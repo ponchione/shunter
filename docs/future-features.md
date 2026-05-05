@@ -83,6 +83,8 @@ Likely feature slices:
 
 Completed slices:
 
+- mixed equality/range OR filters avoid table fallback in live candidate
+  pruning, including opposite-side live join edges when the join side is indexed
 - unfiltered live equi-join candidate pruning uses indexed join-existence
   edges, including same-transaction opposite-side deletes
 - live join delta committed-probe fallbacks use per-transaction delta indexes

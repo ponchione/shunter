@@ -449,3 +449,149 @@ func TestPlaceOrRangeBranchesUseRangeIndex(t *testing.T) {
 		t.Fatalf("TableIndex should be empty for fully range-constrained OR: %v", got)
 	}
 }
+
+func TestPlaceOrMixedEqRangeBranchesUseIndexes(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := Or{
+		Left: ColEq{Table: 1, Column: 0, Value: types.NewUint64(7)},
+		Right: ColRange{Table: 1, Column: 1,
+			Lower: Bound{Value: types.NewUint64(50), Inclusive: false},
+			Upper: Bound{Unbounded: true},
+		},
+	}
+	h := hashN(1)
+	PlaceSubscription(idx, p, h)
+
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != h {
+		t.Fatalf("mixed OR equality branch candidate = %v, want [%v]", got, h)
+	}
+	if got := idx.Range.Lookup(1, 1, types.NewUint64(60)); len(got) != 1 || got[0] != h {
+		t.Fatalf("mixed OR range branch candidate = %v, want [%v]", got, h)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex should be empty for fully indexable mixed OR: %v", got)
+	}
+}
+
+func TestCollectCandidatesMixedEqRangeOrPrunesMismatch(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := Or{
+		Left: ColEq{Table: 1, Column: 0, Value: types.NewUint64(7)},
+		Right: ColRange{Table: 1, Column: 1,
+			Lower: Bound{Value: types.NewUint64(50), Inclusive: false},
+			Upper: Bound{Unbounded: true},
+		},
+	}
+	PlaceSubscription(idx, p, hashN(1))
+
+	rows := []types.ProductValue{{types.NewUint64(8), types.NewUint64(40)}}
+	cands := CollectCandidatesForTable(idx, 1, rows, nil, nil)
+	if len(cands) != 0 {
+		t.Fatalf("mixed OR mismatch candidates = %v, want empty", cands)
+	}
+}
+
+func TestPlaceJoinWithOppositeSideMixedOrFilterAddsValueAndRangeEdges(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+		2: types.KindString,
+		3: types.KindUint64,
+	}, 1)
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: Or{
+			Left: ColEq{Table: 2, Column: 2, Value: types.NewString("red")},
+			Right: ColRange{Table: 2, Column: 3,
+				Lower: Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper: Bound{Unbounded: true},
+			},
+		},
+	}
+	h := hashN(1)
+	placeSubscriptionForResolver(idx, p, h, s)
+
+	valueEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 2}
+	rangeEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 3}
+	if got := idx.JoinEdge.Lookup(valueEdge, types.NewString("red")); len(got) != 1 || got[0] != h {
+		t.Fatalf("mixed OR join equality edge = %v, want [%v]", got, h)
+	}
+	if got := idx.JoinRangeEdge.Lookup(rangeEdge, types.NewUint64(60)); len(got) != 1 || got[0] != h {
+		t.Fatalf("mixed OR join range edge = %v, want [%v]", got, h)
+	}
+	if got := idx.Value.Lookup(2, 2, types.NewString("red")); len(got) != 1 || got[0] != h {
+		t.Fatalf("changed-side equality branch = %v, want [%v]", got, h)
+	}
+	if got := idx.Range.Lookup(2, 3, types.NewUint64(60)); len(got) != 1 || got[0] != h {
+		t.Fatalf("changed-side range branch = %v, want [%v]", got, h)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex for LHS should be empty for mixed OR join edge: %v", got)
+	}
+	if got := idx.Table.Lookup(2); len(got) != 0 {
+		t.Fatalf("TableIndex for RHS should be empty for mixed OR changed side: %v", got)
+	}
+}
+
+func TestPlaceAndRemoveJoinMixedOrSymmetric(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+		2: types.KindString,
+		3: types.KindUint64,
+	}, 1)
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: Or{
+			Left: ColEq{Table: 2, Column: 2, Value: types.NewString("red")},
+			Right: ColRange{Table: 2, Column: 3,
+				Lower: Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper: Bound{Unbounded: true},
+			},
+		},
+	}
+	h := hashN(1)
+	placeSubscriptionForResolver(idx, p, h, s)
+	removeSubscriptionForResolver(idx, p, h, s)
+	if !idx.TestOnlyIsEmpty() {
+		t.Fatalf("indexes not empty after mixed OR remove: %+v", idx)
+	}
+}
+
+func TestCollectCandidatesJoinMixedOrRangeEdgePrunesMismatch(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+		2: types.KindString,
+		3: types.KindUint64,
+	}, 1)
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: Or{
+			Left: ColEq{Table: 2, Column: 2, Value: types.NewString("red")},
+			Right: ColRange{Table: 2, Column: 3,
+				Lower: Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper: Bound{Unbounded: true},
+			},
+		},
+	}
+	placeSubscriptionForResolver(idx, p, hashN(1), s)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(100), types.NewUint64(7), types.NewString("blue"), types.NewUint64(40)}},
+	})
+
+	rows := []types.ProductValue{{types.NewUint64(7)}}
+	cands := CollectCandidatesForTable(idx, 1, rows, committed, s)
+	if len(cands) != 0 {
+		t.Fatalf("mixed OR join edge mismatch candidates = %v, want empty", cands)
+	}
+}

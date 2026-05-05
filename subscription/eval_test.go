@@ -843,6 +843,72 @@ func TestEvalJoinOppositeSideOrFilterCandidateThroughSecondBranch(t *testing.T) 
 	}
 }
 
+func TestEvalJoinOppositeSideMixedOrFilterCandidateThroughRangeBranch(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString})
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+		2: types.KindString,
+		3: types.KindUint64,
+	}, 1)
+
+	rhs := types.ProductValue{
+		types.NewUint64(100),
+		types.NewUint64(7),
+		types.NewString("blue"),
+		types.NewUint64(60),
+	}
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{2: {rhs}})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: Or{
+			Left: ColEq{Table: 2, Column: 2, Value: types.NewString("red")},
+			Right: ColRange{Table: 2, Column: 3,
+				Lower: Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper: Bound{Unbounded: true},
+			},
+		},
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 31, Predicates: []Predicate{join},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	rangeEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 3}
+	if got := mgr.indexes.JoinRangeEdge.Lookup(rangeEdge, types.NewUint64(60)); len(got) != 1 {
+		t.Fatalf("join range-edge candidates = %v, want one hash", got)
+	}
+	if got := mgr.indexes.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("table fallback candidates for changed LHS = %v, want none", got)
+	}
+
+	lhs := types.ProductValue{types.NewUint64(7), types.NewString("lhs")}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {
+			TableID:   1,
+			TableName: "lhs",
+			Inserts:   []types.ProductValue{lhs},
+		},
+	}}
+	committed.addRow(1, 1, lhs)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("update count = %d, want 1", len(updates))
+	}
+	if len(updates[0].Inserts) != 1 || !updates[0].Inserts[0].Equal(lhs) {
+		t.Fatalf("inserts = %v, want projected LHS row %v", updates[0].Inserts, lhs)
+	}
+	if len(updates[0].Deletes) != 0 {
+		t.Fatalf("deletes = %v, want none", updates[0].Deletes)
+	}
+}
+
 func TestEvalJoinOppositeSideRangeFilterCandidate(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
@@ -1432,7 +1498,7 @@ func TestEvalRangePruningSkipsOutOfRangeChange(t *testing.T) {
 	}
 }
 
-func TestEvalOrWithRangeBranchFallsBackToTableCandidates(t *testing.T) {
+func TestEvalOrWithMixedEqRangeBranchesUsesIndexes(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 0)
 	inbox := make(chan FanOutMessage, 1)
@@ -1449,6 +1515,15 @@ func TestEvalOrWithRangeBranchFallsBackToTableCandidates(t *testing.T) {
 		Predicates: []Predicate{pred},
 	}, nil); err != nil {
 		t.Fatalf("RegisterSet = %v", err)
+	}
+	if got := mgr.indexes.Value.Lookup(1, 0, types.NewUint64(1)); len(got) != 1 {
+		t.Fatalf("mixed OR equality candidates = %v, want one hash", got)
+	}
+	if got := mgr.indexes.Range.Lookup(1, 1, types.NewUint64(60)); len(got) != 1 {
+		t.Fatalf("mixed OR range candidates = %v, want one hash", got)
+	}
+	if got := mgr.indexes.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("table fallback candidates for mixed OR = %v, want none", got)
 	}
 
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(2), types.NewUint64(60)}}, nil)

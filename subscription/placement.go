@@ -93,6 +93,16 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 			}
 			continue
 		}
+		mixedColEqs, mixedColRanges := findMixedColEqRanges(pred, t)
+		if len(mixedColEqs) > 0 || len(mixedColRanges) > 0 {
+			for _, ce := range mixedColEqs {
+				mutateValuePlacement(idx, t, ce.Column, ce.Value, hash, add)
+			}
+			for _, cr := range mixedColRanges {
+				mutateRangePlacement(idx, t, cr.Column, cr.Lower, cr.Upper, hash, add)
+			}
+			continue
+		}
 		if join != nil {
 			if placements := joinEdgesFor(pred, join, t, resolver); len(placements) > 0 {
 				for _, placement := range placements {
@@ -102,6 +112,15 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 			}
 			if placements := joinRangeEdgesFor(pred, join, t, resolver); len(placements) > 0 {
 				for _, placement := range placements {
+					mutateJoinRangeEdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
+				}
+				continue
+			}
+			if valuePlacements, rangePlacements := mixedJoinEdgesFor(pred, join, t, resolver); len(valuePlacements) > 0 || len(rangePlacements) > 0 {
+				for _, placement := range valuePlacements {
+					mutateJoinEdgePlacement(idx, placement.edge, placement.value, hash, add)
+				}
+				for _, placement := range rangePlacements {
 					mutateJoinRangeEdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
 				}
 				continue
@@ -279,6 +298,74 @@ func rangeHasBound(p ColRange) bool {
 	return !p.Lower.Unbounded || !p.Upper.Unbounded
 }
 
+type colFilterPlacements struct {
+	eqs    []ColEq
+	ranges []ColRange
+}
+
+// findMixedColEqRanges returns equality/range predicates whose union covers
+// every matching row for table t when the pure equality and pure range paths do
+// not apply. This lets mixed OR shapes such as `a = 1 OR b > 5` avoid table
+// fallback while preserving the same safety rule: every OR branch must carry an
+// indexable constraint for t.
+func findMixedColEqRanges(pred Predicate, t TableID) ([]ColEq, []ColRange) {
+	out, ok := requiredMixedColEqRanges(pred, t)
+	if !ok || len(out.eqs) == 0 || len(out.ranges) == 0 {
+		return nil, nil
+	}
+	return out.eqs, out.ranges
+}
+
+func requiredMixedColEqRanges(pred Predicate, t TableID) (colFilterPlacements, bool) {
+	switch p := pred.(type) {
+	case ColEq:
+		if p.Table == t {
+			return colFilterPlacements{eqs: []ColEq{p}}, true
+		}
+		return colFilterPlacements{}, false
+	case ColRange:
+		if p.Table == t && rangeHasBound(p) {
+			return colFilterPlacements{ranges: []ColRange{p}}, true
+		}
+		return colFilterPlacements{}, false
+	case And:
+		left, leftOK := requiredMixedColEqRanges(p.Left, t)
+		right, rightOK := requiredMixedColEqRanges(p.Right, t)
+		switch {
+		case leftOK && rightOK:
+			return mergeColFilterPlacements(left, right), true
+		case leftOK:
+			return left, true
+		case rightOK:
+			return right, true
+		default:
+			return colFilterPlacements{}, false
+		}
+	case Or:
+		left, leftOK := requiredMixedColEqRanges(p.Left, t)
+		right, rightOK := requiredMixedColEqRanges(p.Right, t)
+		if !leftOK || !rightOK {
+			return colFilterPlacements{}, false
+		}
+		return mergeColFilterPlacements(left, right), true
+	case Join:
+		if p.Filter != nil {
+			return requiredMixedColEqRanges(p.Filter, t)
+		}
+	}
+	return colFilterPlacements{}, false
+}
+
+func mergeColFilterPlacements(left, right colFilterPlacements) colFilterPlacements {
+	if len(right.eqs) > 0 {
+		left.eqs = append(left.eqs, right.eqs...)
+	}
+	if len(right.ranges) > 0 {
+		left.ranges = append(left.ranges, right.ranges...)
+	}
+	return left
+}
+
 // findColEqs returns ColEq predicates whose values cover every matching row
 // for table t. Equality placement is safe through AND when any child
 // constrains t, and through OR only when every branch constrains t; otherwise
@@ -444,6 +531,69 @@ func joinRangeEdgesFor(pred Predicate, join *Join, t TableID, resolver IndexReso
 		})
 	}
 	return placements
+}
+
+// mixedJoinEdgesFor computes the mixed equality/range-filter companion to
+// joinEdgesFor and joinRangeEdgesFor. It is used only after the pure paths
+// decline placement, so it covers indexable mixed OR shapes without changing
+// the established one-tier behavior for pure equality or pure range filters.
+func mixedJoinEdgesFor(
+	pred Predicate,
+	join *Join,
+	t TableID,
+	resolver IndexResolver,
+) ([]joinEdgePlacement, []joinRangeEdgePlacement) {
+	var other TableID
+	var myJoinCol, otherJoinCol ColID
+	switch t {
+	case join.Left:
+		other = join.Right
+		myJoinCol = join.LeftCol
+		otherJoinCol = join.RightCol
+	case join.Right:
+		other = join.Left
+		myJoinCol = join.RightCol
+		otherJoinCol = join.LeftCol
+	default:
+		return nil, nil
+	}
+	otherColEqs, otherColRanges := findMixedColEqRanges(pred, other)
+	if len(otherColEqs) == 0 && len(otherColRanges) == 0 {
+		return nil, nil
+	}
+	if resolver != nil {
+		if _, ok := resolver.IndexIDForColumn(other, otherJoinCol); !ok {
+			return nil, nil
+		}
+	}
+	valuePlacements := make([]joinEdgePlacement, 0, len(otherColEqs))
+	for _, ce := range otherColEqs {
+		valuePlacements = append(valuePlacements, joinEdgePlacement{
+			edge: JoinEdge{
+				LHSTable:     t,
+				RHSTable:     other,
+				LHSJoinCol:   myJoinCol,
+				RHSJoinCol:   otherJoinCol,
+				RHSFilterCol: ce.Column,
+			},
+			value: ce.Value,
+		})
+	}
+	rangePlacements := make([]joinRangeEdgePlacement, 0, len(otherColRanges))
+	for _, cr := range otherColRanges {
+		rangePlacements = append(rangePlacements, joinRangeEdgePlacement{
+			edge: JoinEdge{
+				LHSTable:     t,
+				RHSTable:     other,
+				LHSJoinCol:   myJoinCol,
+				RHSJoinCol:   otherJoinCol,
+				RHSFilterCol: cr.Column,
+			},
+			lower: cr.Lower,
+			upper: cr.Upper,
+		})
+	}
+	return valuePlacements, rangePlacements
 }
 
 // joinExistenceEdgesFor computes join-existence placements for Tier 2 for the
