@@ -326,6 +326,8 @@ func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.Committe
 		}
 		collectJoinEdgeCandidates(m.indexes, tid, tc.Inserts, view, m.resolver, addJoinCandidate)
 		collectJoinEdgeCandidates(m.indexes, tid, tc.Deletes, view, m.resolver, addJoinCandidate)
+		collectJoinFilterDeltaCandidates(m.indexes, tid, tc.Inserts, cs, addJoinCandidate)
+		collectJoinFilterDeltaCandidates(m.indexes, tid, tc.Deletes, cs, addJoinCandidate)
 		collectJoinExistenceDeltaCandidates(m.indexes, tid, tc.Inserts, cs, addJoinCandidate)
 		collectJoinExistenceDeltaCandidates(m.indexes, tid, tc.Deletes, cs, addJoinCandidate)
 

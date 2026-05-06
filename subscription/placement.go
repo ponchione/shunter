@@ -1476,6 +1476,73 @@ func forEachJoinedRHSFilterValue(
 	return matched
 }
 
+func collectJoinFilterDeltaCandidates(
+	idx *PruningIndexes,
+	table TableID,
+	rows []types.ProductValue,
+	changeset *store.Changeset,
+	add func(QueryHash),
+) {
+	if changeset == nil || len(rows) == 0 {
+		return
+	}
+	idx.JoinEdge.ForEachEdge(table, func(edge JoinEdge) {
+		forEachJoinedChangedRHSFilterValue(rows, changeset, edge, func(v Value) {
+			idx.JoinEdge.ForEachHash(edge, v, add)
+		})
+	})
+	idx.JoinRangeEdge.ForEachEdge(table, func(edge JoinEdge) {
+		forEachJoinedChangedRHSFilterValue(rows, changeset, edge, func(v Value) {
+			idx.JoinRangeEdge.ForEachHash(edge, v, add)
+		})
+	})
+}
+
+func forEachJoinedChangedRHSFilterValue(
+	lhsRows []types.ProductValue,
+	changeset *store.Changeset,
+	edge JoinEdge,
+	fn func(Value),
+) {
+	tc := changeset.Tables[edge.RHSTable]
+	if tc == nil {
+		return
+	}
+	lhsKeys := changedJoinKeySet(lhsRows, edge.LHSJoinCol)
+	if len(lhsKeys) == 0 {
+		return
+	}
+	forEachChangedRHSFilterValue(lhsKeys, edge, tc.Inserts, fn)
+	forEachChangedRHSFilterValue(lhsKeys, edge, tc.Deletes, fn)
+}
+
+func changedJoinKeySet(rows []types.ProductValue, col ColID) map[valueKey]struct{} {
+	keys := make(map[valueKey]struct{}, len(rows))
+	for _, row := range rows {
+		if int(col) >= len(row) {
+			continue
+		}
+		keys[encodeValueKey(row[col])] = struct{}{}
+	}
+	return keys
+}
+
+func forEachChangedRHSFilterValue(
+	lhsKeys map[valueKey]struct{},
+	edge JoinEdge,
+	rhsRows []types.ProductValue,
+	fn func(Value),
+) {
+	for _, row := range rhsRows {
+		if int(edge.RHSJoinCol) >= len(row) || int(edge.RHSFilterCol) >= len(row) {
+			continue
+		}
+		if _, ok := lhsKeys[encodeValueKey(row[edge.RHSJoinCol])]; ok {
+			fn(row[edge.RHSFilterCol])
+		}
+	}
+}
+
 func collectJoinExistenceDeltaCandidates(
 	idx *PruningIndexes,
 	table TableID,
