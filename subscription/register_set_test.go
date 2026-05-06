@@ -7,6 +7,7 @@ import (
 	"iter"
 	"testing"
 
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
@@ -385,6 +386,38 @@ func TestRegisterSetSameConnectionReusedHashEmitsEmptyUpdate(t *testing.T) {
 	}
 	if mgr.querySets[connID][1][0] == mgr.querySets[connID][2][0] {
 		t.Fatalf("queryID=1 and queryID=2 must map to distinct internal SubscriptionIDs: %v", mgr.querySets[connID])
+	}
+}
+
+func TestRegisterSetOrderByAffectsSameConnectionQueryIdentity(t *testing.T) {
+	mgr, view := newRegisterSetTestManagerWithRows(t)
+	connID := types.ConnectionID{1}
+	pred := AllRows{Table: 1}
+
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    1,
+		Predicates: []Predicate{pred},
+	}, view); err != nil {
+		t.Fatalf("unordered RegisterSet: %v", err)
+	}
+
+	ordered, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    2,
+		Predicates: []Predicate{pred},
+		OrderByColumns: [][]OrderByColumn{{
+			{Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64}, Table: 1, Column: 0, Desc: true},
+		}},
+	}, view)
+	if err != nil {
+		t.Fatalf("ordered RegisterSet: %v", err)
+	}
+	if len(ordered.Update) != 1 || len(ordered.Update[0].Inserts) != 2 {
+		t.Fatalf("ordered Update = %+v, want fresh initial snapshot distinct from unordered hash", ordered.Update)
+	}
+	if got := ordered.Update[0].Inserts[0][0].AsUint64(); got != 2 {
+		t.Fatalf("ordered initial first id = %d, want 2", got)
 	}
 }
 

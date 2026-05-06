@@ -23,6 +23,7 @@ type SubscriptionSetRegisterRequest struct {
 	Predicates              []Predicate
 	ProjectionColumns       [][]ProjectionColumn
 	Aggregates              []*Aggregate
+	OrderByColumns          [][]OrderByColumn
 	PredicateHashIdentities []*types.Identity
 	ClientIdentity          *types.Identity
 	RequestID               uint32

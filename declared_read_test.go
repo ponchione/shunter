@@ -419,54 +419,53 @@ func TestDeclaredViewMultiWayJoinAppliesVisibilityAfterPermissionSucceeds(t *tes
 	}
 }
 
-func TestDeclaredViewRejectsOrderBy(t *testing.T) {
-	_, err := Build(validChatModule().
+func TestDeclaredViewAllowsOrderBy(t *testing.T) {
+	if _, err := Build(validChatModule().
 		View(ViewDeclaration{
 			Name: "live_messages",
 			SQL:  "SELECT * FROM messages ORDER BY body",
-		}), Config{DataDir: t.TempDir()})
-	if err == nil {
-		t.Fatal("Build error = nil, want ORDER BY rejection for declared view")
-	}
-	if !errors.Is(err, ErrInvalidDeclarationSQL) {
-		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
-	}
-	if !strings.Contains(err.Error(), "Unsupported: SELECT * FROM messages ORDER BY body") {
-		t.Fatalf("Build error = %v, want ORDER BY unsupported text", err)
+		}), Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build rejected ordered declared view: %v", err)
 	}
 }
 
-func TestDeclaredViewRejectsOrderByProjectionAlias(t *testing.T) {
-	_, err := Build(validChatModule().
+func TestDeclaredViewAllowsOrderByProjectionAlias(t *testing.T) {
+	if _, err := Build(validChatModule().
 		View(ViewDeclaration{
 			Name: "live_messages",
 			SQL:  "SELECT body AS text FROM messages ORDER BY text",
-		}), Config{DataDir: t.TempDir()})
-	if err == nil {
-		t.Fatal("Build error = nil, want ORDER BY projection alias rejection for declared view")
-	}
-	if !errors.Is(err, ErrInvalidDeclarationSQL) {
-		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
-	}
-	if !strings.Contains(err.Error(), "Unsupported: SELECT body AS text FROM messages ORDER BY text") {
-		t.Fatalf("Build error = %v, want ORDER BY unsupported text", err)
+		}), Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build rejected projected ordered declared view: %v", err)
 	}
 }
 
-func TestDeclaredViewRejectsMultiColumnOrderBy(t *testing.T) {
-	_, err := Build(validChatModule().
+func TestDeclaredViewAllowsMultiColumnOrderBy(t *testing.T) {
+	if _, err := Build(validChatModule().
 		View(ViewDeclaration{
 			Name: "live_messages",
 			SQL:  "SELECT * FROM messages ORDER BY body DESC, id ASC",
+		}), Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build rejected multi-column ordered declared view: %v", err)
+	}
+}
+
+func TestDeclaredViewRejectsJoinOrderBy(t *testing.T) {
+	_, err := Build(NewModule("live_join_ordered").
+		SchemaVersion(1).
+		TableDef(joinReadIndexedTableDef("t")).
+		TableDef(joinReadIndexedTableDef("s")).
+		View(ViewDeclaration{
+			Name: "live_matching_t_rows",
+			SQL:  "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 ORDER BY t.id",
 		}), Config{DataDir: t.TempDir()})
 	if err == nil {
-		t.Fatal("Build error = nil, want ORDER BY rejection for declared view")
+		t.Fatal("Build error = nil, want join ORDER BY rejection for declared view")
 	}
 	if !errors.Is(err, ErrInvalidDeclarationSQL) {
 		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
 	}
-	if !strings.Contains(err.Error(), "Unsupported: SELECT * FROM messages ORDER BY body DESC, id ASC") {
-		t.Fatalf("Build error = %v, want ORDER BY unsupported text", err)
+	if !strings.Contains(err.Error(), "live ORDER BY views require a single table") {
+		t.Fatalf("Build error = %v, want live single-table ORDER BY rejection", err)
 	}
 }
 
@@ -541,6 +540,23 @@ func TestDeclaredViewRejectsJoinAggregate(t *testing.T) {
 	}
 }
 
+func TestDeclaredViewRejectsAggregateOrderBy(t *testing.T) {
+	_, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_message_count",
+			SQL:  "SELECT COUNT(*) AS n FROM messages ORDER BY n",
+		}), Config{DataDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Build error = nil, want aggregate ORDER BY rejection for declared view")
+	}
+	if !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
+	}
+	if !strings.Contains(err.Error(), "live ORDER BY views do not support aggregate views") {
+		t.Fatalf("Build error = %v, want aggregate ORDER BY rejection", err)
+	}
+}
+
 func TestSubscribeViewOverPrivateBaseTableUsesDeclarationPermission(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message", insertMessageReducer).
@@ -561,6 +577,55 @@ func TestSubscribeViewOverPrivateBaseTableUsesDeclarationPermission(t *testing.T
 	}
 	if len(sub.InitialRows) != 1 || sub.InitialRows[0][1].AsString() != "hello" {
 		t.Fatalf("initial rows = %#v, want inserted private-table row", sub.InitialRows)
+	}
+}
+
+func TestSubscribeViewOrderByReturnsOrderedInitialRows(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		View(ViewDeclaration{
+			Name:        "live_ordered_messages",
+			SQL:         "SELECT * FROM messages ORDER BY body DESC, id ASC",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 3, "bravo")
+	insertMessageWithBody(t, rt, 1, "charlie")
+	insertMessageWithBody(t, rt, 2, "charlie")
+	insertMessageWithBody(t, rt, 4, "alpha")
+
+	sub, err := rt.SubscribeView(context.Background(), "live_ordered_messages", 22, WithDeclaredReadPermissions("messages:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView ordered table-shaped view: %v", err)
+	}
+	if got, want := rowUint64IDs(sub.InitialRows), []uint64{1, 2, 3, 4}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("ordered initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
+	}
+}
+
+func TestSubscribeViewOrderByReturnsOrderedProjectedInitialRows(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		View(ViewDeclaration{
+			Name:        "live_ordered_message_ranks",
+			SQL:         "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 3, "bravo")
+	insertMessageWithBody(t, rt, 1, "charlie")
+	insertMessageWithBody(t, rt, 2, "charlie")
+	insertMessageWithBody(t, rt, 4, "alpha")
+
+	sub, err := rt.SubscribeView(context.Background(), "live_ordered_message_ranks", 23, WithDeclaredReadPermissions("messages:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView ordered projected view: %v", err)
+	}
+	if got, want := rowUint64IDs(sub.InitialRows), []uint64{1, 2, 3, 4}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("ordered projected initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
+	}
+	if len(sub.Columns) != 2 || sub.Columns[0].Name != "id" || sub.Columns[1].Name != "text" {
+		t.Fatalf("projected columns = %#v, want id/text", sub.Columns)
 	}
 }
 
@@ -831,7 +896,7 @@ func TestDeclaredViewAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 		}).
 		View(ViewDeclaration{
 			Name:        "live_messages",
-			SQL:         "SELECT * FROM messages",
+			SQL:         "SELECT * FROM messages ORDER BY body",
 			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
 		}))
 	defer rt.Close()
@@ -847,6 +912,37 @@ func TestDeclaredViewAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	}
 	if len(sub.InitialRows) != 1 || sub.InitialRows[0][1].AsString() != alice.Hex() {
 		t.Fatalf("visible view rows = %#v, want only caller row", sub.InitialRows)
+	}
+}
+
+func TestDeclaredViewOrderByAppliesAfterVisibility(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x35)
+	bob := visibilityRuntimeIdentity(0x36)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        "live_visible_ordered_messages",
+			SQL:         "SELECT * FROM messages ORDER BY id DESC",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 3, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+
+	sub, err := rt.SubscribeView(context.Background(), "live_visible_ordered_messages", 24,
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:subscribe"),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView ordered visibility: %v", err)
+	}
+	if got, want := rowUint64IDs(sub.InitialRows), []uint64{3, 1}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("visible ordered initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
 	}
 }
 
@@ -951,7 +1047,7 @@ func TestDeclaredReadMissingPermissionRejectsBeforeExecutionOrRegistration(t *te
 		}).
 		View(ViewDeclaration{
 			Name:        "live_messages",
-			SQL:         "SELECT * FROM messages",
+			SQL:         "SELECT * FROM messages ORDER BY body",
 			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
 		}))
 	defer rt.Close()
@@ -1131,6 +1227,19 @@ func insertMessageWithBodyReducer(ctx *schema.ReducerContext, args []byte) ([]by
 	return nil, err
 }
 
+func deleteMessageByIDReducer(ctx *schema.ReducerContext, args []byte) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("missing id")
+	}
+	id := uint64(args[0])
+	for rowID, row := range ctx.DB.ScanTable(0) {
+		if len(row) > 0 && row[0].AsUint64() == id {
+			return nil, ctx.DB.Delete(0, rowID)
+		}
+	}
+	return nil, fmt.Errorf("message %d not found", id)
+}
+
 func joinReadTableDef(name string) schema.TableDefinition {
 	return schema.TableDefinition{
 		Name: name,
@@ -1166,6 +1275,17 @@ func rowsHaveUint64IDs(rows []types.ProductValue, ids ...uint64) bool {
 		want[id]--
 	}
 	return true
+}
+
+func rowUint64IDs(rows []types.ProductValue) []uint64 {
+	ids := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		if len(row) == 0 {
+			continue
+		}
+		ids = append(ids, row[0].AsUint64())
+	}
+	return ids
 }
 
 func nullableScoresTableDef() schema.TableDefinition {
@@ -1235,6 +1355,17 @@ func insertMessageWithBody(t *testing.T, rt *Runtime, id byte, body string) {
 	}
 	if res.Status != StatusCommitted {
 		t.Fatalf("insert visibility reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+}
+
+func deleteMessageByID(t *testing.T, rt *Runtime, id byte) {
+	t.Helper()
+	res, err := rt.CallReducer(context.Background(), "delete_message_by_id", []byte{id})
+	if err != nil {
+		t.Fatalf("delete message reducer admission: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("delete message reducer status = %v, err = %v, want committed", res.Status, res.Error)
 	}
 }
 

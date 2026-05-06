@@ -328,22 +328,34 @@ func TestModuleContractValidationAllowsMultiColumnOrderByQuerySQL(t *testing.T) 
 	}
 }
 
-func TestModuleContractValidationRejectsMultiColumnOrderByViewSQL(t *testing.T) {
+func TestModuleContractValidationAllowsMultiColumnOrderByViewSQL(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Views = []ViewDescription{{
 		Name: "live_messages",
 		SQL:  "SELECT * FROM messages ORDER BY body DESC, id ASC",
 	}}
 
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected multi-column ORDER BY view SQL: %v", err)
+	}
+}
+
+func TestModuleContractValidationRejectsJoinOrderByViewSQL(t *testing.T) {
+	contract := buildJoinReadIndexedContract(t)
+	contract.Views = []ViewDescription{{
+		Name: "live_matching_t_rows",
+		SQL:  "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 ORDER BY t.id",
+	}}
+
 	err := ValidateModuleContract(contract)
 	if err == nil {
-		t.Fatal("ValidateModuleContract accepted multi-column ORDER BY view SQL")
+		t.Fatal("ValidateModuleContract accepted join ORDER BY view SQL")
 	}
-	if !strings.Contains(err.Error(), "views.live_messages.sql") {
+	if !strings.Contains(err.Error(), "views.live_matching_t_rows.sql") {
 		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
 	}
-	if !strings.Contains(err.Error(), "Unsupported: SELECT * FROM messages ORDER BY body DESC, id ASC") {
-		t.Fatalf("ValidateModuleContract error = %v, want ORDER BY unsupported text", err)
+	if !strings.Contains(err.Error(), "live ORDER BY views require a single table") {
+		t.Fatalf("ValidateModuleContract error = %v, want single-table ORDER BY unsupported text", err)
 	}
 }
 
@@ -485,6 +497,25 @@ func TestModuleContractValidationRejectsJoinAggregateViewSQL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "live aggregate views require a single table") {
 		t.Fatalf("ValidateModuleContract error = %v, want single-table aggregate unsupported text", err)
+	}
+}
+
+func TestModuleContractValidationRejectsAggregateOrderByViewSQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Views = []ViewDescription{{
+		Name: "live_message_count",
+		SQL:  "SELECT COUNT(*) AS n FROM messages ORDER BY n",
+	}}
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted aggregate ORDER BY view SQL")
+	}
+	if !strings.Contains(err.Error(), "views.live_message_count.sql") {
+		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
+	}
+	if !strings.Contains(err.Error(), "live ORDER BY views do not support aggregate views") {
+		t.Fatalf("ValidateModuleContract error = %v, want aggregate ORDER BY unsupported text", err)
 	}
 }
 

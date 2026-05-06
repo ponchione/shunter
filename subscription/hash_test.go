@@ -144,6 +144,41 @@ func TestQueryShapeHashIncludesAggregateMetadata(t *testing.T) {
 	}
 }
 
+func TestQueryOrderedShapeHashIncludesOrderByMetadata(t *testing.T) {
+	pred := AllRows{Table: 1}
+	idOrder := []OrderByColumn{{
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Table:  1,
+		Column: 0,
+	}}
+	idDesc := []OrderByColumn{{
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Table:  1,
+		Column: 0,
+		Desc:   true,
+	}}
+	bodyThenID := []OrderByColumn{
+		{Schema: schema.ColumnSchema{Index: 1, Name: "body", Type: types.KindString}, Table: 1, Column: 1},
+		{Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64}, Table: 1, Column: 0},
+	}
+	idThenBody := []OrderByColumn{
+		{Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64}, Table: 1, Column: 0},
+		{Schema: schema.ColumnSchema{Index: 1, Name: "body", Type: types.KindString}, Table: 1, Column: 1},
+	}
+
+	unordered := ComputeQueryShapeHash(pred, nil, nil, nil)
+	ordered := ComputeQueryOrderedShapeHash(pred, nil, nil, idOrder, nil)
+	if unordered == ordered {
+		t.Fatal("ORDER BY metadata should change query identity from unordered shape")
+	}
+	if ordered == ComputeQueryOrderedShapeHash(pred, nil, nil, idDesc, nil) {
+		t.Fatal("ORDER BY ASC and DESC should hash differently")
+	}
+	if ComputeQueryOrderedShapeHash(pred, nil, nil, bodyThenID, nil) == ComputeQueryOrderedShapeHash(pred, nil, nil, idThenBody, nil) {
+		t.Fatal("multi-column ORDER BY term order should affect query identity")
+	}
+}
+
 func TestQueryHashOrDiffersFromAnd(t *testing.T) {
 	left := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
 	right := ColEq{Table: 1, Column: 1, Value: types.NewString("alice")}

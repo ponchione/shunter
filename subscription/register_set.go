@@ -58,7 +58,7 @@ func (c *initialRowCollector) add(out *[]types.ProductValue, row types.ProductVa
 	return nil
 }
 
-func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, view store.CommittedReadView, subID types.SubscriptionID, queryID uint32) ([]SubscriptionUpdate, error) {
+func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, orderBy []OrderByColumn, view store.CommittedReadView, subID types.SubscriptionID, queryID uint32) ([]SubscriptionUpdate, error) {
 	if aggregate != nil {
 		return m.initialAggregateUpdates(ctx, pred, aggregate, view, subID, queryID)
 	}
@@ -116,6 +116,10 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection
 			}
 			if len(rows) == 0 {
 				continue
+			}
+			rows, err = orderInitialRows(rows, orderBy)
+			if err != nil {
+				return nil, err
 			}
 			updates = append(updates, SubscriptionUpdate{
 				SubscriptionID: subID,
@@ -515,6 +519,7 @@ func (m *Manager) RegisterSet(
 	canonicalPreds := make([]Predicate, 0, len(req.Predicates))
 	projections := make([][]ProjectionColumn, len(req.Predicates))
 	aggregates := make([]*Aggregate, len(req.Predicates))
+	orderBys := make([][]OrderByColumn, len(req.Predicates))
 	if req.ProjectionColumns != nil {
 		if len(req.ProjectionColumns) != len(req.Predicates) {
 			return SubscriptionSetRegisterResult{}, fmt.Errorf("projection column set count = %d, want %d", len(req.ProjectionColumns), len(req.Predicates))
@@ -529,6 +534,14 @@ func (m *Manager) RegisterSet(
 		}
 		for i := range req.Aggregates {
 			aggregates[i] = copyAggregate(req.Aggregates[i])
+		}
+	}
+	if req.OrderByColumns != nil {
+		if len(req.OrderByColumns) != len(req.Predicates) {
+			return SubscriptionSetRegisterResult{}, fmt.Errorf("order-by column set count = %d, want %d", len(req.OrderByColumns), len(req.Predicates))
+		}
+		for i := range req.OrderByColumns {
+			orderBys[i] = copyOrderByColumns(req.OrderByColumns[i])
 		}
 	}
 	// Pre-validate every predicate before touching registry state.
@@ -551,6 +564,9 @@ func (m *Manager) RegisterSet(
 		}
 		if err := ValidateAggregate(canonical, aggregates[i], m.schema); err != nil {
 			return SubscriptionSetRegisterResult{}, fmt.Errorf("aggregate validation: %w", err)
+		}
+		if err := validateOrderByColumns(canonical, orderBys[i], aggregates[i], m.schema); err != nil {
+			return SubscriptionSetRegisterResult{}, fmt.Errorf("order-by validation: %w", err)
 		}
 		canonicalPreds = append(canonicalPreds, canonical)
 	}
@@ -580,10 +596,11 @@ func (m *Manager) RegisterSet(
 	deduped := make([]Predicate, 0, len(canonicalPreds))
 	dedupedProjections := make([][]ProjectionColumn, 0, len(canonicalPreds))
 	dedupedAggregates := make([]*Aggregate, 0, len(canonicalPreds))
+	dedupedOrderBys := make([][]OrderByColumn, 0, len(canonicalPreds))
 	dedupedHashIdentities := make([]*types.Identity, 0, len(canonicalPreds))
 	seen := make(map[QueryHash]struct{}, len(canonicalPreds))
 	for i, p := range canonicalPreds {
-		h := ComputeQueryShapeHash(p, projections[i], aggregates[i], hashIdentities[i])
+		h := ComputeQueryOrderedShapeHash(p, projections[i], aggregates[i], orderBys[i], hashIdentities[i])
 		if _, dup := seen[h]; dup {
 			continue
 		}
@@ -591,6 +608,7 @@ func (m *Manager) RegisterSet(
 		deduped = append(deduped, p)
 		dedupedProjections = append(dedupedProjections, projections[i])
 		dedupedAggregates = append(dedupedAggregates, aggregates[i])
+		dedupedOrderBys = append(dedupedOrderBys, orderBys[i])
 		dedupedHashIdentities = append(dedupedHashIdentities, hashIdentities[i])
 	}
 	if uint64(len(deduped)) > uint64(^types.SubscriptionID(0))-uint64(m.nextSubID) {
@@ -604,7 +622,8 @@ func (m *Manager) RegisterSet(
 		subID := m.nextSubID
 		projection := dedupedProjections[i]
 		aggregate := dedupedAggregates[i]
-		hash := ComputeQueryShapeHash(p, projection, aggregate, dedupedHashIdentities[i])
+		orderBy := dedupedOrderBys[i]
+		hash := ComputeQueryOrderedShapeHash(p, projection, aggregate, orderBy, dedupedHashIdentities[i])
 		// Reusing this hash on the same connection skips a duplicate initial
 		// snapshot but still allocates an internal subscription ID.
 		existing := m.registry.getQuery(hash)
@@ -612,7 +631,7 @@ func (m *Manager) RegisterSet(
 		var initial []SubscriptionUpdate
 		if !sameConnReuse {
 			var err error
-			initial, err = m.initialUpdates(ctx, p, projection, aggregate, view, subID, req.QueryID)
+			initial, err = m.initialUpdates(ctx, p, projection, aggregate, orderBy, view, subID, req.QueryID)
 			if err != nil {
 				// Unwind any partial state. dropSub handles registry maps + PruningIndexes
 				// eviction on last-ref; each allocated sub is dropped independently.
@@ -624,7 +643,7 @@ func (m *Manager) RegisterSet(
 		}
 		qs := existing
 		if qs == nil {
-			qs = m.registry.createQueryState(hash, p, projection, aggregate)
+			qs = m.registry.createQueryState(hash, p, projection, aggregate, orderBy)
 			// SQLText is set only when the admission path knows the original
 			// SQL string (Single subscribe). Multi leaves it empty —
 			// reference `module_subscription_actor.rs:836` uses raw
@@ -690,7 +709,7 @@ func (m *Manager) UnregisterSetContext(
 		if view == nil || evalErr != nil {
 			continue
 		}
-		initial, err := m.initialUpdates(ctx, qs.predicate, qs.projection, qs.aggregate, view, sid, queryID)
+		initial, err := m.initialUpdates(ctx, qs.predicate, qs.projection, qs.aggregate, qs.orderBy, view, sid, queryID)
 		if err != nil {
 			evalErr = fmt.Errorf("%w: %w", ErrFinalQuery, err)
 			evalSQL = qs.sqlText

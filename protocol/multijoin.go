@@ -234,6 +234,7 @@ func compileMultiJoinSQLQuery(stmt sql.Statement, orderBy []sql.OrderByColumn, n
 		ProjectionColumns:  projectionColumns,
 		Aggregate:          aggregate,
 		OrderBy:            compiledOrder,
+		OrderByPresent:     len(orderBy) != 0,
 		Limit:              limit,
 		Offset:             offset,
 	}, nil

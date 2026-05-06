@@ -9,6 +9,7 @@ type queryState struct {
 	predicate  Predicate // v1 executable plan == the validated predicate itself
 	projection []ProjectionColumn
 	aggregate  *Aggregate
+	orderBy    []OrderByColumn
 	// sqlText is the original Single-subscribe SQL used for final-eval errors.
 	sqlText string
 	// subscribers is keyed first by connection and then by subscription ID so
@@ -48,19 +49,16 @@ func newQueryRegistry() *queryRegistry {
 }
 
 // createQueryState creates a new query state entry. Panics if hash already exists.
-func (r *queryRegistry) createQueryState(hash QueryHash, pred Predicate, projection []ProjectionColumn, aggregate ...*Aggregate) *queryState {
+func (r *queryRegistry) createQueryState(hash QueryHash, pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, orderBy []OrderByColumn) *queryState {
 	if _, ok := r.byHash[hash]; ok {
 		panic("subscription: createQueryState on existing hash")
-	}
-	var agg *Aggregate
-	if len(aggregate) > 0 {
-		agg = aggregate[0]
 	}
 	qs := &queryState{
 		hash:        hash,
 		predicate:   pred,
 		projection:  copyProjectionColumns(projection),
-		aggregate:   copyAggregate(agg),
+		aggregate:   copyAggregate(aggregate),
+		orderBy:     copyOrderByColumns(orderBy),
 		subscribers: make(map[types.ConnectionID]map[types.SubscriptionID]subscriptionDeliveryMeta),
 	}
 	r.byHash[hash] = qs

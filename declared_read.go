@@ -173,6 +173,7 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 			Predicates:              []subscription.Predicate{compiled.Predicate()},
 			ProjectionColumns:       [][]subscription.ProjectionColumn{compiled.SubscriptionProjection()},
 			Aggregates:              []*subscription.Aggregate{compiled.SubscriptionAggregate()},
+			OrderByColumns:          [][]subscription.OrderByColumn{compiled.SubscriptionOrderBy()},
 			PredicateHashIdentities: []*types.Identity{compiled.PredicateHashIdentity(callOpts.caller.Identity)},
 			SQLText:                 entry.SQL,
 		},
@@ -257,7 +258,7 @@ func (r *Runtime) applyDeclaredReadVisibility(compiled protocol.CompiledSQLQuery
 
 func validationOptionsForDeclaredRead(kind declaredReadKind) protocol.SQLQueryValidationOptions {
 	if kind == declaredReadKindView {
-		return protocol.SQLQueryValidationOptions{AllowLimit: false, AllowProjection: true}
+		return protocol.SQLQueryValidationOptions{AllowLimit: false, AllowProjection: true, AllowOrderBy: true}
 	}
 	return protocol.SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true}
 }

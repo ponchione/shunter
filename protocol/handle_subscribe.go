@@ -20,6 +20,7 @@ type compiledSQLQuery struct {
 	ProjectionColumns  []compiledSQLProjectionColumn
 	Aggregate          *compiledSQLAggregate
 	OrderBy            []compiledSQLOrderBy
+	OrderByPresent     bool
 	Limit              *uint64
 	Offset             *uint64
 }
@@ -164,6 +165,30 @@ func (q CompiledSQLQuery) SubscriptionAggregate() *subscription.Aggregate {
 		}
 	}
 	return out
+}
+
+// SubscriptionOrderBy returns optional initial-snapshot ordering metadata for
+// declared live views. It does not imply positional delta semantics.
+func (q CompiledSQLQuery) SubscriptionOrderBy() []subscription.OrderByColumn {
+	if len(q.query.OrderBy) == 0 {
+		return nil
+	}
+	out := make([]subscription.OrderByColumn, len(q.query.OrderBy))
+	for i, term := range q.query.OrderBy {
+		out[i] = subscription.OrderByColumn{
+			Schema: term.Column.Schema,
+			Table:  term.Column.Table,
+			Column: types.ColID(term.Column.Schema.Index),
+			Alias:  term.Column.Alias,
+			Desc:   term.Desc,
+		}
+	}
+	return out
+}
+
+// HasOrderBy reports whether the source SQL included an ORDER BY clause.
+func (q CompiledSQLQuery) HasOrderBy() bool {
+	return q.query.OrderByPresent || len(q.query.OrderBy) != 0
 }
 
 // HasAggregate reports whether this query returns an aggregate row shape.
@@ -648,7 +673,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 					//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 					return compiledSQLQuery{}, fmt.Errorf("Subscriptions require indexes on join columns")
 				}
-				return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: join, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, Limit: limit, Offset: offset}, nil
+				return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: join, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, OrderByPresent: len(stmtOrderBy) != 0, Limit: limit, Offset: offset}, nil
 			}
 			cross := subscription.CrossJoin{Left: leftID, Right: rightID}
 			if leftID == rightID {
@@ -656,10 +681,10 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 				cross.RightAlias = 1
 			}
 			cross.ProjectRight = joinProjectsRight(stmt, leftID == rightID)
-			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: cross, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, Limit: limit, Offset: offset}, nil
+			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: cross, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, OrderByPresent: len(stmtOrderBy) != 0, Limit: limit, Offset: offset}, nil
 		}
 		if _, ok := normalizedPredicate.(sql.FalsePredicate); ok {
-			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: subscription.NoRows{Table: projectedID}, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, Limit: limit, Offset: offset}, nil
+			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: subscription.NoRows{Table: projectedID}, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, OrderByPresent: len(stmtOrderBy) != 0, Limit: limit, Offset: offset}, nil
 		}
 		var filter subscription.Predicate
 		if stmt.Join.HasOn && normalizedPredicate != nil {
@@ -690,6 +715,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			ProjectionColumns:  projectionColumns,
 			Aggregate:          aggregate,
 			OrderBy:            orderBy,
+			OrderByPresent:     len(stmtOrderBy) != 0,
 			Limit:              limit,
 			Offset:             offset,
 		}, nil
@@ -747,7 +773,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
-	return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: pred, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, Limit: limit, Offset: offset}, nil
+	return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: pred, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, OrderByPresent: len(stmtOrderBy) != 0, Limit: limit, Offset: offset}, nil
 }
 
 func aliasTagForJoin(stmt sql.Statement, selfJoin bool) func(string) uint8 {

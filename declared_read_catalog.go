@@ -85,6 +85,7 @@ func declaredReadSpecs(queries []QueryDeclaration, views []ViewDeclaration) []de
 			Validation: protocol.SQLQueryValidationOptions{
 				AllowLimit:      false,
 				AllowProjection: true,
+				AllowOrderBy:    true,
 			},
 		})
 	}
@@ -112,7 +113,13 @@ func declaredReadCatalogEntry(spec declaredReadSpec, sl protocol.SchemaLookup) (
 			if err := subscription.ValidateAggregate(compiled.Predicate(), aggregate, sl); err != nil {
 				return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 			}
+			if compiled.HasOrderBy() {
+				return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, fmt.Errorf("%w: live ORDER BY views do not support aggregate views", subscription.ErrInvalidPredicate))
+			}
 		} else if err := subscription.ValidateProjection(compiled.Predicate(), compiled.SubscriptionProjection(), sl); err != nil {
+			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
+		}
+		if err := subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), compiled.SubscriptionAggregate(), sl); err != nil {
 			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 		}
 	}

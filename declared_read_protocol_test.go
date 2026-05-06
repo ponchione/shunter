@@ -2,6 +2,7 @@ package shunter
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -109,6 +110,49 @@ func TestProtocolDeclaredViewColumnProjectionSendsProjectedInitialRowsAndDeltas(
 	inserts, deletes := requireDeclaredReadDeltaValues(t, client, 43, "messages", projectedColumns)
 	if len(inserts) != 1 || len(inserts[0]) != 1 || inserts[0][0].AsString() != "world" || len(deletes) != 0 {
 		t.Fatalf("projected delta inserts/deletes = %#v/%#v, want one body insert world", inserts, deletes)
+	}
+}
+
+func TestProtocolDeclaredViewOrderBySendsOrderedInitialRowsAndRowDeltas(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		Reducer("delete_message_by_id", deleteMessageByIDReducer).
+		View(ViewDeclaration{
+			Name:        "live_ordered_message_ranks",
+			SQL:         "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 3, "bravo")
+	insertMessageWithBody(t, rt, 1, "charlie")
+	insertMessageWithBody(t, rt, 2, "charlie")
+	insertMessageWithBody(t, rt, 4, "alpha")
+
+	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "ordered-subscriber", "messages:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 35,
+		QueryID:   45,
+		Name:      "live_ordered_message_ranks",
+	})
+	projectedColumns := []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: types.KindUint64},
+		{Index: 1, Name: "text", Type: types.KindString},
+	}
+	initial := requireDeclaredReadAppliedValues(t, client, 35, 45, "messages", projectedColumns)
+	if got, want := rowUint64IDs(initial), []uint64{1, 2, 3, 4}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("ordered protocol initial ids = %v, want %v; rows=%#v", got, want, initial)
+	}
+
+	insertMessageWithBody(t, rt, 5, "delta")
+	inserts, deletes := requireDeclaredReadDeltaValues(t, client, 45, "messages", projectedColumns)
+	if len(inserts) != 1 || inserts[0][0].AsUint64() != 5 || inserts[0][1].AsString() != "delta" || len(deletes) != 0 {
+		t.Fatalf("ordered protocol insert delta inserts/deletes = %#v/%#v, want row 5/delta insert", inserts, deletes)
+	}
+
+	deleteMessageByID(t, rt, 2)
+	inserts, deletes = requireDeclaredReadDeltaValues(t, client, 45, "messages", projectedColumns)
+	if len(inserts) != 0 || len(deletes) != 1 || deletes[0][0].AsUint64() != 2 || deletes[0][1].AsString() != "charlie" {
+		t.Fatalf("ordered protocol delete delta inserts/deletes = %#v/%#v, want row 2/charlie delete", inserts, deletes)
 	}
 }
 

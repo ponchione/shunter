@@ -78,9 +78,8 @@ Likely feature slices:
 
 - broader index-aware planning for remaining live subscription candidate
   pruning and complex live join paths
-- live-view expansion for remaining query-only shapes such as ordering,
-  limits, offsets, and non-COUNT or join aggregate views after delta semantics
-  are explicit
+- live-view expansion for remaining query-only shapes such as limits, offsets,
+  and non-COUNT or join aggregate views after delta semantics are explicit
 
 Completed slices:
 
@@ -106,6 +105,8 @@ Completed slices:
   including projected initial rows and subscription deltas
 - declared live views support single-table `COUNT(*) AS name` and
   `COUNT(column) AS name` aggregate rows, including count-change deltas
+- declared live views support single-table `ORDER BY` initial snapshots for
+  table-shaped and projected views without positional delta semantics
 
 Any query expansion must include tests for authorization, visibility filtering,
 subscription deltas, and contract/codegen export where applicable.

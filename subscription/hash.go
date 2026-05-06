@@ -37,6 +37,7 @@ const (
 	tagMultiJoin  byte = 0x0B
 	tagProjection byte = 0x0C
 	tagAggregate  byte = 0x0D
+	tagOrderBy    byte = 0x0E
 )
 
 // Within a canonical Bound encoding.
@@ -463,6 +464,13 @@ func ComputeQueryPlanHash(pred Predicate, projection []ProjectionColumn, clientI
 // emitted row shape. Empty projection and nil aggregate keep the historical
 // table-shaped predicate hash.
 func ComputeQueryShapeHash(pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, clientID *types.Identity) QueryHash {
+	return ComputeQueryOrderedShapeHash(pred, projection, aggregate, nil, clientID)
+}
+
+// ComputeQueryOrderedShapeHash returns the canonical hash for a predicate plus
+// emitted row shape and initial snapshot ordering metadata. Empty ordering
+// preserves the unordered query shape hash.
+func ComputeQueryOrderedShapeHash(pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, orderBy []OrderByColumn, clientID *types.Identity) QueryHash {
 	if pred == nil {
 		panic("subscription: ComputeQueryHash on nil predicate")
 	}
@@ -472,6 +480,7 @@ func ComputeQueryShapeHash(pred Predicate, projection []ProjectionColumn, aggreg
 	encodePredicate(enc, pred)
 	encodeProjection(enc, projection)
 	encodeAggregate(enc, aggregate)
+	encodeOrderBy(enc, orderBy)
 	if clientID != nil {
 		enc.buf = append(enc.buf, clientID[:]...)
 	}
@@ -521,6 +530,25 @@ func encodeAggregate(e *canonicalEncoder, aggregate *Aggregate) {
 	e.writeU32(uint32(aggregate.Argument.Column))
 	e.writeByte(aggregate.Argument.Alias)
 	encodeColumnSchema(e, aggregate.Argument.Schema)
+}
+
+func encodeOrderBy(e *canonicalEncoder, orderBy []OrderByColumn) {
+	if len(orderBy) == 0 {
+		return
+	}
+	e.writeByte(tagOrderBy)
+	e.writeU32(uint32(len(orderBy)))
+	for _, col := range orderBy {
+		e.writeU32(uint32(col.Table))
+		e.writeU32(uint32(col.Column))
+		e.writeByte(col.Alias)
+		if col.Desc {
+			e.writeByte(1)
+		} else {
+			e.writeByte(0)
+		}
+		encodeColumnSchema(e, col.Schema)
+	}
 }
 
 func encodeColumnSchema(e *canonicalEncoder, col schema.ColumnSchema) {
