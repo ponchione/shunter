@@ -63,6 +63,49 @@ func TestV1CompatibilityModuleContractExportEntryPointsMatch(t *testing.T) {
 	}
 }
 
+func TestV1CompatibilityModuleContractExportsAreDetached(t *testing.T) {
+	rt := buildV1CompatibilityRuntime(t)
+
+	want, err := rt.ExportContractJSON()
+	if err != nil {
+		t.Fatalf("ExportContractJSON returned error: %v", err)
+	}
+
+	contract := rt.ExportContract()
+	contract.ContractVersion = 99
+	contract.Module.Name = "mutated"
+	contract.Module.Metadata["owner"] = "mutated"
+	contract.Schema.Tables[0].Name = "mutated"
+	contract.Schema.Tables[0].Columns[0].Name = "mutated"
+	contract.Schema.Tables[0].Indexes[0].Name = "mutated"
+	contract.Schema.Tables[0].ReadPolicy.Permissions[0] = "mutated"
+	contract.Schema.Reducers[0].Name = "mutated"
+	contract.Queries[0].Name = "mutated"
+	contract.Queries[0].SQL = "SELECT * FROM mutated"
+	contract.Views[0].Name = "mutated"
+	contract.VisibilityFilters[0].Name = "mutated"
+	contract.Permissions.Reducers[0].Required[0] = "mutated"
+	contract.ReadModel.Declarations[0].Tables[0] = "mutated"
+	contract.Migrations.Module.Notes = "mutated"
+	contract.Migrations.Declarations[0].Metadata.Notes = "mutated"
+	contract.Codegen.DefaultSnapshotFilename = "mutated.json"
+
+	schemaExport := rt.ExportSchema()
+	schemaExport.Tables[0].Name = "mutated_schema"
+	schemaExport.Tables[0].Columns[0].Name = "mutated_schema"
+	schemaExport.Tables[0].Indexes[0].Name = "mutated_schema"
+	schemaExport.Tables[0].ReadPolicy.Permissions[0] = "mutated_schema"
+	schemaExport.Reducers[0].Name = "mutated_schema"
+
+	got, err := rt.ExportContractJSON()
+	if err != nil {
+		t.Fatalf("ExportContractJSON after snapshot mutation returned error: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("mutating exported v1 contract/schema snapshots affected runtime contract\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
 func TestV1CompatibilityModuleContractJSONIgnoresUnknownFields(t *testing.T) {
 	want, err := os.ReadFile(filepath.Join("testdata", "v1_module_contract.json"))
 	if err != nil {
