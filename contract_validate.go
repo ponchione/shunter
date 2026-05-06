@@ -7,6 +7,7 @@ import (
 
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -147,11 +148,20 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 		if strings.TrimSpace(view.SQL) == "" {
 			continue
 		}
-		err := protocol.ValidateSQLQueryString(view.SQL, lookup, protocol.SQLQueryValidationOptions{
+		var caller types.Identity
+		compiled, err := protocol.CompileSQLQueryString(view.SQL, lookup, &caller, protocol.SQLQueryValidationOptions{
 			AllowLimit:      false,
-			AllowProjection: false,
+			AllowProjection: true,
 		})
 		if err != nil {
+			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
+			continue
+		}
+		if compiled.HasAggregate() {
+			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, "Aggregate projections are not supported in subscriptions"))
+			continue
+		}
+		if err := subscription.ValidateProjection(compiled.Predicate(), compiled.SubscriptionProjection(), lookup); err != nil {
 			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
 		}
 	}

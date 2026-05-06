@@ -78,9 +78,8 @@ Likely feature slices:
 
 - broader index-aware planning for remaining live subscription candidate
   pruning and complex live join paths
-- live-view expansion for remaining query-only shapes such as column
-  projections, aggregates, ordering, and limits after delta semantics are
-  explicit
+- live-view expansion for remaining query-only shapes such as aggregates,
+  ordering, and limits after delta semantics are explicit
 
 Completed slices:
 
@@ -102,6 +101,8 @@ Completed slices:
 - nullable-aware aggregate semantics for one-off and declared queries
 - table-shaped live multi-way joins use full before/after projected-row bag
   diffs with table-fallback candidate admission
+- declared live views support column projections over their emitted relation,
+  including projected initial rows and subscription deltas
 
 Any query expansion must include tests for authorization, visibility filtering,
 subscription deltas, and contract/codegen export where applicable.

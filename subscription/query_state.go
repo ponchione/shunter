@@ -5,8 +5,9 @@ import "github.com/ponchione/shunter/types"
 // queryState holds bookkeeping for one registered query. Shared by every
 // subscriber with the same QueryHash (SPEC-004 §7.4 deduplication).
 type queryState struct {
-	hash      QueryHash
-	predicate Predicate // v1 executable plan == the validated predicate itself
+	hash       QueryHash
+	predicate  Predicate // v1 executable plan == the validated predicate itself
+	projection []ProjectionColumn
 	// sqlText is the original Single-subscribe SQL used for final-eval errors.
 	sqlText string
 	// subscribers is keyed first by connection and then by subscription ID so
@@ -46,13 +47,14 @@ func newQueryRegistry() *queryRegistry {
 }
 
 // createQueryState creates a new query state entry. Panics if hash already exists.
-func (r *queryRegistry) createQueryState(hash QueryHash, pred Predicate) *queryState {
+func (r *queryRegistry) createQueryState(hash QueryHash, pred Predicate, projection []ProjectionColumn) *queryState {
 	if _, ok := r.byHash[hash]; ok {
 		panic("subscription: createQueryState on existing hash")
 	}
 	qs := &queryState{
 		hash:        hash,
 		predicate:   pred,
+		projection:  copyProjectionColumns(projection),
 		subscribers: make(map[types.ConnectionID]map[types.SubscriptionID]subscriptionDeliveryMeta),
 	}
 	r.byHash[hash] = qs

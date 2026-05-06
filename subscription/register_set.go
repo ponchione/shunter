@@ -58,7 +58,7 @@ func (c *initialRowCollector) add(out *[]types.ProductValue, row types.ProductVa
 	return nil
 }
 
-func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, view store.CommittedReadView, subID types.SubscriptionID, queryID uint32) ([]SubscriptionUpdate, error) {
+func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection []ProjectionColumn, view store.CommittedReadView, subID types.SubscriptionID, queryID uint32) ([]SubscriptionUpdate, error) {
 	if view == nil {
 		return nil, nil
 	}
@@ -87,13 +87,14 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, view store
 			return nil, nil
 		}
 		tableID := emittedTableID(pred)
+		columns := projectionUpdateColumns(m.columnsForUpdate(tableID), projection)
 		return []SubscriptionUpdate{{
 			SubscriptionID: subID,
 			QueryID:        queryID,
 			TableID:        tableID,
 			TableName:      m.schema.TableName(tableID),
-			Columns:        m.columnsForUpdate(tableID),
-			Inserts:        rows,
+			Columns:        columns,
+			Inserts:        projectRows(rows, projection),
 		}}, nil
 	default:
 		tables := pred.Tables()
@@ -118,8 +119,8 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, view store
 				QueryID:        queryID,
 				TableID:        tableID,
 				TableName:      m.schema.TableName(tableID),
-				Columns:        m.columnsForUpdate(tableID),
-				Inserts:        rows,
+				Columns:        projectionUpdateColumns(m.columnsForUpdate(tableID), projection),
+				Inserts:        projectRows(rows, projection),
 			})
 		}
 		return updates, nil
@@ -509,8 +510,17 @@ func (m *Manager) RegisterSet(
 		ctx = context.Background()
 	}
 	canonicalPreds := make([]Predicate, 0, len(req.Predicates))
+	projections := make([][]ProjectionColumn, len(req.Predicates))
+	if req.ProjectionColumns != nil {
+		if len(req.ProjectionColumns) != len(req.Predicates) {
+			return SubscriptionSetRegisterResult{}, fmt.Errorf("projection column set count = %d, want %d", len(req.ProjectionColumns), len(req.Predicates))
+		}
+		for i := range req.ProjectionColumns {
+			projections[i] = copyProjectionColumns(req.ProjectionColumns[i])
+		}
+	}
 	// Pre-validate every predicate before touching registry state.
-	for _, p := range req.Predicates {
+	for i, p := range req.Predicates {
 		if err := ctx.Err(); err != nil {
 			return SubscriptionSetRegisterResult{}, err
 		}
@@ -520,6 +530,9 @@ func (m *Manager) RegisterSet(
 		canonical := canonicalizePredicate(p)
 		if err := ValidatePredicate(canonical, m.schema); err != nil {
 			return SubscriptionSetRegisterResult{}, fmt.Errorf("predicate validation: %w", err)
+		}
+		if err := validateProjectionColumns(canonical, projections[i], m.schema); err != nil {
+			return SubscriptionSetRegisterResult{}, fmt.Errorf("projection validation: %w", err)
 		}
 		canonicalPreds = append(canonicalPreds, canonical)
 	}
@@ -547,15 +560,17 @@ func (m *Manager) RegisterSet(
 	}
 	// Dedup identical predicates within this call.
 	deduped := make([]Predicate, 0, len(canonicalPreds))
+	dedupedProjections := make([][]ProjectionColumn, 0, len(canonicalPreds))
 	dedupedHashIdentities := make([]*types.Identity, 0, len(canonicalPreds))
 	seen := make(map[QueryHash]struct{}, len(canonicalPreds))
 	for i, p := range canonicalPreds {
-		h := ComputeQueryHash(p, hashIdentities[i])
+		h := ComputeQueryPlanHash(p, projections[i], hashIdentities[i])
 		if _, dup := seen[h]; dup {
 			continue
 		}
 		seen[h] = struct{}{}
 		deduped = append(deduped, p)
+		dedupedProjections = append(dedupedProjections, projections[i])
 		dedupedHashIdentities = append(dedupedHashIdentities, hashIdentities[i])
 	}
 	if uint64(len(deduped)) > uint64(^types.SubscriptionID(0))-uint64(m.nextSubID) {
@@ -567,7 +582,8 @@ func (m *Manager) RegisterSet(
 	for i, p := range deduped {
 		m.nextSubID++
 		subID := m.nextSubID
-		hash := ComputeQueryHash(p, dedupedHashIdentities[i])
+		projection := dedupedProjections[i]
+		hash := ComputeQueryPlanHash(p, projection, dedupedHashIdentities[i])
 		// Reusing this hash on the same connection skips a duplicate initial
 		// snapshot but still allocates an internal subscription ID.
 		existing := m.registry.getQuery(hash)
@@ -575,7 +591,7 @@ func (m *Manager) RegisterSet(
 		var initial []SubscriptionUpdate
 		if !sameConnReuse {
 			var err error
-			initial, err = m.initialUpdates(ctx, p, view, subID, req.QueryID)
+			initial, err = m.initialUpdates(ctx, p, projection, view, subID, req.QueryID)
 			if err != nil {
 				// Unwind any partial state. dropSub handles registry maps + PruningIndexes
 				// eviction on last-ref; each allocated sub is dropped independently.
@@ -587,7 +603,7 @@ func (m *Manager) RegisterSet(
 		}
 		qs := existing
 		if qs == nil {
-			qs = m.registry.createQueryState(hash, p)
+			qs = m.registry.createQueryState(hash, p, projection)
 			// SQLText is set only when the admission path knows the original
 			// SQL string (Single subscribe). Multi leaves it empty —
 			// reference `module_subscription_actor.rs:836` uses raw
@@ -653,7 +669,7 @@ func (m *Manager) UnregisterSetContext(
 		if view == nil || evalErr != nil {
 			continue
 		}
-		initial, err := m.initialUpdates(ctx, qs.predicate, view, sid, queryID)
+		initial, err := m.initialUpdates(ctx, qs.predicate, qs.projection, view, sid, queryID)
 		if err != nil {
 			evalErr = fmt.Errorf("%w: %w", ErrFinalQuery, err)
 			evalSQL = qs.sqlText

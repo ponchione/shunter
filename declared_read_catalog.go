@@ -6,6 +6,7 @@ import (
 
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -83,7 +84,7 @@ func declaredReadSpecs(queries []QueryDeclaration, views []ViewDeclaration) []de
 			Migration:   view.Migration,
 			Validation: protocol.SQLQueryValidationOptions{
 				AllowLimit:      false,
-				AllowProjection: false,
+				AllowProjection: true,
 			},
 		})
 	}
@@ -105,6 +106,14 @@ func declaredReadCatalogEntry(spec declaredReadSpec, sl protocol.SchemaLookup) (
 	compiled, err := compileDeclaredReadSQL(spec.SQL, sl, spec.Validation)
 	if err != nil {
 		return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
+	}
+	if spec.Kind == declaredReadKindView {
+		if compiled.HasAggregate() {
+			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, "Aggregate projections are not supported in subscriptions")
+		}
+		if err := subscription.ValidateProjection(compiled.Predicate(), compiled.SubscriptionProjection(), sl); err != nil {
+			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
+		}
 	}
 	entry.attachCompiled(compiled)
 	return entry, nil

@@ -499,7 +499,7 @@ func TestDeclaredViewRejectsCountColumnAggregate(t *testing.T) {
 	if !errors.Is(err, ErrInvalidDeclarationSQL) {
 		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
 	}
-	if !strings.Contains(err.Error(), "Column projections are not supported in subscriptions") {
+	if !strings.Contains(err.Error(), "Aggregate projections are not supported in subscriptions") {
 		t.Fatalf("Build error = %v, want table-shaped view aggregate rejection", err)
 	}
 }
@@ -516,7 +516,7 @@ func TestDeclaredViewRejectsSumColumnAggregate(t *testing.T) {
 	if !errors.Is(err, ErrInvalidDeclarationSQL) {
 		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
 	}
-	if !strings.Contains(err.Error(), "Column projections are not supported in subscriptions") {
+	if !strings.Contains(err.Error(), "Aggregate projections are not supported in subscriptions") {
 		t.Fatalf("Build error = %v, want table-shaped view aggregate rejection", err)
 	}
 }
@@ -541,6 +541,32 @@ func TestSubscribeViewOverPrivateBaseTableUsesDeclarationPermission(t *testing.T
 	}
 	if len(sub.InitialRows) != 1 || sub.InitialRows[0][1].AsString() != "hello" {
 		t.Fatalf("initial rows = %#v, want inserted private-table row", sub.InitialRows)
+	}
+}
+
+func TestSubscribeViewColumnProjectionReturnsProjectedInitialRows(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message", insertMessageReducer).
+		View(ViewDeclaration{
+			Name:        "live_message_bodies",
+			SQL:         "SELECT body AS text FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessage(t, rt, "hello")
+
+	sub, err := rt.SubscribeView(context.Background(), "live_message_bodies", 8, WithDeclaredReadPermissions("messages:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView: %v", err)
+	}
+	if sub.Name != "live_message_bodies" || sub.QueryID != 8 || sub.TableName != "messages" {
+		t.Fatalf("subscription identity = (%q, %d, %q), want live_message_bodies/8/messages", sub.Name, sub.QueryID, sub.TableName)
+	}
+	if len(sub.Columns) != 1 || sub.Columns[0].Name != "text" || sub.Columns[0].Type != types.KindString {
+		t.Fatalf("columns = %#v, want projected text string column", sub.Columns)
+	}
+	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsString() != "hello" {
+		t.Fatalf("initial rows = %#v, want one projected body row", sub.InitialRows)
 	}
 }
 
@@ -754,6 +780,36 @@ func TestDeclaredViewAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	}
 	if len(sub.InitialRows) != 1 || sub.InitialRows[0][1].AsString() != alice.Hex() {
 		t.Fatalf("visible view rows = %#v, want only caller row", sub.InitialRows)
+	}
+}
+
+func TestDeclaredViewColumnProjectionAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x31)
+	bob := visibilityRuntimeIdentity(0x32)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        "live_message_bodies",
+			SQL:         "SELECT body AS text FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+
+	sub, err := rt.SubscribeView(context.Background(), "live_message_bodies", 9,
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:subscribe"),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView: %v", err)
+	}
+	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsString() != alice.Hex() {
+		t.Fatalf("visible projected view rows = %#v, want only caller body", sub.InitialRows)
 	}
 }
 

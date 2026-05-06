@@ -8,6 +8,7 @@ import (
 
 	"github.com/ponchione/shunter/executor"
 	"github.com/ponchione/shunter/protocol"
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
@@ -25,6 +26,7 @@ var (
 type DeclaredQueryResult struct {
 	Name      string
 	TableName string
+	Columns   []schema.ColumnSchema
 	Rows      []types.ProductValue
 }
 
@@ -35,6 +37,7 @@ type DeclaredViewSubscription struct {
 	QueryID     uint32
 	RequestID   uint32
 	TableName   string
+	Columns     []schema.ColumnSchema
 	InitialRows []types.ProductValue
 }
 
@@ -129,6 +132,7 @@ func (r *Runtime) CallQuery(ctx context.Context, name string, opts ...DeclaredRe
 	return DeclaredQueryResult{
 		Name:      entry.Name,
 		TableName: result.TableName,
+		Columns:   copyColumnSchemas(result.Columns),
 		Rows:      types.CopyProductValues(result.Rows),
 	}, nil
 }
@@ -167,6 +171,7 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 			QueryID:                 queryID,
 			RequestID:               callOpts.requestID,
 			Predicates:              []subscription.Predicate{compiled.Predicate()},
+			ProjectionColumns:       [][]subscription.ProjectionColumn{compiled.SubscriptionProjection()},
 			PredicateHashIdentities: []*types.Identity{compiled.PredicateHashIdentity(callOpts.caller.Identity)},
 			SQLText:                 entry.SQL,
 		},
@@ -187,6 +192,7 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 			QueryID:     queryID,
 			RequestID:   callOpts.requestID,
 			TableName:   declaredViewTableName(compiled, response.result.Update),
+			Columns:     declaredViewColumns(compiled, response.result.Update, r.registry),
 			InitialRows: collectDeclaredInitialRows(response.result.Update),
 		}, nil
 	case <-ctx.Done():
@@ -250,7 +256,7 @@ func (r *Runtime) applyDeclaredReadVisibility(compiled protocol.CompiledSQLQuery
 
 func validationOptionsForDeclaredRead(kind declaredReadKind) protocol.SQLQueryValidationOptions {
 	if kind == declaredReadKindView {
-		return protocol.SQLQueryValidationOptions{AllowLimit: false, AllowProjection: false}
+		return protocol.SQLQueryValidationOptions{AllowLimit: false, AllowProjection: true}
 	}
 	return protocol.SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true}
 }
@@ -272,6 +278,27 @@ func collectDeclaredInitialRows(updates []subscription.SubscriptionUpdate) []typ
 	return types.CopyProductValues(rows)
 }
 
+func declaredViewColumns(compiled protocol.CompiledSQLQuery, updates []subscription.SubscriptionUpdate, sl schema.SchemaLookup) []schema.ColumnSchema {
+	for _, update := range updates {
+		if len(update.Columns) != 0 {
+			return copyColumnSchemas(update.Columns)
+		}
+	}
+	if projection := compiled.SubscriptionProjection(); len(projection) != 0 {
+		columns := make([]schema.ColumnSchema, len(projection))
+		for i, col := range projection {
+			columns[i] = col.Schema
+		}
+		return columns
+	}
+	if sl != nil {
+		if _, ts, ok := sl.TableByName(compiled.TableName()); ok && ts != nil {
+			return copyColumnSchemas(ts.Columns)
+		}
+	}
+	return nil
+}
+
 // HandleDeclaredQuery handles the protocol named-query message by delegating to
 // the runtime-owned declared read API.
 func (r *Runtime) HandleDeclaredQuery(ctx context.Context, conn *protocol.Conn, msg *protocol.DeclaredQueryMsg) {
@@ -282,7 +309,7 @@ func (r *Runtime) HandleDeclaredQuery(ctx context.Context, conn *protocol.Conn, 
 		r.observability.RecordProtocolMessage("declared_query", protocolDeclaredReadMetricResult(err))
 		return
 	}
-	rows, err := encodeDeclaredReadRows(result.Rows)
+	rows, err := encodeDeclaredReadRows(result.Rows, result.Columns)
 	if err != nil {
 		r.sendProtocolDeclaredQueryError(conn, msg.MessageID, "encode error: "+err.Error(), receipt)
 		r.observability.RecordProtocolMessage("declared_query", "internal_error")
@@ -313,7 +340,7 @@ func (r *Runtime) HandleSubscribeDeclaredView(ctx context.Context, conn *protoco
 		r.observability.RecordProtocolMessage("subscribe_declared_view", protocolDeclaredReadMetricResult(err))
 		return
 	}
-	rows, err := encodeDeclaredReadRows(sub.InitialRows)
+	rows, err := encodeDeclaredReadRows(sub.InitialRows, sub.Columns)
 	if err != nil {
 		r.sendProtocolDeclaredViewError(conn, msg.RequestID, msg.QueryID, "encode error: "+err.Error(), receipt)
 		r.observability.RecordProtocolMessage("subscribe_declared_view", "internal_error")
@@ -403,8 +430,20 @@ func (r *Runtime) logProtocolDeclaredReadSendError(kind string, err error) {
 	r.observability.LogProtocolProtocolError(kind, "send_failed", err)
 }
 
-func encodeDeclaredReadRows(rows []types.ProductValue) ([]byte, error) {
+func encodeDeclaredReadRows(rows []types.ProductValue, columns []schema.ColumnSchema) ([]byte, error) {
+	if len(columns) != 0 {
+		return protocol.EncodeProductRowsForColumns(rows, columns)
+	}
 	return protocol.EncodeProductRows(rows)
+}
+
+func copyColumnSchemas(in []schema.ColumnSchema) []schema.ColumnSchema {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]schema.ColumnSchema, len(in))
+	copy(out, in)
+	return out
 }
 
 func declaredReadElapsedMicrosI64(receipt time.Time) int64 {

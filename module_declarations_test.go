@@ -183,10 +183,10 @@ func TestBuildValidatesDeclaredReadSQLAgainstSchema(t *testing.T) {
 			}),
 		},
 		{
-			name: "view projection unsupported by subscription SQL",
+			name: "view aggregate unsupported by subscription SQL",
 			mod: validChatModule().View(ViewDeclaration{
 				Name: "live_messages",
-				SQL:  "SELECT id FROM messages",
+				SQL:  "SELECT COUNT(id) AS n FROM messages",
 			}),
 		},
 		{

@@ -125,6 +125,29 @@ func (q CompiledSQLQuery) Predicate() subscription.Predicate {
 	return q.query.Predicate
 }
 
+// SubscriptionProjection returns the optional live-row projection represented
+// by this compiled SQL query.
+func (q CompiledSQLQuery) SubscriptionProjection() []subscription.ProjectionColumn {
+	if len(q.query.ProjectionColumns) == 0 {
+		return nil
+	}
+	out := make([]subscription.ProjectionColumn, len(q.query.ProjectionColumns))
+	for i, col := range q.query.ProjectionColumns {
+		out[i] = subscription.ProjectionColumn{
+			Schema: col.Schema,
+			Table:  col.Table,
+			Column: types.ColID(col.Schema.Index),
+			Alias:  col.Alias,
+		}
+	}
+	return out
+}
+
+// HasAggregate reports whether this query returns an aggregate row shape.
+func (q CompiledSQLQuery) HasAggregate() bool {
+	return q.query.Aggregate != nil
+}
+
 // UsesCallerIdentity reports whether the compiled SQL references :sender.
 func (q CompiledSQLQuery) UsesCallerIdentity() bool {
 	return q.query.UsesCallerIdentity

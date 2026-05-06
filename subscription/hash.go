@@ -23,17 +23,18 @@ func (h QueryHash) String() string { return hex.EncodeToString(h[:]) }
 // Canonical serialization tags. These are internal — not a wire format.
 // Only requirement is determinism within a single binary version.
 const (
-	tagColEq     byte = 0x01
-	tagColNe     byte = 0x02
-	tagColRange  byte = 0x03
-	tagAnd       byte = 0x04
-	tagAllRows   byte = 0x05
-	tagJoin      byte = 0x06
-	tagOr        byte = 0x07
-	tagCrossJoin byte = 0x08
-	tagNoRows    byte = 0x09
-	tagColEqCol  byte = 0x0A
-	tagMultiJoin byte = 0x0B
+	tagColEq      byte = 0x01
+	tagColNe      byte = 0x02
+	tagColRange   byte = 0x03
+	tagAnd        byte = 0x04
+	tagAllRows    byte = 0x05
+	tagJoin       byte = 0x06
+	tagOr         byte = 0x07
+	tagCrossJoin  byte = 0x08
+	tagNoRows     byte = 0x09
+	tagColEqCol   byte = 0x0A
+	tagMultiJoin  byte = 0x0B
+	tagProjection byte = 0x0C
 )
 
 // Within a canonical Bound encoding.
@@ -79,6 +80,11 @@ func (e *canonicalEncoder) writeU64(v uint64) {
 	var tmp [8]byte
 	binary.BigEndian.PutUint64(tmp[:], v)
 	e.buf = append(e.buf, tmp[:]...)
+}
+
+func (e *canonicalEncoder) writeString(v string) {
+	e.writeU32(uint32(len(v)))
+	e.buf = append(e.buf, v...)
 }
 
 func isAllRowsPredicate(pred Predicate) bool {
@@ -441,6 +447,13 @@ func simplifyCanonicalLogical(left, right Predicate, groupTag byte) (Predicate, 
 // identical predicates from different clients produce different hashes
 // (parameterized form, SPEC-004 §3.4).
 func ComputeQueryHash(pred Predicate, clientID *types.Identity) QueryHash {
+	return ComputeQueryPlanHash(pred, nil, clientID)
+}
+
+// ComputeQueryPlanHash returns the canonical hash for a predicate plus its
+// emitted row projection. Empty projection keeps the historical table-shaped
+// predicate hash.
+func ComputeQueryPlanHash(pred Predicate, projection []ProjectionColumn, clientID *types.Identity) QueryHash {
 	if pred == nil {
 		panic("subscription: ComputeQueryHash on nil predicate")
 	}
@@ -448,11 +461,33 @@ func ComputeQueryHash(pred Predicate, clientID *types.Identity) QueryHash {
 	enc := acquireCanonicalEncoder()
 	defer releaseCanonicalEncoder(enc)
 	encodePredicate(enc, pred)
+	encodeProjection(enc, projection)
 	if clientID != nil {
 		enc.buf = append(enc.buf, clientID[:]...)
 	}
 	h := QueryHash(blake3.Sum256(enc.buf))
 	return h
+}
+
+func encodeProjection(e *canonicalEncoder, projection []ProjectionColumn) {
+	if len(projection) == 0 {
+		return
+	}
+	e.writeByte(tagProjection)
+	e.writeU32(uint32(len(projection)))
+	for _, col := range projection {
+		e.writeU32(uint32(col.Table))
+		e.writeU32(uint32(col.Column))
+		e.writeByte(col.Alias)
+		e.writeU32(uint32(col.Schema.Index))
+		e.writeU32(uint32(col.Schema.Type))
+		if col.Schema.Nullable {
+			e.writeByte(1)
+		} else {
+			e.writeByte(0)
+		}
+		e.writeString(col.Schema.Name)
+	}
 }
 
 func encodePredicate(e *canonicalEncoder, pred Predicate) {

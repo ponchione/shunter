@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -375,6 +376,26 @@ func TestQueryHashJoinProjectionDiffers(t *testing.T) {
 	right := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0, ProjectRight: true}
 	if ComputeQueryHash(left, nil) == ComputeQueryHash(right, nil) {
 		t.Fatal("Join projection side must change canonical hash")
+	}
+}
+
+func TestQueryPlanHashProjectionColumnsDiffer(t *testing.T) {
+	pred := AllRows{Table: 1}
+	idProjection := []ProjectionColumn{{
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Table:  1,
+		Column: 0,
+	}}
+	bodyProjection := []ProjectionColumn{{
+		Schema: schema.ColumnSchema{Index: 1, Name: "text", Type: types.KindString},
+		Table:  1,
+		Column: 1,
+	}}
+	if ComputeQueryPlanHash(pred, idProjection, nil) == ComputeQueryPlanHash(pred, bodyProjection, nil) {
+		t.Fatal("query plan hash must include live projection column identity")
+	}
+	if ComputeQueryHash(pred, nil) != ComputeQueryPlanHash(pred, nil, nil) {
+		t.Fatal("empty query plan projection must preserve predicate hash")
 	}
 }
 

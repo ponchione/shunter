@@ -235,6 +235,25 @@ func TestTypeScriptGeneratorExportsJoinWhereColumnComparisonDeclaredViewSQL(t *t
 	assertContains(t, ts, `return subscribeDeclaredView("live_matching_messages");`)
 }
 
+func TestTypeScriptGeneratorExportsProjectedDeclaredViewSQL(t *testing.T) {
+	contract := contractFixture()
+	contract.Views = append(contract.Views, shunter.ViewDescription{
+		Name: "live_message_bodies",
+		SQL:  "SELECT body AS text FROM messages",
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `liveMessageBodies: "live_message_bodies",`)
+	assertContains(t, ts, `liveMessageBodies: "SELECT body AS text FROM messages",`)
+	assertContains(t, ts, `export function subscribeLiveMessageBodies(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_message_bodies");`)
+}
+
 func TestTypeScriptGeneratorExportsMultiJoinDeclaredQuerySQL(t *testing.T) {
 	contract := contractFixture()
 	contract.Schema.Tables = append(contract.Schema.Tables,

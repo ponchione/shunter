@@ -16,6 +16,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - One-off and declared single-table queries now use matching composite indexes for multi-column `ORDER BY`, including mixed directions.
 - One-off and declared multi-way join queries now use matching single-column indexes when probing joined relations.
 - One-off and declared aggregate queries now ignore null inputs for `COUNT(column)`, `COUNT(DISTINCT column)`, and `SUM(nullable_numeric_column)`, returning `NULL` for nullable sums with no non-null inputs.
+- Declared live views now support column projections over their emitted relation, including projected initial rows and subscription deltas.
 - One-off and declared SQL queries support multi-way joins, and table-shaped multi-way joins now work in live subscriptions and executable declared views.
 - Generated TypeScript clients now include a table-name-to-row-type map and a table subscriber callback type derived from it.
 - Added canonical JSON column values with schema export, BSATN encoding, SQL literal coercion, store/index support, subscription hashing, contract validation, and TypeScript `unknown` codegen.

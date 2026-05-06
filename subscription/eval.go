@@ -400,24 +400,27 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 			return nil
 		}
 		projected := p.ProjectedTable()
+		columns := projectionUpdateColumns(m.columnsForUpdate(projected), qs.projection)
 		return []SubscriptionUpdate{{
 			TableID:   projected,
 			TableName: m.schema.TableName(projected),
-			Columns:   m.columnsForUpdate(projected),
-			Inserts:   ins,
-			Deletes:   del,
+			Columns:   columns,
+			Inserts:   projectRows(ins, qs.projection),
+			Deletes:   projectRows(del, qs.projection),
 		}}
 	case CrossJoin:
 		ins, del := evalCrossJoinDelta(dv, p)
 		if len(ins) == 0 && len(del) == 0 {
 			return nil
 		}
+		projected := p.ProjectedTable()
+		columns := projectionUpdateColumns(m.columnsForUpdate(projected), qs.projection)
 		return []SubscriptionUpdate{{
-			TableID:   p.ProjectedTable(),
-			TableName: m.schema.TableName(p.ProjectedTable()),
-			Columns:   m.columnsForUpdate(p.ProjectedTable()),
-			Inserts:   ins,
-			Deletes:   del,
+			TableID:   projected,
+			TableName: m.schema.TableName(projected),
+			Columns:   columns,
+			Inserts:   projectRows(ins, qs.projection),
+			Deletes:   projectRows(del, qs.projection),
 		}}
 	case MultiJoin:
 		ins, del := evalMultiJoinDelta(dv, p)
@@ -425,12 +428,13 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 			return nil
 		}
 		projected := p.ProjectedTable()
+		columns := projectionUpdateColumns(m.columnsForUpdate(projected), qs.projection)
 		return []SubscriptionUpdate{{
 			TableID:   projected,
 			TableName: m.schema.TableName(projected),
-			Columns:   m.columnsForUpdate(projected),
-			Inserts:   ins,
-			Deletes:   del,
+			Columns:   columns,
+			Inserts:   projectRows(ins, qs.projection),
+			Deletes:   projectRows(del, qs.projection),
 		}}
 	default:
 		var updates []SubscriptionUpdate
@@ -442,9 +446,9 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 			updates = append(updates, SubscriptionUpdate{
 				TableID:   t,
 				TableName: m.schema.TableName(t),
-				Columns:   m.columnsForUpdate(t),
-				Inserts:   ins,
-				Deletes:   del,
+				Columns:   projectionUpdateColumns(m.columnsForUpdate(t), qs.projection),
+				Inserts:   projectRows(ins, qs.projection),
+				Deletes:   projectRows(del, qs.projection),
 			})
 		}
 		return updates

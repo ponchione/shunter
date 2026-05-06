@@ -12,7 +12,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/ponchione/websocket"
 
+	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/protocol"
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -78,6 +80,36 @@ func TestProtocolDeclaredViewMultiWayJoinSendsDeltas(t *testing.T) {
 
 	insertMessage(t, rt, "world")
 	requireDeclaredReadDeltaRows(t, client, 42, "messages", 1, 0)
+}
+
+func TestProtocolDeclaredViewColumnProjectionSendsProjectedInitialRowsAndDeltas(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message", insertMessageReducer).
+		View(ViewDeclaration{
+			Name:        "live_message_bodies",
+			SQL:         "SELECT body AS text FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+	insertMessage(t, rt, "hello")
+
+	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "projected-subscriber", "messages:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 33,
+		QueryID:   43,
+		Name:      "live_message_bodies",
+	})
+	projectedColumns := []schema.ColumnSchema{{Name: "text", Type: types.KindString}}
+	initial := requireDeclaredReadAppliedValues(t, client, 33, 43, "messages", projectedColumns)
+	if len(initial) != 1 || len(initial[0]) != 1 || initial[0][0].AsString() != "hello" {
+		t.Fatalf("projected initial rows = %#v, want one body row hello", initial)
+	}
+
+	insertMessage(t, rt, "world")
+	inserts, deletes := requireDeclaredReadDeltaValues(t, client, 43, "messages", projectedColumns)
+	if len(inserts) != 1 || len(inserts[0]) != 1 || inserts[0][0].AsString() != "world" || len(deletes) != 0 {
+		t.Fatalf("projected delta inserts/deletes = %#v/%#v, want one body insert world", inserts, deletes)
+	}
 }
 
 func TestProtocolDeclaredReadsSurviveCleanRestart(t *testing.T) {
@@ -494,6 +526,19 @@ func requireDeclaredReadAppliedRows(t *testing.T, client *websocket.Conn, reques
 	}
 }
 
+func requireDeclaredReadAppliedValues(t *testing.T, client *websocket.Conn, requestID, queryID uint32, wantTable string, columns []schema.ColumnSchema) []types.ProductValue {
+	t.Helper()
+	tag, msg := readDeclaredReadProtocolMessage(t, client)
+	if tag != protocol.TagSubscribeSingleApplied {
+		t.Fatalf("tag = %d, want SubscribeSingleApplied for request=%d query=%d", tag, requestID, queryID)
+	}
+	applied := msg.(protocol.SubscribeSingleApplied)
+	if applied.RequestID != requestID || applied.QueryID != queryID || applied.TableName != wantTable {
+		t.Fatalf("declared view applied = %+v, want request=%d query=%d table=%q", applied, requestID, queryID, wantTable)
+	}
+	return decodeDeclaredReadProtocolRows(t, applied.Rows, columns)
+}
+
 func requireDeclaredReadDeltaRows(t *testing.T, client *websocket.Conn, queryID uint32, wantTable string, wantInserts, wantDeletes int) {
 	t.Helper()
 	tag, msg := readDeclaredReadProtocolMessage(t, client)
@@ -519,6 +564,41 @@ func requireDeclaredReadDeltaRows(t *testing.T, client *websocket.Conn, queryID 
 	if len(insertRows) != wantInserts || len(deleteRows) != wantDeletes {
 		t.Fatalf("declared view delta inserts/deletes = %d/%d, want %d/%d for query=%d table=%q", len(insertRows), len(deleteRows), wantInserts, wantDeletes, queryID, wantTable)
 	}
+}
+
+func requireDeclaredReadDeltaValues(t *testing.T, client *websocket.Conn, queryID uint32, wantTable string, columns []schema.ColumnSchema) ([]types.ProductValue, []types.ProductValue) {
+	t.Helper()
+	tag, msg := readDeclaredReadProtocolMessage(t, client)
+	if tag != protocol.TagTransactionUpdateLight {
+		t.Fatalf("tag = %d, want TransactionUpdateLight for query=%d", tag, queryID)
+	}
+	update := msg.(protocol.TransactionUpdateLight)
+	if len(update.Update) != 1 {
+		t.Fatalf("declared view update entries = %+v, want one entry for query=%d", update.Update, queryID)
+	}
+	entry := update.Update[0]
+	if entry.QueryID != queryID || entry.TableName != wantTable {
+		t.Fatalf("declared view update entry = %+v, want query=%d table=%q", entry, queryID, wantTable)
+	}
+	return decodeDeclaredReadProtocolRows(t, entry.Inserts, columns), decodeDeclaredReadProtocolRows(t, entry.Deletes, columns)
+}
+
+func decodeDeclaredReadProtocolRows(t *testing.T, rowList []byte, columns []schema.ColumnSchema) []types.ProductValue {
+	t.Helper()
+	rawRows, err := protocol.DecodeRowList(rowList)
+	if err != nil {
+		t.Fatalf("DecodeRowList projected declared rows: %v", err)
+	}
+	ts := &schema.TableSchema{Columns: columns}
+	rows := make([]types.ProductValue, 0, len(rawRows))
+	for _, raw := range rawRows {
+		row, err := bsatn.DecodeProductValueFromBytes(raw, ts)
+		if err != nil {
+			t.Fatalf("DecodeProductValue projected declared row: %v", err)
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 func requireDeclaredReadOneOffError(t *testing.T, client *websocket.Conn, wantSubstring string) {

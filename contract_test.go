@@ -293,7 +293,7 @@ func TestModuleContractValidationRejectsInvalidDeclarationSQL(t *testing.T) {
 	}
 
 	contract = buildContractRuntime(t).ExportContract()
-	contract.Views = []ViewDescription{{Name: "live_messages", SQL: "SELECT id FROM messages"}}
+	contract.Views = []ViewDescription{{Name: "live_messages", SQL: "SELECT * FROM missing"}}
 
 	err = ValidateModuleContract(contract)
 	if err == nil {
@@ -301,6 +301,18 @@ func TestModuleContractValidationRejectsInvalidDeclarationSQL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "views.live_messages.sql") {
 		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
+	}
+}
+
+func TestModuleContractValidationAllowsProjectedViewSQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Views = []ViewDescription{{
+		Name: "live_message_bodies",
+		SQL:  "SELECT body AS text FROM messages",
+	}}
+
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected projected view SQL: %v", err)
 	}
 }
 
@@ -421,7 +433,7 @@ func TestModuleContractValidationRejectsCountDistinctAggregateViewSQL(t *testing
 	if !strings.Contains(err.Error(), "views.live_messages.sql") {
 		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
 	}
-	if !strings.Contains(err.Error(), "Column projections are not supported in subscriptions") {
+	if !strings.Contains(err.Error(), "Aggregate projections are not supported in subscriptions") {
 		t.Fatalf("ValidateModuleContract error = %v, want aggregate unsupported text", err)
 	}
 }
@@ -440,7 +452,7 @@ func TestModuleContractValidationRejectsSumAggregateViewSQL(t *testing.T) {
 	if !strings.Contains(err.Error(), "views.live_messages.sql") {
 		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
 	}
-	if !strings.Contains(err.Error(), "Column projections are not supported in subscriptions") {
+	if !strings.Contains(err.Error(), "Aggregate projections are not supported in subscriptions") {
 		t.Fatalf("ValidateModuleContract error = %v, want aggregate unsupported text", err)
 	}
 }
