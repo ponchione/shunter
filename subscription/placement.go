@@ -119,6 +119,9 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 				for _, placement := range placements.rangeEdges {
 					mutateJoinRangeEdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
 				}
+				for _, placement := range placements.existenceEdges {
+					mutateJoinExistencePlacement(idx, placement.edge, hash, add)
+				}
 				continue
 			}
 			if placements := joinExistenceEdgesFor(join, t, resolver); len(placements) > 0 {
@@ -265,6 +268,9 @@ func mutateMultiJoinSplitOrFilterPlacement(
 	}
 	for _, placement := range placements.rangeEdges {
 		mutateJoinRangeEdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
+	}
+	for _, placement := range placements.existenceEdges {
+		mutateJoinExistencePlacement(idx, placement.edge, hash, add)
 	}
 	return true
 }
@@ -451,6 +457,9 @@ func splitMultiJoinOrBranchPlacementsForRelation(
 ) (splitJoinOrPlacements, bool) {
 	branchFilters := multiJoinBranchLocalFilterPlacements(branch, relations)
 	if len(branchFilters) == 0 {
+		if placements := multiJoinBranchColumnEqualityPlacements(branch, relations, relation, resolver); placements.hasAny() {
+			return placements, true
+		}
 		return splitJoinOrPlacements{}, false
 	}
 	if filters := branchFilters[relation]; filters.hasAny() {
@@ -467,7 +476,48 @@ func splitMultiJoinOrBranchPlacementsForRelation(
 		}
 		out.append(multiJoinFilterEdgesBetweenRelations(conditions, relation, targetRelation, filters, resolver))
 	}
+	if !out.hasAny() {
+		out.append(multiJoinBranchColumnEqualityPlacements(branch, relations, relation, resolver))
+	}
 	return out, out.hasAny()
+}
+
+func multiJoinBranchColumnEqualityPlacements(
+	branch Predicate,
+	relations []MultiJoinRelation,
+	relation int,
+	resolver IndexResolver,
+) splitJoinOrPlacements {
+	conditions := multiJoinBranchColumnEqualityConditions(branch, relations)
+	if len(conditions) == 0 {
+		return splitJoinOrPlacements{}
+	}
+	edges := multiJoinExistenceEdgesForRelation(conditions, relation, resolver)
+	if len(edges) == 0 {
+		return splitJoinOrPlacements{}
+	}
+	return splitJoinOrPlacements{existenceEdges: edges}
+}
+
+func multiJoinBranchColumnEqualityConditions(pred Predicate, relations []MultiJoinRelation) []MultiJoinCondition {
+	switch p := pred.(type) {
+	case ColEqCol:
+		left, ok := multiJoinFilterColumnRef(relations, p.LeftTable, p.LeftAlias, p.LeftColumn)
+		if !ok {
+			return nil
+		}
+		right, ok := multiJoinFilterColumnRef(relations, p.RightTable, p.RightAlias, p.RightColumn)
+		if !ok || left.Relation == right.Relation {
+			return nil
+		}
+		return []MultiJoinCondition{{Left: left, Right: right}}
+	case And:
+		left := multiJoinBranchColumnEqualityConditions(p.Left, relations)
+		right := multiJoinBranchColumnEqualityConditions(p.Right, relations)
+		return append(left, right...)
+	default:
+		return nil
+	}
 }
 
 func multiJoinBranchLocalFilterPlacements(pred Predicate, relations []MultiJoinRelation) map[int]colFilterPlacements {
@@ -537,11 +587,9 @@ func multiJoinFilterEdgesBetweenRelations(
 		return splitJoinOrPlacements{}
 	}
 	var out splitJoinOrPlacements
-	for _, condition := range conditions {
-		lhs, rhs, ok := multiJoinConditionRefsForDirection(condition, lhsRelation, rhsRelation)
-		if !ok {
-			continue
-		}
+	for _, path := range multiJoinFilterEdgeConditionPaths(conditions, lhsRelation, rhsRelation) {
+		lhs := path.lhs
+		rhs := path.rhs
 		if _, ok := resolver.IndexIDForColumn(rhs.Table, rhs.Column); !ok {
 			continue
 		}
@@ -572,6 +620,78 @@ func multiJoinFilterEdgesBetweenRelations(
 		}
 	}
 	return out
+}
+
+type multiJoinFilterEdgeConditionPath struct {
+	lhs MultiJoinColumnRef
+	rhs MultiJoinColumnRef
+}
+
+type multiJoinFilterEdgeConditionPathState struct {
+	start   MultiJoinColumnRef
+	current MultiJoinColumnRef
+}
+
+type multiJoinFilterEdgeConditionPathKey struct {
+	relation    int
+	column      ColID
+	startColumn ColID
+}
+
+func multiJoinFilterEdgeConditionPaths(conditions []MultiJoinCondition, lhsRelation int, rhsRelation int) []multiJoinFilterEdgeConditionPath {
+	if lhsRelation == rhsRelation {
+		return nil
+	}
+	var paths []multiJoinFilterEdgeConditionPath
+	var queue []multiJoinFilterEdgeConditionPathState
+	seen := make(map[multiJoinFilterEdgeConditionPathKey]struct{})
+	addPathOrState := func(start, current MultiJoinColumnRef) {
+		if current.Relation == rhsRelation {
+			paths = append(paths, multiJoinFilterEdgeConditionPath{lhs: start, rhs: current})
+			return
+		}
+		key := multiJoinFilterEdgeConditionPathKey{
+			relation:    current.Relation,
+			column:      current.Column,
+			startColumn: start.Column,
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		queue = append(queue, multiJoinFilterEdgeConditionPathState{start: start, current: current})
+	}
+
+	for _, condition := range conditions {
+		start, current, ok := multiJoinConditionRefsFromRelation(condition, lhsRelation)
+		if !ok || start.Relation == current.Relation {
+			continue
+		}
+		addPathOrState(start, current)
+	}
+	for len(queue) > 0 {
+		state := queue[0]
+		queue = queue[1:]
+		for _, condition := range conditions {
+			current, next, ok := multiJoinConditionRefsFromRelation(condition, state.current.Relation)
+			if !ok || current.Relation == next.Relation || current.Column != state.current.Column {
+				continue
+			}
+			addPathOrState(state.start, next)
+		}
+	}
+	return paths
+}
+
+func multiJoinConditionRefsFromRelation(condition MultiJoinCondition, relation int) (MultiJoinColumnRef, MultiJoinColumnRef, bool) {
+	switch {
+	case condition.Left.Relation == relation:
+		return condition.Left, condition.Right, true
+	case condition.Right.Relation == relation:
+		return condition.Right, condition.Left, true
+	default:
+		return MultiJoinColumnRef{}, MultiJoinColumnRef{}, false
+	}
 }
 
 func multiJoinConditionRefsForDirection(
@@ -1131,10 +1251,11 @@ type joinExistenceEdgePlacement struct {
 }
 
 type splitJoinOrPlacements struct {
-	eqs        []ColEq
-	ranges     []ColRange
-	edges      []joinEdgePlacement
-	rangeEdges []joinRangeEdgePlacement
+	eqs            []ColEq
+	ranges         []ColRange
+	edges          []joinEdgePlacement
+	rangeEdges     []joinRangeEdgePlacement
+	existenceEdges []joinExistenceEdgePlacement
 }
 
 type joinPlacementSide struct {
@@ -1184,7 +1305,7 @@ func (s joinPlacementSide) otherJoinColumnIndexed(resolver IndexResolver) bool {
 }
 
 func (p splitJoinOrPlacements) hasAny() bool {
-	return len(p.eqs) > 0 || len(p.ranges) > 0 || len(p.edges) > 0 || len(p.rangeEdges) > 0
+	return len(p.eqs) > 0 || len(p.ranges) > 0 || len(p.edges) > 0 || len(p.rangeEdges) > 0 || len(p.existenceEdges) > 0
 }
 
 func (p *splitJoinOrPlacements) append(other splitJoinOrPlacements) {
@@ -1192,6 +1313,7 @@ func (p *splitJoinOrPlacements) append(other splitJoinOrPlacements) {
 	p.ranges = append(p.ranges, other.ranges...)
 	p.edges = append(p.edges, other.edges...)
 	p.rangeEdges = append(p.rangeEdges, other.rangeEdges...)
+	p.existenceEdges = append(p.existenceEdges, other.existenceEdges...)
 }
 
 // joinEdgesFor computes the JoinEdge/filter-value placements for Tier 2 for the
@@ -1393,6 +1515,12 @@ func splitJoinOrBranchPlacements(
 		default:
 			return splitJoinOrPlacements{}, false
 		}
+	case ColEqCol:
+		placement, ok := splitJoinOrColumnEqualityExistencePlacement(p, side, resolver)
+		if !ok {
+			return splitJoinOrPlacements{}, false
+		}
+		return splitJoinOrPlacements{existenceEdges: []joinExistenceEdgePlacement{placement}}, true
 	case And:
 		var out splitJoinOrPlacements
 		if left, ok := splitJoinOrBranchPlacements(p.Left, side, resolver); ok {
@@ -1409,8 +1537,35 @@ func splitJoinOrBranchPlacements(
 
 func splitJoinOrNeedsBothSides(p splitJoinOrPlacements) bool {
 	hasCurrentSide := len(p.eqs) > 0 || len(p.ranges) > 0
-	hasOtherSide := len(p.edges) > 0 || len(p.rangeEdges) > 0
+	hasOtherSide := len(p.edges) > 0 || len(p.rangeEdges) > 0 || len(p.existenceEdges) > 0
 	return hasCurrentSide && hasOtherSide
+}
+
+func splitJoinOrColumnEqualityExistencePlacement(p ColEqCol, side joinPlacementSide, resolver IndexResolver) (joinExistenceEdgePlacement, bool) {
+	var lhsCol, rhsCol ColID
+	switch {
+	case p.LeftTable == side.table && p.RightTable == side.other:
+		lhsCol = p.LeftColumn
+		rhsCol = p.RightColumn
+	case p.RightTable == side.table && p.LeftTable == side.other:
+		lhsCol = p.RightColumn
+		rhsCol = p.LeftColumn
+	default:
+		return joinExistenceEdgePlacement{}, false
+	}
+	if resolver == nil {
+		return joinExistenceEdgePlacement{}, false
+	}
+	if _, ok := resolver.IndexIDForColumn(side.other, rhsCol); !ok {
+		return joinExistenceEdgePlacement{}, false
+	}
+	return joinExistenceEdgePlacement{edge: JoinEdge{
+		LHSTable:     side.table,
+		RHSTable:     side.other,
+		LHSJoinCol:   lhsCol,
+		RHSJoinCol:   rhsCol,
+		RHSFilterCol: rhsCol,
+	}}, true
 }
 
 // joinExistenceEdgesFor computes join-existence placements for Tier 2 for the

@@ -46,6 +46,42 @@ func splitOrMultiHopFilterMultiJoinPredicate() MultiJoin {
 	return pred
 }
 
+func splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 2, Alias: 1},
+			{Table: 3, Alias: 2},
+		},
+		Conditions: []MultiJoinCondition{
+			{
+				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
+				Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 1, Table: 2, Column: 0, Alias: 1},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
+			},
+		},
+		ProjectedRelation: 0,
+		Filter: Or{
+			Left: ColEq{
+				Table:  1,
+				Column: 0,
+				Alias:  0,
+				Value:  types.NewUint64(7),
+			},
+			Right: ColRange{
+				Table:  3,
+				Column: 0,
+				Alias:  2,
+				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper:  Bound{Unbounded: true},
+			},
+		},
+	}
+}
+
 func TestMultiJoinPlacementUsesSplitOrLocalFilterEdges(t *testing.T) {
 	s := multiJoinTestSchema()
 	idx := NewPruningIndexes()
@@ -88,13 +124,20 @@ func TestMultiJoinPlacementUsesSplitOrLocalFilterEdges(t *testing.T) {
 	}
 }
 
-func TestMultiJoinPlacementSplitOrMultiHopUsesMiddleRelationEdges(t *testing.T) {
+func TestMultiJoinPlacementSplitOrMultiHopUsesTransitiveEndpointAndMiddleRelationEdges(t *testing.T) {
 	s := multiJoinTestSchema()
 	idx := NewPruningIndexes()
 	pred := splitOrMultiHopFilterMultiJoinPredicate()
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("left endpoint split-OR local value placement = %v, want [%v]", got, hash)
+	}
+	leftEndpointRangeEdge := JoinEdge{LHSTable: 1, RHSTable: 3, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinRangeEdge.Lookup(leftEndpointRangeEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("left endpoint split-OR transitive range edge placement = %v, want [%v]", got, hash)
+	}
 	middleValueEdge := JoinEdge{LHSTable: 2, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
 	if got := idx.JoinEdge.Lookup(middleValueEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("middle split-OR value edge placement = %v, want [%v]", got, hash)
@@ -103,24 +146,87 @@ func TestMultiJoinPlacementSplitOrMultiHopUsesMiddleRelationEdges(t *testing.T) 
 	if got := idx.JoinRangeEdge.Lookup(middleRangeEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("middle split-OR range edge placement = %v, want [%v]", got, hash)
 	}
-	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
-		t.Fatalf("endpoint partial local value placement = %v, want empty", got)
+	rightEndpointValueEdge := JoinEdge{LHSTable: 3, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinEdge.Lookup(rightEndpointValueEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("right endpoint split-OR transitive value edge placement = %v, want [%v]", got, hash)
 	}
-	if got := idx.Range.Lookup(3, 0, types.NewUint64(60)); len(got) != 0 {
-		t.Fatalf("endpoint partial local range placement = %v, want empty", got)
+	if got := idx.Range.Lookup(3, 0, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("right endpoint split-OR local range placement = %v, want [%v]", got, hash)
 	}
-	leftConditionEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
-	if _, ok := idx.JoinEdge.exists[leftConditionEdge][hash]; !ok {
-		t.Fatalf("left endpoint condition edge missing: %+v", idx.JoinEdge.exists)
-	}
-	rightConditionEdge := JoinEdge{LHSTable: 3, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
-	if _, ok := idx.JoinEdge.exists[rightConditionEdge][hash]; !ok {
-		t.Fatalf("right endpoint condition edge missing: %+v", idx.JoinEdge.exists)
+	if len(idx.JoinEdge.exists) != 0 {
+		t.Fatalf("broad condition existence edges = %+v, want none for covered split-OR placement", idx.JoinEdge.exists)
 	}
 	for _, table := range []TableID{1, 2, 3} {
 		if got := idx.Table.Lookup(table); len(got) != 0 {
 			t.Fatalf("TableIndex[%d] = %v, want empty", table, got)
 		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrMultiHopEndpointPrunesMismatch(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrMultiHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(100), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(20)}},
+	})
+	leftMismatch := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 1, leftMismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched left endpoint multi-hop candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		3: {{types.NewUint64(60), types.NewUint64(20)}},
+	})
+	got := CollectCandidatesForTable(idx, 1, leftMismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("remote-filter left endpoint multi-hop candidates = %v, want [%v]", got, hash)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(8), types.NewUint64(20)}},
+		2: {{types.NewUint64(100), types.NewUint64(20)}},
+	})
+	rightMismatch := []types.ProductValue{{types.NewUint64(40), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 3, rightMismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched right endpoint multi-hop candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(7), types.NewUint64(20)}},
+	})
+	got = CollectCandidatesForTable(idx, 3, rightMismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("remote-filter right endpoint multi-hop candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestMultiJoinPlacementSplitOrNonKeyPreservingMultiHopStaysOnFallbackEdges(t *testing.T) {
+	s := dualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	leftEndpointRangeEdge := JoinEdge{LHSTable: 1, RHSTable: 3, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinRangeEdge.Lookup(leftEndpointRangeEdge, types.NewUint64(60)); len(got) != 0 {
+		t.Fatalf("non-key-preserving transitive range edge placement = %v, want empty", got)
+	}
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
+		t.Fatalf("partial endpoint local placement = %v, want empty without covered split-OR path", got)
+	}
+	leftConditionEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
+	if _, ok := idx.JoinEdge.exists[leftConditionEdge][hash]; !ok {
+		t.Fatalf("fallback condition edge missing: %+v", idx.JoinEdge.exists)
 	}
 
 	removeSubscriptionForResolver(idx, pred, hash, s)
