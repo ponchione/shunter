@@ -14,9 +14,9 @@ import (
 type AggregateFunc string
 
 const (
-	// AggregateCount counts rows in a live single-table aggregate view.
+	// AggregateCount counts rows in a live aggregate view.
 	AggregateCount AggregateFunc = "COUNT"
-	// AggregateSum sums a numeric column in a live single-table aggregate view.
+	// AggregateSum sums a numeric column in a live aggregate view.
 	AggregateSum AggregateFunc = "SUM"
 )
 
@@ -56,8 +56,11 @@ func ValidateAggregate(pred Predicate, aggregate *Aggregate, s SchemaLookup) err
 	if s == nil {
 		return fmt.Errorf("%w: aggregate schema lookup is nil", ErrInvalidPredicate)
 	}
+	if err := validateAggregateResultColumn(aggregate); err != nil {
+		return err
+	}
 	if join, ok := pred.(Join); ok {
-		return validateJoinCountStarAggregate(join, aggregate, s)
+		return validateJoinAggregate(join, aggregate, s)
 	}
 	if _, ok := pred.(CrossJoin); ok {
 		return fmt.Errorf("%w: live aggregate views require a single table or two-table join", ErrInvalidPredicate)
@@ -69,12 +72,6 @@ func ValidateAggregate(pred Predicate, aggregate *Aggregate, s SchemaLookup) err
 	if !ok {
 		return fmt.Errorf("%w: live aggregate views require one referenced table", ErrInvalidPredicate)
 	}
-	if aggregate.ResultColumn.Index != 0 {
-		return fmt.Errorf("%w: aggregate result schema index must be 0", ErrInvalidPredicate)
-	}
-	if aggregate.ResultColumn.Name == "" {
-		return fmt.Errorf("%w: aggregate result column name must not be empty", ErrInvalidPredicate)
-	}
 	switch aggregate.Func {
 	case AggregateCount:
 		return validateCountAggregate(table, aggregate, s)
@@ -85,22 +82,46 @@ func ValidateAggregate(pred Predicate, aggregate *Aggregate, s SchemaLookup) err
 	}
 }
 
-func validateJoinCountStarAggregate(join Join, aggregate *Aggregate, s SchemaLookup) error {
-	if aggregate.Func != AggregateCount || aggregate.Argument != nil || aggregate.Distinct {
-		return fmt.Errorf("%w: live join aggregate views support COUNT(*) only", ErrInvalidPredicate)
+func validateAggregateResultColumn(aggregate *Aggregate) error {
+	if aggregate.ResultColumn.Index != 0 {
+		return fmt.Errorf("%w: aggregate result schema index must be 0", ErrInvalidPredicate)
 	}
+	if aggregate.ResultColumn.Name == "" {
+		return fmt.Errorf("%w: aggregate result column name must not be empty", ErrInvalidPredicate)
+	}
+	return nil
+}
+
+func validateJoinAggregate(join Join, aggregate *Aggregate, s SchemaLookup) error {
 	if err := validateJoin(join, s, validateOptions{requireJoinIndex: true}); err != nil {
 		return err
 	}
-	return validateCountAggregate(join.ProjectedTable(), aggregate, s)
+	switch aggregate.Func {
+	case AggregateCount:
+		return validateJoinCountAggregate(join, aggregate, s)
+	case AggregateSum:
+		return validateJoinSumAggregate(join, aggregate, s)
+	default:
+		return fmt.Errorf("%w: live aggregate views support COUNT and SUM only", ErrInvalidPredicate)
+	}
+}
+
+func validateJoinCountAggregate(join Join, aggregate *Aggregate, s SchemaLookup) error {
+	if err := validateCountResult(aggregate); err != nil {
+		return err
+	}
+	if aggregate.Argument == nil {
+		if aggregate.Distinct {
+			return fmt.Errorf("%w: COUNT(DISTINCT ...) aggregate requires a column argument", ErrInvalidPredicate)
+		}
+		return nil
+	}
+	return validateJoinAggregateArgument(join, "COUNT(column)", aggregate.Argument, s)
 }
 
 func validateCountAggregate(table TableID, aggregate *Aggregate, s SchemaLookup) error {
-	if aggregate.ResultColumn.Type != types.KindUint64 {
-		return fmt.Errorf("%w: COUNT aggregate result kind must be Uint64", ErrInvalidPredicate)
-	}
-	if aggregate.ResultColumn.Nullable {
-		return fmt.Errorf("%w: COUNT aggregate result must be non-nullable", ErrInvalidPredicate)
+	if err := validateCountResult(aggregate); err != nil {
+		return err
 	}
 	if aggregate.Argument == nil {
 		if aggregate.Distinct {
@@ -114,6 +135,16 @@ func validateCountAggregate(table TableID, aggregate *Aggregate, s SchemaLookup)
 	return nil
 }
 
+func validateCountResult(aggregate *Aggregate) error {
+	if aggregate.ResultColumn.Type != types.KindUint64 {
+		return fmt.Errorf("%w: COUNT aggregate result kind must be Uint64", ErrInvalidPredicate)
+	}
+	if aggregate.ResultColumn.Nullable {
+		return fmt.Errorf("%w: COUNT aggregate result must be non-nullable", ErrInvalidPredicate)
+	}
+	return nil
+}
+
 func validateSumAggregate(table TableID, aggregate *Aggregate, s SchemaLookup) error {
 	if aggregate.Distinct {
 		return fmt.Errorf("%w: live aggregate views do not support SUM(DISTINCT ...)", ErrInvalidPredicate)
@@ -122,6 +153,29 @@ func validateSumAggregate(table TableID, aggregate *Aggregate, s SchemaLookup) e
 		return fmt.Errorf("%w: SUM aggregate requires a column argument", ErrInvalidPredicate)
 	}
 	if err := validateAggregateArgument(table, "SUM(column)", aggregate.Argument, s); err != nil {
+		return err
+	}
+	wantKind, ok := sumAggregateResultKind(aggregate.Argument.Schema.Type)
+	if !ok {
+		return fmt.Errorf("%w: SUM aggregate only supports integer and float columns", ErrInvalidPredicate)
+	}
+	if aggregate.ResultColumn.Type != wantKind {
+		return fmt.Errorf("%w: SUM aggregate result kind must be %s", ErrInvalidPredicate, wantKind)
+	}
+	if aggregate.ResultColumn.Nullable != aggregate.Argument.Schema.Nullable {
+		return fmt.Errorf("%w: SUM aggregate result nullability must match source column", ErrInvalidPredicate)
+	}
+	return nil
+}
+
+func validateJoinSumAggregate(join Join, aggregate *Aggregate, s SchemaLookup) error {
+	if aggregate.Distinct {
+		return fmt.Errorf("%w: live aggregate views do not support SUM(DISTINCT ...)", ErrInvalidPredicate)
+	}
+	if aggregate.Argument == nil {
+		return fmt.Errorf("%w: SUM aggregate requires a column argument", ErrInvalidPredicate)
+	}
+	if err := validateJoinAggregateArgument(join, "SUM(column)", aggregate.Argument, s); err != nil {
 		return err
 	}
 	wantKind, ok := sumAggregateResultKind(aggregate.Argument.Schema.Type)
@@ -157,6 +211,39 @@ func validateAggregateArgument(table TableID, label string, arg *AggregateColumn
 		return fmt.Errorf("%w: aggregate argument kind %s does not match column kind %s", ErrInvalidPredicate, arg.Schema.Type, want)
 	}
 	return nil
+}
+
+func validateJoinAggregateArgument(join Join, label string, arg *AggregateColumn, s SchemaLookup) error {
+	if arg == nil {
+		return fmt.Errorf("%w: %s argument must not be nil", ErrInvalidPredicate, label)
+	}
+	if !aggregateArgumentMatchesJoin(join, arg) {
+		return fmt.Errorf("%w: %s argument must come from a joined relation", ErrInvalidPredicate, label)
+	}
+	if arg.Schema.Index != int(arg.Column) {
+		return fmt.Errorf("%w: aggregate argument schema index %d does not match source column %d", ErrInvalidPredicate, arg.Schema.Index, arg.Column)
+	}
+	if !s.TableExists(arg.Table) {
+		return fmt.Errorf("%w: aggregate argument table %d", ErrTableNotFound, arg.Table)
+	}
+	if !s.ColumnExists(arg.Table, arg.Column) {
+		return fmt.Errorf("%w: aggregate argument table %d column %d", ErrColumnNotFound, arg.Table, arg.Column)
+	}
+	if want := s.ColumnType(arg.Table, arg.Column); arg.Schema.Type != want {
+		return fmt.Errorf("%w: aggregate argument kind %s does not match column kind %s", ErrInvalidPredicate, arg.Schema.Type, want)
+	}
+	return nil
+}
+
+func aggregateArgumentMatchesJoin(join Join, arg *AggregateColumn) bool {
+	if arg == nil {
+		return false
+	}
+	if join.Left == join.Right {
+		return (arg.Table == join.Left && arg.Alias == join.LeftAlias) ||
+			(arg.Table == join.Right && arg.Alias == join.RightAlias)
+	}
+	return arg.Table == join.Left || arg.Table == join.Right
 }
 
 func aggregatePredicateTable(pred Predicate) (TableID, bool) {
@@ -212,28 +299,30 @@ func (m *Manager) evalAggregateQuery(qs *queryState, dv *DeltaView) ([]Subscript
 		return nil, err
 	}
 	var before types.Value
-	switch qs.aggregate.Func {
-	case AggregateCount:
-		if join, ok := qs.predicate.(Join); ok {
-			before, err = countJoinAggregateBeforeValue(dv, join, qs.aggregate, after, m.resolver)
-			if err != nil {
-				return nil, err
+	if join, ok := qs.predicate.(Join); ok {
+		before, err = aggregateJoinRowsValue(projectedRowsBefore(dv, join.Left), projectedRowsBefore(dv, join.Right), join, qs.aggregate)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		switch qs.aggregate.Func {
+		case AggregateCount:
+			if qs.aggregate.Distinct {
+				before, err = aggregateRowsValue(projectedRowsBefore(dv, table), table, qs.predicate, qs.aggregate)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				before = countAggregateBeforeValue(dv, table, qs.predicate, qs.aggregate, after)
 			}
-		} else if qs.aggregate.Distinct {
+		case AggregateSum:
 			before, err = aggregateRowsValue(projectedRowsBefore(dv, table), table, qs.predicate, qs.aggregate)
 			if err != nil {
 				return nil, err
 			}
-		} else {
-			before = countAggregateBeforeValue(dv, table, qs.predicate, qs.aggregate, after)
+		default:
+			return nil, fmt.Errorf("aggregate %q not supported", qs.aggregate.Func)
 		}
-	case AggregateSum:
-		before, err = aggregateRowsValue(projectedRowsBefore(dv, table), table, qs.predicate, qs.aggregate)
-		if err != nil {
-			return nil, err
-		}
-	default:
-		return nil, fmt.Errorf("aggregate %q not supported", qs.aggregate.Func)
 	}
 	if before.Equal(after) {
 		return nil, nil
@@ -258,20 +347,6 @@ func countAggregateBeforeValue(dv *DeltaView, table TableID, pred Predicate, agg
 		before -= inserted
 	}
 	return types.NewUint64(before)
-}
-
-func countJoinAggregateBeforeValue(dv *DeltaView, join Join, aggregate *Aggregate, after types.Value, resolver IndexResolver) (types.Value, error) {
-	if aggregate.Argument != nil || aggregate.Distinct {
-		return types.Value{}, fmt.Errorf("live join aggregate views support COUNT(*) only")
-	}
-	frags := EvalJoinDeltaFragments(dv, &join, resolver)
-	inserts, deletes := ReconcileJoinDelta(frags.Inserts[:], frags.Deletes[:])
-	before := after.AsUint64() + uint64(len(deletes))
-	if uint64(len(inserts)) > before {
-		return types.NewUint64(0), nil
-	}
-	before -= uint64(len(inserts))
-	return types.NewUint64(before), nil
 }
 
 func aggregateCommittedValue(ctx context.Context, view store.CommittedReadView, table TableID, pred Predicate, aggregate *Aggregate, resolver IndexResolver) (types.Value, error) {
@@ -310,14 +385,27 @@ func aggregateCommittedValue(ctx context.Context, view store.CommittedReadView, 
 }
 
 func aggregateJoinCommittedValue(ctx context.Context, view store.CommittedReadView, join Join, aggregate *Aggregate, resolver IndexResolver) (types.Value, error) {
-	if aggregate.Func != AggregateCount || aggregate.Argument != nil || aggregate.Distinct {
-		return types.Value{}, fmt.Errorf("live join aggregate views support COUNT(*) only")
-	}
-	count, err := countJoinCommittedRows(ctx, view, join, resolver)
+	acc, err := newJoinAggregateAccumulator(aggregate)
 	if err != nil {
 		return types.Value{}, err
 	}
-	return types.NewUint64(count), nil
+	if view == nil {
+		return acc.value()
+	}
+	var addErr error
+	err = visitJoinCommittedPairs(ctx, view, join, resolver, func(leftRow, rightRow types.ProductValue) bool {
+		if addErr = acc.add(leftRow, rightRow, join); addErr != nil {
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		return types.Value{}, err
+	}
+	if addErr != nil {
+		return types.Value{}, addErr
+	}
+	return acc.value()
 }
 
 func aggregateCommittedRows(ctx context.Context, view store.CommittedReadView, table TableID) ([]types.ProductValue, error) {
@@ -356,26 +444,26 @@ func countAggregateCommittedRows(ctx context.Context, view store.CommittedReadVi
 	return count, nil
 }
 
-func countJoinCommittedRows(ctx context.Context, view store.CommittedReadView, join Join, resolver IndexResolver) (uint64, error) {
+func visitJoinCommittedPairs(ctx context.Context, view store.CommittedReadView, join Join, resolver IndexResolver, visit func(leftRow, rightRow types.ProductValue) bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if view == nil {
-		return 0, nil
+		return nil
 	}
 	if resolver == nil {
-		return 0, fmt.Errorf("%w: manager has no IndexResolver (join=%d.%d=%d.%d)", ErrJoinIndexUnresolved, join.Left, join.LeftCol, join.Right, join.RightCol)
+		return fmt.Errorf("%w: manager has no IndexResolver (join=%d.%d=%d.%d)", ErrJoinIndexUnresolved, join.Left, join.LeftCol, join.Right, join.RightCol)
 	}
 	if idx, ok := resolver.IndexIDForColumn(join.Right, join.RightCol); ok {
-		return countJoinCommittedRowsWithProbeIndex(ctx, view, join, join.Left, join.LeftCol, join.Right, join.RightCol, idx, true)
+		return visitJoinCommittedPairsWithProbeIndex(ctx, view, join, join.Left, join.LeftCol, join.Right, join.RightCol, idx, true, visit)
 	}
 	if idx, ok := resolver.IndexIDForColumn(join.Left, join.LeftCol); ok {
-		return countJoinCommittedRowsWithProbeIndex(ctx, view, join, join.Right, join.RightCol, join.Left, join.LeftCol, idx, false)
+		return visitJoinCommittedPairsWithProbeIndex(ctx, view, join, join.Right, join.RightCol, join.Left, join.LeftCol, idx, false, visit)
 	}
-	return 0, fmt.Errorf("%w: join=%d.%d=%d.%d", ErrJoinIndexUnresolved, join.Left, join.LeftCol, join.Right, join.RightCol)
+	return fmt.Errorf("%w: join=%d.%d=%d.%d", ErrJoinIndexUnresolved, join.Left, join.LeftCol, join.Right, join.RightCol)
 }
 
-func countJoinCommittedRowsWithProbeIndex(
+func visitJoinCommittedPairsWithProbeIndex(
 	ctx context.Context,
 	view store.CommittedReadView,
 	join Join,
@@ -385,11 +473,11 @@ func countJoinCommittedRowsWithProbeIndex(
 	probeCol ColID,
 	probeIdx IndexID,
 	driveIsLeft bool,
-) (uint64, error) {
-	var count uint64
+	visit func(leftRow, rightRow types.ProductValue) bool,
+) error {
 	for _, driveRow := range view.TableScan(driveTable) {
 		if err := ctx.Err(); err != nil {
-			return 0, err
+			return err
 		}
 		if int(driveCol) >= len(driveRow) {
 			continue
@@ -397,7 +485,7 @@ func countJoinCommittedRowsWithProbeIndex(
 		key := store.NewIndexKey(driveRow[driveCol])
 		for _, rid := range view.IndexSeek(probeTable, probeIdx, key) {
 			if err := ctx.Err(); err != nil {
-				return 0, err
+				return err
 			}
 			probeRow, ok := view.GetRow(probeTable, rid)
 			if !ok || int(probeCol) >= len(probeRow) || !driveRow[driveCol].Equal(probeRow[probeCol]) {
@@ -405,16 +493,139 @@ func countJoinCommittedRowsWithProbeIndex(
 			}
 			if driveIsLeft {
 				if joinPairMatches(driveRow, join.Left, probeRow, join.Right, &join) {
-					count++
+					if !visit(driveRow, probeRow) {
+						return nil
+					}
 				}
 				continue
 			}
 			if joinPairMatches(probeRow, join.Left, driveRow, join.Right, &join) {
-				count++
+				if !visit(probeRow, driveRow) {
+					return nil
+				}
 			}
 		}
 	}
-	return count, nil
+	return nil
+}
+
+type joinAggregateAccumulator struct {
+	aggregate *Aggregate
+	count     uint64
+	distinct  *aggregateDistinctValueSet
+	sum       *liveSumAccumulator
+}
+
+func newJoinAggregateAccumulator(aggregate *Aggregate) (*joinAggregateAccumulator, error) {
+	acc := &joinAggregateAccumulator{aggregate: aggregate}
+	switch aggregate.Func {
+	case AggregateCount:
+		if aggregate.Distinct {
+			acc.distinct = newAggregateDistinctValueSet()
+		}
+	case AggregateSum:
+		acc.sum = newLiveSumAccumulator(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
+	default:
+		return nil, fmt.Errorf("aggregate %q not supported", aggregate.Func)
+	}
+	return acc, nil
+}
+
+func (a *joinAggregateAccumulator) add(leftRow, rightRow types.ProductValue, join Join) error {
+	switch a.aggregate.Func {
+	case AggregateCount:
+		if a.aggregate.Argument == nil {
+			a.count++
+			return nil
+		}
+		value, ok := joinAggregateArgumentValue(leftRow, rightRow, join, a.aggregate.Argument)
+		if !ok || value.IsNull() {
+			return nil
+		}
+		if a.aggregate.Distinct {
+			a.distinct.add(value)
+			return nil
+		}
+		a.count++
+		return nil
+	case AggregateSum:
+		value, ok := joinAggregateArgumentValue(leftRow, rightRow, join, a.aggregate.Argument)
+		if !ok {
+			return nil
+		}
+		return a.sum.add(value)
+	default:
+		return fmt.Errorf("aggregate %q not supported", a.aggregate.Func)
+	}
+}
+
+func (a *joinAggregateAccumulator) value() (types.Value, error) {
+	switch a.aggregate.Func {
+	case AggregateCount:
+		if a.aggregate.Distinct {
+			return types.NewUint64(a.distinct.count()), nil
+		}
+		return types.NewUint64(a.count), nil
+	case AggregateSum:
+		return a.sum.value()
+	default:
+		return types.Value{}, fmt.Errorf("aggregate %q not supported", a.aggregate.Func)
+	}
+}
+
+func aggregateJoinRowsValue(leftRows, rightRows []types.ProductValue, join Join, aggregate *Aggregate) (types.Value, error) {
+	acc, err := newJoinAggregateAccumulator(aggregate)
+	if err != nil {
+		return types.Value{}, err
+	}
+	leftCol := int(join.LeftCol)
+	rightCol := int(join.RightCol)
+	for _, leftRow := range leftRows {
+		if leftCol < 0 || leftCol >= len(leftRow) {
+			continue
+		}
+		for _, rightRow := range rightRows {
+			if rightCol < 0 || rightCol >= len(rightRow) || !leftRow[leftCol].Equal(rightRow[rightCol]) {
+				continue
+			}
+			if !joinPairMatches(leftRow, join.Left, rightRow, join.Right, &join) {
+				continue
+			}
+			if err := acc.add(leftRow, rightRow, join); err != nil {
+				return types.Value{}, err
+			}
+		}
+	}
+	return acc.value()
+}
+
+func joinAggregateArgumentValue(leftRow, rightRow types.ProductValue, join Join, arg *AggregateColumn) (types.Value, bool) {
+	if arg == nil {
+		return types.Value{}, false
+	}
+	var row types.ProductValue
+	switch {
+	case join.Left == join.Right:
+		switch {
+		case arg.Table == join.Left && arg.Alias == join.LeftAlias:
+			row = leftRow
+		case arg.Table == join.Right && arg.Alias == join.RightAlias:
+			row = rightRow
+		default:
+			return types.Value{}, false
+		}
+	case arg.Table == join.Left:
+		row = leftRow
+	case arg.Table == join.Right:
+		row = rightRow
+	default:
+		return types.Value{}, false
+	}
+	idx := int(arg.Column)
+	if idx < 0 || idx >= len(row) {
+		return types.Value{}, false
+	}
+	return row[idx], true
 }
 
 func countAggregateDeltaRows(rows []types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) uint64 {

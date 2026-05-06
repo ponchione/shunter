@@ -335,6 +335,12 @@ func TestTypeScriptGeneratorExportsJoinAggregateDeclaredViewSQL(t *testing.T) {
 	contract.Views = append(contract.Views, shunter.ViewDescription{
 		Name: "live_self_join_count",
 		SQL:  "SELECT COUNT(*) AS n FROM messages AS a JOIN messages AS b ON a.id = b.id",
+	}, shunter.ViewDescription{
+		Name: "live_self_join_distinct_bodies",
+		SQL:  "SELECT COUNT(DISTINCT a.body) AS n FROM messages AS a JOIN messages AS b ON a.id = b.id",
+	}, shunter.ViewDescription{
+		Name: "live_self_join_total",
+		SQL:  "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b ON a.id = b.id",
 	})
 
 	out, err := Generate(contract, Options{Language: LanguageTypeScript})
@@ -347,6 +353,14 @@ func TestTypeScriptGeneratorExportsJoinAggregateDeclaredViewSQL(t *testing.T) {
 	assertContains(t, ts, `liveSelfJoinCount: "SELECT COUNT(*) AS n FROM messages AS a JOIN messages AS b ON a.id = b.id",`)
 	assertContains(t, ts, `export function subscribeLiveSelfJoinCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_self_join_count");`)
+	assertContains(t, ts, `liveSelfJoinDistinctBodies: "live_self_join_distinct_bodies",`)
+	assertContains(t, ts, `liveSelfJoinDistinctBodies: "SELECT COUNT(DISTINCT a.body) AS n FROM messages AS a JOIN messages AS b ON a.id = b.id",`)
+	assertContains(t, ts, `export function subscribeLiveSelfJoinDistinctBodies(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_self_join_distinct_bodies");`)
+	assertContains(t, ts, `liveSelfJoinTotal: "live_self_join_total",`)
+	assertContains(t, ts, `liveSelfJoinTotal: "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b ON a.id = b.id",`)
+	assertContains(t, ts, `export function subscribeLiveSelfJoinTotal(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_self_join_total");`)
 }
 
 func TestTypeScriptGeneratorExportsCountDistinctAggregateDeclaredViewSQL(t *testing.T) {

@@ -567,53 +567,67 @@ func TestModuleContractValidationRejectsSumDistinctAggregateViewSQL(t *testing.T
 	}
 }
 
-func TestModuleContractValidationAllowsJoinCountStarAggregateViewSQL(t *testing.T) {
+func TestModuleContractValidationAllowsJoinAggregateViewSQL(t *testing.T) {
 	contract := buildJoinReadIndexedContract(t)
-	contract.Views = []ViewDescription{{
-		Name: "live_join_count",
-		SQL:  "SELECT COUNT(*) AS n FROM t JOIN s ON t.u32 = s.u32",
-	}}
+	contract.Views = []ViewDescription{
+		{
+			Name: "live_join_count",
+			SQL:  "SELECT COUNT(*) AS n FROM t JOIN s ON t.u32 = s.u32",
+		},
+		{
+			Name: "live_join_column_count",
+			SQL:  "SELECT COUNT(s.id) AS n FROM t JOIN s ON t.u32 = s.u32",
+		},
+		{
+			Name: "live_join_distinct_count",
+			SQL:  "SELECT COUNT(DISTINCT t.id) AS n FROM t JOIN s ON t.u32 = s.u32",
+		},
+		{
+			Name: "live_join_total",
+			SQL:  "SELECT SUM(s.id) AS total FROM t JOIN s ON t.u32 = s.u32",
+		},
+	}
 
 	if err := ValidateModuleContract(contract); err != nil {
-		t.Fatalf("ValidateModuleContract rejected join COUNT(*) aggregate view SQL: %v", err)
+		t.Fatalf("ValidateModuleContract rejected join aggregate view SQL: %v", err)
 	}
 }
 
-func TestModuleContractValidationRejectsJoinSumAggregateViewSQL(t *testing.T) {
+func TestModuleContractValidationRejectsCrossJoinAggregateViewSQL(t *testing.T) {
 	contract := buildJoinReadIndexedContract(t)
 	contract.Views = []ViewDescription{{
-		Name: "live_join_total",
-		SQL:  "SELECT SUM(t.id) AS total FROM t JOIN s ON t.u32 = s.u32",
+		Name: "live_cross_join_count",
+		SQL:  "SELECT COUNT(*) AS n FROM t JOIN s",
 	}}
 
 	err := ValidateModuleContract(contract)
 	if err == nil {
-		t.Fatal("ValidateModuleContract accepted join SUM aggregate view SQL")
+		t.Fatal("ValidateModuleContract accepted cross join aggregate view SQL")
 	}
-	if !strings.Contains(err.Error(), "views.live_join_total.sql") {
+	if !strings.Contains(err.Error(), "views.live_cross_join_count.sql") {
 		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
 	}
-	if !strings.Contains(err.Error(), "live join aggregate views support COUNT(*) only") {
-		t.Fatalf("ValidateModuleContract error = %v, want join COUNT(*)-only unsupported text", err)
+	if !strings.Contains(err.Error(), "live aggregate views require a single table or two-table join") {
+		t.Fatalf("ValidateModuleContract error = %v, want cross/multi aggregate unsupported text", err)
 	}
 }
 
-func TestModuleContractValidationRejectsJoinCountDistinctAggregateViewSQL(t *testing.T) {
+func TestModuleContractValidationRejectsMultiWayJoinAggregateViewSQL(t *testing.T) {
 	contract := buildJoinReadIndexedContract(t)
 	contract.Views = []ViewDescription{{
-		Name: "live_join_distinct_count",
-		SQL:  "SELECT COUNT(DISTINCT t.id) AS n FROM t JOIN s ON t.u32 = s.u32",
+		Name: "live_multi_join_count",
+		SQL:  "SELECT COUNT(*) AS n FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32",
 	}}
 
 	err := ValidateModuleContract(contract)
 	if err == nil {
-		t.Fatal("ValidateModuleContract accepted join COUNT DISTINCT aggregate view SQL")
+		t.Fatal("ValidateModuleContract accepted multi-way join aggregate view SQL")
 	}
-	if !strings.Contains(err.Error(), "views.live_join_distinct_count.sql") {
+	if !strings.Contains(err.Error(), "views.live_multi_join_count.sql") {
 		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
 	}
-	if !strings.Contains(err.Error(), "live join aggregate views support COUNT(*) only") {
-		t.Fatalf("ValidateModuleContract error = %v, want join COUNT(*)-only unsupported text", err)
+	if !strings.Contains(err.Error(), "live aggregate views require a single table or two-table join") {
+		t.Fatalf("ValidateModuleContract error = %v, want cross/multi aggregate unsupported text", err)
 	}
 }
 

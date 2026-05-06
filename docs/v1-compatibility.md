@@ -145,7 +145,7 @@ Out of scope for v1 codegen:
 | One-off raw SQL | Stable for v1 | Protocol `OneOffQuery` executes the Shunter SQL subset against a committed snapshot. Supported shapes include single-table reads, bounded joins/multi-way joins, column projections and aliases, `COUNT`/`SUM` aggregates including `COUNT(DISTINCT column)`, `ORDER BY`, `LIMIT`, and `OFFSET`. Raw SQL is governed by table read policy and visibility filters. There is no root-level local raw SQL API in v1. |
 | Declared queries | Stable for v1 | `QueryDeclaration.SQL`, `Runtime.CallQuery`, and protocol `DeclaredQuery` use the one-off read executor with declaration-level permission metadata. Declared queries may expose private tables when the declaration permission allows the caller. Empty SQL is metadata-only and returns `ErrDeclaredReadNotExecutable` when executed. |
 | Raw subscriptions | Stable for v1 | Protocol `SubscribeSingle` and `SubscribeMulti` register table-shaped live reads. They support table-shaped single-table and join/multi-way subscription predicates, including `SELECT *` for single tables and `SELECT table.*`/alias-shaped emitted relations for joins. Raw subscriptions reject column projections, aggregates, `ORDER BY`, `LIMIT`, and `OFFSET`. Raw subscription admission is governed by table read policy and visibility filters. |
-| Declared live views | Stable for v1 | `ViewDeclaration.SQL`, `Runtime.SubscribeView`, and protocol `SubscribeDeclaredView` register named live views with declaration-level permissions. Supported live view shapes include table-shaped reads, table-shaped joins/multi-way joins, column projections over the emitted relation, single-table `COUNT`/`SUM` aggregates, and two-table indexed join `COUNT(*) AS name`. Declared live views reject join `COUNT(column)`, join `COUNT(DISTINCT ...)`, join `SUM`, cross/multi-way join aggregates, and aggregate aliases without `AS`. |
+| Declared live views | Stable for v1 | `ViewDeclaration.SQL`, `Runtime.SubscribeView`, and protocol `SubscribeDeclaredView` register named live views with declaration-level permissions. Supported live view shapes include table-shaped reads, table-shaped joins/multi-way joins, column projections over the emitted relation, single-table `ORDER BY`, `LIMIT`, and `OFFSET` initial snapshots, single-table `COUNT`/`SUM` aggregates, and two-table indexed join `COUNT`/`SUM` aggregates. Declared live views reject cross/multi-way join aggregates and aggregate aliases without `AS`. |
 | Local runtime reads | Stable for v1 | `Runtime.Read` is callback-scoped committed-state access. `Runtime.CallQuery` and `Runtime.SubscribeView` are the local declared-read APIs. A local ad hoc raw SQL API is out of scope for v1; declare a query or view instead. |
 
 ## Multi-Module Host
@@ -185,9 +185,10 @@ Resolved in this slice:
   `docs/how-to-use-shunter.md` now documents that support and the remaining
   rejections.
 
-Current code and docs now agree that declared live views reject `ORDER BY`,
-`LIMIT`, and `OFFSET`, while one-off raw SQL and declared queries support those
-query-only shapes.
+Current code and docs now agree that declared live views accept single-table
+`ORDER BY`, `LIMIT`, and `OFFSET` initial snapshots for table-shaped and
+projected views while post-commit delivery remains row deltas over matching
+rows.
 
 Open decisions before cutting `v1.0.0`:
 

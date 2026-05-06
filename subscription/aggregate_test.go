@@ -45,6 +45,43 @@ func sumIDAggregate() *Aggregate {
 	}
 }
 
+func countJoinRHSIDAggregate() *Aggregate {
+	return &Aggregate{
+		Func:         AggregateCount,
+		ResultColumn: schema.ColumnSchema{Index: 0, Name: "n", Type: types.KindUint64},
+		Argument: &AggregateColumn{
+			Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+			Table:  joinRHS,
+			Column: 0,
+		},
+	}
+}
+
+func countDistinctJoinLHSIDAggregate() *Aggregate {
+	return &Aggregate{
+		Func:         AggregateCount,
+		Distinct:     true,
+		ResultColumn: schema.ColumnSchema{Index: 0, Name: "n", Type: types.KindUint64},
+		Argument: &AggregateColumn{
+			Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+			Table:  joinLHS,
+			Column: 0,
+		},
+	}
+}
+
+func sumJoinRHSIDAggregate() *Aggregate {
+	return &Aggregate{
+		Func:         AggregateSum,
+		ResultColumn: schema.ColumnSchema{Index: 0, Name: "total", Type: types.KindUint64},
+		Argument: &AggregateColumn{
+			Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+			Table:  joinRHS,
+			Column: 0,
+		},
+	}
+}
+
 func joinCountAggregateSchema() *fakeSchema {
 	s := newFakeSchema()
 	s.addTable(joinLHS, map[ColID]types.ValueKind{
@@ -194,6 +231,60 @@ func TestRegisterSetJoinCountAggregateReturnsOneInitialRow(t *testing.T) {
 	}
 }
 
+func TestRegisterSetJoinColumnAggregatesReturnInitialRows(t *testing.T) {
+	s := joinCountAggregateSchema()
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewString("b")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+			{types.NewUint64(101), types.NewUint64(1)},
+			{types.NewUint64(200), types.NewUint64(2)},
+		},
+	})
+	pred := Join{
+		Left: joinLHS, Right: joinRHS,
+		LeftCol: joinLHSCol, RightCol: joinRHSCol,
+	}
+	tests := []struct {
+		name      string
+		queryID   uint32
+		aggregate *Aggregate
+		want      uint64
+		column    string
+	}{
+		{name: "count column", queryID: 26, aggregate: countJoinRHSIDAggregate(), want: 3, column: "n"},
+		{name: "count distinct", queryID: 27, aggregate: countDistinctJoinLHSIDAggregate(), want: 2, column: "n"},
+		{name: "sum", queryID: 28, aggregate: sumJoinRHSIDAggregate(), want: 401, column: "total"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := NewManager(s, s)
+			res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+				ConnID:     types.ConnectionID{1},
+				QueryID:    tt.queryID,
+				Predicates: []Predicate{pred},
+				Aggregates: []*Aggregate{tt.aggregate},
+			}, view)
+			if err != nil {
+				t.Fatalf("RegisterSet join aggregate = %v", err)
+			}
+			if len(res.Update) != 1 {
+				t.Fatalf("initial update count = %d, want 1", len(res.Update))
+			}
+			update := res.Update[0]
+			if update.TableID != joinLHS || len(update.Columns) != 1 || update.Columns[0].Name != tt.column {
+				t.Fatalf("join aggregate update shape = table %d columns %#v, want lhs/%s", update.TableID, update.Columns, tt.column)
+			}
+			if len(update.Inserts) != 1 || update.Inserts[0][0].AsUint64() != tt.want {
+				t.Fatalf("join aggregate initial rows = %#v, want %d", update.Inserts, tt.want)
+			}
+		})
+	}
+}
+
 func TestEvalAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 2)
@@ -313,6 +404,102 @@ func TestEvalJoinCountAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *te
 	}
 	if len(update.Inserts) != 1 || update.Inserts[0][0].AsUint64() != 2 {
 		t.Fatalf("join COUNT(*) aggregate inserts = %#v, want new count 2", update.Inserts)
+	}
+}
+
+func TestEvalJoinColumnAggregatesEmitChanges(t *testing.T) {
+	s := joinCountAggregateSchema()
+	inbox := make(chan FanOutMessage, 2)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	connID := types.ConnectionID{1}
+	pred := Join{
+		Left: joinLHS, Right: joinRHS,
+		LeftCol: joinLHSCol, RightCol: joinRHSCol,
+	}
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+			{types.NewUint64(200), types.NewUint64(2)},
+		},
+	})
+	for _, req := range []struct {
+		queryID   uint32
+		aggregate *Aggregate
+	}{
+		{26, countJoinRHSIDAggregate()},
+		{27, countDistinctJoinLHSIDAggregate()},
+		{28, sumJoinRHSIDAggregate()},
+	} {
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID:     connID,
+			QueryID:    req.queryID,
+			Predicates: []Predicate{pred},
+			Aggregates: []*Aggregate{req.aggregate},
+		}, before); err != nil {
+			t.Fatalf("RegisterSet join aggregate queryID=%d: %v", req.queryID, err)
+		}
+	}
+
+	afterRightInsert := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+			{types.NewUint64(101), types.NewUint64(1)},
+			{types.NewUint64(200), types.NewUint64(2)},
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), joinChangeset(
+		joinLHS, nil, nil,
+		joinRHS, []types.ProductValue{{types.NewUint64(101), types.NewUint64(1)}}, nil,
+	), afterRightInsert, PostCommitMeta{})
+	first := aggregateUpdatesByQueryID((<-inbox).Fanout[connID])
+	requireAggregateDelta(t, first[26], 1, 2, "COUNT(s.id)")
+	requireAggregateDelta(t, first[28], 100, 201, "SUM(s.id)")
+	if _, ok := first[27]; ok {
+		t.Fatalf("COUNT(DISTINCT t.id) changed on duplicate joined left id: %+v", first[27])
+	}
+
+	afterLeftInsert := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewString("b")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+			{types.NewUint64(101), types.NewUint64(1)},
+			{types.NewUint64(200), types.NewUint64(2)},
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(2), joinChangeset(
+		joinLHS, []types.ProductValue{{types.NewUint64(2), types.NewString("b")}}, nil,
+		joinRHS, nil, nil,
+	), afterLeftInsert, PostCommitMeta{})
+	second := aggregateUpdatesByQueryID((<-inbox).Fanout[connID])
+	requireAggregateDelta(t, second[26], 2, 3, "COUNT(s.id)")
+	requireAggregateDelta(t, second[27], 1, 2, "COUNT(DISTINCT t.id)")
+	requireAggregateDelta(t, second[28], 201, 401, "SUM(s.id)")
+}
+
+func aggregateUpdatesByQueryID(updates []SubscriptionUpdate) map[uint32]SubscriptionUpdate {
+	out := make(map[uint32]SubscriptionUpdate, len(updates))
+	for _, update := range updates {
+		out[update.QueryID] = update
+	}
+	return out
+}
+
+func requireAggregateDelta(t *testing.T, update SubscriptionUpdate, wantDelete, wantInsert uint64, label string) {
+	t.Helper()
+	if len(update.Deletes) != 1 || len(update.Deletes[0]) != 1 || update.Deletes[0][0].AsUint64() != wantDelete {
+		t.Fatalf("%s deletes = %#v, want %d", label, update.Deletes, wantDelete)
+	}
+	if len(update.Inserts) != 1 || len(update.Inserts[0]) != 1 || update.Inserts[0][0].AsUint64() != wantInsert {
+		t.Fatalf("%s inserts = %#v, want %d", label, update.Inserts, wantInsert)
 	}
 }
 
@@ -550,24 +737,18 @@ func TestValidateAggregateRejectsUnsupportedLiveShapes(t *testing.T) {
 			aggregate: &Aggregate{Func: AggregateFunc("AVG"), ResultColumn: schema.ColumnSchema{Index: 0, Name: "avg", Type: types.KindUint64}},
 		},
 		{
-			name:      "join count column",
-			pred:      Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0},
-			aggregate: countBodyAggregate(),
+			name:      "cross join",
+			pred:      CrossJoin{Left: 1, Right: 2},
+			aggregate: countStarAggregate(),
 		},
 		{
-			name:      "join sum",
-			pred:      Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0},
-			aggregate: sumIDAggregate(),
-		},
-		{
-			name: "join count distinct",
-			pred: Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0},
-			aggregate: &Aggregate{
-				Func:         AggregateCount,
-				Distinct:     true,
-				ResultColumn: schema.ColumnSchema{Index: 0, Name: "n", Type: types.KindUint64},
-				Argument:     countBodyAggregate().Argument,
-			},
+			name: "multi join",
+			pred: MultiJoin{Relations: []MultiJoinRelation{
+				{Table: 1, Alias: 0},
+				{Table: 1, Alias: 1},
+				{Table: 2, Alias: 0},
+			}},
+			aggregate: countStarAggregate(),
 		},
 	}
 	for _, tt := range tests {
