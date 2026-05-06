@@ -3,6 +3,7 @@ package subscription
 import (
 	"testing"
 
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -282,6 +283,104 @@ func TestCollectCandidatesMultiJoinSameRelationSetDisjunctiveFilterColumnEqualit
 	got = CollectCandidatesForTable(idx, 1, secondColumnMatch, committed, s)
 	if len(got) != 1 || got[0] != hash {
 		t.Fatalf("second-column disjunctive filter column-equality candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinFilterColumnEqualityUsesDeltaDeletes(t *testing.T) {
+	s := multiJoinTestSchema()
+	mgr := NewManager(s, s)
+	pred := filterColumnEqualityMultiJoinPredicate()
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{14},
+		QueryID:    140,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	committed := buildMockCommitted(s, nil)
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Deletes: []types.ProductValue{{types.NewUint64(1), types.NewUint64(77)}}},
+			2: {Deletes: []types.ProductValue{{types.NewUint64(2), types.NewUint64(88)}}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping filter column-equality delete candidates = %v, want empty", got)
+	}
+
+	overlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Deletes: []types.ProductValue{{types.NewUint64(1), types.NewUint64(77)}}},
+			2: {Deletes: []types.ProductValue{{types.NewUint64(2), types.NewUint64(77)}}},
+		},
+	}
+	got := mgr.collectCandidatesInto(overlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping filter column-equality delete candidates = %v, want only %v", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinDisjunctiveFilterColumnEqualityUsesDeltaDeletes(t *testing.T) {
+	s := dualIndexedMultiJoinTestSchema()
+	mgr := NewManager(s, s)
+	pred := disjunctiveFilterColumnEqualityMultiJoinPredicate()
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{15},
+		QueryID:    150,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	committed := buildMockCommitted(s, nil)
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Deletes: []types.ProductValue{{types.NewUint64(9), types.NewUint64(99)}}},
+			2: {Deletes: []types.ProductValue{{types.NewUint64(42), types.NewUint64(20)}}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping disjunctive filter column-equality delete candidates = %v, want empty", got)
+	}
+
+	firstColumnOverlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Deletes: []types.ProductValue{{types.NewUint64(42), types.NewUint64(99)}}},
+			2: {Deletes: []types.ProductValue{{types.NewUint64(42), types.NewUint64(20)}}},
+		},
+	}
+	got := mgr.collectCandidatesInto(firstColumnOverlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("first-column disjunctive filter delete candidates = %v, want only %v", got, hash)
+	}
+
+	secondColumnOverlap := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Deletes: []types.ProductValue{{types.NewUint64(9), types.NewUint64(20)}}},
+			2: {Deletes: []types.ProductValue{{types.NewUint64(42), types.NewUint64(20)}}},
+		},
+	}
+	got = mgr.collectCandidatesInto(secondColumnOverlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("second-column disjunctive filter delete candidates = %v, want only %v", got, hash)
 	}
 }
 
