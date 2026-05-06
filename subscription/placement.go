@@ -138,6 +138,9 @@ func mutateMultiJoinPlacement(idx *PruningIndexes, pred MultiJoin, hash QueryHas
 		if tableCounts[t] == 1 && mutateLocalFilterPlacement(idx, pred.Filter, t, hash, add) {
 			continue
 		}
+		if tableCounts[t] > 1 && mutateAliasLocalFilterPlacement(idx, pred.Filter, pred.Relations, t, hash, add) {
+			continue
+		}
 		if placements := multiJoinExistenceEdgesFor(pred, t, tableCounts, resolver); len(placements) > 0 {
 			for _, placement := range placements {
 				mutateJoinExistencePlacement(idx, placement.edge, hash, add)
@@ -146,6 +149,41 @@ func mutateMultiJoinPlacement(idx *PruningIndexes, pred MultiJoin, hash QueryHas
 		}
 		mutateTablePlacement(idx, t, hash, add)
 	}
+}
+
+func mutateAliasLocalFilterPlacement(idx *PruningIndexes, pred Predicate, relations []MultiJoinRelation, t TableID, hash QueryHash, add bool) bool {
+	relationsForTable := multiJoinRelationsForTable(relations, t)
+	if len(relationsForTable) == 0 {
+		return false
+	}
+	var placements colFilterPlacements
+	for _, rel := range relationsForTable {
+		aliasPlacements, ok := requiredAliasLocalFilterPlacements(pred, rel.Table, rel.Alias)
+		if !ok || !aliasPlacements.hasAny() {
+			return false
+		}
+		placements = mergeColFilterPlacements(placements, aliasPlacements)
+	}
+	if !placements.hasAny() {
+		return false
+	}
+	for _, ce := range placements.eqs {
+		mutateValuePlacement(idx, t, ce.Column, ce.Value, hash, add)
+	}
+	for _, cr := range placements.ranges {
+		mutateRangePlacement(idx, t, cr.Column, cr.Lower, cr.Upper, hash, add)
+	}
+	return true
+}
+
+func multiJoinRelationsForTable(relations []MultiJoinRelation, table TableID) []MultiJoinRelation {
+	var out []MultiJoinRelation
+	for _, rel := range relations {
+		if rel.Table == table {
+			out = append(out, rel)
+		}
+	}
+	return out
 }
 
 func multiJoinTableCounts(pred MultiJoin) map[TableID]int {
@@ -182,6 +220,47 @@ func mutateLocalFilterPlacement(idx *PruningIndexes, pred Predicate, t TableID, 
 		mutateRangePlacement(idx, t, cr.Column, cr.Lower, cr.Upper, hash, add)
 	}
 	return true
+}
+
+func requiredAliasLocalFilterPlacements(pred Predicate, table TableID, alias uint8) (colFilterPlacements, bool) {
+	switch p := pred.(type) {
+	case ColEq:
+		if p.Table == table && p.Alias == alias {
+			return colFilterPlacements{eqs: []ColEq{p}}, true
+		}
+		return colFilterPlacements{}, false
+	case ColRange:
+		if p.Table == table && p.Alias == alias && rangeHasBound(p) {
+			return colFilterPlacements{ranges: []ColRange{p}}, true
+		}
+		return colFilterPlacements{}, false
+	case ColNe:
+		if p.Table == table && p.Alias == alias {
+			return colFilterPlacements{ranges: colNeRanges(p)}, true
+		}
+		return colFilterPlacements{}, false
+	case And:
+		left, leftOK := requiredAliasLocalFilterPlacements(p.Left, table, alias)
+		right, rightOK := requiredAliasLocalFilterPlacements(p.Right, table, alias)
+		switch {
+		case leftOK && rightOK:
+			return mergeColFilterPlacements(left, right), true
+		case leftOK:
+			return left, true
+		case rightOK:
+			return right, true
+		default:
+			return colFilterPlacements{}, false
+		}
+	case Or:
+		left, leftOK := requiredAliasLocalFilterPlacements(p.Left, table, alias)
+		right, rightOK := requiredAliasLocalFilterPlacements(p.Right, table, alias)
+		if !leftOK || !rightOK {
+			return colFilterPlacements{}, false
+		}
+		return mergeColFilterPlacements(left, right), true
+	}
+	return colFilterPlacements{}, false
 }
 
 func multiJoinExistenceEdgesFor(pred MultiJoin, t TableID, tableCounts map[TableID]int, resolver IndexResolver) []joinExistenceEdgePlacement {
@@ -450,6 +529,10 @@ func rangeHasBound(p ColRange) bool {
 type colFilterPlacements struct {
 	eqs    []ColEq
 	ranges []ColRange
+}
+
+func (p colFilterPlacements) hasAny() bool {
+	return len(p.eqs) > 0 || len(p.ranges) > 0
 }
 
 // findMixedColEqRanges returns equality/range predicates whose union covers

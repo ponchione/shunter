@@ -45,6 +45,34 @@ func multiJoinUnfilteredTestPredicate() MultiJoin {
 	return pred
 }
 
+func repeatedMultiJoinAllAliasesFilteredPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 1, Alias: 1},
+			{Table: 2, Alias: 2},
+		},
+		Conditions: []MultiJoinCondition{
+			{
+				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 2, Column: 1, Alias: 2},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 1, Table: 1, Column: 1, Alias: 1},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 2, Column: 1, Alias: 2},
+			},
+		},
+		ProjectedRelation: 0,
+		Filter: And{
+			Left: ColEq{Table: 1, Column: 0, Alias: 0, Value: types.NewUint64(7)},
+			Right: ColRange{Table: 1, Column: 0, Alias: 1,
+				Lower: Bound{Value: types.NewUint64(10), Inclusive: false},
+				Upper: Bound{Unbounded: true},
+			},
+		},
+	}
+}
+
 func countMultiJoinRIDAggregate() *Aggregate {
 	return &Aggregate{
 		Func:         AggregateCount,
@@ -275,6 +303,34 @@ func TestMultiJoinPlacementUsesJoinConditionExistenceEdgesForDistinctTables(t *t
 	}
 }
 
+func TestMultiJoinPlacementRepeatedTableUsesAliasLocalFiltersWhenEveryAliasConstrained(t *testing.T) {
+	idx := NewPruningIndexes()
+	pred := repeatedMultiJoinAllAliasesFilteredPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	PlaceSubscription(idx, pred, hash)
+
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("alias-0 value placement = %v, want [%v]", got, hash)
+	}
+	if got := idx.Range.Lookup(1, 0, types.NewUint64(11)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("alias-1 range placement = %v, want [%v]", got, hash)
+	}
+	if got := idx.Range.Lookup(1, 0, types.NewUint64(10)); len(got) != 0 {
+		t.Fatalf("alias-1 rejected range boundary = %v, want empty", got)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex[1] = %v, want empty for fully alias-constrained repeated table", got)
+	}
+	if got := idx.Table.Lookup(2); len(got) != 1 || got[0] != hash {
+		t.Fatalf("TableIndex[2] = %v, want fallback [%v]", got, hash)
+	}
+
+	RemoveSubscription(idx, pred, hash)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
 func TestMultiJoinPlacementRepeatedTableKeepsTableFallback(t *testing.T) {
 	idx := NewPruningIndexes()
 	pred := MultiJoin{
@@ -307,6 +363,30 @@ func TestMultiJoinPlacementRepeatedTableKeepsTableFallback(t *testing.T) {
 		if len(got) != 1 || got[0] != hash {
 			t.Fatalf("TableIndex[%d] = %v, want [%v]", table, got, hash)
 		}
+	}
+}
+
+func TestCollectCandidatesMultiJoinRepeatedAliasFiltersPruneMismatch(t *testing.T) {
+	idx := NewPruningIndexes()
+	pred := repeatedMultiJoinAllAliasesFilteredPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	PlaceSubscription(idx, pred, hash)
+
+	mismatch := []types.ProductValue{{types.NewUint64(9), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 1, mismatch, nil, nil); len(got) != 0 {
+		t.Fatalf("mismatched repeated-alias candidates = %v, want empty", got)
+	}
+
+	aliasZeroMatch := []types.ProductValue{{types.NewUint64(7), types.NewUint64(20)}}
+	got := CollectCandidatesForTable(idx, 1, aliasZeroMatch, nil, nil)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("alias-0 repeated-alias candidates = %v, want [%v]", got, hash)
+	}
+
+	aliasOneMatch := []types.ProductValue{{types.NewUint64(11), types.NewUint64(20)}}
+	got = CollectCandidatesForTable(idx, 1, aliasOneMatch, nil, nil)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("alias-1 repeated-alias candidates = %v, want [%v]", got, hash)
 	}
 }
 
