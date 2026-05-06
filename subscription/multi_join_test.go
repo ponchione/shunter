@@ -472,6 +472,78 @@ func TestCollectCandidatesMultiJoinRequiredRemoteFilterEdgesPruneMismatch(t *tes
 	}
 }
 
+func TestCollectCandidatesMultiJoinRequiredRemoteFilterEdgesUseSameTransactionRows(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := multiJoinTestPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	leftRows := []types.ProductValue{{types.NewUint64(500), types.NewUint64(20)}}
+	got := make(map[QueryHash]struct{})
+	rejected := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Inserts: []types.ProductValue{{types.NewUint64(99), types.NewUint64(20)}}},
+		},
+	}
+	collectJoinFilterDeltaCandidates(idx, 1, leftRows, rejected, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if len(got) != 0 {
+		t.Fatalf("rejected same-tx required remote left candidates = %v, want empty", got)
+	}
+
+	noOverlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Inserts: []types.ProductValue{{types.NewUint64(100), types.NewUint64(21)}}},
+		},
+	}
+	collectJoinFilterDeltaCandidates(idx, 1, leftRows, noOverlap, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if len(got) != 0 {
+		t.Fatalf("non-overlapping same-tx required remote left candidates = %v, want empty", got)
+	}
+
+	overlap := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Inserts: []types.ProductValue{{types.NewUint64(100), types.NewUint64(20)}}},
+		},
+	}
+	collectJoinFilterDeltaCandidates(idx, 1, leftRows, overlap, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping same-tx required remote left candidates = %v, want only %v", got, hash)
+	}
+
+	deleteOverlap := &store.Changeset{
+		TxID: 4,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Deletes: []types.ProductValue{{types.NewUint64(100), types.NewUint64(20)}}},
+		},
+	}
+	clear(got)
+	collectJoinFilterDeltaCandidates(idx, 1, leftRows, deleteOverlap, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping same-tx required remote left delete candidates = %v, want only %v", got, hash)
+	}
+
+	middleRows := []types.ProductValue{{types.NewUint64(200), types.NewUint64(20)}}
+	clear(got)
+	collectJoinFilterDeltaCandidates(idx, 2, middleRows, overlap, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping same-tx required remote middle candidates = %v, want only %v", got, hash)
+	}
+}
+
 func TestMultiJoinPlacementUsesJoinConditionExistenceEdgesForDistinctTables(t *testing.T) {
 	s := multiJoinTestSchema()
 	idx := NewPruningIndexes()
@@ -662,6 +734,72 @@ func TestCollectCandidatesMultiJoinRepeatedRequiredRemoteAliasFiltersPruneMismat
 	got = CollectCandidatesForTable(idx, 2, middleMismatch, committed, s)
 	if len(got) != 1 || got[0] != hash {
 		t.Fatalf("matching middle required remote candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinRepeatedRequiredRemoteAliasFiltersUseSameTransactionRows(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := repeatedMultiJoinKeyPreservingAliasFilterPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	aliasRows := []types.ProductValue{{types.NewUint64(9), types.NewUint64(20)}}
+	got := make(map[QueryHash]struct{})
+	rejected := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+		},
+	}
+	collectJoinFilterDeltaCandidates(idx, 1, aliasRows, rejected, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if len(got) != 0 {
+		t.Fatalf("rejected same-tx repeated required alias candidates = %v, want empty", got)
+	}
+
+	overlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(7), types.NewUint64(20)}}},
+		},
+	}
+	collectJoinFilterDeltaCandidates(idx, 1, aliasRows, overlap, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping same-tx repeated required alias candidates = %v, want only %v", got, hash)
+	}
+
+	deleteOverlap := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Deletes: []types.ProductValue{{types.NewUint64(7), types.NewUint64(20)}}},
+		},
+	}
+	clear(got)
+	collectJoinFilterDeltaCandidates(idx, 1, aliasRows, deleteOverlap, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping same-tx repeated required alias delete candidates = %v, want only %v", got, hash)
+	}
+
+	middleRows := []types.ProductValue{{types.NewUint64(100), types.NewUint64(20)}}
+	clear(got)
+	collectJoinFilterDeltaCandidates(idx, 2, middleRows, rejected, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if len(got) != 0 {
+		t.Fatalf("rejected same-tx repeated middle candidates = %v, want empty", got)
+	}
+
+	collectJoinFilterDeltaCandidates(idx, 2, middleRows, overlap, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping same-tx repeated middle candidates = %v, want only %v", got, hash)
 	}
 }
 
