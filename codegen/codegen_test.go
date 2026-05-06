@@ -347,6 +347,9 @@ func TestTypeScriptGeneratorExportsJoinAggregateDeclaredViewSQL(t *testing.T) {
 	}, shunter.ViewDescription{
 		Name: "live_self_cross_join_total",
 		SQL:  "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b",
+	}, shunter.ViewDescription{
+		Name: "live_self_multi_join_total",
+		SQL:  "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b ON a.id = b.id JOIN messages AS c ON b.id = c.id",
 	})
 
 	out, err := Generate(contract, Options{Language: LanguageTypeScript})
@@ -375,6 +378,10 @@ func TestTypeScriptGeneratorExportsJoinAggregateDeclaredViewSQL(t *testing.T) {
 	assertContains(t, ts, `liveSelfCrossJoinTotal: "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b",`)
 	assertContains(t, ts, `export function subscribeLiveSelfCrossJoinTotal(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_self_cross_join_total");`)
+	assertContains(t, ts, `liveSelfMultiJoinTotal: "live_self_multi_join_total",`)
+	assertContains(t, ts, `liveSelfMultiJoinTotal: "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b ON a.id = b.id JOIN messages AS c ON b.id = c.id",`)
+	assertContains(t, ts, `export function subscribeLiveSelfMultiJoinTotal(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_self_multi_join_total");`)
 }
 
 func TestTypeScriptGeneratorExportsCountDistinctAggregateDeclaredViewSQL(t *testing.T) {

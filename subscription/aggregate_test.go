@@ -866,15 +866,6 @@ func TestValidateAggregateRejectsUnsupportedLiveShapes(t *testing.T) {
 			pred:      AllRows{Table: 1},
 			aggregate: &Aggregate{Func: AggregateFunc("AVG"), ResultColumn: schema.ColumnSchema{Index: 0, Name: "avg", Type: types.KindUint64}},
 		},
-		{
-			name: "multi join",
-			pred: MultiJoin{Relations: []MultiJoinRelation{
-				{Table: 1, Alias: 0},
-				{Table: 1, Alias: 1},
-				{Table: 2, Alias: 0},
-			}},
-			aggregate: countStarAggregate(),
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

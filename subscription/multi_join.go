@@ -28,15 +28,27 @@ func multiJoinRowsAfter(view store.CommittedReadView, p MultiJoin) []types.Produ
 }
 
 func multiJoinRowsBefore(dv *DeltaView, p MultiJoin) []types.ProductValue {
+	rows, _ := collectMultiJoinProjectedRows(context.Background(), p, multiJoinRowsByRelationBefore(dv, p), 0)
+	return rows
+}
+
+func multiJoinRowsByRelationBefore(dv *DeltaView, p MultiJoin) [][]types.ProductValue {
 	rowsByRelation := make([][]types.ProductValue, len(p.Relations))
 	for i, rel := range p.Relations {
 		rowsByRelation[i] = projectedRowsBefore(dv, rel.Table)
 	}
-	rows, _ := collectMultiJoinProjectedRows(context.Background(), p, rowsByRelation, 0)
-	return rows
+	return rowsByRelation
 }
 
 func multiJoinRowsFromView(ctx context.Context, view store.CommittedReadView, p MultiJoin, limit int) ([]types.ProductValue, error) {
+	rowsByRelation, err := multiJoinRowsByRelationFromView(ctx, view, p)
+	if err != nil {
+		return nil, err
+	}
+	return collectMultiJoinProjectedRows(ctx, p, rowsByRelation, limit)
+}
+
+func multiJoinRowsByRelationFromView(ctx context.Context, view store.CommittedReadView, p MultiJoin) ([][]types.ProductValue, error) {
 	if view == nil {
 		return nil, nil
 	}
@@ -47,15 +59,26 @@ func multiJoinRowsFromView(ctx context.Context, view store.CommittedReadView, p 
 		}
 		rowsByRelation[i] = tableRowsAfter(view, rel.Table)
 	}
-	return collectMultiJoinProjectedRows(ctx, p, rowsByRelation, limit)
+	return rowsByRelation, nil
 }
 
 func collectMultiJoinProjectedRows(ctx context.Context, p MultiJoin, rowsByRelation [][]types.ProductValue, limit int) ([]types.ProductValue, error) {
+	var out []types.ProductValue
+	err := visitMultiJoinTuples(ctx, p, rowsByRelation, func(tuple []types.ProductValue) error {
+		if limit > 0 && len(out) >= limit {
+			return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, limit)
+		}
+		out = append(out, tuple[p.ProjectedRelation])
+		return nil
+	})
+	return out, err
+}
+
+func visitMultiJoinTuples(ctx context.Context, p MultiJoin, rowsByRelation [][]types.ProductValue, visit func([]types.ProductValue) error) error {
 	if len(p.Relations) == 0 || p.ProjectedRelation < 0 || p.ProjectedRelation >= len(p.Relations) {
-		return nil, nil
+		return nil
 	}
 	tuple := make([]types.ProductValue, len(p.Relations))
-	var out []types.ProductValue
 	var walk func(int) error
 	walk = func(depth int) error {
 		if err := ctxErr(ctx); err != nil {
@@ -65,10 +88,9 @@ func collectMultiJoinProjectedRows(ctx context.Context, p MultiJoin, rowsByRelat
 			if !matchMultiJoinTuple(p.Filter, p.Relations, tuple) {
 				return nil
 			}
-			if limit > 0 && len(out) >= limit {
-				return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, limit)
+			if visit != nil {
+				return visit(tuple)
 			}
-			out = append(out, tuple[p.ProjectedRelation])
 			return nil
 		}
 		if depth >= len(rowsByRelation) {
@@ -85,10 +107,7 @@ func collectMultiJoinProjectedRows(ctx context.Context, p MultiJoin, rowsByRelat
 		}
 		return nil
 	}
-	if err := walk(0); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return walk(0)
 }
 
 func ctxErr(ctx context.Context) error {

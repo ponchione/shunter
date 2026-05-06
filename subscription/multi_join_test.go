@@ -3,6 +3,7 @@ package subscription
 import (
 	"testing"
 
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
@@ -38,6 +39,46 @@ func multiJoinTestPredicate() MultiJoin {
 	}
 }
 
+func countMultiJoinRIDAggregate() *Aggregate {
+	return &Aggregate{
+		Func:         AggregateCount,
+		ResultColumn: schema.ColumnSchema{Index: 0, Name: "n", Type: types.KindUint64},
+		Argument: &AggregateColumn{
+			Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+			Table:  3,
+			Column: 0,
+			Alias:  2,
+		},
+	}
+}
+
+func countDistinctMultiJoinTIDAggregate() *Aggregate {
+	return &Aggregate{
+		Func:         AggregateCount,
+		Distinct:     true,
+		ResultColumn: schema.ColumnSchema{Index: 0, Name: "n", Type: types.KindUint64},
+		Argument: &AggregateColumn{
+			Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+			Table:  1,
+			Column: 0,
+			Alias:  0,
+		},
+	}
+}
+
+func sumMultiJoinRIDAggregate() *Aggregate {
+	return &Aggregate{
+		Func:         AggregateSum,
+		ResultColumn: schema.ColumnSchema{Index: 0, Name: "total", Type: types.KindUint64},
+		Argument: &AggregateColumn{
+			Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+			Table:  3,
+			Column: 0,
+			Alias:  2,
+		},
+	}
+}
+
 func multiJoinCommitted(includeExtraR bool) *mockCommitted {
 	s := multiJoinTestSchema()
 	contents := map[TableID][]types.ProductValue{
@@ -61,6 +102,63 @@ func multiJoinCommitted(includeExtraR bool) *mockCommitted {
 		contents[3] = append(contents[3], types.ProductValue{types.NewUint64(301), types.NewUint64(20)})
 	}
 	return buildMockCommitted(s, contents)
+}
+
+func TestMultiJoinAggregatesRegisterInitialRowsAndDeltas(t *testing.T) {
+	s := multiJoinTestSchema()
+	inbox := make(chan FanOutMessage, 2)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := multiJoinTestPredicate()
+	connID := types.ConnectionID{8}
+	before := multiJoinCommitted(false)
+	tests := []struct {
+		queryID   uint32
+		aggregate *Aggregate
+		want      uint64
+		column    string
+	}{
+		{80, countStarAggregate(), 5, "n"},
+		{81, countMultiJoinRIDAggregate(), 5, "n"},
+		{82, countDistinctMultiJoinTIDAggregate(), 3, "n"},
+		{83, sumMultiJoinRIDAggregate(), 1300, "total"},
+	}
+	for _, tt := range tests {
+		res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID:     connID,
+			QueryID:    tt.queryID,
+			Predicates: []Predicate{pred},
+			Aggregates: []*Aggregate{tt.aggregate},
+		}, before)
+		if err != nil {
+			t.Fatalf("RegisterSet multi-join aggregate queryID=%d: %v", tt.queryID, err)
+		}
+		if len(res.Update) != 1 {
+			t.Fatalf("initial update count queryID=%d = %d, want 1", tt.queryID, len(res.Update))
+		}
+		update := res.Update[0]
+		if update.TableID != 1 || len(update.Columns) != 1 || update.Columns[0].Name != tt.column {
+			t.Fatalf("multi-join aggregate shape queryID=%d = table %d columns %#v, want t/%s", tt.queryID, update.TableID, update.Columns, tt.column)
+		}
+		if len(update.Inserts) != 1 || update.Inserts[0][0].AsUint64() != tt.want {
+			t.Fatalf("multi-join aggregate initial rows queryID=%d = %#v, want %d", tt.queryID, update.Inserts, tt.want)
+		}
+	}
+
+	extra := types.ProductValue{types.NewUint64(301), types.NewUint64(20)}
+	csInsert := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Inserts: []types.ProductValue{extra}},
+		},
+	}
+	mgr.EvalAndBroadcast(types.TxID(1), csInsert, multiJoinCommitted(true), PostCommitMeta{})
+	first := aggregateUpdatesByQueryID((<-inbox).Fanout[connID])
+	requireAggregateDelta(t, first[80], 5, 9, "COUNT(*)")
+	requireAggregateDelta(t, first[81], 5, 9, "COUNT(r.id)")
+	requireAggregateDelta(t, first[83], 1300, 2504, "SUM(r.id)")
+	if _, ok := first[82]; ok {
+		t.Fatalf("COUNT(DISTINCT t.id) changed on duplicate projected ids: %+v", first[82])
+	}
 }
 
 func TestMultiJoinRegisterInitialRowsAndDeltas(t *testing.T) {
