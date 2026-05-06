@@ -254,6 +254,25 @@ func TestTypeScriptGeneratorExportsProjectedDeclaredViewSQL(t *testing.T) {
 	assertContains(t, ts, `return subscribeDeclaredView("live_message_bodies");`)
 }
 
+func TestTypeScriptGeneratorExportsAggregateDeclaredViewSQL(t *testing.T) {
+	contract := contractFixture()
+	contract.Views = append(contract.Views, shunter.ViewDescription{
+		Name: "live_message_count",
+		SQL:  "SELECT COUNT(*) AS n FROM messages",
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `liveMessageCount: "live_message_count",`)
+	assertContains(t, ts, `liveMessageCount: "SELECT COUNT(*) AS n FROM messages",`)
+	assertContains(t, ts, `export function subscribeLiveMessageCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_message_count");`)
+}
+
 func TestTypeScriptGeneratorExportsMultiJoinDeclaredQuerySQL(t *testing.T) {
 	contract := contractFixture()
 	contract.Schema.Tables = append(contract.Schema.Tables,

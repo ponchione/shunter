@@ -172,6 +172,7 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 			RequestID:               callOpts.requestID,
 			Predicates:              []subscription.Predicate{compiled.Predicate()},
 			ProjectionColumns:       [][]subscription.ProjectionColumn{compiled.SubscriptionProjection()},
+			Aggregates:              []*subscription.Aggregate{compiled.SubscriptionAggregate()},
 			PredicateHashIdentities: []*types.Identity{compiled.PredicateHashIdentity(callOpts.caller.Identity)},
 			SQLText:                 entry.SQL,
 		},
@@ -290,6 +291,9 @@ func declaredViewColumns(compiled protocol.CompiledSQLQuery, updates []subscript
 			columns[i] = col.Schema
 		}
 		return columns
+	}
+	if aggregate := compiled.SubscriptionAggregate(); aggregate != nil {
+		return []schema.ColumnSchema{aggregate.ResultColumn}
 	}
 	if sl != nil {
 		if _, ts, ok := sl.TableByName(compiled.TableName()); ok && ts != nil {

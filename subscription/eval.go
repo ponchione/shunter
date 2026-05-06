@@ -389,6 +389,9 @@ func (e *evalPanic) Unwrap() error { return ErrSubscriptionEval }
 // rows (TableID = Join.Left by convention). SubscriptionID is filled in by
 // the caller because it varies per subscriber.
 func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate {
+	if qs.aggregate != nil {
+		return m.evalAggregateQuery(qs, dv)
+	}
 	switch p := qs.predicate.(type) {
 	case Join:
 		frags := EvalJoinDeltaFragments(dv, &p, m.resolver)

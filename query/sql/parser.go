@@ -152,8 +152,8 @@ type ProjectionColumn struct {
 	OutputAlias     string
 }
 
-// AggregateProjection is the bounded query-only aggregate surface currently
-// accepted by the parser.
+// AggregateProjection is the bounded aggregate surface currently accepted by
+// the parser.
 type AggregateProjection struct {
 	Func string
 	// Column is nil for COUNT(*). Non-nil aggregate arguments are resolved

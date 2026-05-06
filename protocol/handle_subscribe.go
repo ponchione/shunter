@@ -143,6 +143,29 @@ func (q CompiledSQLQuery) SubscriptionProjection() []subscription.ProjectionColu
 	return out
 }
 
+// SubscriptionAggregate returns the optional live aggregate row shape
+// represented by this compiled SQL query.
+func (q CompiledSQLQuery) SubscriptionAggregate() *subscription.Aggregate {
+	if q.query.Aggregate == nil {
+		return nil
+	}
+	agg := q.query.Aggregate
+	out := &subscription.Aggregate{
+		Func:         subscription.AggregateFunc(agg.Func),
+		Distinct:     agg.Distinct,
+		ResultColumn: agg.ResultColumn,
+	}
+	if agg.Argument != nil {
+		out.Argument = &subscription.AggregateColumn{
+			Schema: agg.Argument.Schema,
+			Table:  agg.Argument.Table,
+			Column: types.ColID(agg.Argument.Schema.Index),
+			Alias:  agg.Argument.Alias,
+		}
+	}
+	return out
+}
+
 // HasAggregate reports whether this query returns an aggregate row shape.
 func (q CompiledSQLQuery) HasAggregate() bool {
 	return q.query.Aggregate != nil

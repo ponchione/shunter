@@ -108,10 +108,11 @@ func declaredReadCatalogEntry(spec declaredReadSpec, sl protocol.SchemaLookup) (
 		return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 	}
 	if spec.Kind == declaredReadKindView {
-		if compiled.HasAggregate() {
-			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, "Aggregate projections are not supported in subscriptions")
-		}
-		if err := subscription.ValidateProjection(compiled.Predicate(), compiled.SubscriptionProjection(), sl); err != nil {
+		if aggregate := compiled.SubscriptionAggregate(); aggregate != nil {
+			if err := subscription.ValidateAggregate(compiled.Predicate(), aggregate, sl); err != nil {
+				return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
+			}
+		} else if err := subscription.ValidateProjection(compiled.Predicate(), compiled.SubscriptionProjection(), sl); err != nil {
 			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 		}
 	}

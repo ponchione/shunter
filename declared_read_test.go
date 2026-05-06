@@ -487,23 +487,6 @@ func TestDeclaredViewRejectsOffset(t *testing.T) {
 	}
 }
 
-func TestDeclaredViewRejectsCountColumnAggregate(t *testing.T) {
-	_, err := Build(validChatModule().
-		View(ViewDeclaration{
-			Name: "live_messages",
-			SQL:  "SELECT COUNT(body) AS n FROM messages",
-		}), Config{DataDir: t.TempDir()})
-	if err == nil {
-		t.Fatal("Build error = nil, want aggregate rejection for declared view")
-	}
-	if !errors.Is(err, ErrInvalidDeclarationSQL) {
-		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
-	}
-	if !strings.Contains(err.Error(), "Aggregate projections are not supported in subscriptions") {
-		t.Fatalf("Build error = %v, want table-shaped view aggregate rejection", err)
-	}
-}
-
 func TestDeclaredViewRejectsSumColumnAggregate(t *testing.T) {
 	_, err := Build(validChatModule().
 		View(ViewDeclaration{
@@ -516,8 +499,45 @@ func TestDeclaredViewRejectsSumColumnAggregate(t *testing.T) {
 	if !errors.Is(err, ErrInvalidDeclarationSQL) {
 		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
 	}
-	if !strings.Contains(err.Error(), "Aggregate projections are not supported in subscriptions") {
-		t.Fatalf("Build error = %v, want table-shaped view aggregate rejection", err)
+	if !strings.Contains(err.Error(), "live aggregate views support COUNT only") {
+		t.Fatalf("Build error = %v, want live COUNT-only aggregate rejection", err)
+	}
+}
+
+func TestDeclaredViewRejectsCountDistinctAggregate(t *testing.T) {
+	_, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT COUNT(DISTINCT body) AS n FROM messages",
+		}), Config{DataDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Build error = nil, want COUNT DISTINCT rejection for declared view")
+	}
+	if !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
+	}
+	if !strings.Contains(err.Error(), "live aggregate views do not support COUNT(DISTINCT ...)") {
+		t.Fatalf("Build error = %v, want live COUNT DISTINCT rejection", err)
+	}
+}
+
+func TestDeclaredViewRejectsJoinAggregate(t *testing.T) {
+	_, err := Build(NewModule("live_join_count").
+		SchemaVersion(1).
+		TableDef(joinReadIndexedTableDef("t")).
+		TableDef(joinReadIndexedTableDef("s")).
+		View(ViewDeclaration{
+			Name: "live_join_count",
+			SQL:  "SELECT COUNT(*) AS n FROM t JOIN s ON t.u32 = s.u32",
+		}), Config{DataDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Build error = nil, want join aggregate rejection for declared view")
+	}
+	if !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
+	}
+	if !strings.Contains(err.Error(), "live aggregate views require a single table") {
+		t.Fatalf("Build error = %v, want live single-table aggregate rejection", err)
 	}
 }
 
@@ -567,6 +587,53 @@ func TestSubscribeViewColumnProjectionReturnsProjectedInitialRows(t *testing.T) 
 	}
 	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsString() != "hello" {
 		t.Fatalf("initial rows = %#v, want one projected body row", sub.InitialRows)
+	}
+}
+
+func TestSubscribeViewAggregateCountInitialRows(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, NewModule("live_score_counts").
+		SchemaVersion(1).
+		TableDef(nullableScoresTableDef()).
+		Reducer("seed_scores", seedNullableScoresReducer).
+		View(ViewDeclaration{
+			Name:        "live_score_rows_count",
+			SQL:         "SELECT COUNT(*) AS n FROM scores",
+			Permissions: PermissionMetadata{Required: []string{"scores:subscribe"}},
+		}).
+		View(ViewDeclaration{
+			Name:        "live_non_null_score_count",
+			SQL:         "SELECT COUNT(score) AS n FROM scores",
+			Permissions: PermissionMetadata{Required: []string{"scores:subscribe"}},
+		}))
+	defer rt.Close()
+	res, err := rt.CallReducer(context.Background(), "seed_scores", nil)
+	if err != nil {
+		t.Fatalf("seed reducer admission: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("seed reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+
+	allRows, err := rt.SubscribeView(context.Background(), "live_score_rows_count", 18, WithDeclaredReadPermissions("scores:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView COUNT(*): %v", err)
+	}
+	if allRows.TableName != "scores" || len(allRows.Columns) != 1 || allRows.Columns[0].Name != "n" || allRows.Columns[0].Type != types.KindUint64 {
+		t.Fatalf("COUNT(*) subscription shape = table %q columns %#v, want scores/n Uint64", allRows.TableName, allRows.Columns)
+	}
+	if len(allRows.InitialRows) != 1 || allRows.InitialRows[0][0].AsUint64() != 5 {
+		t.Fatalf("COUNT(*) initial rows = %#v, want count 5", allRows.InitialRows)
+	}
+
+	nonNullRows, err := rt.SubscribeView(context.Background(), "live_non_null_score_count", 19, WithDeclaredReadPermissions("scores:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView COUNT(score): %v", err)
+	}
+	if nonNullRows.TableName != "scores" || len(nonNullRows.Columns) != 1 || nonNullRows.Columns[0].Name != "n" || nonNullRows.Columns[0].Type != types.KindUint64 {
+		t.Fatalf("COUNT(score) subscription shape = table %q columns %#v, want scores/n Uint64", nonNullRows.TableName, nonNullRows.Columns)
+	}
+	if len(nonNullRows.InitialRows) != 1 || nonNullRows.InitialRows[0][0].AsUint64() != 3 {
+		t.Fatalf("COUNT(score) initial rows = %#v, want non-null count 3", nonNullRows.InitialRows)
 	}
 }
 
@@ -813,6 +880,37 @@ func TestDeclaredViewColumnProjectionAppliesVisibilityAfterPermissionSucceeds(t 
 	}
 }
 
+func TestDeclaredViewAggregateCountAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x33)
+	bob := visibilityRuntimeIdentity(0x34)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        "live_visible_message_count",
+			SQL:         "SELECT COUNT(body) AS n FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+	insertMessageWithBody(t, rt, 3, alice.Hex())
+
+	sub, err := rt.SubscribeView(context.Background(), "live_visible_message_count", 20,
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:subscribe"),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView aggregate visibility: %v", err)
+	}
+	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 2 {
+		t.Fatalf("visible aggregate view rows = %#v, want count 2", sub.InitialRows)
+	}
+}
+
 func TestDeclaredViewJoinWhereColumnComparisonAppliesVisibility(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x25)
 	bob := visibilityRuntimeIdentity(0x26)
@@ -871,6 +969,30 @@ func TestDeclaredReadMissingPermissionRejectsBeforeExecutionOrRegistration(t *te
 	_, err = rt.SubscribeView(context.Background(), "live_messages", 9, WithDeclaredReadPermissions("messages:subscribe"))
 	if err != nil {
 		t.Fatalf("SubscribeView after rejected attempt with same query id: %v", err)
+	}
+}
+
+func TestDeclaredAggregateViewMissingPermissionRejectsBeforeRegistration(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message", insertMessageReducer).
+		View(ViewDeclaration{
+			Name:        "live_message_count",
+			SQL:         "SELECT COUNT(*) AS n FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessage(t, rt, "hello")
+
+	_, err := rt.SubscribeView(context.Background(), "live_message_count", 21, WithDeclaredReadPermissions("messages:read"))
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("SubscribeView aggregate missing permission error = %v, want ErrPermissionDenied", err)
+	}
+	sub, err := rt.SubscribeView(context.Background(), "live_message_count", 21, WithDeclaredReadPermissions("messages:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView aggregate after rejected attempt with same query id: %v", err)
+	}
+	if len(sub.InitialRows) != 1 || sub.InitialRows[0][0].AsUint64() != 1 {
+		t.Fatalf("aggregate initial rows after permission success = %#v, want count 1", sub.InitialRows)
 	}
 }
 

@@ -157,8 +157,10 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
 			continue
 		}
-		if compiled.HasAggregate() {
-			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, "Aggregate projections are not supported in subscriptions"))
+		if aggregate := compiled.SubscriptionAggregate(); aggregate != nil {
+			if err := subscription.ValidateAggregate(compiled.Predicate(), aggregate, lookup); err != nil {
+				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
+			}
 			continue
 		}
 		if err := subscription.ValidateProjection(compiled.Predicate(), compiled.SubscriptionProjection(), lookup); err != nil {

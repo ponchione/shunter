@@ -183,10 +183,10 @@ func TestBuildValidatesDeclaredReadSQLAgainstSchema(t *testing.T) {
 			}),
 		},
 		{
-			name: "view aggregate unsupported by subscription SQL",
+			name: "view sum aggregate unsupported by subscription SQL",
 			mod: validChatModule().View(ViewDeclaration{
 				Name: "live_messages",
-				SQL:  "SELECT COUNT(id) AS n FROM messages",
+				SQL:  "SELECT SUM(id) AS total FROM messages",
 			}),
 		},
 		{

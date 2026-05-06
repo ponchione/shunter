@@ -9,6 +9,7 @@ import (
 
 	"lukechampine.com/blake3"
 
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -35,6 +36,7 @@ const (
 	tagColEqCol   byte = 0x0A
 	tagMultiJoin  byte = 0x0B
 	tagProjection byte = 0x0C
+	tagAggregate  byte = 0x0D
 )
 
 // Within a canonical Bound encoding.
@@ -454,6 +456,13 @@ func ComputeQueryHash(pred Predicate, clientID *types.Identity) QueryHash {
 // emitted row projection. Empty projection keeps the historical table-shaped
 // predicate hash.
 func ComputeQueryPlanHash(pred Predicate, projection []ProjectionColumn, clientID *types.Identity) QueryHash {
+	return ComputeQueryShapeHash(pred, projection, nil, clientID)
+}
+
+// ComputeQueryShapeHash returns the canonical hash for a predicate plus its
+// emitted row shape. Empty projection and nil aggregate keep the historical
+// table-shaped predicate hash.
+func ComputeQueryShapeHash(pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, clientID *types.Identity) QueryHash {
 	if pred == nil {
 		panic("subscription: ComputeQueryHash on nil predicate")
 	}
@@ -462,6 +471,7 @@ func ComputeQueryPlanHash(pred Predicate, projection []ProjectionColumn, clientI
 	defer releaseCanonicalEncoder(enc)
 	encodePredicate(enc, pred)
 	encodeProjection(enc, projection)
+	encodeAggregate(enc, aggregate)
 	if clientID != nil {
 		enc.buf = append(enc.buf, clientID[:]...)
 	}
@@ -488,6 +498,40 @@ func encodeProjection(e *canonicalEncoder, projection []ProjectionColumn) {
 		}
 		e.writeString(col.Schema.Name)
 	}
+}
+
+func encodeAggregate(e *canonicalEncoder, aggregate *Aggregate) {
+	if aggregate == nil {
+		return
+	}
+	e.writeByte(tagAggregate)
+	e.writeString(string(aggregate.Func))
+	if aggregate.Distinct {
+		e.writeByte(1)
+	} else {
+		e.writeByte(0)
+	}
+	encodeColumnSchema(e, aggregate.ResultColumn)
+	if aggregate.Argument == nil {
+		e.writeByte(0)
+		return
+	}
+	e.writeByte(1)
+	e.writeU32(uint32(aggregate.Argument.Table))
+	e.writeU32(uint32(aggregate.Argument.Column))
+	e.writeByte(aggregate.Argument.Alias)
+	encodeColumnSchema(e, aggregate.Argument.Schema)
+}
+
+func encodeColumnSchema(e *canonicalEncoder, col schema.ColumnSchema) {
+	e.writeU32(uint32(col.Index))
+	e.writeU32(uint32(col.Type))
+	if col.Nullable {
+		e.writeByte(1)
+	} else {
+		e.writeByte(0)
+	}
+	e.writeString(col.Name)
 }
 
 func encodePredicate(e *canonicalEncoder, pred Predicate) {

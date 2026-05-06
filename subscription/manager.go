@@ -22,6 +22,7 @@ type SubscriptionSetRegisterRequest struct {
 	QueryID                 uint32
 	Predicates              []Predicate
 	ProjectionColumns       [][]ProjectionColumn
+	Aggregates              []*Aggregate
 	PredicateHashIdentities []*types.Identity
 	ClientIdentity          *types.Identity
 	RequestID               uint32
