@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -46,5 +47,62 @@ func TestProtocolCompiledAggregateOrderByIsObservable(t *testing.T) {
 	}
 	if !compiled.HasOrderBy() {
 		t.Fatal("HasOrderBy = false, want source ORDER BY to remain observable")
+	}
+}
+
+func TestProtocolV1CompatibilityRejectsEveryUnassignedOrReservedTag(t *testing.T) {
+	for tag := 0; tag <= 255; tag++ {
+		tag := uint8(tag)
+		if isAssignedV1ClientTag(tag) {
+			continue
+		}
+		_, _, err := DecodeClientMessage([]byte{tag})
+		if !errors.Is(err, ErrUnknownMessageTag) {
+			t.Fatalf("DecodeClientMessage(tag=%d) err = %v, want ErrUnknownMessageTag", tag, err)
+		}
+	}
+
+	for tag := 0; tag <= 255; tag++ {
+		tag := uint8(tag)
+		if isAssignedV1ServerTag(tag) {
+			continue
+		}
+		_, _, err := DecodeServerMessage([]byte{tag})
+		if !errors.Is(err, ErrUnknownMessageTag) {
+			t.Fatalf("DecodeServerMessage(tag=%d) err = %v, want ErrUnknownMessageTag", tag, err)
+		}
+	}
+}
+
+func isAssignedV1ClientTag(tag uint8) bool {
+	switch tag {
+	case TagSubscribeSingle,
+		TagUnsubscribeSingle,
+		TagCallReducer,
+		TagOneOffQuery,
+		TagSubscribeMulti,
+		TagUnsubscribeMulti,
+		TagDeclaredQuery,
+		TagSubscribeDeclaredView:
+		return true
+	default:
+		return false
+	}
+}
+
+func isAssignedV1ServerTag(tag uint8) bool {
+	switch tag {
+	case TagIdentityToken,
+		TagSubscribeSingleApplied,
+		TagUnsubscribeSingleApplied,
+		TagSubscriptionError,
+		TagTransactionUpdate,
+		TagOneOffQueryResponse,
+		TagTransactionUpdateLight,
+		TagSubscribeMultiApplied,
+		TagUnsubscribeMultiApplied:
+		return true
+	default:
+		return false
 	}
 }
