@@ -407,23 +407,30 @@ func splitMultiJoinOrFilterPlacementsForRelation(
 	relation int,
 	resolver IndexResolver,
 ) (splitJoinOrPlacements, bool) {
-	or, ok := filter.(Or)
-	if !ok {
-		return splitJoinOrPlacements{}, false
-	}
-	branches := multiJoinOrBranches(or)
-	if len(branches) < 2 {
-		return splitJoinOrPlacements{}, false
-	}
-	var out splitJoinOrPlacements
-	for _, branch := range branches {
-		placements, ok := splitMultiJoinOrBranchPlacementsForRelation(branch, relations, conditions, relation, resolver)
-		if !ok || !placements.hasAny() {
+	switch p := filter.(type) {
+	case Or:
+		branches := multiJoinOrBranches(p)
+		if len(branches) < 2 {
 			return splitJoinOrPlacements{}, false
 		}
-		out.append(placements)
+		var out splitJoinOrPlacements
+		for _, branch := range branches {
+			placements, ok := splitMultiJoinOrBranchPlacementsForRelation(branch, relations, conditions, relation, resolver)
+			if !ok || !placements.hasAny() {
+				return splitJoinOrPlacements{}, false
+			}
+			out.append(placements)
+		}
+		return out, true
+	case And:
+		if placements, ok := splitMultiJoinOrFilterPlacementsForRelation(p.Left, relations, conditions, relation, resolver); ok && placements.hasAny() {
+			return placements, true
+		}
+		if placements, ok := splitMultiJoinOrFilterPlacementsForRelation(p.Right, relations, conditions, relation, resolver); ok && placements.hasAny() {
+			return placements, true
+		}
 	}
-	return out, true
+	return splitJoinOrPlacements{}, false
 }
 
 func multiJoinOrBranches(pred Predicate) []Predicate {
@@ -1312,6 +1319,14 @@ func splitJoinOrPredicatePlacements(
 		}
 		left.append(right)
 		return left, true
+	case And:
+		if left, ok := splitJoinOrPredicatePlacements(p.Left, side, resolver); ok && splitJoinOrNeedsBothSides(left) {
+			return left, true
+		}
+		if right, ok := splitJoinOrPredicatePlacements(p.Right, side, resolver); ok && splitJoinOrNeedsBothSides(right) {
+			return right, true
+		}
+		return splitJoinOrBranchPlacements(pred, side, resolver)
 	default:
 		return splitJoinOrBranchPlacements(pred, side, resolver)
 	}

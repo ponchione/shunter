@@ -80,11 +80,13 @@ Likely feature slices:
   disjunctive cross-alias filter shapes that need multi-hop condition paths,
   uncovered repeated aliases, or non-local branch predicates
 - remaining live subscription candidate pruning beyond current local-filter,
-  join-condition, filter-edge, direct split-OR placement, and same-transaction
-  filter-edge deltas
+  join-condition, filter-edge, direct split-OR placement, required-AND
+  split-OR placement, and same-transaction filter-edge deltas
 
 Completed slices:
 
+- two-table and multi-way live join `AND` filters with a required direct
+  split-`OR` child use local/filter-edge pruning for that `OR` child
 - live join value/range filter-edge candidate pruning uses same-transaction
   opposite-side inserted and deleted rows, matching join-existence delta
   coverage
