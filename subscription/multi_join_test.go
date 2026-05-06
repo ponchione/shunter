@@ -112,6 +112,71 @@ func repeatedMultiJoinMixedAliasPredicate() MultiJoin {
 	}
 }
 
+func repeatedMultiJoinUncoveredAliasPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 1, Alias: 1},
+			{Table: 2, Alias: 2},
+		},
+		Conditions: []MultiJoinCondition{
+			{
+				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 2, Column: 1, Alias: 2},
+			},
+		},
+		ProjectedRelation: 0,
+		Filter:            ColEq{Table: 1, Column: 0, Alias: 0, Value: types.NewUint64(7)},
+	}
+}
+
+func repeatedMultiJoinCrossAliasFilterPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 1, Alias: 1},
+			{Table: 2, Alias: 2},
+		},
+		ProjectedRelation: 0,
+		Filter: And{
+			Left: ColEq{Table: 1, Column: 0, Alias: 0, Value: types.NewUint64(7)},
+			Right: ColEqCol{
+				LeftTable:   1,
+				LeftColumn:  1,
+				LeftAlias:   1,
+				RightTable:  2,
+				RightColumn: 1,
+				RightAlias:  2,
+			},
+		},
+	}
+}
+
+func repeatedMultiJoinSelfAliasFilterPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 1, Alias: 1},
+			{Table: 2, Alias: 2},
+		},
+		Conditions: []MultiJoinCondition{
+			{
+				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 2, Column: 1, Alias: 2},
+			},
+		},
+		ProjectedRelation: 0,
+		Filter: ColEqCol{
+			LeftTable:   1,
+			LeftColumn:  0,
+			LeftAlias:   0,
+			RightTable:  1,
+			RightColumn: 1,
+			RightAlias:  1,
+		},
+	}
+}
+
 func countMultiJoinRIDAggregate() *Aggregate {
 	return &Aggregate{
 		Func:         AggregateCount,
@@ -426,6 +491,151 @@ func TestMultiJoinPlacementRepeatedTableCombinesAliasFiltersAndConditionEdges(t 
 	}
 }
 
+func TestMultiJoinPlacementRepeatedTableFallsBackWhenAliasUncovered(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := repeatedMultiJoinUncoveredAliasPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	if got := idx.Table.Lookup(1); len(got) != 1 || got[0] != hash {
+		t.Fatalf("TableIndex[1] = %v, want fallback [%v]", got, hash)
+	}
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
+		t.Fatalf("partial alias filter placement = %v, want empty when another alias is uncovered", got)
+	}
+	edge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
+	if _, ok := idx.JoinEdge.exists[edge][hash]; ok {
+		t.Fatalf("partial condition edge placement present for uncovered repeated table: %+v", idx.JoinEdge.exists)
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestMultiJoinPlacementRepeatedTableFallsBackWhenMixedAliasConditionEdgeUnindexed(t *testing.T) {
+	s := newFakeSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(1, cols, 1)
+	s.addTable(2, cols)
+	idx := NewPruningIndexes()
+	pred := repeatedMultiJoinMixedAliasPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	if got := idx.Table.Lookup(1); len(got) != 1 || got[0] != hash {
+		t.Fatalf("TableIndex[1] = %v, want fallback [%v]", got, hash)
+	}
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
+		t.Fatalf("partial alias filter placement = %v, want empty when condition edge is unindexed", got)
+	}
+	edge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
+	if _, ok := idx.JoinEdge.exists[edge][hash]; ok {
+		t.Fatalf("unindexed condition edge placement present: %+v", idx.JoinEdge.exists)
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestMultiJoinPlacementRepeatedTableUsesCrossAliasFilterEdges(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := repeatedMultiJoinCrossAliasFilterPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("alias-0 value placement = %v, want [%v]", got, hash)
+	}
+	leftEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
+	if _, ok := idx.JoinEdge.exists[leftEdge][hash]; !ok {
+		t.Fatalf("alias-1 filter edge missing: %+v", idx.JoinEdge.exists)
+	}
+	rightEdge := JoinEdge{LHSTable: 2, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
+	if _, ok := idx.JoinEdge.exists[rightEdge][hash]; !ok {
+		t.Fatalf("alias-2 filter edge missing: %+v", idx.JoinEdge.exists)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex[1] = %v, want empty for cross-alias filter placement", got)
+	}
+	if got := idx.Table.Lookup(2); len(got) != 0 {
+		t.Fatalf("TableIndex[2] = %v, want empty for cross-alias filter placement", got)
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestMultiJoinPlacementRepeatedTableCrossAliasFilterFallsBackWhenUnindexed(t *testing.T) {
+	s := newFakeSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(1, cols, 1)
+	s.addTable(2, cols)
+	idx := NewPruningIndexes()
+	pred := repeatedMultiJoinCrossAliasFilterPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	if got := idx.Table.Lookup(1); len(got) != 1 || got[0] != hash {
+		t.Fatalf("TableIndex[1] = %v, want fallback [%v]", got, hash)
+	}
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
+		t.Fatalf("partial alias filter placement = %v, want empty when filter edge is unindexed", got)
+	}
+	leftEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
+	if _, ok := idx.JoinEdge.exists[leftEdge][hash]; ok {
+		t.Fatalf("unindexed left filter edge placement present: %+v", idx.JoinEdge.exists)
+	}
+	rightEdge := JoinEdge{LHSTable: 2, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
+	if _, ok := idx.JoinEdge.exists[rightEdge][hash]; !ok {
+		t.Fatalf("indexed right filter edge missing: %+v", idx.JoinEdge.exists)
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestMultiJoinPlacementRepeatedTableUsesSelfAliasFilterEdges(t *testing.T) {
+	s := newFakeSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(1, cols, 0, 1)
+	s.addTable(2, cols, 1)
+	idx := NewPruningIndexes()
+	pred := repeatedMultiJoinSelfAliasFilterPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	tests := []JoinEdge{
+		{LHSTable: 1, RHSTable: 1, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 1},
+		{LHSTable: 1, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 0, RHSFilterCol: 0},
+		{LHSTable: 2, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1},
+	}
+	for _, edge := range tests {
+		if _, ok := idx.JoinEdge.exists[edge][hash]; !ok {
+			t.Fatalf("self-alias filter edge missing %+v in %+v", edge, idx.JoinEdge.exists)
+		}
+	}
+	for _, table := range []TableID{1, 2} {
+		if got := idx.Table.Lookup(table); len(got) != 0 {
+			t.Fatalf("TableIndex[%d] = %v, want empty for self-alias filter placement", table, got)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
 func TestMultiJoinPlacementRepeatedTableKeepsTableFallback(t *testing.T) {
 	idx := NewPruningIndexes()
 	pred := MultiJoin{
@@ -581,6 +791,170 @@ func TestCollectCandidatesMultiJoinRepeatedMixedAliasPlacementPrunesMismatch(t *
 	got = CollectCandidatesForTable(idx, 1, aliasConditionMatch, committed, s)
 	if len(got) != 1 || got[0] != hash {
 		t.Fatalf("alias-condition compound candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinRepeatedMixedAliasUsesDeltaOppositeRows(t *testing.T) {
+	s := multiJoinTestSchema()
+	mgr := NewManager(s, s)
+	pred := repeatedMultiJoinMixedAliasPredicate()
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{11},
+		QueryID:    110,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	committed := buildMockCommitted(s, nil)
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(88)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(2), types.NewUint64(99)}}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping repeated-mixed same-tx candidates = %v, want empty", got)
+	}
+
+	overlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(77)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(2), types.NewUint64(77)}}},
+		},
+	}
+	got := mgr.collectCandidatesInto(overlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping repeated-mixed same-tx candidates = %v, want only %v", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinRepeatedCrossAliasFilterPrunesMismatch(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := repeatedMultiJoinCrossAliasFilterPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(100), types.NewUint64(20)}},
+	})
+
+	mismatch := []types.ProductValue{{types.NewUint64(8), types.NewUint64(9)}}
+	if got := CollectCandidatesForTable(idx, 1, mismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched cross-alias filter candidates = %v, want empty", got)
+	}
+
+	aliasFilterMatch := []types.ProductValue{{types.NewUint64(7), types.NewUint64(9)}}
+	got := CollectCandidatesForTable(idx, 1, aliasFilterMatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("alias-filter cross-alias candidates = %v, want [%v]", got, hash)
+	}
+
+	aliasConditionMatch := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+	got = CollectCandidatesForTable(idx, 1, aliasConditionMatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("alias-filter-edge candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinRepeatedCrossAliasFilterUsesDeltaOppositeRows(t *testing.T) {
+	s := multiJoinTestSchema()
+	mgr := NewManager(s, s)
+	pred := repeatedMultiJoinCrossAliasFilterPredicate()
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{12},
+		QueryID:    120,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	committed := buildMockCommitted(s, nil)
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(88)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(2), types.NewUint64(99)}}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping cross-alias same-tx candidates = %v, want empty", got)
+	}
+
+	overlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(77)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(2), types.NewUint64(77)}}},
+		},
+	}
+	got := mgr.collectCandidatesInto(overlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping cross-alias same-tx candidates = %v, want only %v", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinRepeatedSelfAliasFilterUsesDeltaRows(t *testing.T) {
+	s := newFakeSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(1, cols, 0, 1)
+	s.addTable(2, cols, 1)
+	mgr := NewManager(s, s)
+	pred := repeatedMultiJoinSelfAliasFilterPredicate()
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{13},
+		QueryID:    130,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	committed := buildMockCommitted(s, nil)
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{
+				{types.NewUint64(7), types.NewUint64(70)},
+				{types.NewUint64(8), types.NewUint64(80)},
+			}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping self-alias same-tx candidates = %v, want empty", got)
+	}
+
+	overlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{
+				{types.NewUint64(77), types.NewUint64(10)},
+				{types.NewUint64(8), types.NewUint64(77)},
+			}},
+		},
+	}
+	got := mgr.collectCandidatesInto(overlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping self-alias same-tx candidates = %v, want only %v", got, hash)
 	}
 }
 

@@ -28,6 +28,11 @@ Shunter already has a meaningful SQL/read implementation:
 - aggregates for query surfaces
 - ordering, limits, and offsets for query surfaces
 - narrower live subscription behavior
+- repeated-table multi-way live joins can prune candidates when every repeated
+  alias is covered by an alias-local value/range filter, an indexed
+  join-condition existence edge, a required indexed column-equality filter
+  edge, or a disjunctive filter-derived placement that covers the relation in
+  every OR branch; aliases without that coverage keep table fallback placement
 
 The risk is not lack of parser ambition. The risk is accepting SQL shapes whose
 runtime, auth, visibility, or live delta semantics are not precise enough for a
@@ -174,4 +179,3 @@ predictably and with useful errors.
   with the matrix.
 - App-author docs recommend declared/generated reads first and raw SQL as an
   escape hatch.
-
