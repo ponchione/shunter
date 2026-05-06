@@ -472,6 +472,64 @@ func TestCollectCandidatesMultiJoinRequiredRemoteFilterEdgesPruneMismatch(t *tes
 	}
 }
 
+func TestMultiJoinPlacementUsesRequiredRemoteFilterPathEdges(t *testing.T) {
+	s := dualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate()
+	pred.Filter = ColNe{Table: 3, Column: 0, Alias: 2, Value: types.NewUint64(99)}
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	leftPathEdge := JoinPathEdge{
+		LHSTable: 1, MidTable: 2, RHSTable: 3,
+		LHSJoinCol: 1, MidFirstCol: 1, MidSecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
+	}
+	if got := idx.JoinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(100)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("required remote range path edge = %v, want [%v]", got, hash)
+	}
+	if got := idx.JoinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(99)); len(got) != 0 {
+		t.Fatalf("required remote rejected range path edge = %v, want empty", got)
+	}
+	middleEdge := JoinEdge{LHSTable: 2, RHSTable: 3, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinRangeEdge.Lookup(middleEdge, types.NewUint64(100)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("required remote middle range edge = %v, want [%v]", got, hash)
+	}
+	if got := idx.Range.Lookup(3, 0, types.NewUint64(100)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("required remote local range placement = %v, want [%v]", got, hash)
+	}
+	if len(idx.JoinEdge.exists) != 0 {
+		t.Fatalf("required remote path placement existence edges = %+v, want none", idx.JoinEdge.exists)
+	}
+	for _, table := range []TableID{1, 2, 3} {
+		if got := idx.Table.Lookup(table); len(got) != 0 {
+			t.Fatalf("TableIndex[%d] = %v, want empty for required remote path placement", table, got)
+		}
+	}
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(99), types.NewUint64(30)}},
+	})
+	leftMismatch := []types.ProductValue{{types.NewUint64(500), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 1, leftMismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched required remote path candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(100), types.NewUint64(30)}},
+	})
+	got := CollectCandidatesForTable(idx, 1, leftMismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("matching required remote path candidates = %v, want [%v]", got, hash)
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
 func TestCollectCandidatesMultiJoinRequiredRemoteFilterEdgesUseSameTransactionRows(t *testing.T) {
 	s := multiJoinTestSchema()
 	idx := NewPruningIndexes()

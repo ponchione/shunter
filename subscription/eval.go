@@ -330,6 +330,10 @@ func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.Committe
 		collectJoinFilterDeltaCandidates(m.indexes, tid, tc.Deletes, cs, addJoinCandidate)
 		collectJoinExistenceDeltaCandidates(m.indexes, tid, tc.Inserts, cs, addJoinCandidate)
 		collectJoinExistenceDeltaCandidates(m.indexes, tid, tc.Deletes, cs, addJoinCandidate)
+		collectJoinPathEdgeCandidates(m.indexes, tid, tc.Inserts, view, m.resolver, addJoinCandidate)
+		collectJoinPathEdgeCandidates(m.indexes, tid, tc.Deletes, view, m.resolver, addJoinCandidate)
+		collectJoinPathFilterDeltaCandidates(m.indexes, tid, tc.Inserts, cs, view, m.resolver, addJoinCandidate)
+		collectJoinPathFilterDeltaCandidates(m.indexes, tid, tc.Deletes, cs, view, m.resolver, addJoinCandidate)
 
 		// Tier 3: table fallback.
 		m.indexes.Table.ForEachHash(tid, func(h QueryHash) {

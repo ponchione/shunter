@@ -77,15 +77,19 @@ Direction:
 Likely feature slices:
 
 - broader index-aware planning for complex live join paths, especially
-  disjunctive cross-alias filter shapes that need non-key-preserving multi-hop
-  condition paths or non-local branch predicates
+  disjunctive cross-alias filter shapes that need longer non-key-preserving
+  multi-hop condition paths or non-local branch predicates
 - remaining live subscription candidate pruning beyond current local-filter,
   join-condition, required filter-edge, direct split-OR placement, required-AND
   split-OR placement, direct column-equality split-OR branches, all-remote
-  split-OR branches, and same-transaction filter-edge deltas
+  split-OR branches, two-hop path-edge branches, and same-transaction
+  filter-edge deltas
 
 Completed slices:
 
+- multi-way live joins with non-key-preserving two-hop paths use indexed path
+  edges for required and split-`OR` remote value/range filters, including
+  same-transaction changed middle and endpoint rows
 - multi-way live joins with required relation-local value/range filters use
   indexed remote filter-edge pruning across key-preserving condition paths,
   including repeated relation aliases

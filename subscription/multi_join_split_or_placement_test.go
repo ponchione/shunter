@@ -539,7 +539,7 @@ func TestMultiJoinPlacementSplitOrRepeatedAliasUsesConditionEdgesWhenSelfEdgeUni
 	}
 }
 
-func TestMultiJoinPlacementSplitOrNonKeyPreservingMultiHopStaysOnFallbackEdges(t *testing.T) {
+func TestMultiJoinPlacementSplitOrNonKeyPreservingMultiHopUsesPathEdges(t *testing.T) {
 	s := dualIndexedMultiJoinTestSchema()
 	idx := NewPruningIndexes()
 	pred := splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate()
@@ -550,12 +550,193 @@ func TestMultiJoinPlacementSplitOrNonKeyPreservingMultiHopStaysOnFallbackEdges(t
 	if got := idx.JoinRangeEdge.Lookup(leftEndpointRangeEdge, types.NewUint64(60)); len(got) != 0 {
 		t.Fatalf("non-key-preserving transitive range edge placement = %v, want empty", got)
 	}
-	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
-		t.Fatalf("partial endpoint local placement = %v, want empty without covered split-OR path", got)
+	leftPathEdge := JoinPathEdge{
+		LHSTable: 1, MidTable: 2, RHSTable: 3,
+		LHSJoinCol: 1, MidFirstCol: 1, MidSecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
+	}
+	if got := idx.JoinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("non-key-preserving path range edge placement = %v, want [%v]", got, hash)
+	}
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("endpoint local placement = %v, want [%v]", got, hash)
 	}
 	leftConditionEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
-	if _, ok := idx.JoinEdge.exists[leftConditionEdge][hash]; !ok {
-		t.Fatalf("fallback condition edge missing: %+v", idx.JoinEdge.exists)
+	if _, ok := idx.JoinEdge.exists[leftConditionEdge][hash]; ok {
+		t.Fatalf("fallback condition edge present: %+v, want none", idx.JoinEdge.exists)
+	}
+	rightPathEdge := JoinPathEdge{
+		LHSTable: 3, MidTable: 2, RHSTable: 1,
+		LHSJoinCol: 1, MidFirstCol: 0, MidSecondCol: 1, RHSJoinCol: 1, RHSFilterCol: 0,
+	}
+	if got := idx.JoinPathEdge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("non-key-preserving path value edge placement = %v, want [%v]", got, hash)
+	}
+	for _, table := range []TableID{1, 2, 3} {
+		if got := idx.Table.Lookup(table); len(got) != 0 {
+			t.Fatalf("TableIndex[%d] = %v, want empty for non-key-preserving path placement", table, got)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrNonKeyPreservingPathEdgesPruneMismatch(t *testing.T) {
+	s := dualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(30)}},
+	})
+	leftMismatch := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 1, leftMismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched non-key-preserving path left candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(60), types.NewUint64(30)}},
+	})
+	got := CollectCandidatesForTable(idx, 1, leftMismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("matching non-key-preserving path left candidates = %v, want [%v]", got, hash)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(8), types.NewUint64(20)}},
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+	})
+	rightMismatch := []types.ProductValue{{types.NewUint64(40), types.NewUint64(30)}}
+	if got := CollectCandidatesForTable(idx, 3, rightMismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched non-key-preserving path right candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(7), types.NewUint64(20)}},
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+	})
+	got = CollectCandidatesForTable(idx, 3, rightMismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("matching non-key-preserving path right candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrNonKeyPreservingPathEdgesUseSameTransactionRows(t *testing.T) {
+	s := dualIndexedMultiJoinTestSchema()
+	mgr := NewManager(s, s)
+	pred := splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate()
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{21},
+		QueryID:    210,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(30)}}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, buildMockCommitted(s, nil), scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping same-tx path candidates = %v, want empty", got)
+	}
+
+	allChangedOverlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(60), types.NewUint64(30)}}},
+		},
+	}
+	got := mgr.collectCandidatesInto(allChangedOverlap, buildMockCommitted(s, nil), scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("all-changed same-tx path candidates = %v, want only %v", got, hash)
+	}
+
+	allChangedDeleteOverlap := &store.Changeset{
+		TxID: 5,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Deletes: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			2: {Deletes: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Deletes: []types.ProductValue{{types.NewUint64(60), types.NewUint64(30)}}},
+		},
+	}
+	got = mgr.collectCandidatesInto(allChangedDeleteOverlap, buildMockCommitted(s, nil), scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("all-changed same-tx delete path candidates = %v, want only %v", got, hash)
+	}
+
+	midCommitted := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+	})
+	rhsChangedOverlap := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(60), types.NewUint64(30)}}},
+		},
+	}
+	got = mgr.collectCandidatesInto(rhsChangedOverlap, midCommitted, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("rhs-changed same-tx path candidates = %v, want only %v", got, hash)
+	}
+
+	rhsCommitted := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		3: {{types.NewUint64(60), types.NewUint64(30)}},
+	})
+	midChangedOverlap := &store.Changeset{
+		TxID: 4,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+		},
+	}
+	got = mgr.collectCandidatesInto(midChangedOverlap, rhsCommitted, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("mid-changed same-tx path candidates = %v, want only %v", got, hash)
+	}
+}
+
+func TestMultiJoinPlacementSplitOrNonKeyPreservingPathFallsBackWhenMidUnindexed(t *testing.T) {
+	s := newFakeSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(1, cols, 1)
+	s.addTable(2, cols, 0)
+	s.addTable(3, cols, 1)
+	idx := NewPruningIndexes()
+	pred := splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	leftPathEdge := JoinPathEdge{
+		LHSTable: 1, MidTable: 2, RHSTable: 3,
+		LHSJoinCol: 1, MidFirstCol: 1, MidSecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
+	}
+	if got := idx.JoinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 0 {
+		t.Fatalf("unindexed non-key-preserving path edge = %v, want empty", got)
+	}
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
+		t.Fatalf("partial endpoint local placement = %v, want empty when path is uncovered", got)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 1 || got[0] != hash {
+		t.Fatalf("TableIndex[1] = %v, want fallback [%v]", got, hash)
 	}
 
 	removeSubscriptionForResolver(idx, pred, hash, s)
