@@ -179,6 +179,26 @@ func TestQueryOrderedShapeHashIncludesOrderByMetadata(t *testing.T) {
 	}
 }
 
+func TestQueryLimitedShapeHashIncludesLimitMetadata(t *testing.T) {
+	pred := AllRows{Table: 1}
+	limitTwo := uint64(2)
+	limitThree := uint64(3)
+	orderBy := []OrderByColumn{{
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Table:  1,
+		Column: 0,
+	}}
+
+	unlimited := ComputeQueryOrderedShapeHash(pred, nil, nil, orderBy, nil)
+	limitedTwo := ComputeQueryLimitedShapeHash(pred, nil, nil, orderBy, &limitTwo, nil)
+	if unlimited == limitedTwo {
+		t.Fatal("LIMIT metadata should change query identity from unlimited ordered shape")
+	}
+	if limitedTwo == ComputeQueryLimitedShapeHash(pred, nil, nil, orderBy, &limitThree, nil) {
+		t.Fatal("different LIMIT values should hash differently")
+	}
+}
+
 func TestQueryHashOrDiffersFromAnd(t *testing.T) {
 	left := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
 	right := ColEq{Table: 1, Column: 1, Value: types.NewString("alice")}

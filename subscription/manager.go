@@ -24,6 +24,7 @@ type SubscriptionSetRegisterRequest struct {
 	ProjectionColumns       [][]ProjectionColumn
 	Aggregates              []*Aggregate
 	OrderByColumns          [][]OrderByColumn
+	Limits                  []*uint64
 	PredicateHashIdentities []*types.Identity
 	ClientIdentity          *types.Identity
 	RequestID               uint32

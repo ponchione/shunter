@@ -340,6 +340,18 @@ func TestModuleContractValidationAllowsMultiColumnOrderByViewSQL(t *testing.T) {
 	}
 }
 
+func TestModuleContractValidationAllowsLimitViewSQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Views = []ViewDescription{{
+		Name: "live_messages",
+		SQL:  "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC LIMIT 2",
+	}}
+
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected LIMIT view SQL: %v", err)
+	}
+}
+
 func TestModuleContractValidationRejectsJoinOrderByViewSQL(t *testing.T) {
 	contract := buildJoinReadIndexedContract(t)
 	contract.Views = []ViewDescription{{
@@ -356,6 +368,25 @@ func TestModuleContractValidationRejectsJoinOrderByViewSQL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "live ORDER BY views require a single table") {
 		t.Fatalf("ValidateModuleContract error = %v, want single-table ORDER BY unsupported text", err)
+	}
+}
+
+func TestModuleContractValidationRejectsJoinLimitViewSQL(t *testing.T) {
+	contract := buildJoinReadIndexedContract(t)
+	contract.Views = []ViewDescription{{
+		Name: "live_matching_t_rows",
+		SQL:  "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 LIMIT 1",
+	}}
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted join LIMIT view SQL")
+	}
+	if !strings.Contains(err.Error(), "views.live_matching_t_rows.sql") {
+		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
+	}
+	if !strings.Contains(err.Error(), "live LIMIT views require a single table") {
+		t.Fatalf("ValidateModuleContract error = %v, want single-table LIMIT unsupported text", err)
 	}
 }
 
@@ -516,6 +547,25 @@ func TestModuleContractValidationRejectsAggregateOrderByViewSQL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "live ORDER BY views do not support aggregate views") {
 		t.Fatalf("ValidateModuleContract error = %v, want aggregate ORDER BY unsupported text", err)
+	}
+}
+
+func TestModuleContractValidationRejectsAggregateLimitViewSQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Views = []ViewDescription{{
+		Name: "live_message_count",
+		SQL:  "SELECT COUNT(*) AS n FROM messages LIMIT 1",
+	}}
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted aggregate LIMIT view SQL")
+	}
+	if !strings.Contains(err.Error(), "views.live_message_count.sql") {
+		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
+	}
+	if !strings.Contains(err.Error(), "live LIMIT views do not support aggregate views") {
+		t.Fatalf("ValidateModuleContract error = %v, want aggregate LIMIT unsupported text", err)
 	}
 }
 

@@ -156,6 +156,49 @@ func TestProtocolDeclaredViewOrderBySendsOrderedInitialRowsAndRowDeltas(t *testi
 	}
 }
 
+func TestProtocolDeclaredViewLimitSendsLimitedInitialRowsAndRowDeltas(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		Reducer("delete_message_by_id", deleteMessageByIDReducer).
+		View(ViewDeclaration{
+			Name:        "live_limited_message_ranks",
+			SQL:         "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC LIMIT 2",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 3, "bravo")
+	insertMessageWithBody(t, rt, 1, "charlie")
+	insertMessageWithBody(t, rt, 2, "charlie")
+	insertMessageWithBody(t, rt, 4, "alpha")
+
+	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "limited-subscriber", "messages:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 36,
+		QueryID:   46,
+		Name:      "live_limited_message_ranks",
+	})
+	projectedColumns := []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: types.KindUint64},
+		{Index: 1, Name: "text", Type: types.KindString},
+	}
+	initial := requireDeclaredReadAppliedValues(t, client, 36, 46, "messages", projectedColumns)
+	if got, want := rowUint64IDs(initial), []uint64{1, 2}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("limited protocol initial ids = %v, want %v; rows=%#v", got, want, initial)
+	}
+
+	insertMessageWithBody(t, rt, 5, "alpha")
+	inserts, deletes := requireDeclaredReadDeltaValues(t, client, 46, "messages", projectedColumns)
+	if len(inserts) != 1 || inserts[0][0].AsUint64() != 5 || inserts[0][1].AsString() != "alpha" || len(deletes) != 0 {
+		t.Fatalf("limited protocol insert delta inserts/deletes = %#v/%#v, want row 5/alpha insert", inserts, deletes)
+	}
+
+	deleteMessageByID(t, rt, 1)
+	inserts, deletes = requireDeclaredReadDeltaValues(t, client, 46, "messages", projectedColumns)
+	if len(inserts) != 0 || len(deletes) != 1 || deletes[0][0].AsUint64() != 1 || deletes[0][1].AsString() != "charlie" {
+		t.Fatalf("limited protocol delete delta inserts/deletes = %#v/%#v, want row 1/charlie delete", inserts, deletes)
+	}
+}
+
 func TestProtocolDeclaredViewAggregateSendsInitialRowsAndDeltas(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Reducer("insert_message", insertMessageReducer).

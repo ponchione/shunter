@@ -190,10 +190,10 @@ func TestBuildValidatesDeclaredReadSQLAgainstSchema(t *testing.T) {
 			}),
 		},
 		{
-			name: "view limit unsupported by subscription SQL",
+			name: "view offset unsupported by subscription SQL",
 			mod: validChatModule().View(ViewDeclaration{
 				Name: "live_messages",
-				SQL:  "SELECT * FROM messages LIMIT 1",
+				SQL:  "SELECT * FROM messages OFFSET 1",
 			}),
 		},
 	}

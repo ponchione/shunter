@@ -186,9 +186,24 @@ func (q CompiledSQLQuery) SubscriptionOrderBy() []subscription.OrderByColumn {
 	return out
 }
 
+// SubscriptionLimit returns optional initial-snapshot LIMIT metadata for
+// declared live views. Post-commit delivery remains ordinary row deltas.
+func (q CompiledSQLQuery) SubscriptionLimit() *uint64 {
+	if q.query.Limit == nil {
+		return nil
+	}
+	limit := *q.query.Limit
+	return &limit
+}
+
 // HasOrderBy reports whether the source SQL included an ORDER BY clause.
 func (q CompiledSQLQuery) HasOrderBy() bool {
 	return q.query.OrderByPresent || len(q.query.OrderBy) != 0
+}
+
+// HasLimit reports whether the source SQL included a LIMIT clause.
+func (q CompiledSQLQuery) HasLimit() bool {
+	return q.query.Limit != nil
 }
 
 // HasAggregate reports whether this query returns an aggregate row shape.

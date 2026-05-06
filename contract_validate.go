@@ -150,7 +150,7 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 		}
 		var caller types.Identity
 		compiled, err := protocol.CompileSQLQueryString(view.SQL, lookup, &caller, protocol.SQLQueryValidationOptions{
-			AllowLimit:      false,
+			AllowLimit:      true,
 			AllowProjection: true,
 			AllowOrderBy:    true,
 		})
@@ -165,7 +165,13 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			if compiled.HasOrderBy() {
 				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, fmt.Errorf("%w: live ORDER BY views do not support aggregate views", subscription.ErrInvalidPredicate)))
 			}
+			if compiled.HasLimit() {
+				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, fmt.Errorf("%w: live LIMIT views do not support aggregate views", subscription.ErrInvalidPredicate)))
+			}
 			if err := subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), aggregate, lookup); err != nil {
+				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
+			}
+			if err := subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), aggregate, lookup); err != nil {
 				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
 			}
 			continue
@@ -174,6 +180,9 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
 		}
 		if err := subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), compiled.SubscriptionAggregate(), lookup); err != nil {
+			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
+		}
+		if err := subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), compiled.SubscriptionAggregate(), lookup); err != nil {
 			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
 		}
 	}

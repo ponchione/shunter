@@ -449,6 +449,26 @@ func TestDeclaredViewAllowsMultiColumnOrderBy(t *testing.T) {
 	}
 }
 
+func TestDeclaredViewAllowsLimit(t *testing.T) {
+	if _, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT * FROM messages LIMIT 2",
+		}), Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build rejected limited declared view: %v", err)
+	}
+}
+
+func TestDeclaredViewAllowsOrderByLimitProjectionAlias(t *testing.T) {
+	if _, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC LIMIT 2",
+		}), Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build rejected projected ordered limited declared view: %v", err)
+	}
+}
+
 func TestDeclaredViewRejectsJoinOrderBy(t *testing.T) {
 	_, err := Build(NewModule("live_join_ordered").
 		SchemaVersion(1).
@@ -466,6 +486,26 @@ func TestDeclaredViewRejectsJoinOrderBy(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "live ORDER BY views require a single table") {
 		t.Fatalf("Build error = %v, want live single-table ORDER BY rejection", err)
+	}
+}
+
+func TestDeclaredViewRejectsJoinLimit(t *testing.T) {
+	_, err := Build(NewModule("live_join_limited").
+		SchemaVersion(1).
+		TableDef(joinReadIndexedTableDef("t")).
+		TableDef(joinReadIndexedTableDef("s")).
+		View(ViewDeclaration{
+			Name: "live_matching_t_rows",
+			SQL:  "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 LIMIT 1",
+		}), Config{DataDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Build error = nil, want join LIMIT rejection for declared view")
+	}
+	if !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
+	}
+	if !strings.Contains(err.Error(), "live LIMIT views require a single table") {
+		t.Fatalf("Build error = %v, want live single-table LIMIT rejection", err)
 	}
 }
 
@@ -537,6 +577,23 @@ func TestDeclaredViewRejectsJoinAggregate(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "live aggregate views require a single table") {
 		t.Fatalf("Build error = %v, want live single-table aggregate rejection", err)
+	}
+}
+
+func TestDeclaredViewRejectsAggregateLimit(t *testing.T) {
+	_, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_message_count",
+			SQL:  "SELECT COUNT(*) AS n FROM messages LIMIT 1",
+		}), Config{DataDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Build error = nil, want aggregate LIMIT rejection for declared view")
+	}
+	if !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
+	}
+	if !strings.Contains(err.Error(), "live LIMIT views do not support aggregate views") {
+		t.Fatalf("Build error = %v, want aggregate LIMIT rejection", err)
 	}
 }
 
@@ -623,6 +680,54 @@ func TestSubscribeViewOrderByReturnsOrderedProjectedInitialRows(t *testing.T) {
 	}
 	if got, want := rowUint64IDs(sub.InitialRows), []uint64{1, 2, 3, 4}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("ordered projected initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
+	}
+	if len(sub.Columns) != 2 || sub.Columns[0].Name != "id" || sub.Columns[1].Name != "text" {
+		t.Fatalf("projected columns = %#v, want id/text", sub.Columns)
+	}
+}
+
+func TestSubscribeViewLimitReturnsLimitedInitialRows(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		View(ViewDeclaration{
+			Name:        "live_limited_messages",
+			SQL:         "SELECT * FROM messages ORDER BY id ASC LIMIT 2",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 3, "bravo")
+	insertMessageWithBody(t, rt, 1, "charlie")
+	insertMessageWithBody(t, rt, 2, "alpha")
+
+	sub, err := rt.SubscribeView(context.Background(), "live_limited_messages", 25, WithDeclaredReadPermissions("messages:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView limited table-shaped view: %v", err)
+	}
+	if got, want := rowUint64IDs(sub.InitialRows), []uint64{1, 2}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("limited initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
+	}
+}
+
+func TestSubscribeViewLimitReturnsLimitedProjectedInitialRows(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		View(ViewDeclaration{
+			Name:        "live_limited_message_ranks",
+			SQL:         "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC LIMIT 2",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 3, "bravo")
+	insertMessageWithBody(t, rt, 1, "charlie")
+	insertMessageWithBody(t, rt, 2, "charlie")
+	insertMessageWithBody(t, rt, 4, "alpha")
+
+	sub, err := rt.SubscribeView(context.Background(), "live_limited_message_ranks", 26, WithDeclaredReadPermissions("messages:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView limited projected view: %v", err)
+	}
+	if got, want := rowUint64IDs(sub.InitialRows), []uint64{1, 2}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("limited projected initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
 	}
 	if len(sub.Columns) != 2 || sub.Columns[0].Name != "id" || sub.Columns[1].Name != "text" {
 		t.Fatalf("projected columns = %#v, want id/text", sub.Columns)
@@ -946,6 +1051,38 @@ func TestDeclaredViewOrderByAppliesAfterVisibility(t *testing.T) {
 	}
 }
 
+func TestDeclaredViewLimitAppliesAfterVisibility(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x37)
+	bob := visibilityRuntimeIdentity(0x38)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        "live_visible_limited_messages",
+			SQL:         "SELECT * FROM messages ORDER BY id DESC LIMIT 1",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 3, alice.Hex())
+	insertMessageWithBody(t, rt, 4, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+
+	sub, err := rt.SubscribeView(context.Background(), "live_visible_limited_messages", 27,
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:subscribe"),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView limited visibility: %v", err)
+	}
+	if got, want := rowUint64IDs(sub.InitialRows), []uint64{4}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("visible limited initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
+	}
+}
+
 func TestDeclaredViewColumnProjectionAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x31)
 	bob := visibilityRuntimeIdentity(0x32)
@@ -1047,7 +1184,7 @@ func TestDeclaredReadMissingPermissionRejectsBeforeExecutionOrRegistration(t *te
 		}).
 		View(ViewDeclaration{
 			Name:        "live_messages",
-			SQL:         "SELECT * FROM messages ORDER BY body",
+			SQL:         "SELECT * FROM messages ORDER BY body LIMIT 1",
 			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
 		}))
 	defer rt.Close()

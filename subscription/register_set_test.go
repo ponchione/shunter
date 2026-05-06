@@ -421,6 +421,34 @@ func TestRegisterSetOrderByAffectsSameConnectionQueryIdentity(t *testing.T) {
 	}
 }
 
+func TestRegisterSetLimitAffectsSameConnectionQueryIdentity(t *testing.T) {
+	mgr, view := newRegisterSetTestManagerWithRows(t)
+	connID := types.ConnectionID{1}
+	pred := AllRows{Table: 1}
+	limitOne := uint64(1)
+
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    1,
+		Predicates: []Predicate{pred},
+	}, view); err != nil {
+		t.Fatalf("unlimited RegisterSet: %v", err)
+	}
+
+	limited, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    2,
+		Predicates: []Predicate{pred},
+		Limits:     []*uint64{&limitOne},
+	}, view)
+	if err != nil {
+		t.Fatalf("limited RegisterSet: %v", err)
+	}
+	if len(limited.Update) != 1 || len(limited.Update[0].Inserts) != 1 {
+		t.Fatalf("limited Update = %+v, want fresh one-row initial snapshot distinct from unlimited hash", limited.Update)
+	}
+}
+
 // TestRegisterSetCrossConnectionReusedHashStillEmitsInitialSnapshot —
 // reuse-hash elision is same-connection only. A different connection
 // subscribing to the same predicate hash still receives its own initial
