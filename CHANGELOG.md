@@ -16,6 +16,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Live subscription multi-way joins now use indexed existence pruning for required filter-level column equalities, including repeated relation aliases.
 - Live subscription multi-way joins now use per-relation indexed existence pruning for disjunctive filter-level column equalities when every OR branch covers that relation.
 - Live subscription multi-way joins now combine local value/range pruning with indexed column-equality existence pruning for mixed-branch OR filters when every OR branch covers that relation.
+- Live subscription multi-way joins now split OR filters with alias-local value/range branches on directly joined relation instances into local and filter-edge pruning placements.
 - Live subscriptions and declared views now support two-table column-equality join filters, including inner-join `WHERE` column comparisons and cross-join `WHERE` equality lowering with literal filters.
 - Live subscription join candidate pruning now uses required range filters on the opposite joined side when that side's join column is indexed.
 - Live subscription cross-side OR pruning now treats not-equals filters as split range placements instead of falling back to broad join-existence candidates.
