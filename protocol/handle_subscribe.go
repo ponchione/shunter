@@ -918,6 +918,7 @@ func compileAggregateProjection(agg *sql.AggregateProjection, argument *compiled
 		return &compiledSQLAggregate{
 			Func:         "SUM",
 			Argument:     argument,
+			Distinct:     agg.Distinct,
 			ResultColumn: schema.ColumnSchema{Index: 0, Name: agg.Alias, Type: resultKind, Nullable: argument.Schema.Nullable},
 		}, nil
 	default:

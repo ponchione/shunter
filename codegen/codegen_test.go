@@ -330,6 +330,25 @@ func TestTypeScriptGeneratorExportsAggregateDeclaredViewSQL(t *testing.T) {
 	assertContains(t, ts, `return subscribeDeclaredView("live_message_count");`)
 }
 
+func TestTypeScriptGeneratorExportsCountDistinctAggregateDeclaredViewSQL(t *testing.T) {
+	contract := contractFixture()
+	contract.Views = append(contract.Views, shunter.ViewDescription{
+		Name: "live_distinct_message_bodies",
+		SQL:  "SELECT COUNT(DISTINCT body) AS n FROM messages",
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `liveDistinctMessageBodies: "live_distinct_message_bodies",`)
+	assertContains(t, ts, `liveDistinctMessageBodies: "SELECT COUNT(DISTINCT body) AS n FROM messages",`)
+	assertContains(t, ts, `export function subscribeLiveDistinctMessageBodies(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_distinct_message_bodies");`)
+}
+
 func TestTypeScriptGeneratorExportsSumAggregateDeclaredViewSQL(t *testing.T) {
 	contract := contractFixture()
 	contract.Views = append(contract.Views, shunter.ViewDescription{

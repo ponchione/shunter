@@ -1116,6 +1116,27 @@ func TestExecuteCompiledSQLQueryAggregateEmptyInputSemantics(t *testing.T) {
 	}
 }
 
+func TestCompileSQLQueryRejectsSumDistinctAggregate(t *testing.T) {
+	sl := newMockSchema("tasks", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},
+		schema.ColumnSchema{Index: 1, Name: "points", Type: schema.KindUint32},
+	)
+	opts := SQLQueryValidationOptions{
+		AllowLimit:      true,
+		AllowProjection: true,
+		AllowOrderBy:    true,
+		AllowOffset:     true,
+	}
+
+	_, err := CompileSQLQueryString("SELECT SUM(DISTINCT points) AS total FROM tasks", sl, nil, opts)
+	if err == nil {
+		t.Fatal("CompileSQLQueryString SUM(DISTINCT) error = nil, want unsupported aggregate rejection")
+	}
+	if err.Error() != "parse: unsupported SQL: only COUNT(DISTINCT column) aggregate projections supported" {
+		t.Fatalf("CompileSQLQueryString SUM(DISTINCT) error = %v, want unsupported aggregate rejection", err)
+	}
+}
+
 func TestExecuteCompiledSQLQueryNullableAggregateSemantics(t *testing.T) {
 	sl := newMockSchema("tasks", 1,
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},

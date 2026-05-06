@@ -86,9 +86,6 @@ func ValidateAggregate(pred Predicate, aggregate *Aggregate, s SchemaLookup) err
 }
 
 func validateCountAggregate(table TableID, aggregate *Aggregate, s SchemaLookup) error {
-	if aggregate.Distinct {
-		return fmt.Errorf("%w: live aggregate views do not support COUNT(DISTINCT ...)", ErrInvalidPredicate)
-	}
 	if aggregate.ResultColumn.Type != types.KindUint64 {
 		return fmt.Errorf("%w: COUNT aggregate result kind must be Uint64", ErrInvalidPredicate)
 	}
@@ -96,6 +93,9 @@ func validateCountAggregate(table TableID, aggregate *Aggregate, s SchemaLookup)
 		return fmt.Errorf("%w: COUNT aggregate result must be non-nullable", ErrInvalidPredicate)
 	}
 	if aggregate.Argument == nil {
+		if aggregate.Distinct {
+			return fmt.Errorf("%w: COUNT(DISTINCT ...) aggregate requires a column argument", ErrInvalidPredicate)
+		}
 		return nil
 	}
 	if err := validateAggregateArgument(table, "COUNT(column)", aggregate.Argument, s); err != nil {
@@ -204,7 +204,14 @@ func (m *Manager) evalAggregateQuery(qs *queryState, dv *DeltaView) ([]Subscript
 	var before types.Value
 	switch qs.aggregate.Func {
 	case AggregateCount:
-		before = countAggregateBeforeValue(dv, table, qs.predicate, qs.aggregate, after)
+		if qs.aggregate.Distinct {
+			before, err = aggregateRowsValue(projectedRowsBefore(dv, table), table, qs.predicate, qs.aggregate)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			before = countAggregateBeforeValue(dv, table, qs.predicate, qs.aggregate, after)
+		}
 	case AggregateSum:
 		before, err = aggregateRowsValue(projectedRowsBefore(dv, table), table, qs.predicate, qs.aggregate)
 		if err != nil {
@@ -244,26 +251,47 @@ func aggregateCommittedValue(ctx context.Context, view store.CommittedReadView, 
 	}
 	switch aggregate.Func {
 	case AggregateCount:
-		count, err := countAggregateCommittedRows(ctx, view, table, pred, aggregate)
+		if !aggregate.Distinct {
+			count, err := countAggregateCommittedRows(ctx, view, table, pred, aggregate)
+			if err != nil {
+				return types.Value{}, err
+			}
+			return types.NewUint64(count), nil
+		}
+		rows, err := aggregateCommittedRows(ctx, view, table)
 		if err != nil {
 			return types.Value{}, err
 		}
-		return types.NewUint64(count), nil
+		return aggregateRowsValue(rows, table, pred, aggregate)
 	case AggregateSum:
 		if view == nil {
 			return emptySumAggregateValue(aggregate)
 		}
-		var rows []types.ProductValue
-		for _, row := range view.TableScan(table) {
-			if err := ctx.Err(); err != nil {
-				return types.Value{}, err
-			}
-			rows = append(rows, row)
+		rows, err := aggregateCommittedRows(ctx, view, table)
+		if err != nil {
+			return types.Value{}, err
 		}
 		return aggregateRowsValue(rows, table, pred, aggregate)
 	default:
 		return types.Value{}, fmt.Errorf("aggregate %q not supported", aggregate.Func)
 	}
+}
+
+func aggregateCommittedRows(ctx context.Context, view store.CommittedReadView, table TableID) ([]types.ProductValue, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if view == nil {
+		return nil, nil
+	}
+	var rows []types.ProductValue
+	for _, row := range view.TableScan(table) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 func countAggregateCommittedRows(ctx context.Context, view store.CommittedReadView, table TableID, pred Predicate, aggregate *Aggregate) (uint64, error) {
@@ -320,6 +348,9 @@ func aggregateValueRow(value types.Value) types.ProductValue {
 func aggregateRowsValue(rows []types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) (types.Value, error) {
 	switch aggregate.Func {
 	case AggregateCount:
+		if aggregate.Distinct {
+			return types.NewUint64(distinctCountAggregateRows(rows, table, pred, aggregate)), nil
+		}
 		var count uint64
 		for _, row := range rows {
 			if aggregateRowContributes(row, table, pred, aggregate) {
@@ -344,6 +375,18 @@ func aggregateRowsValue(rows []types.ProductValue, table TableID, pred Predicate
 	}
 }
 
+func distinctCountAggregateRows(rows []types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) uint64 {
+	seen := newAggregateDistinctValueSet()
+	for _, row := range rows {
+		value, ok := aggregateArgumentValue(row, table, pred, aggregate)
+		if !ok || value.IsNull() {
+			continue
+		}
+		seen.add(value)
+	}
+	return seen.count()
+}
+
 func aggregateArgumentValue(row types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) (types.Value, bool) {
 	if aggregate == nil || aggregate.Argument == nil || !MatchRow(pred, table, row) {
 		return types.Value{}, false
@@ -357,6 +400,30 @@ func aggregateArgumentValue(row types.ProductValue, table TableID, pred Predicat
 		return types.Value{}, false
 	}
 	return row[idx], true
+}
+
+type aggregateDistinctValueSet struct {
+	buckets map[uint64][]types.Value
+	n       uint64
+}
+
+func newAggregateDistinctValueSet() *aggregateDistinctValueSet {
+	return &aggregateDistinctValueSet{buckets: make(map[uint64][]types.Value)}
+}
+
+func (s *aggregateDistinctValueSet) add(value types.Value) {
+	hash := value.Hash64()
+	for _, existing := range s.buckets[hash] {
+		if value.Equal(existing) {
+			return
+		}
+	}
+	s.buckets[hash] = append(s.buckets[hash], value)
+	s.n++
+}
+
+func (s *aggregateDistinctValueSet) count() uint64 {
+	return s.n
 }
 
 func emptySumAggregateValue(aggregate *Aggregate) (types.Value, error) {

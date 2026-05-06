@@ -711,6 +711,9 @@ func sumOneOffAggregate(ctx context.Context, view store.CommittedReadView, table
 	if aggregate == nil || aggregate.Argument == nil {
 		return types.Value{}, fmt.Errorf("SUM aggregate requires a column argument")
 	}
+	if aggregate.Distinct {
+		return types.Value{}, fmt.Errorf("SUM(DISTINCT ...) aggregate not supported")
+	}
 	argument := *aggregate.Argument
 	acc := newOneOffSumAccumulator(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
 	var addErr error

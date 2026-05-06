@@ -517,22 +517,15 @@ func TestModuleContractValidationAllowsSumAggregateViewSQL(t *testing.T) {
 	}
 }
 
-func TestModuleContractValidationRejectsCountDistinctAggregateViewSQL(t *testing.T) {
+func TestModuleContractValidationAllowsCountDistinctAggregateViewSQL(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Views = []ViewDescription{{
 		Name: "live_messages",
 		SQL:  "SELECT COUNT(DISTINCT body) AS n FROM messages",
 	}}
 
-	err := ValidateModuleContract(contract)
-	if err == nil {
-		t.Fatal("ValidateModuleContract accepted COUNT DISTINCT aggregate view SQL")
-	}
-	if !strings.Contains(err.Error(), "views.live_messages.sql") {
-		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
-	}
-	if !strings.Contains(err.Error(), "live aggregate views do not support COUNT(DISTINCT ...)") {
-		t.Fatalf("ValidateModuleContract error = %v, want COUNT DISTINCT aggregate unsupported text", err)
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected COUNT DISTINCT aggregate view SQL: %v", err)
 	}
 }
 
@@ -552,6 +545,25 @@ func TestModuleContractValidationRejectsSumStringAggregateViewSQL(t *testing.T) 
 	}
 	if !strings.Contains(err.Error(), "SUM aggregate only supports 64-bit integer and float columns") {
 		t.Fatalf("ValidateModuleContract error = %v, want SUM numeric-column unsupported text", err)
+	}
+}
+
+func TestModuleContractValidationRejectsSumDistinctAggregateViewSQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Views = []ViewDescription{{
+		Name: "live_messages",
+		SQL:  "SELECT SUM(DISTINCT id) AS total FROM messages",
+	}}
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted SUM DISTINCT aggregate view SQL")
+	}
+	if !strings.Contains(err.Error(), "views.live_messages.sql") {
+		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
+	}
+	if !strings.Contains(err.Error(), "only COUNT(DISTINCT column) aggregate projections supported") {
+		t.Fatalf("ValidateModuleContract error = %v, want SUM DISTINCT aggregate unsupported text", err)
 	}
 }
 
@@ -586,6 +598,25 @@ func TestModuleContractValidationRejectsJoinSumAggregateViewSQL(t *testing.T) {
 		t.Fatal("ValidateModuleContract accepted join SUM aggregate view SQL")
 	}
 	if !strings.Contains(err.Error(), "views.live_join_total.sql") {
+		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
+	}
+	if !strings.Contains(err.Error(), "live aggregate views require a single table") {
+		t.Fatalf("ValidateModuleContract error = %v, want single-table aggregate unsupported text", err)
+	}
+}
+
+func TestModuleContractValidationRejectsJoinCountDistinctAggregateViewSQL(t *testing.T) {
+	contract := buildJoinReadIndexedContract(t)
+	contract.Views = []ViewDescription{{
+		Name: "live_join_distinct_count",
+		SQL:  "SELECT COUNT(DISTINCT t.id) AS n FROM t JOIN s ON t.u32 = s.u32",
+	}}
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted join COUNT DISTINCT aggregate view SQL")
+	}
+	if !strings.Contains(err.Error(), "views.live_join_distinct_count.sql") {
 		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
 	}
 	if !strings.Contains(err.Error(), "live aggregate views require a single table") {

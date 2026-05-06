@@ -27,6 +27,12 @@ func countBodyAggregate() *Aggregate {
 	}
 }
 
+func countDistinctBodyAggregate() *Aggregate {
+	agg := countBodyAggregate()
+	agg.Distinct = true
+	return agg
+}
+
 func sumIDAggregate() *Aggregate {
 	return &Aggregate{
 		Func:         AggregateSum,
@@ -103,6 +109,39 @@ func TestRegisterSetSumAggregateReturnsOneInitialRow(t *testing.T) {
 	}
 }
 
+func TestRegisterSetCountDistinctAggregateReturnsOneInitialRow(t *testing.T) {
+	s := testSchema()
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewNull(types.KindString)},
+			{types.NewUint64(3), types.NewString("b")},
+			{types.NewUint64(4), types.NewString("a")},
+		},
+	})
+	mgr := NewManager(s, s)
+
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    22,
+		Predicates: []Predicate{AllRows{Table: 1}},
+		Aggregates: []*Aggregate{countDistinctBodyAggregate()},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet COUNT(DISTINCT) aggregate = %v", err)
+	}
+	if len(res.Update) != 1 {
+		t.Fatalf("initial update count = %d, want 1", len(res.Update))
+	}
+	update := res.Update[0]
+	if len(update.Columns) != 1 || update.Columns[0].Name != "n" || update.Columns[0].Type != types.KindUint64 {
+		t.Fatalf("aggregate columns = %#v, want n Uint64", update.Columns)
+	}
+	if len(update.Inserts) != 1 || update.Inserts[0][0].AsUint64() != 2 {
+		t.Fatalf("COUNT(DISTINCT) aggregate initial rows = %#v, want distinct count 2", update.Inserts)
+	}
+}
+
 func TestEvalAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 2)
@@ -169,6 +208,78 @@ func TestEvalAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) 
 	msg = <-inbox
 	if len(msg.Fanout[connID]) != 0 {
 		t.Fatalf("unchanged aggregate fanout = %+v, want no updates", msg.Fanout)
+	}
+}
+
+func TestEvalCountDistinctAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) {
+	s := testSchema()
+	inbox := make(chan FanOutMessage, 2)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	connID := types.ConnectionID{1}
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewNull(types.KindString)},
+			{types.NewUint64(3), types.NewString("b")},
+			{types.NewUint64(4), types.NewString("a")},
+		},
+	})
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    23,
+		Predicates: []Predicate{AllRows{Table: 1}},
+		Aggregates: []*Aggregate{countDistinctBodyAggregate()},
+	}, before); err != nil {
+		t.Fatalf("RegisterSet COUNT(DISTINCT) aggregate = %v", err)
+	}
+
+	afterChanged := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(3), types.NewString("b")},
+			{types.NewUint64(4), types.NewString("a")},
+			{types.NewUint64(5), types.NewString("c")},
+		},
+	})
+	changed := &store.Changeset{TxID: 1, Tables: map[TableID]*store.TableChangeset{
+		1: {
+			TableID: 1,
+			Inserts: []types.ProductValue{
+				{types.NewUint64(5), types.NewString("c")},
+			},
+			Deletes: []types.ProductValue{
+				{types.NewUint64(2), types.NewNull(types.KindString)},
+			},
+		},
+	}}
+	mgr.EvalAndBroadcast(types.TxID(1), changed, afterChanged, PostCommitMeta{})
+	msg := <-inbox
+	updates := msg.Fanout[connID]
+	if len(updates) != 1 {
+		t.Fatalf("COUNT(DISTINCT) aggregate fanout updates = %+v, want one update", updates)
+	}
+	update := updates[0]
+	if len(update.Deletes) != 1 || update.Deletes[0][0].AsUint64() != 2 {
+		t.Fatalf("COUNT(DISTINCT) aggregate deletes = %#v, want old distinct count 2", update.Deletes)
+	}
+	if len(update.Inserts) != 1 || update.Inserts[0][0].AsUint64() != 3 {
+		t.Fatalf("COUNT(DISTINCT) aggregate inserts = %#v, want new distinct count 3", update.Inserts)
+	}
+
+	afterUnchanged := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(3), types.NewString("b")},
+			{types.NewUint64(4), types.NewString("a")},
+			{types.NewUint64(5), types.NewString("c")},
+			{types.NewUint64(6), types.NewString("c")},
+		},
+	})
+	unchanged := simpleChangeset(1, []types.ProductValue{{types.NewUint64(6), types.NewString("c")}}, nil)
+	mgr.EvalAndBroadcast(types.TxID(2), unchanged, afterUnchanged, PostCommitMeta{})
+	msg = <-inbox
+	if len(msg.Fanout[connID]) != 0 {
+		t.Fatalf("unchanged COUNT(DISTINCT) aggregate fanout = %+v, want no updates", msg.Fanout)
 	}
 }
 
@@ -319,9 +430,14 @@ func TestValidateAggregateRejectsUnsupportedLiveShapes(t *testing.T) {
 		aggregate *Aggregate
 	}{
 		{
-			name:      "distinct",
+			name:      "count distinct star",
 			pred:      AllRows{Table: 1},
 			aggregate: &Aggregate{Func: AggregateCount, Distinct: true, ResultColumn: schema.ColumnSchema{Index: 0, Name: "n", Type: types.KindUint64}},
+		},
+		{
+			name:      "sum distinct",
+			pred:      AllRows{Table: 1},
+			aggregate: &Aggregate{Func: AggregateSum, Distinct: true, ResultColumn: schema.ColumnSchema{Index: 0, Name: "total", Type: types.KindUint64}, Argument: sumIDAggregate().Argument},
 		},
 		{
 			name:      "unsupported function",

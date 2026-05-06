@@ -576,20 +576,30 @@ func TestDeclaredViewRejectsSumStringAggregate(t *testing.T) {
 	}
 }
 
-func TestDeclaredViewRejectsCountDistinctAggregate(t *testing.T) {
+func TestDeclaredViewRejectsSumDistinctAggregate(t *testing.T) {
 	_, err := Build(validChatModule().
 		View(ViewDeclaration{
 			Name: "live_messages",
-			SQL:  "SELECT COUNT(DISTINCT body) AS n FROM messages",
+			SQL:  "SELECT SUM(DISTINCT id) AS total FROM messages",
 		}), Config{DataDir: t.TempDir()})
 	if err == nil {
-		t.Fatal("Build error = nil, want COUNT DISTINCT rejection for declared view")
+		t.Fatal("Build error = nil, want SUM DISTINCT rejection for declared view")
 	}
 	if !errors.Is(err, ErrInvalidDeclarationSQL) {
 		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
 	}
-	if !strings.Contains(err.Error(), "live aggregate views do not support COUNT(DISTINCT ...)") {
-		t.Fatalf("Build error = %v, want live COUNT DISTINCT rejection", err)
+	if !strings.Contains(err.Error(), "only COUNT(DISTINCT column) aggregate projections supported") {
+		t.Fatalf("Build error = %v, want live SUM DISTINCT rejection", err)
+	}
+}
+
+func TestDeclaredViewAllowsCountDistinctAggregate(t *testing.T) {
+	if _, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT COUNT(DISTINCT body) AS n FROM messages",
+		}), Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build rejected COUNT DISTINCT aggregate declared view: %v", err)
 	}
 }
 
@@ -874,6 +884,11 @@ func TestSubscribeViewAggregateCountInitialRows(t *testing.T) {
 			Permissions: PermissionMetadata{Required: []string{"scores:subscribe"}},
 		}).
 		View(ViewDeclaration{
+			Name:        "live_distinct_score_count",
+			SQL:         "SELECT COUNT(DISTINCT score) AS n FROM scores",
+			Permissions: PermissionMetadata{Required: []string{"scores:subscribe"}},
+		}).
+		View(ViewDeclaration{
 			Name:        "live_score_total",
 			SQL:         "SELECT SUM(score) AS total FROM scores",
 			Permissions: PermissionMetadata{Required: []string{"scores:subscribe"}},
@@ -909,7 +924,18 @@ func TestSubscribeViewAggregateCountInitialRows(t *testing.T) {
 		t.Fatalf("COUNT(score) initial rows = %#v, want non-null count 3", nonNullRows.InitialRows)
 	}
 
-	totalRows, err := rt.SubscribeView(context.Background(), "live_score_total", 20, WithDeclaredReadPermissions("scores:subscribe"))
+	distinctRows, err := rt.SubscribeView(context.Background(), "live_distinct_score_count", 20, WithDeclaredReadPermissions("scores:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView COUNT(DISTINCT score): %v", err)
+	}
+	if distinctRows.TableName != "scores" || len(distinctRows.Columns) != 1 || distinctRows.Columns[0].Name != "n" || distinctRows.Columns[0].Type != types.KindUint64 {
+		t.Fatalf("COUNT(DISTINCT score) subscription shape = table %q columns %#v, want scores/n Uint64", distinctRows.TableName, distinctRows.Columns)
+	}
+	if len(distinctRows.InitialRows) != 1 || distinctRows.InitialRows[0][0].AsUint64() != 2 {
+		t.Fatalf("COUNT(DISTINCT score) initial rows = %#v, want distinct count 2", distinctRows.InitialRows)
+	}
+
+	totalRows, err := rt.SubscribeView(context.Background(), "live_score_total", 21, WithDeclaredReadPermissions("scores:subscribe"))
 	if err != nil {
 		t.Fatalf("SubscribeView SUM(score): %v", err)
 	}
@@ -1287,6 +1313,37 @@ func TestDeclaredViewAggregateCountAppliesVisibilityAfterPermissionSucceeds(t *t
 	}
 	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 2 {
 		t.Fatalf("visible aggregate view rows = %#v, want count 2", sub.InitialRows)
+	}
+}
+
+func TestDeclaredViewAggregateCountDistinctAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x3d)
+	bob := visibilityRuntimeIdentity(0x3e)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        "live_visible_distinct_message_ids",
+			SQL:         "SELECT COUNT(DISTINCT id) AS n FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+	insertMessageWithBody(t, rt, 3, alice.Hex())
+
+	sub, err := rt.SubscribeView(context.Background(), "live_visible_distinct_message_ids", 32,
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:subscribe"),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView COUNT(DISTINCT) visibility: %v", err)
+	}
+	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 2 {
+		t.Fatalf("visible COUNT(DISTINCT) view rows = %#v, want distinct count 2", sub.InitialRows)
 	}
 }
 

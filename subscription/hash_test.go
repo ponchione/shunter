@@ -121,6 +121,8 @@ func TestQueryShapeHashIncludesAggregateMetadata(t *testing.T) {
 			Column: 1,
 		},
 	}
+	countDistinctBody := copyAggregate(countBody)
+	countDistinctBody.Distinct = true
 	renamed := &Aggregate{Func: AggregateCount, ResultColumn: schema.ColumnSchema{Index: 0, Name: "total", Type: types.KindUint64}}
 	sumID := &Aggregate{
 		Func:         AggregateSum,
@@ -137,6 +139,7 @@ func TestQueryShapeHashIncludesAggregateMetadata(t *testing.T) {
 	projectionHash := ComputeQueryPlanHash(pred, projection, nil)
 	countStarHash := ComputeQueryShapeHash(pred, nil, countStar, nil)
 	countBodyHash := ComputeQueryShapeHash(pred, nil, countBody, nil)
+	countDistinctBodyHash := ComputeQueryShapeHash(pred, nil, countDistinctBody, nil)
 	renamedHash := ComputeQueryShapeHash(pred, nil, renamed, nil)
 	sumHash := ComputeQueryShapeHash(pred, nil, sumID, nil)
 
@@ -148,6 +151,9 @@ func TestQueryShapeHashIncludesAggregateMetadata(t *testing.T) {
 	}
 	if countStarHash == countBodyHash {
 		t.Fatal("COUNT(*) and COUNT(column) should hash differently")
+	}
+	if countBodyHash == countDistinctBodyHash {
+		t.Fatal("COUNT(column) and COUNT(DISTINCT column) should hash differently")
 	}
 	if countStarHash == renamedHash {
 		t.Fatal("aggregate result column schema should affect query identity")
