@@ -114,7 +114,12 @@ func (r *RangeIndex) Remove(table TableID, col ColID, lower, upper Bound, hash Q
 // Lookup returns query hashes whose registered range contains value.
 func (r *RangeIndex) Lookup(table TableID, col ColID, value Value) []QueryHash {
 	var out []QueryHash
+	seen := make(map[QueryHash]struct{})
 	r.ForEachHash(table, col, value, func(h QueryHash) {
+		if _, ok := seen[h]; ok {
+			return
+		}
+		seen[h] = struct{}{}
 		out = append(out, h)
 	})
 	if out == nil {

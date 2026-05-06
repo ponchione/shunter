@@ -84,7 +84,12 @@ func (ji *JoinRangeEdgeIndex) Remove(edge JoinEdge, lower, upper Bound, hash Que
 // Lookup returns query hashes for registered ranges containing filterValue.
 func (ji *JoinRangeEdgeIndex) Lookup(edge JoinEdge, filterValue Value) []QueryHash {
 	var out []QueryHash
+	seen := make(map[QueryHash]struct{})
 	ji.ForEachHash(edge, filterValue, func(h QueryHash) {
+		if _, ok := seen[h]; ok {
+			return
+		}
+		seen[h] = struct{}{}
 		out = append(out, h)
 	})
 	if out == nil {
