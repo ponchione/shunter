@@ -47,6 +47,29 @@ func splitOrMultiHopFilterMultiJoinPredicate() MultiJoin {
 	return pred
 }
 
+func splitOrAllRemoteRangeMultiJoinPredicate() MultiJoin {
+	pred := multiJoinUnfilteredTestPredicate()
+	pred.Filter = And{
+		Left: AllRows{Table: 1},
+		Right: Or{
+			Left: ColRange{
+				Table:  2,
+				Column: 0,
+				Alias:  1,
+				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper:  Bound{Unbounded: true},
+			},
+			Right: ColNe{
+				Table:  3,
+				Column: 0,
+				Alias:  2,
+				Value:  types.NewUint64(7),
+			},
+		},
+	}
+	return pred
+}
+
 func splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate() MultiJoin {
 	return MultiJoin{
 		Relations: []MultiJoinRelation{
@@ -419,6 +442,163 @@ func TestCollectCandidatesMultiJoinSplitOrMultiHopEndpointPrunesMismatch(t *test
 	got = CollectCandidatesForTable(idx, 3, rightMismatch, committed, s)
 	if len(got) != 1 || got[0] != hash {
 		t.Fatalf("remote-filter right endpoint multi-hop candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestMultiJoinPlacementAndWrappedSplitOrAllRemoteRangeBranchesUseEdges(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrAllRemoteRangeMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	remoteRangeEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinRangeEdge.Lookup(remoteRangeEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("all-remote range branch edge = %v, want [%v]", got, hash)
+	}
+	remoteNeEdge := JoinEdge{LHSTable: 1, RHSTable: 3, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinRangeEdge.Lookup(remoteNeEdge, types.NewUint64(6)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("all-remote ColNe lower branch edge = %v, want [%v]", got, hash)
+	}
+	if got := idx.JoinRangeEdge.Lookup(remoteNeEdge, types.NewUint64(7)); len(got) != 0 {
+		t.Fatalf("all-remote ColNe rejected branch edge = %v, want empty", got)
+	}
+	if got := idx.JoinRangeEdge.Lookup(remoteNeEdge, types.NewUint64(8)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("all-remote ColNe upper branch edge = %v, want [%v]", got, hash)
+	}
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
+		t.Fatalf("endpoint-local value placement = %v, want empty for all-remote branches", got)
+	}
+	if len(idx.JoinEdge.exists) != 0 {
+		t.Fatalf("all-remote branch existence fallback = %+v, want none", idx.JoinEdge.exists)
+	}
+	for _, table := range []TableID{1, 2, 3} {
+		if got := idx.Table.Lookup(table); len(got) != 0 {
+			t.Fatalf("TableIndex[%d] = %v, want empty for all-remote split-OR placement", table, got)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestMultiJoinPlacementAndWrappedSplitOrAllRemoteRangeBranchesFallBackWhenPartiallyCovered(t *testing.T) {
+	s := newFakeSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(1, cols, 1)
+	s.addTable(2, cols, 1)
+	s.addTable(3, cols)
+	idx := NewPruningIndexes()
+	pred := splitOrAllRemoteRangeMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	coveredBranchEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinRangeEdge.Lookup(coveredBranchEdge, types.NewUint64(60)); len(got) != 0 {
+		t.Fatalf("partial all-remote range edge = %v, want empty when another branch is uncovered", got)
+	}
+	uncoveredBranchEdge := JoinEdge{LHSTable: 1, RHSTable: 3, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinRangeEdge.Lookup(uncoveredBranchEdge, types.NewUint64(8)); len(got) != 0 {
+		t.Fatalf("unindexed all-remote ColNe edge = %v, want empty", got)
+	}
+	conditionEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
+	if _, ok := idx.JoinEdge.exists[conditionEdge][hash]; !ok {
+		t.Fatalf("condition-edge fallback missing: %+v", idx.JoinEdge.exists)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex[1] = %v, want condition-edge fallback", got)
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestCollectCandidatesMultiJoinAndWrappedSplitOrAllRemoteRangeBranchesPruneMismatch(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrAllRemoteRangeMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	changed := []types.ProductValue{{types.NewUint64(100), types.NewUint64(20)}}
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(40), types.NewUint64(20)}},
+		3: {{types.NewUint64(7), types.NewUint64(20)}},
+	})
+	if got := CollectCandidatesForTable(idx, 1, changed, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched all-remote split-OR candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(60), types.NewUint64(20)}},
+		3: {{types.NewUint64(7), types.NewUint64(20)}},
+	})
+	got := CollectCandidatesForTable(idx, 1, changed, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("range all-remote split-OR candidates = %v, want [%v]", got, hash)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(40), types.NewUint64(20)}},
+		3: {{types.NewUint64(8), types.NewUint64(20)}},
+	})
+	got = CollectCandidatesForTable(idx, 1, changed, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("ColNe all-remote split-OR candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinAndWrappedSplitOrAllRemoteRangeBranchesUseSameTransactionRows(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrAllRemoteRangeMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	changed := []types.ProductValue{{types.NewUint64(100), types.NewUint64(20)}}
+	candidates := make(map[QueryHash]struct{})
+	add := func(h QueryHash) {
+		candidates[h] = struct{}{}
+	}
+
+	rejected := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(7), types.NewUint64(20)}}},
+		},
+	}
+	collectJoinFilterDeltaCandidates(idx, 1, changed, rejected, add)
+	if len(candidates) != 0 {
+		t.Fatalf("rejected same-tx all-remote split-OR candidates = %v, want empty", candidates)
+	}
+
+	rangeOverlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(60), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(7), types.NewUint64(20)}}},
+		},
+	}
+	clear(candidates)
+	collectJoinFilterDeltaCandidates(idx, 1, changed, rangeOverlap, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("range same-tx all-remote split-OR candidates = %v, want only %v", candidates, hash)
+	}
+
+	deleteOverlap := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Deletes: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+		},
+	}
+	clear(candidates)
+	collectJoinFilterDeltaCandidates(idx, 1, changed, deleteOverlap, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("ColNe delete same-tx all-remote split-OR candidates = %v, want only %v", candidates, hash)
 	}
 }
 
