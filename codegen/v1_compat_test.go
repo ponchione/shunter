@@ -245,8 +245,72 @@ func v1ContractJSONWithUnknownFields(t *testing.T, data []byte) []byte {
 			new: "  \"schema\": {\n    \"future_schema_field\": [\n      \"ignored\"\n    ],\n    \"version\": 3,",
 		},
 		{
+			old: "      {\n        \"name\": \"messages\",\n        \"columns\": [",
+			new: "      {\n        \"future_table_field\": \"ignored\",\n        \"name\": \"messages\",\n        \"columns\": [",
+		},
+		{
+			old: "          {\n            \"name\": \"id\",\n            \"type\": \"uint64\"\n          }",
+			new: "          {\n            \"future_column_field\": \"ignored\",\n            \"name\": \"id\",\n            \"type\": \"uint64\"\n          }",
+		},
+		{
+			old: "          {\n            \"name\": \"pk\",\n            \"columns\": [",
+			new: "          {\n            \"future_index_field\": \"ignored\",\n            \"name\": \"pk\",\n            \"columns\": [",
+		},
+		{
+			old: "        \"read_policy\": {\n          \"access\": \"permissioned\",",
+			new: "        \"read_policy\": {\n          \"future_read_policy_field\": \"ignored\",\n          \"access\": \"permissioned\",",
+		},
+		{
+			old: "      {\n        \"name\": \"create_message\",\n        \"lifecycle\": false\n      }",
+			new: "      {\n        \"future_reducer_field\": \"ignored\",\n        \"name\": \"create_message\",\n        \"lifecycle\": false\n      }",
+		},
+		{
 			old: "    {\n      \"name\": \"recent_messages\",\n      \"sql\": \"SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25\"\n    }",
 			new: "    {\n      \"future_query_field\": \"ignored\",\n      \"name\": \"recent_messages\",\n      \"sql\": \"SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25\"\n    }",
+		},
+		{
+			old: "    {\n      \"name\": \"live_message_projection\",\n      \"sql\": \"SELECT id, body AS text FROM messages\"\n    }",
+			new: "    {\n      \"future_view_field\": \"ignored\",\n      \"name\": \"live_message_projection\",\n      \"sql\": \"SELECT id, body AS text FROM messages\"\n    }",
+		},
+		{
+			old: "    {\n      \"name\": \"own_messages\",\n      \"sql\": \"SELECT * FROM messages WHERE sender = :sender\",",
+			new: "    {\n      \"future_visibility_filter_field\": \"ignored\",\n      \"name\": \"own_messages\",\n      \"sql\": \"SELECT * FROM messages WHERE sender = :sender\",",
+		},
+		{
+			old: "  \"permissions\": {\n    \"reducers\": [",
+			new: "  \"permissions\": {\n    \"future_permissions_field\": \"ignored\",\n    \"reducers\": [",
+		},
+		{
+			old: "      {\n        \"name\": \"create_message\",\n        \"required\": [",
+			new: "      {\n        \"future_permission_declaration_field\": \"ignored\",\n        \"name\": \"create_message\",\n        \"required\": [",
+		},
+		{
+			old: "  \"read_model\": {\n    \"declarations\": [",
+			new: "  \"read_model\": {\n    \"future_read_model_field\": \"ignored\",\n    \"declarations\": [",
+		},
+		{
+			old: "      {\n        \"surface\": \"query\",\n        \"name\": \"recent_messages\",",
+			new: "      {\n        \"future_read_model_declaration_field\": \"ignored\",\n        \"surface\": \"query\",\n        \"name\": \"recent_messages\",",
+		},
+		{
+			old: "  \"migrations\": {\n    \"module\": {",
+			new: "  \"migrations\": {\n    \"future_migrations_field\": \"ignored\",\n    \"module\": {",
+		},
+		{
+			old: "    \"module\": {\n      \"module_version\": \"v1.0.0\",",
+			new: "    \"module\": {\n      \"future_module_migration_field\": \"ignored\",\n      \"module_version\": \"v1.0.0\",",
+		},
+		{
+			old: "      {\n        \"surface\": \"table\",\n        \"name\": \"messages\",",
+			new: "      {\n        \"future_migration_declaration_field\": \"ignored\",\n        \"surface\": \"table\",\n        \"name\": \"messages\",",
+		},
+		{
+			old: "        \"metadata\": {\n          \"module_version\": \"\",",
+			new: "        \"metadata\": {\n          \"future_migration_metadata_field\": \"ignored\",\n          \"module_version\": \"\",",
+		},
+		{
+			old: "  \"codegen\": {\n    \"contract_format\": \"shunter.module_contract\",",
+			new: "  \"codegen\": {\n    \"future_codegen_field\": \"ignored\",\n    \"contract_format\": \"shunter.module_contract\",",
 		},
 	}
 
