@@ -73,6 +73,27 @@ func repeatedMultiJoinAllAliasesFilteredPredicate() MultiJoin {
 	}
 }
 
+func repeatedMultiJoinConditionPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 1, Alias: 1},
+			{Table: 2, Alias: 2},
+		},
+		Conditions: []MultiJoinCondition{
+			{
+				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 0, Alias: 0},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 2, Column: 1, Alias: 2},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 1, Table: 1, Column: 1, Alias: 1},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 2, Column: 1, Alias: 2},
+			},
+		},
+		ProjectedRelation: 0,
+	}
+}
+
 func countMultiJoinRIDAggregate() *Aggregate {
 	return &Aggregate{
 		Func:         AggregateCount,
@@ -331,6 +352,35 @@ func TestMultiJoinPlacementRepeatedTableUsesAliasLocalFiltersWhenEveryAliasConst
 	}
 }
 
+func TestMultiJoinPlacementRepeatedTableUsesJoinConditionEdgesWhenEveryAliasConstrained(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := repeatedMultiJoinConditionPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	tests := []JoinEdge{
+		{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 1},
+		{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1},
+		{LHSTable: 2, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1},
+	}
+	for _, edge := range tests {
+		if _, ok := idx.JoinEdge.exists[edge][hash]; !ok {
+			t.Fatalf("missing repeated multi-join condition edge %+v in %+v", edge, idx.JoinEdge.exists)
+		}
+	}
+	for _, table := range []TableID{1, 2} {
+		if got := idx.Table.Lookup(table); len(got) != 0 {
+			t.Fatalf("TableIndex[%d] = %v, want empty", table, got)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
 func TestMultiJoinPlacementRepeatedTableKeepsTableFallback(t *testing.T) {
 	idx := NewPruningIndexes()
 	pred := MultiJoin{
@@ -387,6 +437,77 @@ func TestCollectCandidatesMultiJoinRepeatedAliasFiltersPruneMismatch(t *testing.
 	got = CollectCandidatesForTable(idx, 1, aliasOneMatch, nil, nil)
 	if len(got) != 1 || got[0] != hash {
 		t.Fatalf("alias-1 repeated-alias candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinRepeatedConditionPrunesCommittedMismatch(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := repeatedMultiJoinConditionPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(100), types.NewUint64(20)}},
+	})
+
+	mismatch := []types.ProductValue{{types.NewUint64(7), types.NewUint64(8)}}
+	if got := CollectCandidatesForTable(idx, 1, mismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched repeated-condition candidates = %v, want empty", got)
+	}
+
+	aliasZeroMatch := []types.ProductValue{{types.NewUint64(20), types.NewUint64(8)}}
+	got := CollectCandidatesForTable(idx, 1, aliasZeroMatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("alias-0 repeated-condition candidates = %v, want [%v]", got, hash)
+	}
+
+	aliasOneMatch := []types.ProductValue{{types.NewUint64(7), types.NewUint64(20)}}
+	got = CollectCandidatesForTable(idx, 1, aliasOneMatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("alias-1 repeated-condition candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinRepeatedConditionUsesDeltaOppositeRows(t *testing.T) {
+	s := multiJoinTestSchema()
+	mgr := NewManager(s, s)
+	pred := repeatedMultiJoinConditionPredicate()
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{10},
+		QueryID:    100,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	committed := buildMockCommitted(s, nil)
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(77), types.NewUint64(88)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(2), types.NewUint64(99)}}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping repeated-condition same-tx candidates = %v, want empty", got)
+	}
+
+	overlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(77), types.NewUint64(88)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(2), types.NewUint64(77)}}},
+		},
+	}
+	got := mgr.collectCandidatesInto(overlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping repeated-condition same-tx candidates = %v, want only %v", got, hash)
 	}
 }
 

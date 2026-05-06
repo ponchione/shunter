@@ -141,7 +141,7 @@ func mutateMultiJoinPlacement(idx *PruningIndexes, pred MultiJoin, hash QueryHas
 		if tableCounts[t] > 1 && mutateAliasLocalFilterPlacement(idx, pred.Filter, pred.Relations, t, hash, add) {
 			continue
 		}
-		if placements := multiJoinExistenceEdgesFor(pred, t, tableCounts, resolver); len(placements) > 0 {
+		if placements := multiJoinExistenceEdgesFor(pred, t, resolver); len(placements) > 0 {
 			for _, placement := range placements {
 				mutateJoinExistencePlacement(idx, placement.edge, hash, add)
 			}
@@ -263,23 +263,35 @@ func requiredAliasLocalFilterPlacements(pred Predicate, table TableID, alias uin
 	return colFilterPlacements{}, false
 }
 
-func multiJoinExistenceEdgesFor(pred MultiJoin, t TableID, tableCounts map[TableID]int, resolver IndexResolver) []joinExistenceEdgePlacement {
-	if resolver == nil || tableCounts[t] != 1 {
+func multiJoinExistenceEdgesFor(pred MultiJoin, t TableID, resolver IndexResolver) []joinExistenceEdgePlacement {
+	if resolver == nil {
 		return nil
 	}
-	relation, ok := multiJoinRelationIndexForTable(pred.Relations, t)
-	if !ok {
+	relationIndexes := multiJoinRelationIndexesForTable(pred.Relations, t)
+	if len(relationIndexes) == 0 {
 		return nil
 	}
 	var placements []joinExistenceEdgePlacement
-	for _, condition := range pred.Conditions {
+	for _, relation := range relationIndexes {
+		relationPlacements := multiJoinExistenceEdgesForRelation(pred.Conditions, relation, resolver)
+		if len(relationPlacements) == 0 {
+			return nil
+		}
+		placements = append(placements, relationPlacements...)
+	}
+	return placements
+}
+
+func multiJoinExistenceEdgesForRelation(conditions []MultiJoinCondition, relation int, resolver IndexResolver) []joinExistenceEdgePlacement {
+	var placements []joinExistenceEdgePlacement
+	for _, condition := range conditions {
 		switch {
 		case condition.Left.Relation == relation:
-			if placement, ok := multiJoinExistenceEdgeForRefs(condition.Left, condition.Right, tableCounts, resolver); ok {
+			if placement, ok := multiJoinExistenceEdgeForRefs(condition.Left, condition.Right, resolver); ok {
 				placements = append(placements, placement)
 			}
 		case condition.Right.Relation == relation:
-			if placement, ok := multiJoinExistenceEdgeForRefs(condition.Right, condition.Left, tableCounts, resolver); ok {
+			if placement, ok := multiJoinExistenceEdgeForRefs(condition.Right, condition.Left, resolver); ok {
 				placements = append(placements, placement)
 			}
 		}
@@ -287,23 +299,18 @@ func multiJoinExistenceEdgesFor(pred MultiJoin, t TableID, tableCounts map[Table
 	return placements
 }
 
-func multiJoinRelationIndexForTable(relations []MultiJoinRelation, table TableID) (int, bool) {
-	match := -1
-	count := 0
+func multiJoinRelationIndexesForTable(relations []MultiJoinRelation, table TableID) []int {
+	var out []int
 	for i, rel := range relations {
 		if rel.Table != table {
 			continue
 		}
-		count++
-		match = i
+		out = append(out, i)
 	}
-	return match, count == 1
+	return out
 }
 
-func multiJoinExistenceEdgeForRefs(lhs, rhs MultiJoinColumnRef, tableCounts map[TableID]int, resolver IndexResolver) (joinExistenceEdgePlacement, bool) {
-	if tableCounts[lhs.Table] != 1 || tableCounts[rhs.Table] != 1 {
-		return joinExistenceEdgePlacement{}, false
-	}
+func multiJoinExistenceEdgeForRefs(lhs, rhs MultiJoinColumnRef, resolver IndexResolver) (joinExistenceEdgePlacement, bool) {
 	if _, ok := resolver.IndexIDForColumn(rhs.Table, rhs.Column); !ok {
 		return joinExistenceEdgePlacement{}, false
 	}
