@@ -78,8 +78,8 @@ Likely feature slices:
 
 - broader index-aware planning for remaining live subscription candidate
   pruning and complex live join paths
-- live-view expansion for cross/multi-way join aggregates after delta semantics
-  are explicit
+- live-view expansion for multi-way join aggregates after delta semantics are
+  explicit
 
 Completed slices:
 
@@ -114,6 +114,9 @@ Completed slices:
 - declared live views support two-table indexed join `COUNT(column)`,
   `COUNT(DISTINCT column)`, and `SUM(column)` aggregate rows, including
   aggregate-change deltas
+- declared live views support two-table cross-join `COUNT(*)`,
+  `COUNT(column)`, `COUNT(DISTINCT column)`, and `SUM(column)` aggregate rows,
+  including aggregate-change deltas
 - declared live views support single-table `ORDER BY` initial snapshots for
   table-shaped and projected views without positional delta semantics
 - declared live views support single-table `LIMIT` initial snapshots for

@@ -358,8 +358,8 @@ clients receive ongoing transaction updates through the protocol path.
 Executable views may use table-shaped multi-way joins such as `SELECT a.*`,
 column projections over the emitted relation, single-table `ORDER BY`, `LIMIT`,
 and `OFFSET` initial snapshots, single-table `COUNT`/`SUM` aggregates, and
-two-table indexed join `COUNT`/`SUM` aggregates. Live views still reject
-cross/multi-way join aggregates and aggregate aliases without `AS`.
+two-table indexed join or cross-join `COUNT`/`SUM` aggregates. Live views still
+reject multi-way join aggregates and aggregate aliases without `AS`.
 
 ## Serve Protocol Traffic
 

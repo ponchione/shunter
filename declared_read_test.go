@@ -395,6 +395,66 @@ func TestSubscribeViewJoinAggregateCountInitialRows(t *testing.T) {
 	}
 }
 
+func TestSubscribeViewCrossJoinAggregateInitialRows(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, NewModule("live_cross_join_count_reads").
+		SchemaVersion(1).
+		TableDef(joinReadIndexedTableDef("t")).
+		TableDef(joinReadIndexedTableDef("s")).
+		Reducer("seed_join_rows", seedJoinRowsReducer).
+		View(ViewDeclaration{
+			Name:        "live_cross_tuple_count",
+			SQL:         "SELECT COUNT(*) AS n FROM t JOIN s",
+			Permissions: PermissionMetadata{Required: []string{"joins:subscribe"}},
+		}).
+		View(ViewDeclaration{
+			Name:        "live_cross_s_id_count",
+			SQL:         "SELECT COUNT(s.id) AS n FROM t JOIN s",
+			Permissions: PermissionMetadata{Required: []string{"joins:subscribe"}},
+		}).
+		View(ViewDeclaration{
+			Name:        "live_cross_t_distinct_count",
+			SQL:         "SELECT COUNT(DISTINCT t.id) AS n FROM t JOIN s",
+			Permissions: PermissionMetadata{Required: []string{"joins:subscribe"}},
+		}).
+		View(ViewDeclaration{
+			Name:        "live_cross_s_id_total",
+			SQL:         "SELECT SUM(s.id) AS total FROM t JOIN s",
+			Permissions: PermissionMetadata{Required: []string{"joins:subscribe"}},
+		}))
+	defer rt.Close()
+
+	res, err := rt.CallReducer(context.Background(), "seed_join_rows", nil)
+	if err != nil {
+		t.Fatalf("seed reducer admission: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("seed reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+
+	for _, tt := range []struct {
+		name      string
+		queryID   uint32
+		column    string
+		wantValue uint64
+	}{
+		{name: "live_cross_tuple_count", queryID: 38, column: "n", wantValue: 9},
+		{name: "live_cross_s_id_count", queryID: 39, column: "n", wantValue: 9},
+		{name: "live_cross_t_distinct_count", queryID: 40, column: "n", wantValue: 3},
+		{name: "live_cross_s_id_total", queryID: 41, column: "total", wantValue: 309},
+	} {
+		sub, err := rt.SubscribeView(context.Background(), tt.name, tt.queryID, WithDeclaredReadPermissions("joins:subscribe"))
+		if err != nil {
+			t.Fatalf("SubscribeView %s: %v", tt.name, err)
+		}
+		if sub.TableName != "t" || len(sub.Columns) != 1 || sub.Columns[0].Name != tt.column || sub.Columns[0].Type != types.KindUint64 {
+			t.Fatalf("%s shape = table %q columns %#v, want t/%s Uint64", tt.name, sub.TableName, sub.Columns, tt.column)
+		}
+		if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != tt.wantValue {
+			t.Fatalf("%s initial rows = %#v, want %d", tt.name, sub.InitialRows, tt.wantValue)
+		}
+	}
+}
+
 func TestDeclaredQueryMultiWayJoinAggregateExecutes(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, NewModule("multi_join_reads").
 		SchemaVersion(1).
@@ -700,33 +760,48 @@ func TestDeclaredViewAllowsJoinAggregateVariants(t *testing.T) {
 	}
 }
 
-func TestDeclaredViewRejectsCrossAndMultiWayJoinAggregates(t *testing.T) {
-	for _, tt := range []struct {
-		name string
-		sql  string
-	}{
-		{name: "cross", sql: "SELECT COUNT(*) AS n FROM t JOIN s"},
-		{name: "multi-way", sql: "SELECT COUNT(*) AS n FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := Build(NewModule("live_join_count_rejected").
-				SchemaVersion(1).
-				TableDef(joinReadIndexedTableDef("t")).
-				TableDef(joinReadIndexedTableDef("s")).
-				View(ViewDeclaration{
-					Name: "live_join_count",
-					SQL:  tt.sql,
-				}), Config{DataDir: t.TempDir()})
-			if err == nil {
-				t.Fatal("Build error = nil, want unsupported join aggregate rejection")
-			}
-			if !errors.Is(err, ErrInvalidDeclarationSQL) {
-				t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
-			}
-			if !strings.Contains(err.Error(), "live aggregate views require a single table or two-table join") {
-				t.Fatalf("Build error = %v, want cross/multi aggregate rejection", err)
-			}
-		})
+func TestDeclaredViewAllowsCrossJoinAggregateVariants(t *testing.T) {
+	if _, err := Build(NewModule("live_cross_join_count").
+		SchemaVersion(1).
+		TableDef(joinReadIndexedTableDef("t")).
+		TableDef(joinReadIndexedTableDef("s")).
+		View(ViewDeclaration{
+			Name: "live_cross_join_count",
+			SQL:  "SELECT COUNT(*) AS n FROM t JOIN s",
+		}).
+		View(ViewDeclaration{
+			Name: "live_cross_join_column_count",
+			SQL:  "SELECT COUNT(s.id) AS n FROM t JOIN s",
+		}).
+		View(ViewDeclaration{
+			Name: "live_cross_join_distinct_count",
+			SQL:  "SELECT COUNT(DISTINCT t.id) AS n FROM t JOIN s",
+		}).
+		View(ViewDeclaration{
+			Name: "live_cross_join_total",
+			SQL:  "SELECT SUM(s.id) AS total FROM t JOIN s",
+		}), Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build rejected cross-join aggregate variant declared view: %v", err)
+	}
+}
+
+func TestDeclaredViewRejectsMultiWayJoinAggregates(t *testing.T) {
+	_, err := Build(NewModule("live_join_count_rejected").
+		SchemaVersion(1).
+		TableDef(joinReadIndexedTableDef("t")).
+		TableDef(joinReadIndexedTableDef("s")).
+		View(ViewDeclaration{
+			Name: "live_join_count",
+			SQL:  "SELECT COUNT(*) AS n FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32",
+		}), Config{DataDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Build error = nil, want unsupported multi-way join aggregate rejection")
+	}
+	if !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
+	}
+	if !strings.Contains(err.Error(), "live aggregate views require a single table or two-table join") {
+		t.Fatalf("Build error = %v, want multi-way aggregate rejection", err)
 	}
 }
 
@@ -1516,6 +1591,37 @@ func TestDeclaredViewJoinAggregateSumAppliesVisibilityAfterPermissionSucceeds(t 
 	}
 }
 
+func TestDeclaredViewCrossJoinAggregateSumAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x43)
+	bob := visibilityRuntimeIdentity(0x44)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        "live_visible_self_cross_join_total",
+			SQL:         "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+	insertMessageWithBody(t, rt, 3, alice.Hex())
+
+	sub, err := rt.SubscribeView(context.Background(), "live_visible_self_cross_join_total", 42,
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:subscribe"),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView cross-join SUM visibility: %v", err)
+	}
+	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 8 {
+		t.Fatalf("visible cross-join SUM view rows = %#v, want total 8", sub.InitialRows)
+	}
+}
+
 func TestDeclaredViewAggregateSumAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x3b)
 	bob := visibilityRuntimeIdentity(0x3c)
@@ -1653,6 +1759,30 @@ func TestDeclaredJoinAggregateViewMissingPermissionRejectsBeforeRegistration(t *
 	}
 	if len(sub.InitialRows) != 1 || sub.InitialRows[0][0].AsUint64() != 1 {
 		t.Fatalf("join aggregate initial rows after permission success = %#v, want total 1", sub.InitialRows)
+	}
+}
+
+func TestDeclaredCrossJoinAggregateViewMissingPermissionRejectsBeforeRegistration(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		View(ViewDeclaration{
+			Name:        "live_self_cross_join_total",
+			SQL:         "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, "hello")
+
+	_, err := rt.SubscribeView(context.Background(), "live_self_cross_join_total", 43, WithDeclaredReadPermissions("messages:read"))
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("SubscribeView cross-join aggregate missing permission error = %v, want ErrPermissionDenied", err)
+	}
+	sub, err := rt.SubscribeView(context.Background(), "live_self_cross_join_total", 43, WithDeclaredReadPermissions("messages:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView cross-join aggregate after rejected attempt with same query id: %v", err)
+	}
+	if len(sub.InitialRows) != 1 || sub.InitialRows[0][0].AsUint64() != 1 {
+		t.Fatalf("cross-join aggregate initial rows after permission success = %#v, want total 1", sub.InitialRows)
 	}
 }
 

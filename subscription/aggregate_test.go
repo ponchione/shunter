@@ -285,6 +285,58 @@ func TestRegisterSetJoinColumnAggregatesReturnInitialRows(t *testing.T) {
 	}
 }
 
+func TestRegisterSetCrossJoinAggregatesReturnInitialRows(t *testing.T) {
+	s := joinCountAggregateSchema()
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewString("b")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+			{types.NewUint64(101), types.NewUint64(1)},
+			{types.NewUint64(200), types.NewUint64(2)},
+		},
+	})
+	pred := CrossJoin{Left: joinLHS, Right: joinRHS}
+	tests := []struct {
+		name      string
+		queryID   uint32
+		aggregate *Aggregate
+		want      uint64
+		column    string
+	}{
+		{name: "count star", queryID: 29, aggregate: countStarAggregate(), want: 6, column: "n"},
+		{name: "count column", queryID: 30, aggregate: countJoinRHSIDAggregate(), want: 6, column: "n"},
+		{name: "count distinct", queryID: 31, aggregate: countDistinctJoinLHSIDAggregate(), want: 2, column: "n"},
+		{name: "sum", queryID: 32, aggregate: sumJoinRHSIDAggregate(), want: 802, column: "total"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := NewManager(s, s)
+			res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+				ConnID:     types.ConnectionID{1},
+				QueryID:    tt.queryID,
+				Predicates: []Predicate{pred},
+				Aggregates: []*Aggregate{tt.aggregate},
+			}, view)
+			if err != nil {
+				t.Fatalf("RegisterSet cross aggregate = %v", err)
+			}
+			if len(res.Update) != 1 {
+				t.Fatalf("initial update count = %d, want 1", len(res.Update))
+			}
+			update := res.Update[0]
+			if update.TableID != joinLHS || len(update.Columns) != 1 || update.Columns[0].Name != tt.column {
+				t.Fatalf("cross aggregate update shape = table %d columns %#v, want lhs/%s", update.TableID, update.Columns, tt.column)
+			}
+			if len(update.Inserts) != 1 || update.Inserts[0][0].AsUint64() != tt.want {
+				t.Fatalf("cross aggregate initial rows = %#v, want %d", update.Inserts, tt.want)
+			}
+		})
+	}
+}
+
 func TestEvalAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 2)
@@ -483,6 +535,84 @@ func TestEvalJoinColumnAggregatesEmitChanges(t *testing.T) {
 	requireAggregateDelta(t, second[26], 2, 3, "COUNT(s.id)")
 	requireAggregateDelta(t, second[27], 1, 2, "COUNT(DISTINCT t.id)")
 	requireAggregateDelta(t, second[28], 201, 401, "SUM(s.id)")
+}
+
+func TestEvalCrossJoinAggregatesEmitChanges(t *testing.T) {
+	s := joinCountAggregateSchema()
+	inbox := make(chan FanOutMessage, 2)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	connID := types.ConnectionID{1}
+	pred := CrossJoin{Left: joinLHS, Right: joinRHS}
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+			{types.NewUint64(200), types.NewUint64(2)},
+		},
+	})
+	for _, req := range []struct {
+		queryID   uint32
+		aggregate *Aggregate
+	}{
+		{29, countStarAggregate()},
+		{30, countJoinRHSIDAggregate()},
+		{31, countDistinctJoinLHSIDAggregate()},
+		{32, sumJoinRHSIDAggregate()},
+	} {
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID:     connID,
+			QueryID:    req.queryID,
+			Predicates: []Predicate{pred},
+			Aggregates: []*Aggregate{req.aggregate},
+		}, before); err != nil {
+			t.Fatalf("RegisterSet cross aggregate queryID=%d: %v", req.queryID, err)
+		}
+	}
+
+	afterRightInsert := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+			{types.NewUint64(200), types.NewUint64(2)},
+			{types.NewUint64(300), types.NewUint64(3)},
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), joinChangeset(
+		joinLHS, nil, nil,
+		joinRHS, []types.ProductValue{{types.NewUint64(300), types.NewUint64(3)}}, nil,
+	), afterRightInsert, PostCommitMeta{})
+	first := aggregateUpdatesByQueryID((<-inbox).Fanout[connID])
+	requireAggregateDelta(t, first[29], 2, 3, "COUNT(*)")
+	requireAggregateDelta(t, first[30], 2, 3, "COUNT(s.id)")
+	requireAggregateDelta(t, first[32], 300, 600, "SUM(s.id)")
+	if _, ok := first[31]; ok {
+		t.Fatalf("COUNT(DISTINCT t.id) changed on right-side cross insert: %+v", first[31])
+	}
+
+	afterLeftInsert := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewString("b")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+			{types.NewUint64(200), types.NewUint64(2)},
+			{types.NewUint64(300), types.NewUint64(3)},
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(2), joinChangeset(
+		joinLHS, []types.ProductValue{{types.NewUint64(2), types.NewString("b")}}, nil,
+		joinRHS, nil, nil,
+	), afterLeftInsert, PostCommitMeta{})
+	second := aggregateUpdatesByQueryID((<-inbox).Fanout[connID])
+	requireAggregateDelta(t, second[29], 3, 6, "COUNT(*)")
+	requireAggregateDelta(t, second[30], 3, 6, "COUNT(s.id)")
+	requireAggregateDelta(t, second[31], 1, 2, "COUNT(DISTINCT t.id)")
+	requireAggregateDelta(t, second[32], 600, 1200, "SUM(s.id)")
 }
 
 func aggregateUpdatesByQueryID(updates []SubscriptionUpdate) map[uint32]SubscriptionUpdate {
@@ -735,11 +865,6 @@ func TestValidateAggregateRejectsUnsupportedLiveShapes(t *testing.T) {
 			name:      "unsupported function",
 			pred:      AllRows{Table: 1},
 			aggregate: &Aggregate{Func: AggregateFunc("AVG"), ResultColumn: schema.ColumnSchema{Index: 0, Name: "avg", Type: types.KindUint64}},
-		},
-		{
-			name:      "cross join",
-			pred:      CrossJoin{Left: 1, Right: 2},
-			aggregate: countStarAggregate(),
 		},
 		{
 			name: "multi join",

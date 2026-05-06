@@ -341,6 +341,39 @@ func TestProtocolDeclaredViewJoinSumAggregateSendsInitialRowsAndDeltas(t *testin
 	}
 }
 
+func TestProtocolDeclaredViewCrossJoinSumAggregateSendsInitialRowsAndDeltas(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		View(ViewDeclaration{
+			Name:        "live_self_cross_join_total",
+			SQL:         "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, "hello")
+
+	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "cross-join-sum-aggregate-subscriber", "messages:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 42,
+		QueryID:   52,
+		Name:      "live_self_cross_join_total",
+	})
+	aggregateColumns := []schema.ColumnSchema{{Name: "total", Type: types.KindUint64}}
+	initial := requireDeclaredReadAppliedValues(t, client, 42, 52, "messages", aggregateColumns)
+	if len(initial) != 1 || len(initial[0]) != 1 || initial[0][0].AsUint64() != 1 {
+		t.Fatalf("cross-join SUM aggregate initial rows = %#v, want total 1", initial)
+	}
+
+	insertMessageWithBody(t, rt, 2, "world")
+	inserts, deletes := requireDeclaredReadDeltaValues(t, client, 52, "messages", aggregateColumns)
+	if len(deletes) != 1 || len(deletes[0]) != 1 || deletes[0][0].AsUint64() != 1 {
+		t.Fatalf("cross-join SUM aggregate delta deletes = %#v, want old total 1", deletes)
+	}
+	if len(inserts) != 1 || len(inserts[0]) != 1 || inserts[0][0].AsUint64() != 6 {
+		t.Fatalf("cross-join SUM aggregate delta inserts = %#v, want new total 6", inserts)
+	}
+}
+
 func TestProtocolDeclaredViewCountDistinctAggregateSendsInitialRowsAndDeltas(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).

@@ -62,8 +62,8 @@ func ValidateAggregate(pred Predicate, aggregate *Aggregate, s SchemaLookup) err
 	if join, ok := pred.(Join); ok {
 		return validateJoinAggregate(join, aggregate, s)
 	}
-	if _, ok := pred.(CrossJoin); ok {
-		return fmt.Errorf("%w: live aggregate views require a single table or two-table join", ErrInvalidPredicate)
+	if cross, ok := pred.(CrossJoin); ok {
+		return validateCrossJoinAggregate(cross, aggregate, s)
 	}
 	if _, ok := pred.(MultiJoin); ok {
 		return fmt.Errorf("%w: live aggregate views require a single table or two-table join", ErrInvalidPredicate)
@@ -106,6 +106,20 @@ func validateJoinAggregate(join Join, aggregate *Aggregate, s SchemaLookup) erro
 	}
 }
 
+func validateCrossJoinAggregate(cross CrossJoin, aggregate *Aggregate, s SchemaLookup) error {
+	if err := validateCrossJoin(cross, s, validateOptions{requireJoinIndex: true}); err != nil {
+		return err
+	}
+	switch aggregate.Func {
+	case AggregateCount:
+		return validateCrossJoinCountAggregate(cross, aggregate, s)
+	case AggregateSum:
+		return validateCrossJoinSumAggregate(cross, aggregate, s)
+	default:
+		return fmt.Errorf("%w: live aggregate views support COUNT and SUM only", ErrInvalidPredicate)
+	}
+}
+
 func validateJoinCountAggregate(join Join, aggregate *Aggregate, s SchemaLookup) error {
 	if err := validateCountResult(aggregate); err != nil {
 		return err
@@ -117,6 +131,19 @@ func validateJoinCountAggregate(join Join, aggregate *Aggregate, s SchemaLookup)
 		return nil
 	}
 	return validateJoinAggregateArgument(join, "COUNT(column)", aggregate.Argument, s)
+}
+
+func validateCrossJoinCountAggregate(cross CrossJoin, aggregate *Aggregate, s SchemaLookup) error {
+	if err := validateCountResult(aggregate); err != nil {
+		return err
+	}
+	if aggregate.Argument == nil {
+		if aggregate.Distinct {
+			return fmt.Errorf("%w: COUNT(DISTINCT ...) aggregate requires a column argument", ErrInvalidPredicate)
+		}
+		return nil
+	}
+	return validateCrossJoinAggregateArgument(cross, "COUNT(column)", aggregate.Argument, s)
 }
 
 func validateCountAggregate(table TableID, aggregate *Aggregate, s SchemaLookup) error {
@@ -191,6 +218,29 @@ func validateJoinSumAggregate(join Join, aggregate *Aggregate, s SchemaLookup) e
 	return nil
 }
 
+func validateCrossJoinSumAggregate(cross CrossJoin, aggregate *Aggregate, s SchemaLookup) error {
+	if aggregate.Distinct {
+		return fmt.Errorf("%w: live aggregate views do not support SUM(DISTINCT ...)", ErrInvalidPredicate)
+	}
+	if aggregate.Argument == nil {
+		return fmt.Errorf("%w: SUM aggregate requires a column argument", ErrInvalidPredicate)
+	}
+	if err := validateCrossJoinAggregateArgument(cross, "SUM(column)", aggregate.Argument, s); err != nil {
+		return err
+	}
+	wantKind, ok := sumAggregateResultKind(aggregate.Argument.Schema.Type)
+	if !ok {
+		return fmt.Errorf("%w: SUM aggregate only supports integer and float columns", ErrInvalidPredicate)
+	}
+	if aggregate.ResultColumn.Type != wantKind {
+		return fmt.Errorf("%w: SUM aggregate result kind must be %s", ErrInvalidPredicate, wantKind)
+	}
+	if aggregate.ResultColumn.Nullable != aggregate.Argument.Schema.Nullable {
+		return fmt.Errorf("%w: SUM aggregate result nullability must match source column", ErrInvalidPredicate)
+	}
+	return nil
+}
+
 func validateAggregateArgument(table TableID, label string, arg *AggregateColumn, s SchemaLookup) error {
 	if arg == nil {
 		return fmt.Errorf("%w: %s argument must not be nil", ErrInvalidPredicate, label)
@@ -235,15 +285,45 @@ func validateJoinAggregateArgument(join Join, label string, arg *AggregateColumn
 	return nil
 }
 
+func validateCrossJoinAggregateArgument(cross CrossJoin, label string, arg *AggregateColumn, s SchemaLookup) error {
+	if arg == nil {
+		return fmt.Errorf("%w: %s argument must not be nil", ErrInvalidPredicate, label)
+	}
+	if !aggregateArgumentMatchesCrossJoin(cross, arg) {
+		return fmt.Errorf("%w: %s argument must come from a joined relation", ErrInvalidPredicate, label)
+	}
+	if arg.Schema.Index != int(arg.Column) {
+		return fmt.Errorf("%w: aggregate argument schema index %d does not match source column %d", ErrInvalidPredicate, arg.Schema.Index, arg.Column)
+	}
+	if !s.TableExists(arg.Table) {
+		return fmt.Errorf("%w: aggregate argument table %d", ErrTableNotFound, arg.Table)
+	}
+	if !s.ColumnExists(arg.Table, arg.Column) {
+		return fmt.Errorf("%w: aggregate argument table %d column %d", ErrColumnNotFound, arg.Table, arg.Column)
+	}
+	if want := s.ColumnType(arg.Table, arg.Column); arg.Schema.Type != want {
+		return fmt.Errorf("%w: aggregate argument kind %s does not match column kind %s", ErrInvalidPredicate, arg.Schema.Type, want)
+	}
+	return nil
+}
+
 func aggregateArgumentMatchesJoin(join Join, arg *AggregateColumn) bool {
+	return aggregateArgumentMatchesRelationPair(join.Left, join.LeftAlias, join.Right, join.RightAlias, arg)
+}
+
+func aggregateArgumentMatchesCrossJoin(cross CrossJoin, arg *AggregateColumn) bool {
+	return aggregateArgumentMatchesRelationPair(cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, arg)
+}
+
+func aggregateArgumentMatchesRelationPair(left TableID, leftAlias uint8, right TableID, rightAlias uint8, arg *AggregateColumn) bool {
 	if arg == nil {
 		return false
 	}
-	if join.Left == join.Right {
-		return (arg.Table == join.Left && arg.Alias == join.LeftAlias) ||
-			(arg.Table == join.Right && arg.Alias == join.RightAlias)
+	if left == right {
+		return (arg.Table == left && arg.Alias == leftAlias) ||
+			(arg.Table == right && arg.Alias == rightAlias)
 	}
-	return arg.Table == join.Left || arg.Table == join.Right
+	return arg.Table == left || arg.Table == right
 }
 
 func aggregatePredicateTable(pred Predicate) (TableID, bool) {
@@ -299,12 +379,20 @@ func (m *Manager) evalAggregateQuery(qs *queryState, dv *DeltaView) ([]Subscript
 		return nil, err
 	}
 	var before types.Value
-	if join, ok := qs.predicate.(Join); ok {
+	switch pred := qs.predicate.(type) {
+	case Join:
+		join := pred
 		before, err = aggregateJoinRowsValue(projectedRowsBefore(dv, join.Left), projectedRowsBefore(dv, join.Right), join, qs.aggregate)
 		if err != nil {
 			return nil, err
 		}
-	} else {
+	case CrossJoin:
+		cross := pred
+		before, err = aggregateCrossJoinRowsValue(projectedRowsBefore(dv, cross.Left), projectedRowsBefore(dv, cross.Right), cross, qs.aggregate)
+		if err != nil {
+			return nil, err
+		}
+	default:
 		switch qs.aggregate.Func {
 		case AggregateCount:
 			if qs.aggregate.Distinct {
@@ -356,6 +444,9 @@ func aggregateCommittedValue(ctx context.Context, view store.CommittedReadView, 
 	if join, ok := pred.(Join); ok {
 		return aggregateJoinCommittedValue(ctx, view, join, aggregate, resolver)
 	}
+	if cross, ok := pred.(CrossJoin); ok {
+		return aggregateCrossJoinCommittedValue(ctx, view, cross, aggregate)
+	}
 	switch aggregate.Func {
 	case AggregateCount:
 		if !aggregate.Distinct {
@@ -395,6 +486,30 @@ func aggregateJoinCommittedValue(ctx context.Context, view store.CommittedReadVi
 	var addErr error
 	err = visitJoinCommittedPairs(ctx, view, join, resolver, func(leftRow, rightRow types.ProductValue) bool {
 		if addErr = acc.add(leftRow, rightRow, join); addErr != nil {
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		return types.Value{}, err
+	}
+	if addErr != nil {
+		return types.Value{}, addErr
+	}
+	return acc.value()
+}
+
+func aggregateCrossJoinCommittedValue(ctx context.Context, view store.CommittedReadView, cross CrossJoin, aggregate *Aggregate) (types.Value, error) {
+	acc, err := newJoinAggregateAccumulator(aggregate)
+	if err != nil {
+		return types.Value{}, err
+	}
+	if view == nil {
+		return acc.value()
+	}
+	var addErr error
+	err = visitCrossJoinCommittedPairs(ctx, view, cross, func(leftRow, rightRow types.ProductValue) bool {
+		if addErr = acc.addCross(leftRow, rightRow, cross); addErr != nil {
 			return false
 		}
 		return true
@@ -509,6 +624,32 @@ func visitJoinCommittedPairsWithProbeIndex(
 	return nil
 }
 
+func visitCrossJoinCommittedPairs(ctx context.Context, view store.CommittedReadView, cross CrossJoin, visit func(leftRow, rightRow types.ProductValue) bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if view == nil {
+		return nil
+	}
+	for _, leftRow := range view.TableScan(cross.Left) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		for _, rightRow := range view.TableScan(cross.Right) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if !MatchJoinPair(cross.Filter, cross.Left, cross.LeftAlias, leftRow, cross.Right, cross.RightAlias, rightRow) {
+				continue
+			}
+			if !visit(leftRow, rightRow) {
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
 type joinAggregateAccumulator struct {
 	aggregate *Aggregate
 	count     uint64
@@ -532,13 +673,21 @@ func newJoinAggregateAccumulator(aggregate *Aggregate) (*joinAggregateAccumulato
 }
 
 func (a *joinAggregateAccumulator) add(leftRow, rightRow types.ProductValue, join Join) error {
+	return a.addPair(leftRow, rightRow, join.Left, join.LeftAlias, join.Right, join.RightAlias)
+}
+
+func (a *joinAggregateAccumulator) addCross(leftRow, rightRow types.ProductValue, cross CrossJoin) error {
+	return a.addPair(leftRow, rightRow, cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias)
+}
+
+func (a *joinAggregateAccumulator) addPair(leftRow, rightRow types.ProductValue, left TableID, leftAlias uint8, right TableID, rightAlias uint8) error {
 	switch a.aggregate.Func {
 	case AggregateCount:
 		if a.aggregate.Argument == nil {
 			a.count++
 			return nil
 		}
-		value, ok := joinAggregateArgumentValue(leftRow, rightRow, join, a.aggregate.Argument)
+		value, ok := relationPairAggregateArgumentValue(leftRow, rightRow, left, leftAlias, right, rightAlias, a.aggregate.Argument)
 		if !ok || value.IsNull() {
 			return nil
 		}
@@ -549,7 +698,7 @@ func (a *joinAggregateAccumulator) add(leftRow, rightRow types.ProductValue, joi
 		a.count++
 		return nil
 	case AggregateSum:
-		value, ok := joinAggregateArgumentValue(leftRow, rightRow, join, a.aggregate.Argument)
+		value, ok := relationPairAggregateArgumentValue(leftRow, rightRow, left, leftAlias, right, rightAlias, a.aggregate.Argument)
 		if !ok {
 			return nil
 		}
@@ -599,24 +748,42 @@ func aggregateJoinRowsValue(leftRows, rightRows []types.ProductValue, join Join,
 	return acc.value()
 }
 
-func joinAggregateArgumentValue(leftRow, rightRow types.ProductValue, join Join, arg *AggregateColumn) (types.Value, bool) {
+func aggregateCrossJoinRowsValue(leftRows, rightRows []types.ProductValue, cross CrossJoin, aggregate *Aggregate) (types.Value, error) {
+	acc, err := newJoinAggregateAccumulator(aggregate)
+	if err != nil {
+		return types.Value{}, err
+	}
+	for _, leftRow := range leftRows {
+		for _, rightRow := range rightRows {
+			if !MatchJoinPair(cross.Filter, cross.Left, cross.LeftAlias, leftRow, cross.Right, cross.RightAlias, rightRow) {
+				continue
+			}
+			if err := acc.addCross(leftRow, rightRow, cross); err != nil {
+				return types.Value{}, err
+			}
+		}
+	}
+	return acc.value()
+}
+
+func relationPairAggregateArgumentValue(leftRow, rightRow types.ProductValue, left TableID, leftAlias uint8, right TableID, rightAlias uint8, arg *AggregateColumn) (types.Value, bool) {
 	if arg == nil {
 		return types.Value{}, false
 	}
 	var row types.ProductValue
 	switch {
-	case join.Left == join.Right:
+	case left == right:
 		switch {
-		case arg.Table == join.Left && arg.Alias == join.LeftAlias:
+		case arg.Table == left && arg.Alias == leftAlias:
 			row = leftRow
-		case arg.Table == join.Right && arg.Alias == join.RightAlias:
+		case arg.Table == right && arg.Alias == rightAlias:
 			row = rightRow
 		default:
 			return types.Value{}, false
 		}
-	case arg.Table == join.Left:
+	case arg.Table == left:
 		row = leftRow
-	case arg.Table == join.Right:
+	case arg.Table == right:
 		row = rightRow
 	default:
 		return types.Value{}, false
@@ -641,6 +808,8 @@ func countAggregateDeltaRows(rows []types.ProductValue, table TableID, pred Pred
 func aggregateEmittedTable(pred Predicate) (TableID, bool) {
 	switch p := pred.(type) {
 	case Join:
+		return p.ProjectedTable(), true
+	case CrossJoin:
 		return p.ProjectedTable(), true
 	default:
 		return aggregatePredicateTable(pred)

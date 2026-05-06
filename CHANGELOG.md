@@ -22,6 +22,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Declared live views now support single-table `COUNT(DISTINCT column)` aggregate rows, including visibility-filtered distinct counts and delete-old/insert-new deltas when the distinct count changes.
 - Declared live views now support two-table indexed join `COUNT(*)` aggregate rows, including visibility-filtered counts and delete-old/insert-new deltas when the count changes.
 - Declared live views now support two-table indexed join `COUNT(column)`, `COUNT(DISTINCT column)`, and `SUM(column)` aggregate rows, including visibility-filtered values and delete-old/insert-new deltas when aggregate values change.
+- Declared live views now support two-table cross-join `COUNT(*)`, `COUNT(column)`, `COUNT(DISTINCT column)`, and `SUM(column)` aggregate rows, including visibility-filtered values and delete-old/insert-new deltas when aggregate values change.
 - Declared live views now support single-table `ORDER BY` initial snapshots for table-shaped and projected views while retaining row-delta semantics after commits.
 - Declared live views now support single-table `LIMIT` initial snapshots for table-shaped and projected views while retaining row-delta semantics after commits.
 - Declared live views now support single-table `OFFSET` initial snapshots for table-shaped and projected views while retaining row-delta semantics after commits.
