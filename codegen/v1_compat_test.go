@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	shunter "github.com/ponchione/shunter"
+	"github.com/ponchione/shunter/schema"
 )
 
 func TestV1CompatibilityTypeScriptGolden(t *testing.T) {
@@ -126,6 +127,84 @@ func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
 		`liveMessageCount: { tables: ["messages"], tags: ["aggregate", "v1"] },`,
 	} {
 		assertContains(t, ts, want)
+	}
+}
+
+func TestV1CompatibilityTypeScriptCoversCurrentValueKindMappings(t *testing.T) {
+	columns := []struct {
+		name  string
+		field string
+		kind  schema.ValueKind
+		want  string
+	}{
+		{name: "bool_value", field: "boolValue", kind: schema.KindBool, want: "boolean"},
+		{name: "int8_value", field: "int8Value", kind: schema.KindInt8, want: "number"},
+		{name: "uint8_value", field: "uint8Value", kind: schema.KindUint8, want: "number"},
+		{name: "int16_value", field: "int16Value", kind: schema.KindInt16, want: "number"},
+		{name: "uint16_value", field: "uint16Value", kind: schema.KindUint16, want: "number"},
+		{name: "int32_value", field: "int32Value", kind: schema.KindInt32, want: "number"},
+		{name: "uint32_value", field: "uint32Value", kind: schema.KindUint32, want: "number"},
+		{name: "int64_value", field: "int64Value", kind: schema.KindInt64, want: "bigint"},
+		{name: "uint64_value", field: "uint64Value", kind: schema.KindUint64, want: "bigint"},
+		{name: "float32_value", field: "float32Value", kind: schema.KindFloat32, want: "number"},
+		{name: "float64_value", field: "float64Value", kind: schema.KindFloat64, want: "number"},
+		{name: "string_value", field: "stringValue", kind: schema.KindString, want: "string"},
+		{name: "bytes_value", field: "bytesValue", kind: schema.KindBytes, want: "Uint8Array"},
+		{name: "int128_value", field: "int128Value", kind: schema.KindInt128, want: "bigint"},
+		{name: "uint128_value", field: "uint128Value", kind: schema.KindUint128, want: "bigint"},
+		{name: "int256_value", field: "int256Value", kind: schema.KindInt256, want: "bigint"},
+		{name: "uint256_value", field: "uint256Value", kind: schema.KindUint256, want: "bigint"},
+		{name: "timestamp_value", field: "timestampValue", kind: schema.KindTimestamp, want: "bigint"},
+		{name: "array_string_value", field: "arrayStringValue", kind: schema.KindArrayString, want: "string[]"},
+		{name: "uuid_value", field: "uuidValue", kind: schema.KindUUID, want: "UUID"},
+		{name: "duration_value", field: "durationValue", kind: schema.KindDuration, want: "bigint"},
+		{name: "json_value", field: "jsonValue", kind: schema.KindJSON, want: "unknown"},
+	}
+
+	tableColumns := make([]schema.ColumnExport, 0, len(columns))
+	for _, column := range columns {
+		exportName := schema.ValueKindExportString(column.kind)
+		if exportName == "" {
+			t.Fatalf("ValueKindExportString(%d) returned an empty export name", column.kind)
+		}
+		tableColumns = append(tableColumns, schema.ColumnExport{Name: column.name, Type: exportName})
+	}
+
+	contract := contractFixture()
+	contract.Schema.Tables = []schema.TableExport{
+		{
+			Name:    "all_values",
+			Columns: tableColumns,
+			Indexes: []schema.IndexExport{
+				{Name: "all_values_pk", Columns: []string{"uint64_value"}, Unique: true, Primary: true},
+			},
+		},
+	}
+	contract.Schema.Reducers = []schema.ReducerExport{}
+	contract.Queries = []shunter.QueryDescription{}
+	contract.Views = []shunter.ViewDescription{}
+	contract.VisibilityFilters = []shunter.VisibilityFilterDescription{}
+	contract.Permissions = shunter.PermissionContract{
+		Reducers: []shunter.PermissionContractDeclaration{},
+		Queries:  []shunter.PermissionContractDeclaration{},
+		Views:    []shunter.PermissionContractDeclaration{},
+	}
+	contract.ReadModel = shunter.ReadModelContract{
+		Declarations: []shunter.ReadModelContractDeclaration{},
+	}
+	contract.Migrations = shunter.MigrationContract{
+		Declarations: []shunter.MigrationContractDeclaration{},
+	}
+
+	got, err := GenerateTypeScript(contract)
+	if err != nil {
+		t.Fatalf("GenerateTypeScript returned error: %v", err)
+	}
+	ts := string(got)
+
+	assertContains(t, ts, `export interface AllValuesRow {`)
+	for _, column := range columns {
+		assertContains(t, ts, `  `+column.field+`: `+column.want+`;`)
 	}
 }
 
