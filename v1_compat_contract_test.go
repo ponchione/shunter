@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -82,6 +83,65 @@ func TestV1CompatibilityModuleContractJSONIgnoresUnknownFields(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("unknown fields affected canonical contract JSON\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+func TestV1CompatibilityModuleContractRejectsVersionDrift(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "v1_module_contract.json"))
+	if err != nil {
+		t.Fatalf("read v1 contract fixture: %v", err)
+	}
+	var base ModuleContract
+	if err := json.Unmarshal(data, &base); err != nil {
+		t.Fatalf("Unmarshal v1 contract fixture: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*ModuleContract)
+		want   string
+	}{
+		{
+			name: "contract_version",
+			mutate: func(contract *ModuleContract) {
+				contract.ContractVersion = ModuleContractVersion + 1
+			},
+			want: "contract_version = 2, want 1",
+		},
+		{
+			name: "codegen_contract_version",
+			mutate: func(contract *ModuleContract) {
+				contract.Codegen.ContractVersion = ModuleContractVersion + 1
+			},
+			want: "codegen.contract_version = 2, want 1",
+		},
+		{
+			name: "codegen_contract_format",
+			mutate: func(contract *ModuleContract) {
+				contract.Codegen.ContractFormat = "future.module_contract"
+			},
+			want: `codegen.contract_format = "future.module_contract"`,
+		},
+		{
+			name: "codegen_default_snapshot_filename",
+			mutate: func(contract *ModuleContract) {
+				contract.Codegen.DefaultSnapshotFilename = "future.contract.json"
+			},
+			want: `codegen.default_snapshot_filename = "future.contract.json"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			contract := base
+			tc.mutate(&contract)
+			err := ValidateModuleContract(contract)
+			if err == nil {
+				t.Fatal("ValidateModuleContract returned nil error, want v1 known-field rejection")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ValidateModuleContract error = %v, want context %q", err, tc.want)
+			}
+		})
 	}
 }
 
