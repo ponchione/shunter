@@ -78,8 +78,8 @@ Likely feature slices:
 
 - broader index-aware planning for remaining live subscription candidate
   pruning and complex live join paths
-- live-view expansion for currently query-only shapes after delta semantics are
-  explicit
+- live-view expansion for remaining query-only shapes, especially multi-way
+  joins, after delta semantics are explicit
 
 Completed slices:
 

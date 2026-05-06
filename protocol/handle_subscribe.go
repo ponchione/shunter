@@ -526,7 +526,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			stmt.Join.RightAlias: {id: rightID, ts: rightTS},
 		}
 		if stmt.Join.HasOn && stmt.Predicate != nil {
-			if _, err := compileSQLPredicateForRelations(stmt.Predicate, relations, aliasTagForJoin(stmt, leftID == rightID), caller, allowProjection); err != nil {
+			if _, err := compileSQLPredicateForRelations(stmt.Predicate, relations, aliasTagForJoin(stmt, leftID == rightID), caller, true); err != nil {
 				return compiledSQLQuery{}, err
 			}
 		}
@@ -584,12 +584,13 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		}
 		if !stmt.Join.HasOn {
 			if stmt.Predicate != nil {
-				if !allowProjection {
-					return compiledSQLQuery{}, fmt.Errorf("cross join WHERE not supported")
-				}
 				join, err := compileCrossJoinWhereColumnEquality(stmt, leftID, leftTS, rightID, rightTS, caller)
 				if err != nil {
 					return compiledSQLQuery{}, err
+				}
+				if !allowProjection && !sl.HasIndex(join.Left, join.LeftCol) && !sl.HasIndex(join.Right, join.RightCol) {
+					//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
+					return compiledSQLQuery{}, fmt.Errorf("Subscriptions require indexes on join columns")
 				}
 				return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: join, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, Limit: limit, Offset: offset}, nil
 			}
@@ -607,7 +608,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		var filter subscription.Predicate
 		if stmt.Join.HasOn && normalizedPredicate != nil {
 			var err error
-			filter, err = compileSQLPredicateForRelations(normalizedPredicate, relations, aliasTag, caller, allowProjection)
+			filter, err = compileSQLPredicateForRelations(normalizedPredicate, relations, aliasTag, caller, true)
 			if err != nil {
 				return compiledSQLQuery{}, err
 			}

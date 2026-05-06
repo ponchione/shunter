@@ -347,22 +347,27 @@ func TestModuleContractValidationAllowsJoinWhereColumnComparisonQuerySQL(t *test
 	}
 }
 
-func TestModuleContractValidationRejectsJoinWhereColumnComparisonViewSQL(t *testing.T) {
-	contract := buildJoinReadContract(t)
+func TestModuleContractValidationAllowsJoinWhereColumnComparisonViewSQL(t *testing.T) {
+	contract := buildJoinReadIndexedContract(t)
 	contract.Views = []ViewDescription{{
 		Name: "live_matching_t_rows",
 		SQL:  "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE t.id = s.id",
 	}}
 
-	err := ValidateModuleContract(contract)
-	if err == nil {
-		t.Fatal("ValidateModuleContract accepted join WHERE column comparison view SQL")
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected join WHERE column comparison view SQL: %v", err)
 	}
-	if !strings.Contains(err.Error(), "views.live_matching_t_rows.sql") {
-		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
-	}
-	if !strings.Contains(err.Error(), "join WHERE column comparisons not supported") {
-		t.Fatalf("ValidateModuleContract error = %v, want column comparison unsupported text", err)
+}
+
+func TestModuleContractValidationAllowsCrossJoinWhereColumnEqualityViewSQL(t *testing.T) {
+	contract := buildJoinReadIndexedContract(t)
+	contract.Views = []ViewDescription{{
+		Name: "live_matching_t_rows",
+		SQL:  "SELECT t.* FROM t JOIN s WHERE t.u32 = s.u32",
+	}}
+
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected cross-join WHERE equality view SQL: %v", err)
 	}
 }
 
@@ -1044,6 +1049,18 @@ func buildJoinReadContract(t *testing.T) ModuleContract {
 		SchemaVersion(1).
 		TableDef(joinReadTableDef("t")).
 		TableDef(joinReadTableDef("s")), Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	return rt.ExportContract()
+}
+
+func buildJoinReadIndexedContract(t *testing.T) ModuleContract {
+	t.Helper()
+	rt, err := Build(NewModule("join_indexed_contract").
+		SchemaVersion(1).
+		TableDef(joinReadIndexedTableDef("t")).
+		TableDef(joinReadIndexedTableDef("s")), Config{DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}

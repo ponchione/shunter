@@ -270,6 +270,27 @@ func TestAuthReadAdmissionPrivateJoinPredicateDoesNotLeakShape(t *testing.T) {
 	requireOneOffAuthError(t, conn, "no such table: `secret`. If the table exists, it may be marked private.")
 }
 
+func TestAuthReadAdmissionPrivateJoinWhereColumnComparisonDoesNotRegister(t *testing.T) {
+	conn := strictReadAdmissionConn()
+	executor := &mockSubExecutor{}
+	sl := authReadJoinLookup(
+		schema.ReadPolicy{Access: schema.TableAccessPublic},
+		schema.ReadPolicy{Access: schema.TableAccessPrivate},
+	)
+	const sqlText = "SELECT visible.* FROM visible JOIN secret ON visible.id = secret.visible_id WHERE visible.id = secret.id"
+
+	handleSubscribeSingle(context.Background(), conn, &SubscribeSingleMsg{
+		RequestID:   17,
+		QueryID:     27,
+		QueryString: sqlText,
+	}, executor, sl)
+
+	requireSubscriptionError(t, conn, 17, 27, "no such table: `secret`. If the table exists, it may be marked private., executing: `"+sqlText+"`")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Fatal("executor registered an unauthorized join WHERE column-comparison subscription")
+	}
+}
+
 func TestAuthReadAdmissionPrivateMultiWayJoinTableRejected(t *testing.T) {
 	conn := strictReadAdmissionConn()
 	sl := authReadJoinLookup(

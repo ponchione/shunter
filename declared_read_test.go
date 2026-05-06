@@ -287,6 +287,42 @@ func TestDeclaredQueryJoinWhereColumnComparisonExecutes(t *testing.T) {
 	}
 }
 
+func TestDeclaredViewJoinWhereColumnComparisonSubscribes(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, NewModule("live_join_reads").
+		SchemaVersion(1).
+		TableDef(joinReadIndexedTableDef("t")).
+		TableDef(joinReadIndexedTableDef("s")).
+		Reducer("seed_join_rows", seedJoinRowsReducer).
+		View(ViewDeclaration{
+			Name:        "live_matching_t_rows",
+			SQL:         "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE t.id = s.id",
+			Permissions: PermissionMetadata{Required: []string{"joins:subscribe"}},
+		}))
+	defer rt.Close()
+
+	res, err := rt.CallReducer(context.Background(), "seed_join_rows", nil)
+	if err != nil {
+		t.Fatalf("seed reducer admission: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("seed reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+
+	sub, err := rt.SubscribeView(context.Background(), "live_matching_t_rows", 14, WithDeclaredReadPermissions("joins:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView: %v", err)
+	}
+	if sub.Name != "live_matching_t_rows" || sub.TableName != "t" {
+		t.Fatalf("subscription identity = (%q, %q), want live_matching_t_rows/t", sub.Name, sub.TableName)
+	}
+	if len(sub.InitialRows) != 2 {
+		t.Fatalf("initial rows = %#v, want two matching rows", sub.InitialRows)
+	}
+	if !rowsHaveUint64IDs(sub.InitialRows, 1, 3) {
+		t.Fatalf("initial rows = %#v, want t ids 1 and 3", sub.InitialRows)
+	}
+}
+
 func TestDeclaredQueryMultiWayJoinAggregateExecutes(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, NewModule("multi_join_reads").
 		SchemaVersion(1).
@@ -658,6 +694,36 @@ func TestDeclaredViewAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	}
 }
 
+func TestDeclaredViewJoinWhereColumnComparisonAppliesVisibility(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x25)
+	bob := visibilityRuntimeIdentity(0x26)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        "live_matching_messages",
+			SQL:         "SELECT a.* FROM messages AS a JOIN messages AS b ON a.id = b.id WHERE a.body = b.body",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+
+	sub, err := rt.SubscribeView(context.Background(), "live_matching_messages", 15,
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:subscribe"),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView: %v", err)
+	}
+	if len(sub.InitialRows) != 1 || sub.InitialRows[0][0].AsUint64() != 1 || sub.InitialRows[0][1].AsString() != alice.Hex() {
+		t.Fatalf("visible join view rows = %#v, want only caller row", sub.InitialRows)
+	}
+}
+
 func TestDeclaredReadMissingPermissionRejectsBeforeExecutionOrRegistration(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message", insertMessageReducer).
@@ -832,6 +898,33 @@ func joinReadTableDef(name string) schema.TableDefinition {
 			{Name: "u32", Type: types.KindUint64},
 		},
 	}
+}
+
+func joinReadIndexedTableDef(name string) schema.TableDefinition {
+	def := joinReadTableDef(name)
+	def.Indexes = []schema.IndexDefinition{{Name: "idx_" + name + "_u32", Columns: []string{"u32"}}}
+	return def
+}
+
+func rowsHaveUint64IDs(rows []types.ProductValue, ids ...uint64) bool {
+	if len(rows) != len(ids) {
+		return false
+	}
+	want := make(map[uint64]int, len(ids))
+	for _, id := range ids {
+		want[id]++
+	}
+	for _, row := range rows {
+		if len(row) == 0 {
+			return false
+		}
+		id := row[0].AsUint64()
+		if want[id] == 0 {
+			return false
+		}
+		want[id]--
+	}
+	return true
 }
 
 func nullableScoresTableDef() schema.TableDefinition {

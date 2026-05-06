@@ -2971,7 +2971,7 @@ func TestHandleOneOffQuery_CrossJoinWhereColumnEqualityReturnsProjectedRows(t *t
 
 	result := drainOneOff(t, conn)
 	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (one-off cross-join WHERE column equality is query-only accepted)", *result.Error)
+		t.Fatalf("Error = %q, want nil (cross-join WHERE column equality lowers to an indexed join)", *result.Error)
 	}
 	if len(result.Tables) != 1 {
 		t.Fatalf("Tables len = %d, want 1", len(result.Tables))
@@ -3048,7 +3048,7 @@ func TestHandleOneOffQuery_CrossJoinWhereColumnEqualityAndLiteralFilterReturnsPr
 
 	result := drainOneOff(t, conn)
 	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (one-off cross-join WHERE equality plus filter is query-only accepted)", *result.Error)
+		t.Fatalf("Error = %q, want nil (cross-join WHERE equality plus filter lowers to an indexed join)", *result.Error)
 	}
 	if len(result.Tables) != 1 {
 		t.Fatalf("Tables len = %d, want 1", len(result.Tables))

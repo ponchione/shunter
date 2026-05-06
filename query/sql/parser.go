@@ -96,7 +96,7 @@ type ComparisonPredicate struct {
 func (ComparisonPredicate) isPredicate() {}
 
 // ColumnComparisonPredicate compares two qualified columns. It is intentionally
-// limited to join-scoped query-only lowering for now.
+// limited to join-scoped lowering.
 type ColumnComparisonPredicate struct {
 	Left  ColumnRef
 	Op    string

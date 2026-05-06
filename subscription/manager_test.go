@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -12,6 +13,18 @@ func testSchema() *fakeSchema {
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
 	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindInt32}, 0)
 	return s
+}
+
+func requireProductRowsEqual(t *testing.T, got, want []types.ProductValue) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+	for i := range want {
+		if !got[i].Equal(want[i]) {
+			t.Fatalf("rows[%d] = %v, want %v (all rows: %v)", i, got[i], want[i], got)
+		}
+	}
 }
 
 // buildMockCommitted creates a committed view consistent with the fakeSchema
@@ -796,6 +809,79 @@ func TestRegisterJoinBootstrapProjectsRight(t *testing.T) {
 	}
 	if !got.Update[0].Inserts[0][1].Equal(types.NewString("rhs")) {
 		t.Fatalf("projected row = %v, want RHS-shaped", got.Update[0].Inserts[0])
+	}
+}
+
+func TestRegisterJoinColumnComparisonFilterInitialAndDeltas(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	initialRows := map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewUint64(10)},
+			{types.NewUint64(2), types.NewUint64(20)},
+			{types.NewUint64(3), types.NewUint64(20)},
+		},
+		2: {
+			{types.NewUint64(1), types.NewUint64(10)},
+			{types.NewUint64(99), types.NewUint64(20)},
+			{types.NewUint64(3), types.NewUint64(20)},
+		},
+	}
+	view := buildMockCommitted(s, initialRows)
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	p := Join{
+		Left:     1,
+		Right:    2,
+		LeftCol:  1,
+		RightCol: 1,
+		Filter: ColEqCol{
+			LeftTable:   1,
+			LeftColumn:  0,
+			RightTable:  2,
+			RightColumn: 0,
+		},
+	}
+	got, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 17, Predicates: []Predicate{p},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if len(got.Update) != 1 {
+		t.Fatalf("initial updates = %v, want one update", got.Update)
+	}
+	requireProductRowsEqual(t, got.Update[0].Inserts, []types.ProductValue{
+		{types.NewUint64(1), types.NewUint64(10)},
+		{types.NewUint64(3), types.NewUint64(20)},
+	})
+
+	inserted := []types.ProductValue{
+		{types.NewUint64(4), types.NewUint64(20)},
+		{types.NewUint64(99), types.NewUint64(20)},
+	}
+	cs := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {TableID: 1, TableName: "t", Inserts: inserted},
+		},
+	}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: append(append([]types.ProductValue(nil), initialRows[1]...), inserted...),
+		2: initialRows[2],
+	})
+	mgr.EvalAndBroadcast(types.TxID(2), cs, after, PostCommitMeta{})
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("delta updates = %+v, want one update", updates)
+	}
+	requireProductRowsEqual(t, updates[0].Inserts, []types.ProductValue{
+		{types.NewUint64(99), types.NewUint64(20)},
+	})
+	if len(updates[0].Deletes) != 0 {
+		t.Fatalf("delta deletes = %+v, want none", updates[0].Deletes)
 	}
 }
 

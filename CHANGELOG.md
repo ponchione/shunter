@@ -8,6 +8,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Live subscription join deltas now avoid per-row committed table rescans when only the changed side's join column is indexed.
 - Live subscription initial join snapshots now choose the lower-cost indexed scan side, including filter-reduced candidate sets, when both join columns are indexed.
 - Live subscription initial join snapshots now use indexed required equality/range filters to skip unnecessary join probes.
+- Live subscriptions and declared views now support two-table column-equality join filters, including inner-join `WHERE` column comparisons and cross-join `WHERE` equality lowering with literal filters.
 - Live subscription join candidate pruning now uses required range filters on the opposite joined side when that side's join column is indexed.
 - Live subscription cross-side OR pruning now treats not-equals filters as split range placements instead of falling back to broad join-existence candidates.
 - Live subscription delta candidate pruning now uses range predicates instead of table-wide fallback when the predicate shape is safely range-constrained.
@@ -16,7 +17,6 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - One-off and declared multi-way join queries now use matching single-column indexes when probing joined relations.
 - One-off and declared aggregate queries now ignore null inputs for `COUNT(column)`, `COUNT(DISTINCT column)`, and `SUM(nullable_numeric_column)`, returning `NULL` for nullable sums with no non-null inputs.
 - One-off and declared SQL queries now support query-only multi-way joins while live subscriptions continue to reject them.
-- One-off and declared SQL queries now support inner-join `WHERE` column equality filters while live subscription admission keeps rejecting them.
 - Generated TypeScript clients now include a table-name-to-row-type map and a table subscriber callback type derived from it.
 - Added canonical JSON column values with schema export, BSATN encoding, SQL literal coercion, store/index support, subscription hashing, contract validation, and TypeScript `unknown` codegen.
 - Added nullable column semantics across `types.Value`, schema reflection/export, schema-aware row BSATN, store validation/indexing, SQL `IS NULL` predicates, snapshots/recovery, contract diff, and TypeScript `T | null` codegen.

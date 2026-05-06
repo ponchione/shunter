@@ -992,7 +992,7 @@ func TestHandleSubscribeSingle_CrossJoinWhereFalseStillRejected(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	want := "cross join WHERE not supported, executing: `" + sqlText + "`"
+	want := "cross join WHERE only supports qualified column equality, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
@@ -1001,7 +1001,7 @@ func TestHandleSubscribeSingle_CrossJoinWhereFalseStillRejected(t *testing.T) {
 	}
 }
 
-func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityStillRejected(t *testing.T) {
+func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAccepted(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -1011,6 +1011,7 @@ func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityStillRejected(t *test
 			{Name: "id", Type: schema.KindUint32},
 			{Name: "u32", Type: schema.KindUint32},
 		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
 	})
 	b.TableDef(schema.TableDefinition{
 		Name: "s",
@@ -1033,21 +1034,24 @@ func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityStillRejected(t *test
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, registrySchemaLookup{reg: eng.Registry()})
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	requireNoSubscribeFrame(t, conn)
+	req := executor.getRegisterSetReq()
+	if req == nil || len(req.Predicates) != 1 {
+		t.Fatalf("RegisterSubscriptionSet request = %+v, want one predicate", req)
 	}
-	se := decoded.(SubscriptionError)
-	want := "cross join WHERE not supported, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
+	join, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("predicate = %T, want subscription.Join", req.Predicates[0])
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection", req)
+	if join.Left != 0 || join.Right != 1 || join.LeftCol != 1 || join.RightCol != 1 {
+		t.Fatalf("join = %+v, want t.u32 = s.u32", join)
+	}
+	if join.Filter != nil {
+		t.Fatalf("join filter = %+v, want nil", join.Filter)
 	}
 }
 
-func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAndLiteralFilterStillRejected(t *testing.T) {
+func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAndLiteralFilterAccepted(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -1057,6 +1061,7 @@ func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAndLiteralFilterStill
 			{Name: "id", Type: schema.KindUint32},
 			{Name: "u32", Type: schema.KindUint32},
 		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
 	})
 	b.TableDef(schema.TableDefinition{
 		Name: "s",
@@ -1080,17 +1085,21 @@ func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAndLiteralFilterStill
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, registrySchemaLookup{reg: eng.Registry()})
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	requireNoSubscribeFrame(t, conn)
+	req := executor.getRegisterSetReq()
+	if req == nil || len(req.Predicates) != 1 {
+		t.Fatalf("RegisterSubscriptionSet request = %+v, want one predicate", req)
 	}
-	se := decoded.(SubscriptionError)
-	want := "cross join WHERE not supported, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
+	join, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("predicate = %T, want subscription.Join", req.Predicates[0])
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection", req)
+	filter, ok := join.Filter.(subscription.ColEq)
+	if !ok {
+		t.Fatalf("join filter = %T, want subscription.ColEq", join.Filter)
+	}
+	if filter.Table != 1 || filter.Column != 2 || !filter.Value.Equal(types.NewBool(true)) {
+		t.Fatalf("join filter = %+v, want s.enabled = TRUE", filter)
 	}
 }
 

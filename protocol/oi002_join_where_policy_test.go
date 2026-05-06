@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -48,10 +49,10 @@ func TestHandleOneOffQuery_InnerJoinWhereColumnComparisonFiltersPairs(t *testing
 	})
 }
 
-func TestHandleSubscribeSingle_InnerJoinWhereColumnComparisonRejected(t *testing.T) {
+func TestHandleSubscribeSingle_InnerJoinWhereColumnComparisonAccepted(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
-	sl := exactIdentifierJoinSchema()
+	sl := exactIdentifierIndexedJoinSchema()
 
 	const sqlText = "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE t.id = s.id"
 	handleSubscribeSingle(context.Background(), conn, &SubscribeSingleMsg{
@@ -60,14 +61,28 @@ func TestHandleSubscribeSingle_InnerJoinWhereColumnComparisonRejected(t *testing
 		QueryString: sqlText,
 	}, executor, sl)
 
-	requireSubscriptionError(t, conn, 768, 769, "join WHERE column comparisons not supported, executing: `"+sqlText+"`")
-	requireNoSubscriptionRegistration(t, executor)
+	requireNoSubscribeFrame(t, conn)
+	req := executor.getRegisterSetReq()
+	if req == nil || len(req.Predicates) != 1 {
+		t.Fatalf("RegisterSubscriptionSet request = %+v, want one predicate", req)
+	}
+	join, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("predicate = %T, want subscription.Join", req.Predicates[0])
+	}
+	filter, ok := join.Filter.(subscription.ColEqCol)
+	if !ok {
+		t.Fatalf("join filter = %T, want subscription.ColEqCol", join.Filter)
+	}
+	if filter.LeftTable != 1 || filter.LeftColumn != 0 || filter.RightTable != 2 || filter.RightColumn != 0 {
+		t.Fatalf("join filter = %+v, want t.id = s.id", filter)
+	}
 }
 
-func TestHandleSubscribeMulti_InnerJoinWhereColumnComparisonRejected(t *testing.T) {
+func TestHandleSubscribeMulti_InnerJoinWhereColumnComparisonAccepted(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
-	sl := exactIdentifierJoinSchema()
+	sl := exactIdentifierIndexedJoinSchema()
 
 	const sqlText = "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE t.id = s.id"
 	handleSubscribeMulti(context.Background(), conn, &SubscribeMultiMsg{
@@ -76,7 +91,33 @@ func TestHandleSubscribeMulti_InnerJoinWhereColumnComparisonRejected(t *testing.
 		QueryStrings: []string{"SELECT * FROM t WHERE id = 1", sqlText},
 	}, executor, sl)
 
-	requireSubscriptionError(t, conn, 770, 771, "join WHERE column comparisons not supported, executing: `"+sqlText+"`")
+	requireNoSubscribeFrame(t, conn)
+	req := executor.getRegisterSetReq()
+	if req == nil || len(req.Predicates) != 2 {
+		t.Fatalf("RegisterSubscriptionSet request = %+v, want two predicates", req)
+	}
+	join, ok := req.Predicates[1].(subscription.Join)
+	if !ok {
+		t.Fatalf("predicate[1] = %T, want subscription.Join", req.Predicates[1])
+	}
+	if _, ok := join.Filter.(subscription.ColEqCol); !ok {
+		t.Fatalf("join filter = %T, want subscription.ColEqCol", join.Filter)
+	}
+}
+
+func TestHandleSubscribeSingle_InnerJoinWhereColumnComparisonRequiresJoinIndex(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := exactIdentifierJoinSchema()
+
+	const sqlText = "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE t.id = s.id"
+	handleSubscribeSingle(context.Background(), conn, &SubscribeSingleMsg{
+		RequestID:   772,
+		QueryID:     773,
+		QueryString: sqlText,
+	}, executor, sl)
+
+	requireSubscriptionError(t, conn, 772, 773, "Subscriptions require indexes on join columns, executing: `"+sqlText+"`")
 	requireNoSubscriptionRegistration(t, executor)
 }
 

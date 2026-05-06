@@ -208,6 +208,33 @@ func TestTypeScriptGeneratorExportsJoinWhereColumnComparisonDeclaredQuerySQL(t *
 	assertContains(t, ts, `return runDeclaredQuery("matching_messages");`)
 }
 
+func TestTypeScriptGeneratorExportsJoinWhereColumnComparisonDeclaredViewSQL(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables = append(contract.Schema.Tables, schema.TableExport{
+		Name: "s",
+		Columns: []schema.ColumnExport{
+			{Name: "id", Type: "uint64"},
+			{Name: "u32", Type: "uint64"},
+		},
+		Indexes: []schema.IndexExport{{Name: "idx_s_u32", Columns: []string{"u32"}}},
+	})
+	contract.Views = append(contract.Views, shunter.ViewDescription{
+		Name: "live_matching_messages",
+		SQL:  "SELECT messages.* FROM messages JOIN s ON messages.id = s.u32 WHERE messages.id = s.id",
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `liveMatchingMessages: "live_matching_messages",`)
+	assertContains(t, ts, `liveMatchingMessages: "SELECT messages.* FROM messages JOIN s ON messages.id = s.u32 WHERE messages.id = s.id",`)
+	assertContains(t, ts, `export function subscribeLiveMatchingMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_matching_messages");`)
+}
+
 func TestTypeScriptGeneratorExportsMultiJoinDeclaredQuerySQL(t *testing.T) {
 	contract := contractFixture()
 	contract.Schema.Tables = append(contract.Schema.Tables,
