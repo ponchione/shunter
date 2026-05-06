@@ -3,6 +3,7 @@ package subscription
 import (
 	"testing"
 
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -67,6 +68,82 @@ func TestPlaceJoinSplitOrColumnEqualityBranchUsesExistenceEdge(t *testing.T) {
 	}
 }
 
+func TestCollectCandidatesJoinSplitOrColumnEqualityBranchUsesSameTransactionRows(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindString,
+		2: types.KindUint64,
+	}, 0, 2)
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindString,
+		2: types.KindUint64,
+	}, 0, 2)
+	mgr := NewManager(s, s)
+	pred := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 0,
+		Filter: Or{
+			Left: ColEq{Table: 1, Column: 1, Value: types.NewString("active")},
+			Right: ColEqCol{
+				LeftTable:   1,
+				LeftColumn:  2,
+				RightTable:  2,
+				RightColumn: 2,
+			},
+		},
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{18},
+		QueryID:    180,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	committed := buildMockCommitted(s, nil)
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("inactive"), types.NewUint64(7)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("other"), types.NewUint64(8)}}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping split-OR column-equality same-tx candidates = %v, want empty", got)
+	}
+
+	overlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("inactive"), types.NewUint64(7)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("other"), types.NewUint64(7)}}},
+		},
+	}
+	got := mgr.collectCandidatesInto(overlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping split-OR column-equality same-tx candidates = %v, want only %v", got, hash)
+	}
+
+	deleteOverlap := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Deletes: []types.ProductValue{{types.NewUint64(1), types.NewString("inactive"), types.NewUint64(7)}}},
+			2: {Deletes: []types.ProductValue{{types.NewUint64(2), types.NewString("other"), types.NewUint64(7)}}},
+		},
+	}
+	got = mgr.collectCandidatesInto(deleteOverlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping split-OR column-equality same-tx delete candidates = %v, want only %v", got, hash)
+	}
+}
+
 func TestMultiJoinPlacementSplitOrColumnEqualityBranchUsesExistenceEdge(t *testing.T) {
 	s := dualIndexedMultiJoinTestSchema()
 	idx := NewPruningIndexes()
@@ -118,5 +195,71 @@ func TestMultiJoinPlacementSplitOrColumnEqualityBranchUsesExistenceEdge(t *testi
 	removeSubscriptionForResolver(idx, pred, hash, s)
 	if !pruningIndexesEmpty(idx) {
 		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrColumnEqualityBranchUsesSameTransactionRows(t *testing.T) {
+	s := dualIndexedMultiJoinTestSchema()
+	mgr := NewManager(s, s)
+	pred := multiJoinUnfilteredTestPredicate()
+	pred.Filter = Or{
+		Left: ColEq{Table: 1, Column: 0, Alias: 0, Value: types.NewUint64(7)},
+		Right: ColEqCol{
+			LeftTable:   2,
+			LeftColumn:  0,
+			LeftAlias:   1,
+			RightTable:  3,
+			RightColumn: 0,
+			RightAlias:  2,
+		},
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{19},
+		QueryID:    190,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	committed := buildMockCommitted(s, nil)
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(9), types.NewUint64(99)}}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping multi-way split-OR column-equality same-tx candidates = %v, want empty", got)
+	}
+
+	overlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(99)}}},
+		},
+	}
+	got := mgr.collectCandidatesInto(overlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping multi-way split-OR column-equality same-tx candidates = %v, want only %v", got, hash)
+	}
+
+	deleteOverlap := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Deletes: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			3: {Deletes: []types.ProductValue{{types.NewUint64(8), types.NewUint64(99)}}},
+		},
+	}
+	got = mgr.collectCandidatesInto(deleteOverlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping multi-way split-OR column-equality same-tx delete candidates = %v, want only %v", got, hash)
 	}
 }

@@ -3,6 +3,7 @@ package subscription
 import (
 	"testing"
 
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -207,6 +208,104 @@ func TestCollectCandidatesMultiJoinSplitOrMultiHopEndpointPrunesMismatch(t *test
 	got = CollectCandidatesForTable(idx, 3, rightMismatch, committed, s)
 	if len(got) != 1 || got[0] != hash {
 		t.Fatalf("remote-filter right endpoint multi-hop candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrSameTransactionFilterEdges(t *testing.T) {
+	s := multiJoinTestSchema()
+	mgr := NewManager(s, s)
+	pred := splitOrLocalFilterMultiJoinPredicate()
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{16},
+		QueryID:    160,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	committed := buildMockCommitted(s, nil)
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(20)}}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping split-OR same-tx filter-edge candidates = %v, want empty", got)
+	}
+
+	overlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(60), types.NewUint64(20)}}},
+		},
+	}
+	got := mgr.collectCandidatesInto(overlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping split-OR same-tx filter-edge candidates = %v, want only %v", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrSameTransactionTransitiveFilterEdges(t *testing.T) {
+	s := multiJoinTestSchema()
+	mgr := NewManager(s, s)
+	pred := splitOrMultiHopFilterMultiJoinPredicate()
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{17},
+		QueryID:    170,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	committed := buildMockCommitted(s, nil)
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(20)}}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping transitive split-OR same-tx candidates = %v, want empty", got)
+	}
+
+	overlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(60), types.NewUint64(20)}}},
+		},
+	}
+	got := mgr.collectCandidatesInto(overlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping transitive split-OR same-tx candidates = %v, want only %v", got, hash)
+	}
+
+	deleteOverlap := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Deletes: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			3: {Deletes: []types.ProductValue{{types.NewUint64(60), types.NewUint64(20)}}},
+		},
+	}
+	got = mgr.collectCandidatesInto(deleteOverlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping transitive split-OR same-tx delete candidates = %v, want only %v", got, hash)
 	}
 }
 

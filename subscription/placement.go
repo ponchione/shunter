@@ -694,21 +694,6 @@ func multiJoinConditionRefsFromRelation(condition MultiJoinCondition, relation i
 	}
 }
 
-func multiJoinConditionRefsForDirection(
-	condition MultiJoinCondition,
-	lhsRelation int,
-	rhsRelation int,
-) (MultiJoinColumnRef, MultiJoinColumnRef, bool) {
-	switch {
-	case condition.Left.Relation == lhsRelation && condition.Right.Relation == rhsRelation:
-		return condition.Left, condition.Right, true
-	case condition.Right.Relation == lhsRelation && condition.Left.Relation == rhsRelation:
-		return condition.Right, condition.Left, true
-	default:
-		return MultiJoinColumnRef{}, MultiJoinColumnRef{}, false
-	}
-}
-
 func multiJoinFilterRelationIndex(relations []MultiJoinRelation, table TableID, alias uint8) (int, bool) {
 	match := -1
 	tableCount := 0
