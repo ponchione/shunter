@@ -330,6 +330,25 @@ func TestTypeScriptGeneratorExportsAggregateDeclaredViewSQL(t *testing.T) {
 	assertContains(t, ts, `return subscribeDeclaredView("live_message_count");`)
 }
 
+func TestTypeScriptGeneratorExportsJoinAggregateDeclaredViewSQL(t *testing.T) {
+	contract := contractFixture()
+	contract.Views = append(contract.Views, shunter.ViewDescription{
+		Name: "live_self_join_count",
+		SQL:  "SELECT COUNT(*) AS n FROM messages AS a JOIN messages AS b ON a.id = b.id",
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `liveSelfJoinCount: "live_self_join_count",`)
+	assertContains(t, ts, `liveSelfJoinCount: "SELECT COUNT(*) AS n FROM messages AS a JOIN messages AS b ON a.id = b.id",`)
+	assertContains(t, ts, `export function subscribeLiveSelfJoinCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_self_join_count");`)
+}
+
 func TestTypeScriptGeneratorExportsCountDistinctAggregateDeclaredViewSQL(t *testing.T) {
 	contract := contractFixture()
 	contract.Views = append(contract.Views, shunter.ViewDescription{

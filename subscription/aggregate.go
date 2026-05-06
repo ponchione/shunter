@@ -56,14 +56,14 @@ func ValidateAggregate(pred Predicate, aggregate *Aggregate, s SchemaLookup) err
 	if s == nil {
 		return fmt.Errorf("%w: aggregate schema lookup is nil", ErrInvalidPredicate)
 	}
-	if _, ok := pred.(Join); ok {
-		return fmt.Errorf("%w: live aggregate views require a single table", ErrInvalidPredicate)
+	if join, ok := pred.(Join); ok {
+		return validateJoinCountStarAggregate(join, aggregate, s)
 	}
 	if _, ok := pred.(CrossJoin); ok {
-		return fmt.Errorf("%w: live aggregate views require a single table", ErrInvalidPredicate)
+		return fmt.Errorf("%w: live aggregate views require a single table or two-table join", ErrInvalidPredicate)
 	}
 	if _, ok := pred.(MultiJoin); ok {
-		return fmt.Errorf("%w: live aggregate views require a single table", ErrInvalidPredicate)
+		return fmt.Errorf("%w: live aggregate views require a single table or two-table join", ErrInvalidPredicate)
 	}
 	table, ok := aggregatePredicateTable(pred)
 	if !ok {
@@ -83,6 +83,16 @@ func ValidateAggregate(pred Predicate, aggregate *Aggregate, s SchemaLookup) err
 	default:
 		return fmt.Errorf("%w: live aggregate views support COUNT and SUM only", ErrInvalidPredicate)
 	}
+}
+
+func validateJoinCountStarAggregate(join Join, aggregate *Aggregate, s SchemaLookup) error {
+	if aggregate.Func != AggregateCount || aggregate.Argument != nil || aggregate.Distinct {
+		return fmt.Errorf("%w: live join aggregate views support COUNT(*) only", ErrInvalidPredicate)
+	}
+	if err := validateJoin(join, s, validateOptions{requireJoinIndex: true}); err != nil {
+		return err
+	}
+	return validateCountAggregate(join.ProjectedTable(), aggregate, s)
 }
 
 func validateCountAggregate(table TableID, aggregate *Aggregate, s SchemaLookup) error {
@@ -174,11 +184,11 @@ func (m *Manager) initialAggregateUpdates(ctx context.Context, pred Predicate, a
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	table, ok := aggregatePredicateTable(pred)
+	table, ok := aggregateEmittedTable(pred)
 	if !ok {
 		return nil, nil
 	}
-	value, err := aggregateCommittedValue(ctx, view, table, pred, aggregate)
+	value, err := aggregateCommittedValue(ctx, view, table, pred, aggregate, m.resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -193,18 +203,23 @@ func (m *Manager) initialAggregateUpdates(ctx context.Context, pred Predicate, a
 }
 
 func (m *Manager) evalAggregateQuery(qs *queryState, dv *DeltaView) ([]SubscriptionUpdate, error) {
-	table, ok := aggregatePredicateTable(qs.predicate)
+	table, ok := aggregateEmittedTable(qs.predicate)
 	if !ok || qs.aggregate == nil {
 		return nil, nil
 	}
-	after, err := aggregateCommittedValue(context.Background(), dv.CommittedView(), table, qs.predicate, qs.aggregate)
+	after, err := aggregateCommittedValue(context.Background(), dv.CommittedView(), table, qs.predicate, qs.aggregate, m.resolver)
 	if err != nil {
 		return nil, err
 	}
 	var before types.Value
 	switch qs.aggregate.Func {
 	case AggregateCount:
-		if qs.aggregate.Distinct {
+		if join, ok := qs.predicate.(Join); ok {
+			before, err = countJoinAggregateBeforeValue(dv, join, qs.aggregate, after, m.resolver)
+			if err != nil {
+				return nil, err
+			}
+		} else if qs.aggregate.Distinct {
 			before, err = aggregateRowsValue(projectedRowsBefore(dv, table), table, qs.predicate, qs.aggregate)
 			if err != nil {
 				return nil, err
@@ -245,9 +260,26 @@ func countAggregateBeforeValue(dv *DeltaView, table TableID, pred Predicate, agg
 	return types.NewUint64(before)
 }
 
-func aggregateCommittedValue(ctx context.Context, view store.CommittedReadView, table TableID, pred Predicate, aggregate *Aggregate) (types.Value, error) {
+func countJoinAggregateBeforeValue(dv *DeltaView, join Join, aggregate *Aggregate, after types.Value, resolver IndexResolver) (types.Value, error) {
+	if aggregate.Argument != nil || aggregate.Distinct {
+		return types.Value{}, fmt.Errorf("live join aggregate views support COUNT(*) only")
+	}
+	frags := EvalJoinDeltaFragments(dv, &join, resolver)
+	inserts, deletes := ReconcileJoinDelta(frags.Inserts[:], frags.Deletes[:])
+	before := after.AsUint64() + uint64(len(deletes))
+	if uint64(len(inserts)) > before {
+		return types.NewUint64(0), nil
+	}
+	before -= uint64(len(inserts))
+	return types.NewUint64(before), nil
+}
+
+func aggregateCommittedValue(ctx context.Context, view store.CommittedReadView, table TableID, pred Predicate, aggregate *Aggregate, resolver IndexResolver) (types.Value, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if join, ok := pred.(Join); ok {
+		return aggregateJoinCommittedValue(ctx, view, join, aggregate, resolver)
 	}
 	switch aggregate.Func {
 	case AggregateCount:
@@ -275,6 +307,17 @@ func aggregateCommittedValue(ctx context.Context, view store.CommittedReadView, 
 	default:
 		return types.Value{}, fmt.Errorf("aggregate %q not supported", aggregate.Func)
 	}
+}
+
+func aggregateJoinCommittedValue(ctx context.Context, view store.CommittedReadView, join Join, aggregate *Aggregate, resolver IndexResolver) (types.Value, error) {
+	if aggregate.Func != AggregateCount || aggregate.Argument != nil || aggregate.Distinct {
+		return types.Value{}, fmt.Errorf("live join aggregate views support COUNT(*) only")
+	}
+	count, err := countJoinCommittedRows(ctx, view, join, resolver)
+	if err != nil {
+		return types.Value{}, err
+	}
+	return types.NewUint64(count), nil
 }
 
 func aggregateCommittedRows(ctx context.Context, view store.CommittedReadView, table TableID) ([]types.ProductValue, error) {
@@ -313,6 +356,67 @@ func countAggregateCommittedRows(ctx context.Context, view store.CommittedReadVi
 	return count, nil
 }
 
+func countJoinCommittedRows(ctx context.Context, view store.CommittedReadView, join Join, resolver IndexResolver) (uint64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if view == nil {
+		return 0, nil
+	}
+	if resolver == nil {
+		return 0, fmt.Errorf("%w: manager has no IndexResolver (join=%d.%d=%d.%d)", ErrJoinIndexUnresolved, join.Left, join.LeftCol, join.Right, join.RightCol)
+	}
+	if idx, ok := resolver.IndexIDForColumn(join.Right, join.RightCol); ok {
+		return countJoinCommittedRowsWithProbeIndex(ctx, view, join, join.Left, join.LeftCol, join.Right, join.RightCol, idx, true)
+	}
+	if idx, ok := resolver.IndexIDForColumn(join.Left, join.LeftCol); ok {
+		return countJoinCommittedRowsWithProbeIndex(ctx, view, join, join.Right, join.RightCol, join.Left, join.LeftCol, idx, false)
+	}
+	return 0, fmt.Errorf("%w: join=%d.%d=%d.%d", ErrJoinIndexUnresolved, join.Left, join.LeftCol, join.Right, join.RightCol)
+}
+
+func countJoinCommittedRowsWithProbeIndex(
+	ctx context.Context,
+	view store.CommittedReadView,
+	join Join,
+	driveTable TableID,
+	driveCol ColID,
+	probeTable TableID,
+	probeCol ColID,
+	probeIdx IndexID,
+	driveIsLeft bool,
+) (uint64, error) {
+	var count uint64
+	for _, driveRow := range view.TableScan(driveTable) {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		if int(driveCol) >= len(driveRow) {
+			continue
+		}
+		key := store.NewIndexKey(driveRow[driveCol])
+		for _, rid := range view.IndexSeek(probeTable, probeIdx, key) {
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
+			probeRow, ok := view.GetRow(probeTable, rid)
+			if !ok || int(probeCol) >= len(probeRow) || !driveRow[driveCol].Equal(probeRow[probeCol]) {
+				continue
+			}
+			if driveIsLeft {
+				if joinPairMatches(driveRow, join.Left, probeRow, join.Right, &join) {
+					count++
+				}
+				continue
+			}
+			if joinPairMatches(probeRow, join.Left, driveRow, join.Right, &join) {
+				count++
+			}
+		}
+	}
+	return count, nil
+}
+
 func countAggregateDeltaRows(rows []types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) uint64 {
 	var count uint64
 	for _, row := range rows {
@@ -321,6 +425,15 @@ func countAggregateDeltaRows(rows []types.ProductValue, table TableID, pred Pred
 		}
 	}
 	return count
+}
+
+func aggregateEmittedTable(pred Predicate) (TableID, bool) {
+	switch p := pred.(type) {
+	case Join:
+		return p.ProjectedTable(), true
+	default:
+		return aggregatePredicateTable(pred)
+	}
 }
 
 func aggregateRowContributes(row types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) bool {

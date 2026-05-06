@@ -45,6 +45,19 @@ func sumIDAggregate() *Aggregate {
 	}
 }
 
+func joinCountAggregateSchema() *fakeSchema {
+	s := newFakeSchema()
+	s.addTable(joinLHS, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindString,
+	}, joinLHSCol)
+	s.addTable(joinRHS, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+	}, joinRHSCol)
+	return s
+}
+
 func TestRegisterSetAggregateReturnsOneInitialRow(t *testing.T) {
 	s := testSchema()
 	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
@@ -142,6 +155,45 @@ func TestRegisterSetCountDistinctAggregateReturnsOneInitialRow(t *testing.T) {
 	}
 }
 
+func TestRegisterSetJoinCountAggregateReturnsOneInitialRow(t *testing.T) {
+	s := joinCountAggregateSchema()
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewString("b")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+			{types.NewUint64(101), types.NewUint64(1)},
+			{types.NewUint64(200), types.NewUint64(2)},
+		},
+	})
+	mgr := NewManager(s, s)
+
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:  types.ConnectionID{1},
+		QueryID: 24,
+		Predicates: []Predicate{Join{
+			Left: joinLHS, Right: joinRHS,
+			LeftCol: joinLHSCol, RightCol: joinRHSCol,
+		}},
+		Aggregates: []*Aggregate{countStarAggregate()},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet join COUNT(*) aggregate = %v", err)
+	}
+	if len(res.Update) != 1 {
+		t.Fatalf("initial update count = %d, want 1", len(res.Update))
+	}
+	update := res.Update[0]
+	if update.TableID != joinLHS || len(update.Columns) != 1 || update.Columns[0].Name != "n" || update.Columns[0].Type != types.KindUint64 {
+		t.Fatalf("join aggregate update shape = table %d columns %#v, want lhs/n Uint64", update.TableID, update.Columns)
+	}
+	if len(update.Inserts) != 1 || update.Inserts[0][0].AsUint64() != 3 {
+		t.Fatalf("join COUNT(*) aggregate initial rows = %#v, want count 3", update.Inserts)
+	}
+}
+
 func TestEvalAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 2)
@@ -208,6 +260,59 @@ func TestEvalAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) 
 	msg = <-inbox
 	if len(msg.Fanout[connID]) != 0 {
 		t.Fatalf("unchanged aggregate fanout = %+v, want no updates", msg.Fanout)
+	}
+}
+
+func TestEvalJoinCountAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) {
+	s := joinCountAggregateSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	connID := types.ConnectionID{1}
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+		},
+	})
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:  connID,
+		QueryID: 25,
+		Predicates: []Predicate{Join{
+			Left: joinLHS, Right: joinRHS,
+			LeftCol: joinLHSCol, RightCol: joinRHSCol,
+		}},
+		Aggregates: []*Aggregate{countStarAggregate()},
+	}, before); err != nil {
+		t.Fatalf("RegisterSet join COUNT(*) aggregate = %v", err)
+	}
+
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+			{types.NewUint64(101), types.NewUint64(1)},
+		},
+	})
+	changed := joinChangeset(
+		joinLHS, nil, nil,
+		joinRHS, []types.ProductValue{{types.NewUint64(101), types.NewUint64(1)}}, nil,
+	)
+	mgr.EvalAndBroadcast(types.TxID(1), changed, after, PostCommitMeta{})
+	msg := <-inbox
+	updates := msg.Fanout[connID]
+	if len(updates) != 1 {
+		t.Fatalf("join COUNT(*) aggregate fanout updates = %+v, want one update", updates)
+	}
+	update := updates[0]
+	if len(update.Deletes) != 1 || update.Deletes[0][0].AsUint64() != 1 {
+		t.Fatalf("join COUNT(*) aggregate deletes = %#v, want old count 1", update.Deletes)
+	}
+	if len(update.Inserts) != 1 || update.Inserts[0][0].AsUint64() != 2 {
+		t.Fatalf("join COUNT(*) aggregate inserts = %#v, want new count 2", update.Inserts)
 	}
 }
 
@@ -445,9 +550,24 @@ func TestValidateAggregateRejectsUnsupportedLiveShapes(t *testing.T) {
 			aggregate: &Aggregate{Func: AggregateFunc("AVG"), ResultColumn: schema.ColumnSchema{Index: 0, Name: "avg", Type: types.KindUint64}},
 		},
 		{
-			name:      "join",
+			name:      "join count column",
 			pred:      Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0},
-			aggregate: countStarAggregate(),
+			aggregate: countBodyAggregate(),
+		},
+		{
+			name:      "join sum",
+			pred:      Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0},
+			aggregate: sumIDAggregate(),
+		},
+		{
+			name: "join count distinct",
+			pred: Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0},
+			aggregate: &Aggregate{
+				Func:         AggregateCount,
+				Distinct:     true,
+				ResultColumn: schema.ColumnSchema{Index: 0, Name: "n", Type: types.KindUint64},
+				Argument:     countBodyAggregate().Argument,
+			},
 		},
 	}
 	for _, tt := range tests {

@@ -567,22 +567,15 @@ func TestModuleContractValidationRejectsSumDistinctAggregateViewSQL(t *testing.T
 	}
 }
 
-func TestModuleContractValidationRejectsJoinAggregateViewSQL(t *testing.T) {
+func TestModuleContractValidationAllowsJoinCountStarAggregateViewSQL(t *testing.T) {
 	contract := buildJoinReadIndexedContract(t)
 	contract.Views = []ViewDescription{{
 		Name: "live_join_count",
 		SQL:  "SELECT COUNT(*) AS n FROM t JOIN s ON t.u32 = s.u32",
 	}}
 
-	err := ValidateModuleContract(contract)
-	if err == nil {
-		t.Fatal("ValidateModuleContract accepted join aggregate view SQL")
-	}
-	if !strings.Contains(err.Error(), "views.live_join_count.sql") {
-		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
-	}
-	if !strings.Contains(err.Error(), "live aggregate views require a single table") {
-		t.Fatalf("ValidateModuleContract error = %v, want single-table aggregate unsupported text", err)
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected join COUNT(*) aggregate view SQL: %v", err)
 	}
 }
 
@@ -600,8 +593,8 @@ func TestModuleContractValidationRejectsJoinSumAggregateViewSQL(t *testing.T) {
 	if !strings.Contains(err.Error(), "views.live_join_total.sql") {
 		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
 	}
-	if !strings.Contains(err.Error(), "live aggregate views require a single table") {
-		t.Fatalf("ValidateModuleContract error = %v, want single-table aggregate unsupported text", err)
+	if !strings.Contains(err.Error(), "live join aggregate views support COUNT(*) only") {
+		t.Fatalf("ValidateModuleContract error = %v, want join COUNT(*)-only unsupported text", err)
 	}
 }
 
@@ -619,8 +612,8 @@ func TestModuleContractValidationRejectsJoinCountDistinctAggregateViewSQL(t *tes
 	if !strings.Contains(err.Error(), "views.live_join_distinct_count.sql") {
 		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
 	}
-	if !strings.Contains(err.Error(), "live aggregate views require a single table") {
-		t.Fatalf("ValidateModuleContract error = %v, want single-table aggregate unsupported text", err)
+	if !strings.Contains(err.Error(), "live join aggregate views support COUNT(*) only") {
+		t.Fatalf("ValidateModuleContract error = %v, want join COUNT(*)-only unsupported text", err)
 	}
 }
 

@@ -323,6 +323,42 @@ func TestDeclaredViewJoinWhereColumnComparisonSubscribes(t *testing.T) {
 	}
 }
 
+func TestSubscribeViewJoinAggregateCountInitialRows(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, NewModule("live_join_count_reads").
+		SchemaVersion(1).
+		TableDef(joinReadIndexedTableDef("t")).
+		TableDef(joinReadIndexedTableDef("s")).
+		Reducer("seed_join_rows", seedJoinRowsReducer).
+		View(ViewDeclaration{
+			Name:        "live_matching_tuple_count",
+			SQL:         "SELECT COUNT(*) AS n FROM t JOIN s ON t.u32 = s.u32",
+			Permissions: PermissionMetadata{Required: []string{"joins:subscribe"}},
+		}))
+	defer rt.Close()
+
+	res, err := rt.CallReducer(context.Background(), "seed_join_rows", nil)
+	if err != nil {
+		t.Fatalf("seed reducer admission: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("seed reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+
+	sub, err := rt.SubscribeView(context.Background(), "live_matching_tuple_count", 33, WithDeclaredReadPermissions("joins:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView join COUNT(*): %v", err)
+	}
+	if sub.Name != "live_matching_tuple_count" || sub.TableName != "t" {
+		t.Fatalf("subscription identity = (%q, %q), want live_matching_tuple_count/t", sub.Name, sub.TableName)
+	}
+	if len(sub.Columns) != 1 || sub.Columns[0].Name != "n" || sub.Columns[0].Type != types.KindUint64 {
+		t.Fatalf("join COUNT(*) columns = %#v, want n Uint64", sub.Columns)
+	}
+	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 5 {
+		t.Fatalf("join COUNT(*) initial rows = %#v, want count 5", sub.InitialRows)
+	}
+}
+
 func TestDeclaredQueryMultiWayJoinAggregateExecutes(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, NewModule("multi_join_reads").
 		SchemaVersion(1).
@@ -603,23 +639,16 @@ func TestDeclaredViewAllowsCountDistinctAggregate(t *testing.T) {
 	}
 }
 
-func TestDeclaredViewRejectsJoinAggregate(t *testing.T) {
-	_, err := Build(NewModule("live_join_count").
+func TestDeclaredViewAllowsJoinCountStarAggregate(t *testing.T) {
+	if _, err := Build(NewModule("live_join_count").
 		SchemaVersion(1).
 		TableDef(joinReadIndexedTableDef("t")).
 		TableDef(joinReadIndexedTableDef("s")).
 		View(ViewDeclaration{
 			Name: "live_join_count",
 			SQL:  "SELECT COUNT(*) AS n FROM t JOIN s ON t.u32 = s.u32",
-		}), Config{DataDir: t.TempDir()})
-	if err == nil {
-		t.Fatal("Build error = nil, want join aggregate rejection for declared view")
-	}
-	if !errors.Is(err, ErrInvalidDeclarationSQL) {
-		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
-	}
-	if !strings.Contains(err.Error(), "live aggregate views require a single table") {
-		t.Fatalf("Build error = %v, want live single-table aggregate rejection", err)
+		}), Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build rejected join COUNT(*) aggregate declared view: %v", err)
 	}
 }
 
@@ -1347,6 +1376,37 @@ func TestDeclaredViewAggregateCountDistinctAppliesVisibilityAfterPermissionSucce
 	}
 }
 
+func TestDeclaredViewJoinAggregateCountAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x3f)
+	bob := visibilityRuntimeIdentity(0x40)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        "live_visible_self_join_count",
+			SQL:         "SELECT COUNT(*) AS n FROM messages AS a JOIN messages AS b ON a.id = b.id",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+	insertMessageWithBody(t, rt, 3, alice.Hex())
+
+	sub, err := rt.SubscribeView(context.Background(), "live_visible_self_join_count", 34,
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:subscribe"),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView join COUNT(*) visibility: %v", err)
+	}
+	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 2 {
+		t.Fatalf("visible join COUNT(*) view rows = %#v, want count 2", sub.InitialRows)
+	}
+}
+
 func TestDeclaredViewAggregateSumAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x3b)
 	bob := visibilityRuntimeIdentity(0x3c)
@@ -1460,6 +1520,30 @@ func TestDeclaredAggregateViewMissingPermissionRejectsBeforeRegistration(t *test
 	}
 	if len(sub.InitialRows) != 1 || sub.InitialRows[0][0].AsUint64() != 3 {
 		t.Fatalf("aggregate initial rows after permission success = %#v, want total 3", sub.InitialRows)
+	}
+}
+
+func TestDeclaredJoinAggregateViewMissingPermissionRejectsBeforeRegistration(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message", insertMessageReducer).
+		View(ViewDeclaration{
+			Name:        "live_self_join_count",
+			SQL:         "SELECT COUNT(*) AS n FROM messages AS a JOIN messages AS b ON a.id = b.id",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessage(t, rt, "hello")
+
+	_, err := rt.SubscribeView(context.Background(), "live_self_join_count", 35, WithDeclaredReadPermissions("messages:read"))
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("SubscribeView join aggregate missing permission error = %v, want ErrPermissionDenied", err)
+	}
+	sub, err := rt.SubscribeView(context.Background(), "live_self_join_count", 35, WithDeclaredReadPermissions("messages:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView join aggregate after rejected attempt with same query id: %v", err)
+	}
+	if len(sub.InitialRows) != 1 || sub.InitialRows[0][0].AsUint64() != 1 {
+		t.Fatalf("join aggregate initial rows after permission success = %#v, want count 1", sub.InitialRows)
 	}
 }
 

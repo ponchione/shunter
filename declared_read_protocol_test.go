@@ -275,6 +275,39 @@ func TestProtocolDeclaredViewAggregateSendsInitialRowsAndDeltas(t *testing.T) {
 	}
 }
 
+func TestProtocolDeclaredViewJoinAggregateSendsInitialRowsAndDeltas(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message", insertMessageReducer).
+		View(ViewDeclaration{
+			Name:        "live_self_join_count",
+			SQL:         "SELECT COUNT(*) AS n FROM messages AS a JOIN messages AS b ON a.id = b.id",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+	insertMessage(t, rt, "hello")
+
+	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "join-aggregate-subscriber", "messages:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 40,
+		QueryID:   50,
+		Name:      "live_self_join_count",
+	})
+	aggregateColumns := []schema.ColumnSchema{{Name: "n", Type: types.KindUint64}}
+	initial := requireDeclaredReadAppliedValues(t, client, 40, 50, "messages", aggregateColumns)
+	if len(initial) != 1 || len(initial[0]) != 1 || initial[0][0].AsUint64() != 1 {
+		t.Fatalf("join aggregate initial rows = %#v, want count 1", initial)
+	}
+
+	insertMessage(t, rt, "world")
+	inserts, deletes := requireDeclaredReadDeltaValues(t, client, 50, "messages", aggregateColumns)
+	if len(deletes) != 1 || len(deletes[0]) != 1 || deletes[0][0].AsUint64() != 1 {
+		t.Fatalf("join aggregate delta deletes = %#v, want old count 1", deletes)
+	}
+	if len(inserts) != 1 || len(inserts[0]) != 1 || inserts[0][0].AsUint64() != 2 {
+		t.Fatalf("join aggregate delta inserts = %#v, want new count 2", inserts)
+	}
+}
+
 func TestProtocolDeclaredViewCountDistinctAggregateSendsInitialRowsAndDeltas(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
