@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -33,6 +34,31 @@ func TestV1CompatibilityModuleContractGolden(t *testing.T) {
 	}
 	if !bytes.Equal(got, recoded) {
 		t.Fatalf("golden contract did not canonicalize idempotently\nfirst:\n%s\nsecond:\n%s", got, recoded)
+	}
+}
+
+func TestV1CompatibilityModuleContractExportEntryPointsMatch(t *testing.T) {
+	rt := buildV1CompatibilityRuntime(t)
+
+	want, err := rt.ExportContractJSON()
+	if err != nil {
+		t.Fatalf("ExportContractJSON returned error: %v", err)
+	}
+	contract := rt.ExportContract()
+	got, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("ExportContract().MarshalCanonicalJSON returned error: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("ExportContract canonical JSON differs from ExportContractJSON\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	exportedSchema := rt.ExportSchema()
+	if exportedSchema == nil {
+		t.Fatal("ExportSchema returned nil")
+	}
+	if !reflect.DeepEqual(*exportedSchema, contract.Schema) {
+		t.Fatalf("ExportSchema differs from ExportContract().Schema\n--- got ---\n%#v\n--- want ---\n%#v", *exportedSchema, contract.Schema)
 	}
 }
 
