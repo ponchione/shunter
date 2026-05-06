@@ -355,9 +355,11 @@ fmt.Println(sub.TableName, len(sub.InitialRows))
 
 `SubscribeView` admits the subscription and returns the initial rows. Protocol
 clients receive ongoing transaction updates through the protocol path.
-Executable views may use table-shaped multi-way joins such as `SELECT a.*`.
-Live views still reject column projections, aggregates, ordering, limits, and
-offsets.
+Executable views may use table-shaped multi-way joins such as `SELECT a.*`,
+column projections over the emitted relation, and single-table
+`COUNT(*) AS name` or `COUNT(column) AS name` aggregates. Live views still
+reject `SUM`, `COUNT(DISTINCT ...)`, join aggregates, aggregate aliases without
+`AS`, ordering, limits, and offsets.
 
 ## Serve Protocol Traffic
 

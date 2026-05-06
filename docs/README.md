@@ -26,6 +26,11 @@ Do not read broad specs by default.
   contracts.
 - `docs/shunter-design-decisions.md` — consolidated current Shunter design
   decisions that code and tests still cite.
+- `docs/v1-compatibility.md` — initial v1 support matrix for root APIs,
+  protocol, contract JSON, codegen, read surfaces, and host status.
+- `docs/v1-roadmap/` — focused v1 readiness workstreams for contract freeze,
+  reference app, client SDK, auth, operations, hardening, performance,
+  isolation, and SQL/read scope.
 
 ## Baseline Specs
 
