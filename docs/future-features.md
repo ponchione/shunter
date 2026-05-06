@@ -76,13 +76,15 @@ Direction:
 
 Likely feature slices:
 
-- broader index-aware planning for complex live join paths, including
-  multi-way join-condition pruning and repeated-relation cases
-- remaining live subscription candidate pruning beyond single-relation filter
-  placement
+- broader index-aware planning for complex live join paths, especially
+  repeated-relation cases and alias-aware pruning
+- remaining live subscription candidate pruning beyond distinct-table local
+  filter and join-condition placement
 
 Completed slices:
 
+- distinct-table multi-way live join conditions use indexed existence-edge
+  pruning, including same-transaction opposite-side changed rows
 - distinct-table multi-way live join filters use local value/range pruning on
   the filtered relation while repeated-table relation instances keep table
   fallback

@@ -39,6 +39,12 @@ func multiJoinTestPredicate() MultiJoin {
 	}
 }
 
+func multiJoinUnfilteredTestPredicate() MultiJoin {
+	pred := multiJoinTestPredicate()
+	pred.Filter = nil
+	return pred
+}
+
 func countMultiJoinRIDAggregate() *Aggregate {
 	return &Aggregate{
 		Func:         AggregateCount,
@@ -239,6 +245,36 @@ func TestMultiJoinPlacementUsesLocalFilterIndexesForDistinctTables(t *testing.T)
 	}
 }
 
+func TestMultiJoinPlacementUsesJoinConditionExistenceEdgesForDistinctTables(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := multiJoinUnfilteredTestPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	tests := []JoinEdge{
+		{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1},
+		{LHSTable: 2, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1},
+		{LHSTable: 2, RHSTable: 3, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1},
+		{LHSTable: 3, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1},
+	}
+	for _, edge := range tests {
+		if _, ok := idx.JoinEdge.exists[edge][hash]; !ok {
+			t.Fatalf("missing multi-join existence edge %+v in %+v", edge, idx.JoinEdge.exists)
+		}
+	}
+	for _, table := range []TableID{1, 2, 3} {
+		if got := idx.Table.Lookup(table); len(got) != 0 {
+			t.Fatalf("TableIndex[%d] = %v, want empty", table, got)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
 func TestMultiJoinPlacementRepeatedTableKeepsTableFallback(t *testing.T) {
 	idx := NewPruningIndexes()
 	pred := MultiJoin{
@@ -289,6 +325,69 @@ func TestCollectCandidatesMultiJoinLocalFilterPrunesMismatch(t *testing.T) {
 	got := CollectCandidatesForTable(idx, 3, match, nil, nil)
 	if len(got) != 1 || got[0] != hash {
 		t.Fatalf("matching local MultiJoin filter candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinConditionExistencePrunesCommittedMismatch(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := multiJoinUnfilteredTestPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	committed := multiJoinCommitted(false)
+
+	mismatch := []types.ProductValue{{types.NewUint64(500), types.NewUint64(999)}}
+	if got := CollectCandidatesForTable(idx, 1, mismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched multi-join condition candidates = %v, want empty", got)
+	}
+
+	match := []types.ProductValue{{types.NewUint64(500), types.NewUint64(20)}}
+	got := CollectCandidatesForTable(idx, 1, match, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("matching multi-join condition candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinConditionExistenceUsesDeltaOppositeRows(t *testing.T) {
+	s := multiJoinTestSchema()
+	mgr := NewManager(s, s)
+	pred := multiJoinUnfilteredTestPredicate()
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{9},
+		QueryID:    90,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	committed := buildMockCommitted(s, nil)
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(1), types.NewUint64(77)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(2), types.NewUint64(88)}}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping same-tx candidates = %v, want empty", got)
+	}
+
+	overlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(1), types.NewUint64(77)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(2), types.NewUint64(77)}}},
+		},
+	}
+	got := mgr.collectCandidatesInto(overlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping same-tx candidates = %v, want only %v", got, hash)
 	}
 }
 

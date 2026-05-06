@@ -51,7 +51,7 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 		return
 	}
 	if p, ok := pred.(MultiJoin); ok {
-		mutateMultiJoinPlacement(idx, p, hash, add)
+		mutateMultiJoinPlacement(idx, p, hash, add, resolver)
 		return
 	}
 	if j, ok := pred.(Join); ok && j.Left == j.Right {
@@ -132,10 +132,16 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 	}
 }
 
-func mutateMultiJoinPlacement(idx *PruningIndexes, pred MultiJoin, hash QueryHash, add bool) {
+func mutateMultiJoinPlacement(idx *PruningIndexes, pred MultiJoin, hash QueryHash, add bool, resolver IndexResolver) {
 	tableCounts := multiJoinTableCounts(pred)
 	for _, t := range pred.Tables() {
 		if tableCounts[t] == 1 && mutateLocalFilterPlacement(idx, pred.Filter, t, hash, add) {
+			continue
+		}
+		if placements := multiJoinExistenceEdgesFor(pred, t, tableCounts, resolver); len(placements) > 0 {
+			for _, placement := range placements {
+				mutateJoinExistencePlacement(idx, placement.edge, hash, add)
+			}
 			continue
 		}
 		mutateTablePlacement(idx, t, hash, add)
@@ -176,6 +182,59 @@ func mutateLocalFilterPlacement(idx *PruningIndexes, pred Predicate, t TableID, 
 		mutateRangePlacement(idx, t, cr.Column, cr.Lower, cr.Upper, hash, add)
 	}
 	return true
+}
+
+func multiJoinExistenceEdgesFor(pred MultiJoin, t TableID, tableCounts map[TableID]int, resolver IndexResolver) []joinExistenceEdgePlacement {
+	if resolver == nil || tableCounts[t] != 1 {
+		return nil
+	}
+	relation, ok := multiJoinRelationIndexForTable(pred.Relations, t)
+	if !ok {
+		return nil
+	}
+	var placements []joinExistenceEdgePlacement
+	for _, condition := range pred.Conditions {
+		switch {
+		case condition.Left.Relation == relation:
+			if placement, ok := multiJoinExistenceEdgeForRefs(condition.Left, condition.Right, tableCounts, resolver); ok {
+				placements = append(placements, placement)
+			}
+		case condition.Right.Relation == relation:
+			if placement, ok := multiJoinExistenceEdgeForRefs(condition.Right, condition.Left, tableCounts, resolver); ok {
+				placements = append(placements, placement)
+			}
+		}
+	}
+	return placements
+}
+
+func multiJoinRelationIndexForTable(relations []MultiJoinRelation, table TableID) (int, bool) {
+	match := -1
+	count := 0
+	for i, rel := range relations {
+		if rel.Table != table {
+			continue
+		}
+		count++
+		match = i
+	}
+	return match, count == 1
+}
+
+func multiJoinExistenceEdgeForRefs(lhs, rhs MultiJoinColumnRef, tableCounts map[TableID]int, resolver IndexResolver) (joinExistenceEdgePlacement, bool) {
+	if tableCounts[lhs.Table] != 1 || tableCounts[rhs.Table] != 1 {
+		return joinExistenceEdgePlacement{}, false
+	}
+	if _, ok := resolver.IndexIDForColumn(rhs.Table, rhs.Column); !ok {
+		return joinExistenceEdgePlacement{}, false
+	}
+	return joinExistenceEdgePlacement{edge: JoinEdge{
+		LHSTable:     lhs.Table,
+		RHSTable:     rhs.Table,
+		LHSJoinCol:   lhs.Column,
+		RHSJoinCol:   rhs.Column,
+		RHSFilterCol: rhs.Column,
+	}}, true
 }
 
 func predicateNeverMatches(pred Predicate) bool {
