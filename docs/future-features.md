@@ -76,11 +76,16 @@ Direction:
 
 Likely feature slices:
 
-- broader index-aware planning for remaining live subscription candidate
-  pruning and complex live join paths
+- broader index-aware planning for complex live join paths, including
+  multi-way join-condition pruning and repeated-relation cases
+- remaining live subscription candidate pruning beyond single-relation filter
+  placement
 
 Completed slices:
 
+- distinct-table multi-way live join filters use local value/range pruning on
+  the filtered relation while repeated-table relation instances keep table
+  fallback
 - ColNe live predicates use two exclusive range placements, including
   opposite-side join range edges
 - structurally false live predicates, including NoRows roots and join or

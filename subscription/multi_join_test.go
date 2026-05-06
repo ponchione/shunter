@@ -211,22 +211,84 @@ func TestMultiJoinRegisterInitialRowsAndDeltas(t *testing.T) {
 	}
 }
 
-func TestMultiJoinPlacementUsesTableFallbackForEveryReferencedTable(t *testing.T) {
+func TestMultiJoinPlacementUsesLocalFilterIndexesForDistinctTables(t *testing.T) {
 	idx := NewPruningIndexes()
 	pred := multiJoinTestPredicate()
 	hash := ComputeQueryHash(pred, nil)
 	PlaceSubscription(idx, pred, hash)
-	for _, table := range []TableID{1, 2, 3} {
+
+	for _, table := range []TableID{1, 2} {
 		got := idx.Table.Lookup(table)
 		if len(got) != 1 || got[0] != hash {
 			t.Fatalf("TableIndex[%d] = %v, want [%v]", table, got, hash)
 		}
 	}
+	if got := idx.Range.Lookup(3, 0, types.NewUint64(100)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("RangeIndex[3.0 != 99] match = %v, want [%v]", got, hash)
+	}
+	if got := idx.Range.Lookup(3, 0, types.NewUint64(99)); len(got) != 0 {
+		t.Fatalf("RangeIndex[3.0 != 99] rejected value = %v, want empty", got)
+	}
+	if got := idx.Table.Lookup(3); len(got) != 0 {
+		t.Fatalf("TableIndex[3] = %v, want empty for locally filtered distinct relation", got)
+	}
+
 	RemoveSubscription(idx, pred, hash)
-	for _, table := range []TableID{1, 2, 3} {
-		if got := idx.Table.Lookup(table); len(got) != 0 {
-			t.Fatalf("TableIndex[%d] after remove = %v, want empty", table, got)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestMultiJoinPlacementRepeatedTableKeepsTableFallback(t *testing.T) {
+	idx := NewPruningIndexes()
+	pred := MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 1, Alias: 1},
+			{Table: 2, Alias: 2},
+		},
+		Conditions: []MultiJoinCondition{
+			{
+				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
+				Right: MultiJoinColumnRef{Relation: 1, Table: 1, Column: 1, Alias: 1},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 1, Table: 1, Column: 1, Alias: 1},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 2, Column: 1, Alias: 2},
+			},
+		},
+		ProjectedRelation: 0,
+		Filter:            ColEq{Table: 1, Column: 0, Alias: 0, Value: types.NewUint64(7)},
+	}
+	hash := ComputeQueryHash(pred, nil)
+	PlaceSubscription(idx, pred, hash)
+
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
+		t.Fatalf("repeated-table MultiJoin value placement = %v, want empty", got)
+	}
+	for _, table := range []TableID{1, 2} {
+		got := idx.Table.Lookup(table)
+		if len(got) != 1 || got[0] != hash {
+			t.Fatalf("TableIndex[%d] = %v, want [%v]", table, got, hash)
 		}
+	}
+}
+
+func TestCollectCandidatesMultiJoinLocalFilterPrunesMismatch(t *testing.T) {
+	idx := NewPruningIndexes()
+	pred := multiJoinTestPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	PlaceSubscription(idx, pred, hash)
+
+	mismatch := []types.ProductValue{{types.NewUint64(99), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 3, mismatch, nil, nil); len(got) != 0 {
+		t.Fatalf("mismatched local MultiJoin filter candidates = %v, want empty", got)
+	}
+
+	match := []types.ProductValue{{types.NewUint64(301), types.NewUint64(20)}}
+	got := CollectCandidatesForTable(idx, 3, match, nil, nil)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("matching local MultiJoin filter candidates = %v, want [%v]", got, hash)
 	}
 }
 

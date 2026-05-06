@@ -51,9 +51,7 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 		return
 	}
 	if p, ok := pred.(MultiJoin); ok {
-		for _, t := range p.Tables() {
-			mutateTablePlacement(idx, t, hash, add)
-		}
+		mutateMultiJoinPlacement(idx, p, hash, add)
 		return
 	}
 	if j, ok := pred.(Join); ok && j.Left == j.Right {
@@ -132,6 +130,52 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 		}
 		mutateTablePlacement(idx, t, hash, add)
 	}
+}
+
+func mutateMultiJoinPlacement(idx *PruningIndexes, pred MultiJoin, hash QueryHash, add bool) {
+	tableCounts := multiJoinTableCounts(pred)
+	for _, t := range pred.Tables() {
+		if tableCounts[t] == 1 && mutateLocalFilterPlacement(idx, pred.Filter, t, hash, add) {
+			continue
+		}
+		mutateTablePlacement(idx, t, hash, add)
+	}
+}
+
+func multiJoinTableCounts(pred MultiJoin) map[TableID]int {
+	counts := make(map[TableID]int, len(pred.Relations))
+	for _, rel := range pred.Relations {
+		counts[rel.Table]++
+	}
+	return counts
+}
+
+func mutateLocalFilterPlacement(idx *PruningIndexes, pred Predicate, t TableID, hash QueryHash, add bool) bool {
+	colEqs := findColEqs(pred, t)
+	if len(colEqs) > 0 {
+		for _, ce := range colEqs {
+			mutateValuePlacement(idx, t, ce.Column, ce.Value, hash, add)
+		}
+		return true
+	}
+	colRanges := findColRanges(pred, t)
+	if len(colRanges) > 0 {
+		for _, cr := range colRanges {
+			mutateRangePlacement(idx, t, cr.Column, cr.Lower, cr.Upper, hash, add)
+		}
+		return true
+	}
+	mixedColEqs, mixedColRanges := findMixedColEqRanges(pred, t)
+	if len(mixedColEqs) == 0 && len(mixedColRanges) == 0 {
+		return false
+	}
+	for _, ce := range mixedColEqs {
+		mutateValuePlacement(idx, t, ce.Column, ce.Value, hash, add)
+	}
+	for _, cr := range mixedColRanges {
+		mutateRangePlacement(idx, t, cr.Column, cr.Lower, cr.Upper, hash, add)
+	}
+	return true
 }
 
 func predicateNeverMatches(pred Predicate) bool {
