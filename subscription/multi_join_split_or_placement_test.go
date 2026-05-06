@@ -1438,6 +1438,91 @@ func TestMultiJoinPlacementSplitOrLongNonKeyPreservingMultiHopUsesPath3Edges(t *
 	}
 }
 
+func TestMultiJoinPlacementSplitOrLongNonKeyPreservingPath3FallsBackWhenUnindexed(t *testing.T) {
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	cases := []struct {
+		name              string
+		indexes           map[TableID][]ColID
+		wantTableFallback bool
+	}{
+		{
+			name: "mid1 join column",
+			indexes: map[TableID][]ColID{
+				1: {1},
+				2: {0},
+				3: {0, 1},
+				4: {0, 1},
+			},
+			wantTableFallback: true,
+		},
+		{
+			name: "mid2 join column",
+			indexes: map[TableID][]ColID{
+				1: {1},
+				2: {0, 1},
+				3: {0},
+				4: {0, 1},
+			},
+		},
+		{
+			name: "rhs join column",
+			indexes: map[TableID][]ColID{
+				1: {1},
+				2: {0, 1},
+				3: {0, 1},
+				4: {0},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newFakeSchema()
+			for table, indexes := range tc.indexes {
+				s.addTable(table, cols, indexes...)
+			}
+			idx := NewPruningIndexes()
+			pred := splitOrLongNonKeyPreservingMultiHopFilterMultiJoinPredicate()
+			hash := ComputeQueryHash(pred, nil)
+			placeSubscriptionForResolver(idx, pred, hash, s)
+
+			path3Edge := JoinPath3Edge{
+				LHSTable: 1, Mid1Table: 2, Mid2Table: 3, RHSTable: 4,
+				LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
+				Mid2FirstCol: 1, Mid2SecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
+			}
+			if got := idx.JoinRangePath3Edge.Lookup(path3Edge, types.NewUint64(60)); len(got) != 0 {
+				t.Fatalf("partial path3 range placement = %v, want empty", got)
+			}
+			if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
+				t.Fatalf("partial path3 endpoint local placement = %v, want empty", got)
+			}
+
+			conditionEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
+			if tc.wantTableFallback {
+				if got := idx.JoinEdge.exists[conditionEdge]; len(got) != 0 {
+					t.Fatalf("condition-edge fallback = %v, want none", got)
+				}
+				if got := idx.Table.Lookup(1); len(got) != 1 || got[0] != hash {
+					t.Fatalf("TableIndex[1] = %v, want fallback [%v]", got, hash)
+				}
+			} else {
+				if _, ok := idx.JoinEdge.exists[conditionEdge][hash]; !ok {
+					t.Fatalf("condition-edge fallback missing: %+v", idx.JoinEdge.exists)
+				}
+				if got := idx.Table.Lookup(1); len(got) != 0 {
+					t.Fatalf("TableIndex[1] = %v, want condition-edge fallback", got)
+				}
+			}
+
+			removeSubscriptionForResolver(idx, pred, hash, s)
+			if !pruningIndexesEmpty(idx) {
+				t.Fatalf("indexes after remove = %+v, want empty", idx)
+			}
+		})
+	}
+}
+
 func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingPath3PrunesMismatch(t *testing.T) {
 	s := fourTableDualIndexedMultiJoinTestSchema()
 	idx := NewPruningIndexes()
