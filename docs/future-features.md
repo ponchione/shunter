@@ -77,12 +77,14 @@ Direction:
 Likely feature slices:
 
 - broader index-aware planning for complex live join paths, especially
-  cross-alias filter shapes and compound alias/condition placement
+  cross-alias filter shapes
 - remaining live subscription candidate pruning beyond local filter and
   join-condition placement
 
 Completed slices:
 
+- repeated-table multi-way live joins can combine alias-local value/range
+  filters with indexed condition-edge pruning across relation instances
 - repeated-table multi-way live join conditions use indexed existence-edge
   pruning when every relation instance has an indexed condition edge
 - repeated-table multi-way live join filters use alias-aware local value/range
