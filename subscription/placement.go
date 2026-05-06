@@ -1406,7 +1406,7 @@ func splitJoinOrPlacementsFor(pred Predicate, join *Join, t TableID, resolver In
 		return splitJoinOrPlacementsFor(j.Filter, join, t, resolver)
 	}
 	placements, ok := splitJoinOrPredicatePlacements(pred, side, resolver)
-	if !ok || !placements.hasAny() || !splitJoinOrNeedsBothSides(placements) {
+	if !ok || !placements.hasAny() || !splitJoinOrHasRemotePlacement(placements) {
 		return splitJoinOrPlacements{}, false
 	}
 	return placements, true
@@ -1427,10 +1427,10 @@ func splitJoinOrPredicatePlacements(
 		left.append(right)
 		return left, true
 	case And:
-		if left, ok := splitJoinOrPredicatePlacements(p.Left, side, resolver); ok && splitJoinOrNeedsBothSides(left) {
+		if left, ok := splitJoinOrPredicatePlacements(p.Left, side, resolver); ok && splitJoinOrHasRemotePlacement(left) {
 			return left, true
 		}
-		if right, ok := splitJoinOrPredicatePlacements(p.Right, side, resolver); ok && splitJoinOrNeedsBothSides(right) {
+		if right, ok := splitJoinOrPredicatePlacements(p.Right, side, resolver); ok && splitJoinOrHasRemotePlacement(right) {
 			return right, true
 		}
 		return splitJoinOrBranchPlacements(pred, side, resolver)
@@ -1520,10 +1520,8 @@ func splitJoinOrBranchPlacements(
 	}
 }
 
-func splitJoinOrNeedsBothSides(p splitJoinOrPlacements) bool {
-	hasCurrentSide := len(p.eqs) > 0 || len(p.ranges) > 0
-	hasOtherSide := len(p.edges) > 0 || len(p.rangeEdges) > 0 || len(p.existenceEdges) > 0
-	return hasCurrentSide && hasOtherSide
+func splitJoinOrHasRemotePlacement(p splitJoinOrPlacements) bool {
+	return len(p.edges) > 0 || len(p.rangeEdges) > 0 || len(p.existenceEdges) > 0
 }
 
 func splitJoinOrColumnEqualityExistencePlacement(p ColEqCol, side joinPlacementSide, resolver IndexResolver) (joinExistenceEdgePlacement, bool) {

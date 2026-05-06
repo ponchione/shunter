@@ -83,6 +83,42 @@ func splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate() MultiJoin {
 	}
 }
 
+func splitOrRepeatedAliasMultiHopFilterMultiJoinPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 1, Alias: 1},
+			{Table: 2, Alias: 2},
+		},
+		Conditions: []MultiJoinCondition{
+			{
+				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 2, Column: 1, Alias: 2},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 1, Table: 1, Column: 1, Alias: 1},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 2, Column: 1, Alias: 2},
+			},
+		},
+		ProjectedRelation: 0,
+		Filter: Or{
+			Left: ColEq{
+				Table:  1,
+				Column: 0,
+				Alias:  0,
+				Value:  types.NewUint64(7),
+			},
+			Right: ColRange{
+				Table:  1,
+				Column: 0,
+				Alias:  1,
+				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper:  Bound{Unbounded: true},
+			},
+		},
+	}
+}
+
 func TestMultiJoinPlacementUsesSplitOrLocalFilterEdges(t *testing.T) {
 	s := multiJoinTestSchema()
 	idx := NewPruningIndexes()
@@ -306,6 +342,200 @@ func TestCollectCandidatesMultiJoinSplitOrSameTransactionTransitiveFilterEdges(t
 	got = mgr.collectCandidatesInto(deleteOverlap, committed, scratch)
 	if _, ok := got[hash]; !ok || len(got) != 1 {
 		t.Fatalf("overlapping transitive split-OR same-tx delete candidates = %v, want only %v", got, hash)
+	}
+}
+
+func TestMultiJoinPlacementSplitOrRepeatedAliasUsesSelfAndMiddleRelationEdges(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrRepeatedAliasMultiHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("repeated-alias split-OR value placement = %v, want [%v]", got, hash)
+	}
+	if got := idx.Range.Lookup(1, 0, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("repeated-alias split-OR range placement = %v, want [%v]", got, hash)
+	}
+	selfEdge := JoinEdge{LHSTable: 1, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinEdge.Lookup(selfEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("repeated-alias split-OR self value edge = %v, want [%v]", got, hash)
+	}
+	if got := idx.JoinRangeEdge.Lookup(selfEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("repeated-alias split-OR self range edge = %v, want [%v]", got, hash)
+	}
+	middleValueEdge := JoinEdge{LHSTable: 2, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinEdge.Lookup(middleValueEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("repeated-alias split-OR middle value edge = %v, want [%v]", got, hash)
+	}
+	if got := idx.JoinRangeEdge.Lookup(middleValueEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("repeated-alias split-OR middle range edge = %v, want [%v]", got, hash)
+	}
+	if len(idx.JoinEdge.exists) != 0 {
+		t.Fatalf("repeated-alias split-OR existence edges = %+v, want none", idx.JoinEdge.exists)
+	}
+	for _, table := range []TableID{1, 2} {
+		if got := idx.Table.Lookup(table); len(got) != 0 {
+			t.Fatalf("TableIndex[%d] = %v, want empty for repeated-alias split-OR placement", table, got)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrRepeatedAliasPrunesMismatch(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrRepeatedAliasMultiHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(40), types.NewUint64(20)}},
+		2: {{types.NewUint64(100), types.NewUint64(20)}},
+	})
+
+	mismatch := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 1, mismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched repeated-alias split-OR table candidates = %v, want empty", got)
+	}
+
+	localMatch := []types.ProductValue{{types.NewUint64(7), types.NewUint64(99)}}
+	got := CollectCandidatesForTable(idx, 1, localMatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("local repeated-alias split-OR candidates = %v, want [%v]", got, hash)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(60), types.NewUint64(20)}},
+	})
+	edgeMatch := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+	got = CollectCandidatesForTable(idx, 1, edgeMatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("self-edge repeated-alias split-OR candidates = %v, want [%v]", got, hash)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(40), types.NewUint64(20)}},
+	})
+	middleMismatch := []types.ProductValue{{types.NewUint64(100), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 2, middleMismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched repeated-alias split-OR middle candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(7), types.NewUint64(20)}},
+	})
+	got = CollectCandidatesForTable(idx, 2, middleMismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("value-edge repeated-alias split-OR middle candidates = %v, want [%v]", got, hash)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(60), types.NewUint64(20)}},
+	})
+	got = CollectCandidatesForTable(idx, 2, middleMismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("range-edge repeated-alias split-OR middle candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrRepeatedAliasSameTransactionRows(t *testing.T) {
+	s := multiJoinTestSchema()
+	mgr := NewManager(s, s)
+	pred := splitOrRepeatedAliasMultiHopFilterMultiJoinPredicate()
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{20},
+		QueryID:    200,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	committed := buildMockCommitted(s, nil)
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{
+				{types.NewUint64(8), types.NewUint64(20)},
+				{types.NewUint64(40), types.NewUint64(20)},
+			}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping repeated-alias split-OR same-tx candidates = %v, want empty", got)
+	}
+
+	selfOverlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{
+				{types.NewUint64(8), types.NewUint64(20)},
+				{types.NewUint64(60), types.NewUint64(20)},
+			}},
+		},
+	}
+	got := mgr.collectCandidatesInto(selfOverlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("self-overlap repeated-alias split-OR same-tx candidates = %v, want only %v", got, hash)
+	}
+
+	middleOverlap := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(7), types.NewUint64(20)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(100), types.NewUint64(20)}}},
+		},
+	}
+	got = mgr.collectCandidatesInto(middleOverlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("middle-overlap repeated-alias split-OR same-tx candidates = %v, want only %v", got, hash)
+	}
+}
+
+func TestMultiJoinPlacementSplitOrRepeatedAliasUsesConditionEdgesWhenSelfEdgeUnindexed(t *testing.T) {
+	s := newFakeSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(1, cols)
+	s.addTable(2, cols, 1)
+	idx := NewPruningIndexes()
+	pred := splitOrRepeatedAliasMultiHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	selfEdge := JoinEdge{LHSTable: 1, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinEdge.Lookup(selfEdge, types.NewUint64(7)); len(got) != 0 {
+		t.Fatalf("unindexed repeated-alias self value edge = %v, want empty", got)
+	}
+	if got := idx.JoinRangeEdge.Lookup(selfEdge, types.NewUint64(60)); len(got) != 0 {
+		t.Fatalf("unindexed repeated-alias self range edge = %v, want empty", got)
+	}
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
+		t.Fatalf("partial repeated-alias local value placement = %v, want empty", got)
+	}
+	conditionEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
+	if _, ok := idx.JoinEdge.exists[conditionEdge][hash]; !ok {
+		t.Fatalf("condition fallback edge missing: %+v", idx.JoinEdge.exists)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex[1] = %v, want condition-edge placement", got)
+	}
+	if got := idx.Table.Lookup(2); len(got) != 1 || got[0] != hash {
+		t.Fatalf("TableIndex[2] = %v, want fallback [%v]", got, hash)
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
 	}
 }
 

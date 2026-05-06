@@ -21,6 +21,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Live subscription join value/range filter-edge pruning now admits candidates from same-transaction opposite-side inserts and deletes.
 - Live subscription joins now use direct split-OR local/filter-edge pruning when the OR is a required child of an AND filter.
 - Live subscription joins now use indexed existence-edge pruning for direct column-equality branches inside split OR filters.
+- Live subscription joins now use remote filter/existence branch edges for split OR filters whose changed side has no local branch.
 - Live subscriptions and declared views now support two-table column-equality join filters, including inner-join `WHERE` column comparisons and cross-join `WHERE` equality lowering with literal filters.
 - Live subscription join candidate pruning now uses required range filters on the opposite joined side when that side's join column is indexed.
 - Live subscription cross-side OR pruning now treats not-equals filters as split range placements instead of falling back to broad join-existence candidates.

@@ -81,11 +81,14 @@ Likely feature slices:
   condition paths, uncovered repeated aliases, or non-local branch predicates
 - remaining live subscription candidate pruning beyond current local-filter,
   join-condition, filter-edge, direct split-OR placement, required-AND
-  split-OR placement, direct column-equality split-OR branches, and
-  same-transaction filter-edge deltas
+  split-OR placement, direct column-equality split-OR branches, all-remote
+  split-OR branches, and same-transaction filter-edge deltas
 
 Completed slices:
 
+- two-table live join split-`OR` filters whose branches are all proven through
+  opposite-side filter/existence edges use those branch edges instead of broad
+  join-existence fallback
 - two-table and multi-way live join split-`OR` filters with direct
   column-equality branches use indexed existence-edge pruning for those
   branches
