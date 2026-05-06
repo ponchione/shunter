@@ -2,9 +2,12 @@ package codegen
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+
+	shunter "github.com/ponchione/shunter"
 )
 
 func TestV1CompatibilityTypeScriptGolden(t *testing.T) {
@@ -18,6 +21,56 @@ func TestV1CompatibilityTypeScriptGolden(t *testing.T) {
 	}
 
 	assertCodegenGoldenBytes(t, filepath.Join("testdata", "v1_module_contract.ts"), got)
+}
+
+func TestV1CompatibilityTypeScriptEntryPointsMatchGolden(t *testing.T) {
+	contractJSON, err := os.ReadFile(filepath.Join("..", "testdata", "v1_module_contract.json"))
+	if err != nil {
+		t.Fatalf("read v1 contract fixture: %v", err)
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "v1_module_contract.ts"))
+	if err != nil {
+		t.Fatalf("read v1 TypeScript fixture: %v", err)
+	}
+	var contract shunter.ModuleContract
+	if err := json.Unmarshal(contractJSON, &contract); err != nil {
+		t.Fatalf("Unmarshal v1 contract fixture: %v", err)
+	}
+
+	cases := []struct {
+		name     string
+		generate func() ([]byte, error)
+	}{
+		{
+			name: "GenerateTypeScript",
+			generate: func() ([]byte, error) {
+				return GenerateTypeScript(contract)
+			},
+		},
+		{
+			name: "Generate",
+			generate: func() ([]byte, error) {
+				return Generate(contract, Options{Language: LanguageTypeScript})
+			},
+		},
+		{
+			name: "GenerateFromJSON",
+			generate: func() ([]byte, error) {
+				return GenerateFromJSON(contractJSON, Options{Language: LanguageTypeScript})
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.generate()
+			if err != nil {
+				t.Fatalf("%s returned error: %v", tc.name, err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("%s output differs from v1 TypeScript golden\n--- got ---\n%s\n--- want ---\n%s", tc.name, got, want)
+			}
+		})
+	}
 }
 
 func TestV1CompatibilityTypeScriptIgnoresUnknownContractJSONFields(t *testing.T) {
