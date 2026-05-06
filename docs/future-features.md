@@ -77,13 +77,15 @@ Direction:
 Likely feature slices:
 
 - broader index-aware planning for complex live join paths, especially
-  disjunctive cross-alias filter shapes that mix branch kinds or leave
-  relations uncovered
-- remaining live subscription candidate pruning beyond local filter and
-  join-condition placement
+  disjunctive cross-alias filter shapes that leave relations uncovered
+- remaining live subscription candidate pruning beyond current local-filter,
+  join-condition, and filter-edge placement
 
 Completed slices:
 
+- multi-way live join `OR` filters that mix local value/range branches with
+  column-equality branches use per-relation pruning for relation instances
+  covered by every branch
 - multi-way live join `OR` filters with column equality branches use indexed
   existence-edge pruning for relation instances covered by every branch
 - multi-way live join filters with required column equality use indexed

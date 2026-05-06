@@ -63,6 +63,28 @@ func disjunctiveFilterColumnEqualityMultiJoinPredicate() MultiJoin {
 	}
 }
 
+func mixedBranchKindMultiJoinPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 2, Alias: 1},
+			{Table: 3, Alias: 2},
+		},
+		ProjectedRelation: 0,
+		Filter: Or{
+			Left: ColEq{Table: 1, Column: 0, Alias: 0, Value: types.NewUint64(7)},
+			Right: ColEqCol{
+				LeftTable:   1,
+				LeftColumn:  1,
+				LeftAlias:   0,
+				RightTable:  2,
+				RightColumn: 1,
+				RightAlias:  1,
+			},
+		},
+	}
+}
+
 func partiallyDisjunctiveFilterColumnEqualityMultiJoinPredicate() MultiJoin {
 	return MultiJoin{
 		Relations: []MultiJoinRelation{
@@ -108,6 +130,63 @@ func repeatedFilterColumnEqualityMultiJoinPredicate() MultiJoin {
 			RightColumn: 1,
 			RightAlias:  1,
 		},
+	}
+}
+
+func TestMultiJoinPlacementUsesMixedBranchKindCommonRelationFilterPlacement(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := mixedBranchKindMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("mixed branch local placement = %v, want [%v]", got, hash)
+	}
+	edge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
+	if _, ok := idx.JoinEdge.exists[edge][hash]; !ok {
+		t.Fatalf("missing mixed branch condition edge %+v in %+v", edge, idx.JoinEdge.exists)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex[1] = %v, want empty for mixed branch common relation", got)
+	}
+	for _, table := range []TableID{2, 3} {
+		if got := idx.Table.Lookup(table); len(got) != 1 || got[0] != hash {
+			t.Fatalf("TableIndex[%d] = %v, want fallback [%v]", table, got, hash)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestCollectCandidatesMultiJoinMixedBranchKindCommonRelationPrunesMismatch(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := mixedBranchKindMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(100), types.NewUint64(20)}},
+	})
+
+	mismatch := []types.ProductValue{{types.NewUint64(8), types.NewUint64(9)}}
+	if got := CollectCandidatesForTable(idx, 1, mismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched mixed branch candidates = %v, want empty", got)
+	}
+
+	localMatch := []types.ProductValue{{types.NewUint64(7), types.NewUint64(9)}}
+	got := CollectCandidatesForTable(idx, 1, localMatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("local mixed branch candidates = %v, want [%v]", got, hash)
+	}
+
+	edgeMatch := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+	got = CollectCandidatesForTable(idx, 1, edgeMatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("edge mixed branch candidates = %v, want [%v]", got, hash)
 	}
 }
 
