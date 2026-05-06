@@ -17,6 +17,8 @@ type PruningIndexes struct {
 	JoinRangePathEdge  *JoinRangePathEdgeIndex
 	JoinPath3Edge      *JoinPath3EdgeIndex
 	JoinRangePath3Edge *JoinRangePath3EdgeIndex
+	JoinPath4Edge      *JoinPath4EdgeIndex
+	JoinRangePath4Edge *JoinRangePath4EdgeIndex
 	Table              *TableIndex
 }
 
@@ -31,6 +33,8 @@ func NewPruningIndexes() *PruningIndexes {
 		JoinRangePathEdge:  NewJoinRangePathEdgeIndex(),
 		JoinPath3Edge:      NewJoinPath3EdgeIndex(),
 		JoinRangePath3Edge: NewJoinRangePath3EdgeIndex(),
+		JoinPath4Edge:      NewJoinPath4EdgeIndex(),
+		JoinRangePath4Edge: NewJoinRangePath4EdgeIndex(),
 		Table:              NewTableIndex(),
 	}
 }
@@ -140,6 +144,12 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 				}
 				for _, placement := range placements.rangePath3Edges {
 					mutateJoinRangePath3EdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
+				}
+				for _, placement := range placements.path4Edges {
+					mutateJoinPath4EdgePlacement(idx, placement.edge, placement.value, hash, add)
+				}
+				for _, placement := range placements.rangePath4Edges {
+					mutateJoinRangePath4EdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
 				}
 				for _, placement := range placements.existenceEdges {
 					mutateJoinExistencePlacement(idx, placement.edge, hash, add)
@@ -306,6 +316,12 @@ func mutateMultiJoinSplitOrFilterPlacement(
 	for _, placement := range placements.rangePath3Edges {
 		mutateJoinRangePath3EdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
 	}
+	for _, placement := range placements.path4Edges {
+		mutateJoinPath4EdgePlacement(idx, placement.edge, placement.value, hash, add)
+	}
+	for _, placement := range placements.rangePath4Edges {
+		mutateJoinRangePath4EdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
+	}
 	for _, placement := range placements.existenceEdges {
 		mutateJoinExistencePlacement(idx, placement.edge, hash, add)
 	}
@@ -380,6 +396,12 @@ func mutateMultiJoinRequiredFilterEdgePlacement(
 	}
 	for _, placement := range placements.rangePath3Edges {
 		mutateJoinRangePath3EdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
+	}
+	for _, placement := range placements.path4Edges {
+		mutateJoinPath4EdgePlacement(idx, placement.edge, placement.value, hash, add)
+	}
+	for _, placement := range placements.rangePath4Edges {
+		mutateJoinRangePath4EdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
 	}
 	return true
 }
@@ -873,6 +895,56 @@ func multiJoinFilterEdgesBetweenRelations(
 			})
 		}
 	}
+	for _, path := range multiJoinFilterEdgeFourHopConditionPaths(conditions, lhsRelation, rhsRelation) {
+		if path.mid1First.Column == path.mid1Second.Column &&
+			path.mid2First.Column == path.mid2Second.Column &&
+			path.mid3First.Column == path.mid3Second.Column {
+			continue
+		}
+		if _, ok := resolver.IndexIDForColumn(path.mid1First.Table, path.mid1First.Column); !ok {
+			continue
+		}
+		if _, ok := resolver.IndexIDForColumn(path.mid2First.Table, path.mid2First.Column); !ok {
+			continue
+		}
+		if _, ok := resolver.IndexIDForColumn(path.mid3First.Table, path.mid3First.Column); !ok {
+			continue
+		}
+		if _, ok := resolver.IndexIDForColumn(path.rhs.Table, path.rhs.Column); !ok {
+			continue
+		}
+		edge := JoinPath4Edge{
+			LHSTable:      path.lhs.Table,
+			Mid1Table:     path.mid1First.Table,
+			Mid2Table:     path.mid2First.Table,
+			Mid3Table:     path.mid3First.Table,
+			RHSTable:      path.rhs.Table,
+			LHSJoinCol:    path.lhs.Column,
+			Mid1FirstCol:  path.mid1First.Column,
+			Mid1SecondCol: path.mid1Second.Column,
+			Mid2FirstCol:  path.mid2First.Column,
+			Mid2SecondCol: path.mid2Second.Column,
+			Mid3FirstCol:  path.mid3First.Column,
+			Mid3SecondCol: path.mid3Second.Column,
+			RHSJoinCol:    path.rhs.Column,
+			RHSFilterCol:  0,
+		}
+		for _, ce := range filters.eqs {
+			edge.RHSFilterCol = ce.Column
+			out.path4Edges = append(out.path4Edges, joinPath4EdgePlacement{
+				edge:  edge,
+				value: ce.Value,
+			})
+		}
+		for _, cr := range filters.ranges {
+			edge.RHSFilterCol = cr.Column
+			out.rangePath4Edges = append(out.rangePath4Edges, joinRangePath4EdgePlacement{
+				edge:  edge,
+				lower: cr.Lower,
+				upper: cr.Upper,
+			})
+		}
+	}
 	return out
 }
 
@@ -894,6 +966,17 @@ type multiJoinFilterEdgeThreeHopConditionPath struct {
 	mid1Second MultiJoinColumnRef
 	mid2First  MultiJoinColumnRef
 	mid2Second MultiJoinColumnRef
+	rhs        MultiJoinColumnRef
+}
+
+type multiJoinFilterEdgeFourHopConditionPath struct {
+	lhs        MultiJoinColumnRef
+	mid1First  MultiJoinColumnRef
+	mid1Second MultiJoinColumnRef
+	mid2First  MultiJoinColumnRef
+	mid2Second MultiJoinColumnRef
+	mid3First  MultiJoinColumnRef
+	mid3Second MultiJoinColumnRef
 	rhs        MultiJoinColumnRef
 }
 
@@ -1007,6 +1090,48 @@ func multiJoinFilterEdgeThreeHopConditionPaths(conditions []MultiJoinCondition, 
 					mid2Second: mid2Second,
 					rhs:        rhs,
 				})
+			}
+		}
+	}
+	return paths
+}
+
+func multiJoinFilterEdgeFourHopConditionPaths(conditions []MultiJoinCondition, lhsRelation int, rhsRelation int) []multiJoinFilterEdgeFourHopConditionPath {
+	if lhsRelation == rhsRelation {
+		return nil
+	}
+	var paths []multiJoinFilterEdgeFourHopConditionPath
+	for _, first := range conditions {
+		lhs, mid1First, ok := multiJoinConditionRefsFromRelation(first, lhsRelation)
+		if !ok || lhs.Relation == mid1First.Relation {
+			continue
+		}
+		for _, second := range conditions {
+			mid1Second, mid2First, ok := multiJoinConditionRefsFromRelation(second, mid1First.Relation)
+			if !ok || mid1Second.Relation == mid2First.Relation || mid2First.Relation == lhsRelation {
+				continue
+			}
+			for _, third := range conditions {
+				mid2Second, mid3First, ok := multiJoinConditionRefsFromRelation(third, mid2First.Relation)
+				if !ok || mid2Second.Relation == mid3First.Relation || mid3First.Relation == lhsRelation || mid3First.Relation == mid1First.Relation {
+					continue
+				}
+				for _, fourth := range conditions {
+					mid3Second, rhs, ok := multiJoinConditionRefsFromRelation(fourth, mid3First.Relation)
+					if !ok || mid3Second.Relation == rhs.Relation || rhs.Relation != rhsRelation {
+						continue
+					}
+					paths = append(paths, multiJoinFilterEdgeFourHopConditionPath{
+						lhs:        lhs,
+						mid1First:  mid1First,
+						mid1Second: mid1Second,
+						mid2First:  mid2First,
+						mid2Second: mid2Second,
+						mid3First:  mid3First,
+						mid3Second: mid3Second,
+						rhs:        rhs,
+					})
+				}
 			}
 		}
 	}
@@ -1274,6 +1399,22 @@ func mutateJoinRangePath3EdgePlacement(idx *PruningIndexes, edge JoinPath3Edge, 
 	idx.JoinRangePath3Edge.Remove(edge, lower, upper, hash)
 }
 
+func mutateJoinPath4EdgePlacement(idx *PruningIndexes, edge JoinPath4Edge, value Value, hash QueryHash, add bool) {
+	if add {
+		idx.JoinPath4Edge.Add(edge, value, hash)
+		return
+	}
+	idx.JoinPath4Edge.Remove(edge, value, hash)
+}
+
+func mutateJoinRangePath4EdgePlacement(idx *PruningIndexes, edge JoinPath4Edge, lower, upper Bound, hash QueryHash, add bool) {
+	if add {
+		idx.JoinRangePath4Edge.Add(edge, lower, upper, hash)
+		return
+	}
+	idx.JoinRangePath4Edge.Remove(edge, lower, upper, hash)
+}
+
 func mutateJoinExistencePlacement(idx *PruningIndexes, edge JoinEdge, hash QueryHash, add bool) {
 	if add {
 		idx.JoinEdge.AddExistence(edge, hash)
@@ -1342,6 +1483,9 @@ func collectCandidatesForTableInto(
 		set[h] = struct{}{}
 	})
 	collectJoinPath3EdgeCandidates(idx, table, rows, committed, resolver, func(h QueryHash) {
+		set[h] = struct{}{}
+	})
+	collectJoinPath4EdgeCandidates(idx, table, rows, committed, resolver, func(h QueryHash) {
 		set[h] = struct{}{}
 	})
 
@@ -1621,6 +1765,17 @@ type joinRangePath3EdgePlacement struct {
 	upper Bound
 }
 
+type joinPath4EdgePlacement struct {
+	edge  JoinPath4Edge
+	value Value
+}
+
+type joinRangePath4EdgePlacement struct {
+	edge  JoinPath4Edge
+	lower Bound
+	upper Bound
+}
+
 type joinExistenceEdgePlacement struct {
 	edge JoinEdge
 }
@@ -1634,6 +1789,8 @@ type splitJoinOrPlacements struct {
 	rangePathEdges  []joinRangePathEdgePlacement
 	path3Edges      []joinPath3EdgePlacement
 	rangePath3Edges []joinRangePath3EdgePlacement
+	path4Edges      []joinPath4EdgePlacement
+	rangePath4Edges []joinRangePath4EdgePlacement
 	existenceEdges  []joinExistenceEdgePlacement
 }
 
@@ -1684,7 +1841,7 @@ func (s joinPlacementSide) otherJoinColumnIndexed(resolver IndexResolver) bool {
 }
 
 func (p splitJoinOrPlacements) hasAny() bool {
-	return len(p.eqs) > 0 || len(p.ranges) > 0 || len(p.edges) > 0 || len(p.rangeEdges) > 0 || len(p.pathEdges) > 0 || len(p.rangePathEdges) > 0 || len(p.path3Edges) > 0 || len(p.rangePath3Edges) > 0 || len(p.existenceEdges) > 0
+	return len(p.eqs) > 0 || len(p.ranges) > 0 || len(p.edges) > 0 || len(p.rangeEdges) > 0 || len(p.pathEdges) > 0 || len(p.rangePathEdges) > 0 || len(p.path3Edges) > 0 || len(p.rangePath3Edges) > 0 || len(p.path4Edges) > 0 || len(p.rangePath4Edges) > 0 || len(p.existenceEdges) > 0
 }
 
 func (p *splitJoinOrPlacements) append(other splitJoinOrPlacements) {
@@ -1696,6 +1853,8 @@ func (p *splitJoinOrPlacements) append(other splitJoinOrPlacements) {
 	p.rangePathEdges = append(p.rangePathEdges, other.rangePathEdges...)
 	p.path3Edges = append(p.path3Edges, other.path3Edges...)
 	p.rangePath3Edges = append(p.rangePath3Edges, other.rangePath3Edges...)
+	p.path4Edges = append(p.path4Edges, other.path4Edges...)
+	p.rangePath4Edges = append(p.rangePath4Edges, other.rangePath4Edges...)
 	p.existenceEdges = append(p.existenceEdges, other.existenceEdges...)
 }
 
@@ -1919,7 +2078,7 @@ func splitJoinOrBranchPlacements(
 }
 
 func splitJoinOrHasRemotePlacement(p splitJoinOrPlacements) bool {
-	return len(p.edges) > 0 || len(p.rangeEdges) > 0 || len(p.pathEdges) > 0 || len(p.rangePathEdges) > 0 || len(p.path3Edges) > 0 || len(p.rangePath3Edges) > 0 || len(p.existenceEdges) > 0
+	return len(p.edges) > 0 || len(p.rangeEdges) > 0 || len(p.pathEdges) > 0 || len(p.rangePathEdges) > 0 || len(p.path3Edges) > 0 || len(p.rangePath3Edges) > 0 || len(p.path4Edges) > 0 || len(p.rangePath4Edges) > 0 || len(p.existenceEdges) > 0
 }
 
 func splitJoinOrColumnEqualityExistencePlacement(p ColEqCol, side joinPlacementSide, resolver IndexResolver) (joinExistenceEdgePlacement, bool) {
@@ -2154,6 +2313,88 @@ func forEachJoinedPath3RHSFilterValue(
 						continue
 					}
 					fn(rhsRow[edge.RHSFilterCol])
+				}
+			}
+		}
+	}
+}
+
+func collectJoinPath4EdgeCandidates(
+	idx *PruningIndexes,
+	table TableID,
+	rows []types.ProductValue,
+	committed store.CommittedReadView,
+	resolver IndexResolver,
+	add func(QueryHash),
+) {
+	if committed == nil || resolver == nil {
+		return
+	}
+	idx.JoinPath4Edge.ForEachEdge(table, func(edge JoinPath4Edge) {
+		forEachJoinedPath4RHSFilterValue(rows, committed, resolver, edge, func(v Value) {
+			idx.JoinPath4Edge.ForEachHash(edge, v, add)
+		})
+	})
+	idx.JoinRangePath4Edge.ForEachEdge(table, func(edge JoinPath4Edge) {
+		forEachJoinedPath4RHSFilterValue(rows, committed, resolver, edge, func(v Value) {
+			idx.JoinRangePath4Edge.ForEachHash(edge, v, add)
+		})
+	})
+}
+
+func forEachJoinedPath4RHSFilterValue(
+	rows []types.ProductValue,
+	committed store.CommittedReadView,
+	resolver IndexResolver,
+	edge JoinPath4Edge,
+	fn func(Value),
+) {
+	mid1Idx, ok := resolver.IndexIDForColumn(edge.Mid1Table, edge.Mid1FirstCol)
+	if !ok {
+		return
+	}
+	mid2Idx, ok := resolver.IndexIDForColumn(edge.Mid2Table, edge.Mid2FirstCol)
+	if !ok {
+		return
+	}
+	mid3Idx, ok := resolver.IndexIDForColumn(edge.Mid3Table, edge.Mid3FirstCol)
+	if !ok {
+		return
+	}
+	rhsIdx, ok := resolver.IndexIDForColumn(edge.RHSTable, edge.RHSJoinCol)
+	if !ok {
+		return
+	}
+	for _, row := range rows {
+		if int(edge.LHSJoinCol) >= len(row) {
+			continue
+		}
+		mid1Key := store.NewIndexKey(row[edge.LHSJoinCol])
+		for _, mid1RID := range committed.IndexSeek(edge.Mid1Table, mid1Idx, mid1Key) {
+			mid1Row, ok := committed.GetRow(edge.Mid1Table, mid1RID)
+			if !ok || int(edge.Mid1SecondCol) >= len(mid1Row) {
+				continue
+			}
+			mid2Key := store.NewIndexKey(mid1Row[edge.Mid1SecondCol])
+			for _, mid2RID := range committed.IndexSeek(edge.Mid2Table, mid2Idx, mid2Key) {
+				mid2Row, ok := committed.GetRow(edge.Mid2Table, mid2RID)
+				if !ok || int(edge.Mid2SecondCol) >= len(mid2Row) {
+					continue
+				}
+				mid3Key := store.NewIndexKey(mid2Row[edge.Mid2SecondCol])
+				for _, mid3RID := range committed.IndexSeek(edge.Mid3Table, mid3Idx, mid3Key) {
+					mid3Row, ok := committed.GetRow(edge.Mid3Table, mid3RID)
+					if !ok || int(edge.Mid3SecondCol) >= len(mid3Row) {
+						continue
+					}
+					rhsKey := store.NewIndexKey(mid3Row[edge.Mid3SecondCol])
+					for _, rhsRID := range committed.IndexSeek(edge.RHSTable, rhsIdx, rhsKey) {
+						rhsRow, ok := committed.GetRow(edge.RHSTable, rhsRID)
+						if !ok || int(edge.RHSFilterCol) >= len(rhsRow) {
+							continue
+						}
+						fn(rhsRow[edge.RHSFilterCol])
+					}
 				}
 			}
 		}
@@ -2547,6 +2788,250 @@ func forEachCommittedPath3RHSFilterValue(
 		return
 	}
 	for _, value := range mid2Values {
+		rhsKey := store.NewIndexKey(value)
+		for _, rhsRID := range committed.IndexSeek(edge.RHSTable, rhsIdx, rhsKey) {
+			rhsRow, ok := committed.GetRow(edge.RHSTable, rhsRID)
+			if !ok || int(edge.RHSFilterCol) >= len(rhsRow) {
+				continue
+			}
+			fn(rhsRow[edge.RHSFilterCol])
+		}
+	}
+}
+
+func collectJoinPath4FilterDeltaCandidates(
+	idx *PruningIndexes,
+	table TableID,
+	rows []types.ProductValue,
+	changeset *store.Changeset,
+	committed store.CommittedReadView,
+	resolver IndexResolver,
+	add func(QueryHash),
+) {
+	if changeset == nil || len(rows) == 0 {
+		return
+	}
+	idx.JoinPath4Edge.ForEachEdge(table, func(edge JoinPath4Edge) {
+		forEachJoinedChangedPath4RHSFilterValue(rows, changeset, committed, resolver, edge, func(v Value) {
+			idx.JoinPath4Edge.ForEachHash(edge, v, add)
+		})
+	})
+	idx.JoinRangePath4Edge.ForEachEdge(table, func(edge JoinPath4Edge) {
+		forEachJoinedChangedPath4RHSFilterValue(rows, changeset, committed, resolver, edge, func(v Value) {
+			idx.JoinRangePath4Edge.ForEachHash(edge, v, add)
+		})
+	})
+}
+
+func forEachJoinedChangedPath4RHSFilterValue(
+	lhsRows []types.ProductValue,
+	changeset *store.Changeset,
+	committed store.CommittedReadView,
+	resolver IndexResolver,
+	edge JoinPath4Edge,
+	fn func(Value),
+) {
+	lhsKeys := changedJoinKeySet(lhsRows, edge.LHSJoinCol)
+	if len(lhsKeys) == 0 {
+		return
+	}
+	mid1Values := make(map[valueKey]Value)
+	if mid1Changes := changeset.Tables[edge.Mid1Table]; mid1Changes != nil {
+		collectChangedPath4Mid1Values(lhsKeys, edge, mid1Changes.Inserts, mid1Values)
+		collectChangedPath4Mid1Values(lhsKeys, edge, mid1Changes.Deletes, mid1Values)
+	}
+	collectCommittedPath4Mid1Values(lhsRows, committed, resolver, edge, mid1Values)
+	if len(mid1Values) == 0 {
+		return
+	}
+
+	mid2Values := make(map[valueKey]Value)
+	if mid2Changes := changeset.Tables[edge.Mid2Table]; mid2Changes != nil {
+		collectChangedPath4Mid2Values(mid1Values, edge, mid2Changes.Inserts, mid2Values)
+		collectChangedPath4Mid2Values(mid1Values, edge, mid2Changes.Deletes, mid2Values)
+	}
+	collectCommittedPath4Mid2Values(mid1Values, committed, resolver, edge, mid2Values)
+	if len(mid2Values) == 0 {
+		return
+	}
+
+	mid3Values := make(map[valueKey]Value)
+	if mid3Changes := changeset.Tables[edge.Mid3Table]; mid3Changes != nil {
+		collectChangedPath4Mid3Values(mid2Values, edge, mid3Changes.Inserts, mid3Values)
+		collectChangedPath4Mid3Values(mid2Values, edge, mid3Changes.Deletes, mid3Values)
+	}
+	collectCommittedPath4Mid3Values(mid2Values, committed, resolver, edge, mid3Values)
+	if len(mid3Values) == 0 {
+		return
+	}
+
+	if rhsChanges := changeset.Tables[edge.RHSTable]; rhsChanges != nil {
+		forEachChangedPath4RHSFilterValue(mid3Values, edge, rhsChanges.Inserts, fn)
+		forEachChangedPath4RHSFilterValue(mid3Values, edge, rhsChanges.Deletes, fn)
+	}
+	forEachCommittedPath4RHSFilterValue(mid3Values, committed, resolver, edge, fn)
+}
+
+func collectChangedPath4Mid1Values(
+	lhsKeys map[valueKey]struct{},
+	edge JoinPath4Edge,
+	mid1Rows []types.ProductValue,
+	out map[valueKey]Value,
+) {
+	for _, row := range mid1Rows {
+		if int(edge.Mid1FirstCol) >= len(row) || int(edge.Mid1SecondCol) >= len(row) {
+			continue
+		}
+		if _, ok := lhsKeys[encodeValueKey(row[edge.Mid1FirstCol])]; ok {
+			out[encodeValueKey(row[edge.Mid1SecondCol])] = row[edge.Mid1SecondCol]
+		}
+	}
+}
+
+func collectCommittedPath4Mid1Values(
+	lhsRows []types.ProductValue,
+	committed store.CommittedReadView,
+	resolver IndexResolver,
+	edge JoinPath4Edge,
+	out map[valueKey]Value,
+) {
+	if committed == nil || resolver == nil {
+		return
+	}
+	mid1Idx, ok := resolver.IndexIDForColumn(edge.Mid1Table, edge.Mid1FirstCol)
+	if !ok {
+		return
+	}
+	for _, row := range lhsRows {
+		if int(edge.LHSJoinCol) >= len(row) {
+			continue
+		}
+		mid1Key := store.NewIndexKey(row[edge.LHSJoinCol])
+		for _, mid1RID := range committed.IndexSeek(edge.Mid1Table, mid1Idx, mid1Key) {
+			mid1Row, ok := committed.GetRow(edge.Mid1Table, mid1RID)
+			if !ok || int(edge.Mid1SecondCol) >= len(mid1Row) {
+				continue
+			}
+			out[encodeValueKey(mid1Row[edge.Mid1SecondCol])] = mid1Row[edge.Mid1SecondCol]
+		}
+	}
+}
+
+func collectChangedPath4Mid2Values(
+	mid1Values map[valueKey]Value,
+	edge JoinPath4Edge,
+	mid2Rows []types.ProductValue,
+	out map[valueKey]Value,
+) {
+	for _, row := range mid2Rows {
+		if int(edge.Mid2FirstCol) >= len(row) || int(edge.Mid2SecondCol) >= len(row) {
+			continue
+		}
+		if _, ok := mid1Values[encodeValueKey(row[edge.Mid2FirstCol])]; ok {
+			out[encodeValueKey(row[edge.Mid2SecondCol])] = row[edge.Mid2SecondCol]
+		}
+	}
+}
+
+func collectCommittedPath4Mid2Values(
+	mid1Values map[valueKey]Value,
+	committed store.CommittedReadView,
+	resolver IndexResolver,
+	edge JoinPath4Edge,
+	out map[valueKey]Value,
+) {
+	if committed == nil || resolver == nil {
+		return
+	}
+	mid2Idx, ok := resolver.IndexIDForColumn(edge.Mid2Table, edge.Mid2FirstCol)
+	if !ok {
+		return
+	}
+	for _, value := range mid1Values {
+		mid2Key := store.NewIndexKey(value)
+		for _, mid2RID := range committed.IndexSeek(edge.Mid2Table, mid2Idx, mid2Key) {
+			mid2Row, ok := committed.GetRow(edge.Mid2Table, mid2RID)
+			if !ok || int(edge.Mid2SecondCol) >= len(mid2Row) {
+				continue
+			}
+			out[encodeValueKey(mid2Row[edge.Mid2SecondCol])] = mid2Row[edge.Mid2SecondCol]
+		}
+	}
+}
+
+func collectChangedPath4Mid3Values(
+	mid2Values map[valueKey]Value,
+	edge JoinPath4Edge,
+	mid3Rows []types.ProductValue,
+	out map[valueKey]Value,
+) {
+	for _, row := range mid3Rows {
+		if int(edge.Mid3FirstCol) >= len(row) || int(edge.Mid3SecondCol) >= len(row) {
+			continue
+		}
+		if _, ok := mid2Values[encodeValueKey(row[edge.Mid3FirstCol])]; ok {
+			out[encodeValueKey(row[edge.Mid3SecondCol])] = row[edge.Mid3SecondCol]
+		}
+	}
+}
+
+func collectCommittedPath4Mid3Values(
+	mid2Values map[valueKey]Value,
+	committed store.CommittedReadView,
+	resolver IndexResolver,
+	edge JoinPath4Edge,
+	out map[valueKey]Value,
+) {
+	if committed == nil || resolver == nil {
+		return
+	}
+	mid3Idx, ok := resolver.IndexIDForColumn(edge.Mid3Table, edge.Mid3FirstCol)
+	if !ok {
+		return
+	}
+	for _, value := range mid2Values {
+		mid3Key := store.NewIndexKey(value)
+		for _, mid3RID := range committed.IndexSeek(edge.Mid3Table, mid3Idx, mid3Key) {
+			mid3Row, ok := committed.GetRow(edge.Mid3Table, mid3RID)
+			if !ok || int(edge.Mid3SecondCol) >= len(mid3Row) {
+				continue
+			}
+			out[encodeValueKey(mid3Row[edge.Mid3SecondCol])] = mid3Row[edge.Mid3SecondCol]
+		}
+	}
+}
+
+func forEachChangedPath4RHSFilterValue(
+	mid3Values map[valueKey]Value,
+	edge JoinPath4Edge,
+	rhsRows []types.ProductValue,
+	fn func(Value),
+) {
+	for _, row := range rhsRows {
+		if int(edge.RHSJoinCol) >= len(row) || int(edge.RHSFilterCol) >= len(row) {
+			continue
+		}
+		if _, ok := mid3Values[encodeValueKey(row[edge.RHSJoinCol])]; ok {
+			fn(row[edge.RHSFilterCol])
+		}
+	}
+}
+
+func forEachCommittedPath4RHSFilterValue(
+	mid3Values map[valueKey]Value,
+	committed store.CommittedReadView,
+	resolver IndexResolver,
+	edge JoinPath4Edge,
+	fn func(Value),
+) {
+	if committed == nil || resolver == nil {
+		return
+	}
+	rhsIdx, ok := resolver.IndexIDForColumn(edge.RHSTable, edge.RHSJoinCol)
+	if !ok {
+		return
+	}
+	for _, value := range mid3Values {
 		rhsKey := store.NewIndexKey(value)
 		for _, rhsRID := range committed.IndexSeek(edge.RHSTable, rhsIdx, rhsKey) {
 			rhsRow, ok := committed.GetRow(edge.RHSTable, rhsRID)
