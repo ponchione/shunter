@@ -6,6 +6,7 @@ import (
 
 	"github.com/ponchione/shunter/query/sql"
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -54,7 +55,101 @@ func (m *compiledSQLMultiJoin) referencedTables() []schema.TableID {
 	return out
 }
 
-func compileMultiJoinSQLQuery(stmt sql.Statement, orderBy []sql.OrderByColumn, normalizedPredicate sql.Predicate, usesCallerIdentity bool, sqlText string, sl SchemaLookup, caller *types.Identity) (compiledSQLQuery, error) {
+func subscriptionMultiJoinPredicate(multi *compiledSQLMultiJoin) (subscription.Predicate, error) {
+	if multi == nil {
+		return nil, fmt.Errorf("multi-join metadata must not be nil")
+	}
+	relations := make([]subscription.MultiJoinRelation, len(multi.Relations))
+	for i, rel := range multi.Relations {
+		relations[i] = subscription.MultiJoinRelation{Table: rel.Table, Alias: rel.Alias}
+	}
+	conditions := make([]subscription.MultiJoinCondition, len(multi.Conditions))
+	for i, condition := range multi.Conditions {
+		conditions[i] = subscription.MultiJoinCondition{
+			Left:  subscriptionMultiJoinColumnRef(condition.Left),
+			Right: subscriptionMultiJoinColumnRef(condition.Right),
+		}
+	}
+	projectedTable := schema.TableID(0)
+	if multi.ProjectedRelation >= 0 && multi.ProjectedRelation < len(multi.Relations) {
+		projectedTable = multi.Relations[multi.ProjectedRelation].Table
+	}
+	filter, err := compiledMultiPredicateToSubscription(multi.Filter, projectedTable)
+	if err != nil {
+		return nil, err
+	}
+	for _, rel := range multi.Relations {
+		filter = andSubscriptionPredicates(filter, rel.Visibility)
+	}
+	return subscription.MultiJoin{
+		Relations:         relations,
+		Conditions:        conditions,
+		ProjectedRelation: multi.ProjectedRelation,
+		Filter:            filter,
+	}, nil
+}
+
+func subscriptionMultiJoinColumnRef(ref compiledSQLMultiColumnRef) subscription.MultiJoinColumnRef {
+	return subscription.MultiJoinColumnRef{
+		Relation: ref.Relation,
+		Table:    ref.Column.table,
+		Column:   ref.Column.column,
+		Alias:    ref.Column.alias,
+	}
+}
+
+func compiledMultiPredicateToSubscription(pred *compiledSQLMultiPredicate, noRowsTable schema.TableID) (subscription.Predicate, error) {
+	if pred == nil {
+		return nil, nil
+	}
+	switch pred.Kind {
+	case compiledSQLMultiPredicateTrue:
+		return nil, nil
+	case compiledSQLMultiPredicateFalse:
+		return subscription.NoRows{Table: noRowsTable}, nil
+	case compiledSQLMultiPredicateComparison:
+		col := pred.Column.Column
+		return normalizePredicate(col.table, int(col.column), col.alias, pred.Op, pred.Value)
+	case compiledSQLMultiPredicateColumnComparison:
+		left := pred.LeftColumn.Column
+		right := pred.RightColumn.Column
+		return subscription.ColEqCol{
+			LeftTable:   left.table,
+			LeftColumn:  left.column,
+			LeftAlias:   left.alias,
+			RightTable:  right.table,
+			RightColumn: right.column,
+			RightAlias:  right.alias,
+		}, nil
+	case compiledSQLMultiPredicateAnd:
+		left, err := compiledMultiPredicateToSubscription(pred.Left, noRowsTable)
+		if err != nil {
+			return nil, err
+		}
+		right, err := compiledMultiPredicateToSubscription(pred.Right, noRowsTable)
+		if err != nil {
+			return nil, err
+		}
+		return andSubscriptionPredicates(left, right), nil
+	case compiledSQLMultiPredicateOr:
+		left, err := compiledMultiPredicateToSubscription(pred.Left, noRowsTable)
+		if err != nil {
+			return nil, err
+		}
+		right, err := compiledMultiPredicateToSubscription(pred.Right, noRowsTable)
+		if err != nil {
+			return nil, err
+		}
+		if left == nil || right == nil {
+			return nil, nil
+		}
+		return orSubscriptionPredicates(left, right), nil
+	default:
+		return nil, fmt.Errorf("unsupported multi-join predicate kind %d", pred.Kind)
+	}
+}
+
+func compileMultiJoinSQLQuery(stmt sql.Statement, orderBy []sql.OrderByColumn, normalizedPredicate sql.Predicate, usesCallerIdentity bool, sqlText string, sl SchemaLookup, caller *types.Identity, allowProjection bool) (compiledSQLQuery, error) {
 	relations, relationMap, aliasTags, err := compileMultiJoinRelations(stmt, sl)
 	if err != nil {
 		return compiledSQLQuery{}, err
@@ -82,9 +177,17 @@ func compileMultiJoinSQLQuery(stmt sql.Statement, orderBy []sql.OrderByColumn, n
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
+	if !allowProjection && len(stmt.ProjectionColumns) != 0 {
+		//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
+		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
+	}
 	aggregate, err := compileMultiJoinAggregateProjection(stmt.Aggregate, relationMap, aliasTag)
 	if err != nil {
 		return compiledSQLQuery{}, err
+	}
+	if !allowProjection && stmt.Aggregate != nil {
+		//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
+		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 	}
 	var compiledOrder []compiledSQLOrderBy
 	if stmt.Aggregate != nil {
@@ -103,20 +206,36 @@ func compileMultiJoinSQLQuery(stmt sql.Statement, orderBy []sql.OrderByColumn, n
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
+	if !allowProjection {
+		for _, condition := range conditions {
+			left := condition.Left.Column
+			right := condition.Right.Column
+			if !sl.HasIndex(left.table, left.column) && !sl.HasIndex(right.table, right.column) {
+				//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
+				return compiledSQLQuery{}, fmt.Errorf("Subscriptions require indexes on join columns")
+			}
+		}
+	}
+	multi := &compiledSQLMultiJoin{
+		Relations:         relations,
+		Conditions:        conditions,
+		Filter:            filter,
+		ProjectedRelation: projectedRelation,
+	}
+	pred, err := subscriptionMultiJoinPredicate(multi)
+	if err != nil {
+		return compiledSQLQuery{}, err
+	}
 	return compiledSQLQuery{
 		TableName:          stmt.ProjectedTable,
+		Predicate:          pred,
 		UsesCallerIdentity: usesCallerIdentity,
-		MultiJoin: &compiledSQLMultiJoin{
-			Relations:         relations,
-			Conditions:        conditions,
-			Filter:            filter,
-			ProjectedRelation: projectedRelation,
-		},
-		ProjectionColumns: projectionColumns,
-		Aggregate:         aggregate,
-		OrderBy:           compiledOrder,
-		Limit:             limit,
-		Offset:            offset,
+		MultiJoin:          multi,
+		ProjectionColumns:  projectionColumns,
+		Aggregate:          aggregate,
+		OrderBy:            compiledOrder,
+		Limit:              limit,
+		Offset:             offset,
 	}, nil
 }
 

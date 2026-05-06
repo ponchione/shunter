@@ -25,7 +25,7 @@ type Value = types.Value
 // ValueKind re-exports the column kind enum used by SchemaLookup.
 type ValueKind = types.ValueKind
 
-// Predicate is a filter expression over rows from one or two tables.
+// Predicate is a filter expression over rows from one or more tables.
 // The interface is sealed: external packages cannot provide implementations.
 // This enforcement is what lets the pruning layer rely on an inspectable
 // predicate structure (SPEC-004 §3.1).
@@ -229,6 +229,59 @@ func (p CrossJoin) ProjectedTable() TableID {
 		return p.Right
 	}
 	return p.Left
+}
+
+// MultiJoinRelation describes one relation instance in a three-or-more-way
+// live join. Alias disambiguates repeated table instances.
+type MultiJoinRelation struct {
+	Table TableID
+	Alias uint8
+}
+
+// MultiJoinColumnRef identifies a column in one relation instance.
+type MultiJoinColumnRef struct {
+	Relation int
+	Table    TableID
+	Column   ColID
+	Alias    uint8
+}
+
+// MultiJoinCondition is an equality edge between two relation columns.
+type MultiJoinCondition struct {
+	Left  MultiJoinColumnRef
+	Right MultiJoinColumnRef
+}
+
+// MultiJoin matches tuples across three or more relation instances and emits
+// rows from ProjectedRelation. Filter is an optional tuple-level predicate.
+type MultiJoin struct {
+	Relations         []MultiJoinRelation
+	Conditions        []MultiJoinCondition
+	ProjectedRelation int
+	Filter            Predicate
+}
+
+func (MultiJoin) sealed() {}
+
+func (p MultiJoin) Tables() []TableID {
+	out := make([]TableID, 0, len(p.Relations))
+	seen := make(map[TableID]struct{}, len(p.Relations))
+	for _, rel := range p.Relations {
+		if _, ok := seen[rel.Table]; ok {
+			continue
+		}
+		seen[rel.Table] = struct{}{}
+		out = append(out, rel.Table)
+	}
+	return out
+}
+
+// ProjectedTable returns the table ID whose row shape the subscription emits.
+func (p MultiJoin) ProjectedTable() TableID {
+	if p.ProjectedRelation < 0 || p.ProjectedRelation >= len(p.Relations) {
+		return 0
+	}
+	return p.Relations[p.ProjectedRelation].Table
 }
 
 // Bound describes one end of a ColRange. If Unbounded is true, Value and

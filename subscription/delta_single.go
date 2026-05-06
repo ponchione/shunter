@@ -93,6 +93,8 @@ func MatchRowSide(pred Predicate, table TableID, sideAlias uint8, row types.Prod
 		return true
 	case CrossJoin:
 		return true
+	case MultiJoin:
+		return true
 	}
 	return false
 }
@@ -148,6 +150,8 @@ func MatchJoinPair(pred Predicate, leftTable TableID, leftAlias uint8, leftRow t
 	case Join:
 		return true
 	case CrossJoin:
+		return true
+	case MultiJoin:
 		return true
 	}
 	return false

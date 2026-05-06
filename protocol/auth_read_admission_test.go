@@ -306,6 +306,27 @@ func TestAuthReadAdmissionPrivateMultiWayJoinTableRejected(t *testing.T) {
 	requireOneOffAuthError(t, conn, "no such table: `secret`. If the table exists, it may be marked private.")
 }
 
+func TestAuthReadAdmissionSubscribePrivateMultiWayJoinTableRejected(t *testing.T) {
+	conn := strictReadAdmissionConn()
+	executor := &mockSubExecutor{}
+	sl := authReadJoinLookup(
+		schema.ReadPolicy{Access: schema.TableAccessPublic},
+		schema.ReadPolicy{Access: schema.TableAccessPrivate},
+	)
+	const sqlText = "SELECT visible.* FROM visible JOIN secret ON visible.id = secret.visible_id JOIN visible AS v2 ON secret.visible_id = v2.id"
+
+	handleSubscribeSingle(context.Background(), conn, &SubscribeSingleMsg{
+		RequestID:   18,
+		QueryID:     28,
+		QueryString: sqlText,
+	}, executor, sl)
+
+	requireSubscriptionError(t, conn, 18, 28, "no such table: `secret`. If the table exists, it may be marked private., executing: `"+sqlText+"`")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Fatal("executor registered an unauthorized multi-way join subscription")
+	}
+}
+
 func TestAuthReadAdmissionSubscribeMultiUnauthorizedQueryRegistersNone(t *testing.T) {
 	conn := strictReadAdmissionConn()
 	executor := &mockSubExecutor{}

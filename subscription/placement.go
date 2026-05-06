@@ -50,6 +50,12 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 	if predicateNeverMatches(pred) {
 		return
 	}
+	if p, ok := pred.(MultiJoin); ok {
+		for _, t := range p.Tables() {
+			mutateTablePlacement(idx, t, hash, add)
+		}
+		return
+	}
 	if j, ok := pred.(Join); ok && j.Left == j.Right {
 		mutateTablePlacement(idx, j.Left, hash, add)
 		return
@@ -141,6 +147,8 @@ func predicateNeverMatches(pred Predicate) bool {
 	case Join:
 		return predicateNeverMatches(p.Filter)
 	case CrossJoin:
+		return predicateNeverMatches(p.Filter)
+	case MultiJoin:
 		return predicateNeverMatches(p.Filter)
 	default:
 		return false

@@ -356,6 +356,69 @@ func TestDeclaredQueryMultiWayJoinAggregateExecutes(t *testing.T) {
 	}
 }
 
+func TestDeclaredViewMultiWayJoinSubscribes(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, NewModule("multi_join_view_reads").
+		SchemaVersion(1).
+		TableDef(joinReadIndexedTableDef("t")).
+		TableDef(joinReadIndexedTableDef("s")).
+		Reducer("seed_join_rows", seedJoinRowsReducer).
+		View(ViewDeclaration{
+			Name:        "live_matching_tuple_rows",
+			SQL:         "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32 WHERE r.id <> 99",
+			Permissions: PermissionMetadata{Required: []string{"joins:subscribe"}},
+		}))
+	defer rt.Close()
+
+	res, err := rt.CallReducer(context.Background(), "seed_join_rows", nil)
+	if err != nil {
+		t.Fatalf("seed reducer admission: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("seed reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+
+	sub, err := rt.SubscribeView(context.Background(), "live_matching_tuple_rows", 16, WithDeclaredReadPermissions("joins:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView: %v", err)
+	}
+	if sub.Name != "live_matching_tuple_rows" || sub.TableName != "t" {
+		t.Fatalf("subscription identity = (%q, %q), want live_matching_tuple_rows/t", sub.Name, sub.TableName)
+	}
+	if !rowsHaveUint64IDs(sub.InitialRows, 1, 2, 2, 3, 3) {
+		t.Fatalf("initial rows = %#v, want projected t ids 1,2,2,3,3", sub.InitialRows)
+	}
+}
+
+func TestDeclaredViewMultiWayJoinAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x31)
+	bob := visibilityRuntimeIdentity(0x32)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        "live_visible_message_chain",
+			SQL:         "SELECT a.* FROM messages AS a JOIN messages AS b ON a.id = b.id JOIN messages AS c ON b.id = c.id",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+
+	sub, err := rt.SubscribeView(context.Background(), "live_visible_message_chain", 17,
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:subscribe"),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView: %v", err)
+	}
+	if len(sub.InitialRows) != 1 || sub.InitialRows[0][0].AsUint64() != 1 || sub.InitialRows[0][1].AsString() != alice.Hex() {
+		t.Fatalf("visible multi-way view rows = %#v, want only caller row", sub.InitialRows)
+	}
+}
+
 func TestDeclaredViewRejectsOrderBy(t *testing.T) {
 	_, err := Build(validChatModule().
 		View(ViewDeclaration{

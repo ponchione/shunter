@@ -170,6 +170,11 @@ func copyCompiledSQLQuery(query compiledSQLQuery) compiledSQLQuery {
 	}
 	if query.MultiJoin != nil {
 		out.MultiJoin = copyCompiledSQLMultiJoin(query.MultiJoin)
+		pred, err := subscriptionMultiJoinPredicate(out.MultiJoin)
+		if err != nil {
+			panic("protocol: invalid compiled multi-join predicate: " + err.Error())
+		}
+		out.Predicate = pred
 	}
 	if len(query.OrderBy) > 0 {
 		out.OrderBy = make([]compiledSQLOrderBy, len(query.OrderBy))
@@ -305,14 +310,22 @@ func ApplyVisibilityFilters(compiled CompiledSQLQuery, sl SchemaLookup, caller *
 		return CompiledSQLQuery{}, fmt.Errorf("schema lookup must not be nil")
 	}
 	query := copyCompiledSQLQuery(compiled.query)
-	if allowAll || len(filters) == 0 || query.Predicate == nil {
-		if query.MultiJoin != nil && !allowAll && len(filters) != 0 {
+	if query.MultiJoin != nil {
+		if !allowAll && len(filters) != 0 {
 			usesCallerIdentity, err := applyMultiJoinVisibility(query.MultiJoin, sl, caller, filters)
 			if err != nil {
 				return CompiledSQLQuery{}, err
 			}
 			query.UsesCallerIdentity = query.UsesCallerIdentity || usesCallerIdentity
+			pred, err := subscriptionMultiJoinPredicate(query.MultiJoin)
+			if err != nil {
+				return CompiledSQLQuery{}, err
+			}
+			query.Predicate = pred
 		}
+		return newCompiledSQLQuery(query), nil
+	}
+	if allowAll || len(filters) == 0 || query.Predicate == nil {
 		return newCompiledSQLQuery(query), nil
 	}
 	expanded, usesCallerIdentity, err := expandPredicateVisibility(query.Predicate, sl, caller, filters)
@@ -463,10 +476,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	normalizedPredicate := plan.NormalizedPredicate
 	usesCallerIdentity := plan.UsesCallerIdentity
 	if len(stmt.Joins) > 1 {
-		if !allowProjection {
-			return compiledSQLQuery{}, fmt.Errorf("multi-way joins are only supported for one-off queries and executable declared queries")
-		}
-		return compileMultiJoinSQLQuery(stmt, stmtOrderBy, normalizedPredicate, usesCallerIdentity, qs, sl, caller)
+		return compileMultiJoinSQLQuery(stmt, stmtOrderBy, normalizedPredicate, usesCallerIdentity, qs, sl, caller, allowProjection)
 	}
 	if stmt.Join != nil {
 		leftID, leftTS, ok := lookupSQLTableExact(sl, stmt.Join.LeftTable)

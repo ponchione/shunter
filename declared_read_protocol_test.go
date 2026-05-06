@@ -57,6 +57,29 @@ func TestProtocolDeclaredViewSucceedsWithDeclarationPermission(t *testing.T) {
 	requireDeclaredReadAppliedRows(t, client, 31, 41, "messages", 1)
 }
 
+func TestProtocolDeclaredViewMultiWayJoinSendsDeltas(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message", insertMessageReducer).
+		View(ViewDeclaration{
+			Name:        "live_message_chain",
+			SQL:         "SELECT a.* FROM messages AS a JOIN messages AS b ON a.id = b.id JOIN messages AS c ON b.id = c.id",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+	insertMessage(t, rt, "hello")
+
+	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "multi-subscriber", "messages:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 32,
+		QueryID:   42,
+		Name:      "live_message_chain",
+	})
+	requireDeclaredReadAppliedRows(t, client, 32, 42, "messages", 1)
+
+	insertMessage(t, rt, "world")
+	requireDeclaredReadDeltaRows(t, client, 42, "messages", 1, 0)
+}
+
 func TestProtocolDeclaredReadsSurviveCleanRestart(t *testing.T) {
 	dataDir := t.TempDir()
 	cfg := declaredReadProtocolConfig(t)

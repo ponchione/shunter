@@ -44,8 +44,10 @@ func validateRootPredicate(pred Predicate) error {
 	if pred == nil {
 		return fmt.Errorf("%w: nil predicate", ErrInvalidPredicate)
 	}
-	if tables := pred.Tables(); len(tables) > 2 {
-		return fmt.Errorf("%w: predicate references %d tables", ErrTooManyTables, len(tables))
+	if _, ok := pred.(MultiJoin); !ok {
+		if tables := pred.Tables(); len(tables) > 2 {
+			return fmt.Errorf("%w: predicate references %d tables", ErrTooManyTables, len(tables))
+		}
 	}
 	return nil
 }
@@ -77,6 +79,8 @@ func validateWithOptions(pred Predicate, s SchemaLookup, opts validateOptions) e
 		return validateJoin(p, s, opts)
 	case CrossJoin:
 		return validateCrossJoin(p, s, opts)
+	case MultiJoin:
+		return validateMultiJoin(p, s, opts)
 	default:
 		return fmt.Errorf("%w: unsupported predicate %T", ErrInvalidPredicate, pred)
 	}
@@ -155,6 +159,114 @@ func validateColumn(table TableID, col ColID, s SchemaLookup) (ValueKind, error)
 		return 0, fmt.Errorf("%w: table %d column %d", ErrColumnNotFound, table, col)
 	}
 	return s.ColumnType(table, col), nil
+}
+
+func validateMultiJoin(p MultiJoin, s SchemaLookup, opts validateOptions) error {
+	if len(p.Relations) < 3 {
+		return fmt.Errorf("%w: multi-join requires at least three relations", ErrInvalidPredicate)
+	}
+	if p.ProjectedRelation < 0 || p.ProjectedRelation >= len(p.Relations) {
+		return fmt.Errorf("%w: multi-join projected relation %d out of range", ErrInvalidPredicate, p.ProjectedRelation)
+	}
+	seenRelations := make(map[MultiJoinRelation]struct{}, len(p.Relations))
+	tableCounts := make(map[TableID]int, len(p.Relations))
+	for _, rel := range p.Relations {
+		if !s.TableExists(rel.Table) {
+			return fmt.Errorf("%w: multi-join relation table %d", ErrTableNotFound, rel.Table)
+		}
+		if _, exists := seenRelations[rel]; exists {
+			return fmt.Errorf("%w: duplicate multi-join relation table %d alias %d", ErrInvalidPredicate, rel.Table, rel.Alias)
+		}
+		seenRelations[rel] = struct{}{}
+		tableCounts[rel.Table]++
+	}
+	for _, condition := range p.Conditions {
+		leftKind, err := validateMultiJoinColumnRef("multi-join left condition", condition.Left, p.Relations, s)
+		if err != nil {
+			return err
+		}
+		rightKind, err := validateMultiJoinColumnRef("multi-join right condition", condition.Right, p.Relations, s)
+		if err != nil {
+			return err
+		}
+		if condition.Left.Relation == condition.Right.Relation {
+			return fmt.Errorf("%w: multi-join condition compares one relation", ErrInvalidPredicate)
+		}
+		if leftKind != rightKind {
+			return fmt.Errorf("%w: multi-join condition column kinds differ (%s vs %s)", ErrInvalidPredicate, leftKind, rightKind)
+		}
+		if opts.requireJoinIndex && !s.HasIndex(condition.Left.Table, condition.Left.Column) && !s.HasIndex(condition.Right.Table, condition.Right.Column) {
+			return fmt.Errorf("%w: join %d.%d = %d.%d", ErrUnindexedJoin, condition.Left.Table, condition.Left.Column, condition.Right.Table, condition.Right.Column)
+		}
+	}
+	if p.Filter == nil {
+		return nil
+	}
+	for _, ft := range p.Filter.Tables() {
+		if tableCounts[ft] == 0 {
+			return fmt.Errorf("%w: multi-join filter references table %d outside join", ErrInvalidPredicate, ft)
+		}
+	}
+	if err := validateMultiJoinFilterAliases(p.Filter, tableCounts, seenRelations); err != nil {
+		return err
+	}
+	return validateWithOptions(p.Filter, s, opts)
+}
+
+func validateMultiJoinColumnRef(name string, ref MultiJoinColumnRef, relations []MultiJoinRelation, s SchemaLookup) (ValueKind, error) {
+	if ref.Relation < 0 || ref.Relation >= len(relations) {
+		return 0, fmt.Errorf("%w: %s relation %d out of range", ErrInvalidPredicate, name, ref.Relation)
+	}
+	rel := relations[ref.Relation]
+	if rel.Table != ref.Table || rel.Alias != ref.Alias {
+		return 0, fmt.Errorf("%w: %s relation metadata mismatch", ErrInvalidPredicate, name)
+	}
+	return validateColumn(ref.Table, ref.Column, s)
+}
+
+func validateMultiJoinFilterAliases(pred Predicate, tableCounts map[TableID]int, relations map[MultiJoinRelation]struct{}) error {
+	switch p := pred.(type) {
+	case ColEq:
+		return validateMultiJoinLeafAlias("multi-join filter", p.Table, p.Alias, tableCounts, relations)
+	case ColNe:
+		return validateMultiJoinLeafAlias("multi-join filter", p.Table, p.Alias, tableCounts, relations)
+	case ColRange:
+		return validateMultiJoinLeafAlias("multi-join filter", p.Table, p.Alias, tableCounts, relations)
+	case ColEqCol:
+		if err := validateMultiJoinLeafAlias("multi-join filter", p.LeftTable, p.LeftAlias, tableCounts, relations); err != nil {
+			return err
+		}
+		return validateMultiJoinLeafAlias("multi-join filter", p.RightTable, p.RightAlias, tableCounts, relations)
+	case And:
+		return validateMultiJoinFilterAliasChildren(p.Left, p.Right, tableCounts, relations)
+	case Or:
+		return validateMultiJoinFilterAliasChildren(p.Left, p.Right, tableCounts, relations)
+	}
+	return nil
+}
+
+func validateMultiJoinLeafAlias(name string, table TableID, alias uint8, tableCounts map[TableID]int, relations map[MultiJoinRelation]struct{}) error {
+	if tableCounts[table] <= 1 {
+		return nil
+	}
+	if _, ok := relations[MultiJoinRelation{Table: table, Alias: alias}]; !ok {
+		return fmt.Errorf("%w: %s alias %d does not match a relation for table %d", ErrInvalidPredicate, name, alias, table)
+	}
+	return nil
+}
+
+func validateMultiJoinFilterAliasChildren(left, right Predicate, tableCounts map[TableID]int, relations map[MultiJoinRelation]struct{}) error {
+	if left != nil {
+		if err := validateMultiJoinFilterAliases(left, tableCounts, relations); err != nil {
+			return err
+		}
+	}
+	if right != nil {
+		if err := validateMultiJoinFilterAliases(right, tableCounts, relations); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateJoin(p Join, s SchemaLookup, opts validateOptions) error {

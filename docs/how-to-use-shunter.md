@@ -355,6 +355,9 @@ fmt.Println(sub.TableName, len(sub.InitialRows))
 
 `SubscribeView` admits the subscription and returns the initial rows. Protocol
 clients receive ongoing transaction updates through the protocol path.
+Executable views may use table-shaped multi-way joins such as `SELECT a.*`.
+Live views still reject column projections, aggregates, ordering, limits, and
+offsets.
 
 ## Serve Protocol Traffic
 

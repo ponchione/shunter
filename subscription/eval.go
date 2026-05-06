@@ -279,6 +279,10 @@ func walkDeltaIndexColumns(pred Predicate, visit func(TableID, ColID)) {
 			if x.Filter != nil {
 				walk(x.Filter)
 			}
+		case MultiJoin:
+			if x.Filter != nil {
+				walk(x.Filter)
+			}
 		}
 	}
 	if pred != nil {
@@ -412,6 +416,19 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 			TableID:   p.ProjectedTable(),
 			TableName: m.schema.TableName(p.ProjectedTable()),
 			Columns:   m.columnsForUpdate(p.ProjectedTable()),
+			Inserts:   ins,
+			Deletes:   del,
+		}}
+	case MultiJoin:
+		ins, del := evalMultiJoinDelta(dv, p)
+		if len(ins) == 0 && len(del) == 0 {
+			return nil
+		}
+		projected := p.ProjectedTable()
+		return []SubscriptionUpdate{{
+			TableID:   projected,
+			TableName: m.schema.TableName(projected),
+			Columns:   m.columnsForUpdate(projected),
 			Inserts:   ins,
 			Deletes:   del,
 		}}

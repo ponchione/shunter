@@ -33,6 +33,7 @@ const (
 	tagCrossJoin byte = 0x08
 	tagNoRows    byte = 0x09
 	tagColEqCol  byte = 0x0A
+	tagMultiJoin byte = 0x0B
 )
 
 // Within a canonical Bound encoding.
@@ -121,7 +122,7 @@ func containsJoinLikePredicate(pred Predicate) bool {
 		return containsJoinLikePredicate(p.Left) || containsJoinLikePredicate(p.Right)
 	case Or:
 		return containsJoinLikePredicate(p.Left) || containsJoinLikePredicate(p.Right)
-	case Join, CrossJoin:
+	case Join, CrossJoin, MultiJoin:
 		return true
 	default:
 		return false
@@ -381,6 +382,11 @@ func canonicalizePredicate(pred Predicate) Predicate {
 		}
 		p.Filter = canonicalizePredicate(p.Filter)
 		return p
+	case MultiJoin:
+		if p.Filter != nil {
+			p.Filter = canonicalizePredicate(p.Filter)
+		}
+		return p
 	default:
 		return pred
 	}
@@ -528,10 +534,36 @@ func encodePredicate(e *canonicalEncoder, pred Predicate) {
 			e.writeByte(1)
 			encodePredicate(e, p.Filter)
 		}
+	case MultiJoin:
+		e.writeByte(tagMultiJoin)
+		e.writeU32(uint32(len(p.Relations)))
+		for _, rel := range p.Relations {
+			e.writeU32(uint32(rel.Table))
+			e.writeByte(rel.Alias)
+		}
+		e.writeU32(uint32(p.ProjectedRelation))
+		e.writeU32(uint32(len(p.Conditions)))
+		for _, condition := range p.Conditions {
+			encodeMultiJoinColumnRef(e, condition.Left)
+			encodeMultiJoinColumnRef(e, condition.Right)
+		}
+		if p.Filter == nil {
+			e.writeByte(0)
+		} else {
+			e.writeByte(1)
+			encodePredicate(e, p.Filter)
+		}
 	default:
 		// Sealed interface — no external impls reach this point.
 		panic("subscription: unknown predicate type")
 	}
+}
+
+func encodeMultiJoinColumnRef(e *canonicalEncoder, ref MultiJoinColumnRef) {
+	e.writeU32(uint32(ref.Relation))
+	e.writeU32(uint32(ref.Table))
+	e.writeU32(uint32(ref.Column))
+	e.writeByte(ref.Alias)
 }
 
 func encodeBound(e *canonicalEncoder, b Bound) {

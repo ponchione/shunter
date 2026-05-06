@@ -2195,50 +2195,147 @@ func TestHandleSubscribeSingle_UnaliasedSelfCrossJoinRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_MultiWayJoinRejected pins the reference-matched
-// rejection of three-way join shapes at the subscribe admission boundary.
-// Externally the client receives a SubscriptionError; internally the parser
-// short-circuits before admission. Reference subscription runtime bails with
-// "Invalid number of tables in subscription: {N}" at
-// reference/SpacetimeDB/crates/subscription/src/lib.rs:251.
-func TestHandleSubscribeSingle_MultiWayJoinRejected(t *testing.T) {
+func TestHandleSubscribeSingle_MultiWayJoinAcceptedForTableShape(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
-		Name:    "t",
-		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
 	})
 	b.TableDef(schema.TableDefinition{
-		Name:    "s",
-		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_s_u32", Columns: []string{"u32"}}},
 	})
 	eng, err := b.Build(schema.EngineOptions{})
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	cases := []struct {
-		name        string
-		queryString string
-	}{
-		{"cross_chain", "SELECT t.* FROM t JOIN s JOIN s AS r"},
-		{"on_chain", "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32"},
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	const sqlText = "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32 WHERE r.id <> 99"
+	msg := &SubscribeSingleMsg{RequestID: 70, QueryID: 71, QueryString: sqlText}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			conn := testConnDirect(nil)
-			executor := &mockSubExecutor{}
-			sl := registrySchemaLookup{reg: eng.Registry()}
-			msg := &SubscribeSingleMsg{RequestID: 70, QueryID: 71, QueryString: c.queryString}
-			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-			tag, decoded := drainServerMsgEventually(t, conn)
-			if tag != TagSubscriptionError {
-				t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-			}
-			se := decoded.(SubscriptionError)
-			requireOptionalUint32(t, se.QueryID, 71, "SubscriptionError.QueryID")
-			if req := executor.getRegisterSetReq(); req != nil {
-				t.Fatal("executor should not be called for multi-way join")
-			}
-		})
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	pred, ok := req.Predicates[0].(subscription.MultiJoin)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want MultiJoin", req.Predicates[0])
+	}
+	if len(pred.Relations) != 3 || len(pred.Conditions) != 2 {
+		t.Fatalf("MultiJoin relations/conditions = %d/%d, want 3/2", len(pred.Relations), len(pred.Conditions))
+	}
+	tID, _, ok := eng.Registry().TableByName("t")
+	if !ok {
+		t.Fatal("schema missing table t")
+	}
+	if pred.ProjectedTable() != tID {
+		t.Fatalf("ProjectedTable = %d, want table %d", pred.ProjectedTable(), tID)
+	}
+	if pred.Filter == nil {
+		t.Fatal("MultiJoin filter = nil, want WHERE literal filter")
+	}
+}
+
+func TestHandleSubscribeSingle_MultiWayJoinProjectionRejected(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_s_u32", Columns: []string{"u32"}}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	const sqlText = "SELECT t.id FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32"
+	msg := &SubscribeSingleMsg{RequestID: 72, QueryID: 73, QueryString: sqlText}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 73, "SubscriptionError.QueryID")
+	if !strings.Contains(se.Error, "Column projections are not supported in subscriptions") {
+		t.Fatalf("Error = %q, want projection rejection", se.Error)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Fatal("executor should not be called for multi-way projection")
+	}
+}
+
+func TestHandleSubscribeSingle_MultiWayJoinUnindexedJoinRejected(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	const sqlText = "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32"
+	msg := &SubscribeSingleMsg{RequestID: 74, QueryID: 75, QueryString: sqlText}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 75, "SubscriptionError.QueryID")
+	if !strings.Contains(se.Error, "Subscriptions require indexes on join columns") {
+		t.Fatalf("Error = %q, want unindexed join rejection", se.Error)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Fatal("executor should not be called for unindexed multi-way join")
 	}
 }
 

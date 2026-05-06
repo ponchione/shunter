@@ -63,7 +63,7 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, view store
 		return nil, nil
 	}
 	switch p := pred.(type) {
-	case Join, CrossJoin:
+	case Join, CrossJoin, MultiJoin:
 		if ctx == nil {
 			ctx = context.Background()
 		}
@@ -77,6 +77,8 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, view store
 			rows, err = m.appendProjectedJoinRows(ctx, nil, view, p)
 		case CrossJoin:
 			rows, err = m.appendProjectedCrossJoinRows(ctx, nil, view, p)
+		case MultiJoin:
+			rows, err = m.appendProjectedMultiJoinRows(ctx, nil, view, p)
 		}
 		if err != nil {
 			return nil, err
@@ -481,6 +483,8 @@ func emittedTableID(p Predicate) TableID {
 	case Join:
 		return x.ProjectedTable()
 	case CrossJoin:
+		return x.ProjectedTable()
+	case MultiJoin:
 		return x.ProjectedTable()
 	}
 	tables := p.Tables()
