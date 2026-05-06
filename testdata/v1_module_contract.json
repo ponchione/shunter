@@ -1,0 +1,323 @@
+{
+  "contract_version": 1,
+  "module": {
+    "name": "v1_guardrails",
+    "version": "v1.0.0",
+    "metadata": {
+      "owner": "v1-contract",
+      "purpose": "compatibility-fixture"
+    }
+  },
+  "schema": {
+    "version": 3,
+    "tables": [
+      {
+        "name": "messages",
+        "columns": [
+          {
+            "name": "id",
+            "type": "uint64"
+          },
+          {
+            "name": "sender",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "type": "string"
+          },
+          {
+            "name": "sent_at",
+            "type": "timestamp"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "pk",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "primary": true
+          },
+          {
+            "name": "messages_sender_idx",
+            "columns": [
+              "sender"
+            ],
+            "unique": false,
+            "primary": false
+          },
+          {
+            "name": "messages_sent_at_idx",
+            "columns": [
+              "sent_at"
+            ],
+            "unique": false,
+            "primary": false
+          }
+        ],
+        "read_policy": {
+          "access": "permissioned",
+          "permissions": [
+            "messages:read"
+          ]
+        }
+      },
+      {
+        "name": "sys_clients",
+        "columns": [
+          {
+            "name": "connection_id",
+            "type": "bytes"
+          },
+          {
+            "name": "identity",
+            "type": "bytes"
+          },
+          {
+            "name": "connected_at",
+            "type": "int64"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "pk",
+            "columns": [
+              "connection_id"
+            ],
+            "unique": true,
+            "primary": true
+          }
+        ],
+        "read_policy": {
+          "access": "private",
+          "permissions": []
+        }
+      },
+      {
+        "name": "sys_scheduled",
+        "columns": [
+          {
+            "name": "schedule_id",
+            "type": "uint64"
+          },
+          {
+            "name": "reducer_name",
+            "type": "string"
+          },
+          {
+            "name": "args",
+            "type": "bytes"
+          },
+          {
+            "name": "next_run_at_ns",
+            "type": "int64"
+          },
+          {
+            "name": "repeat_ns",
+            "type": "int64"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "pk",
+            "columns": [
+              "schedule_id"
+            ],
+            "unique": true,
+            "primary": true
+          }
+        ],
+        "read_policy": {
+          "access": "private",
+          "permissions": []
+        }
+      }
+    ],
+    "reducers": [
+      {
+        "name": "create_message",
+        "lifecycle": false
+      },
+      {
+        "name": "OnConnect",
+        "lifecycle": true
+      }
+    ]
+  },
+  "queries": [
+    {
+      "name": "recent_messages",
+      "sql": "SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25"
+    }
+  ],
+  "views": [
+    {
+      "name": "live_message_projection",
+      "sql": "SELECT id, body AS text FROM messages"
+    },
+    {
+      "name": "live_message_count",
+      "sql": "SELECT COUNT(*) AS n FROM messages"
+    }
+  ],
+  "visibility_filters": [
+    {
+      "name": "own_messages",
+      "sql": "SELECT * FROM messages WHERE sender = :sender",
+      "return_table": "messages",
+      "return_table_id": 0,
+      "uses_caller_identity": true
+    }
+  ],
+  "permissions": {
+    "reducers": [
+      {
+        "name": "create_message",
+        "required": [
+          "messages:write"
+        ]
+      }
+    ],
+    "queries": [
+      {
+        "name": "recent_messages",
+        "required": [
+          "messages:read"
+        ]
+      }
+    ],
+    "views": [
+      {
+        "name": "live_message_projection",
+        "required": [
+          "messages:subscribe"
+        ]
+      },
+      {
+        "name": "live_message_count",
+        "required": [
+          "messages:subscribe"
+        ]
+      }
+    ]
+  },
+  "read_model": {
+    "declarations": [
+      {
+        "surface": "query",
+        "name": "recent_messages",
+        "tables": [
+          "messages"
+        ],
+        "tags": [
+          "history",
+          "v1"
+        ]
+      },
+      {
+        "surface": "view",
+        "name": "live_message_projection",
+        "tables": [
+          "messages"
+        ],
+        "tags": [
+          "projection",
+          "v1"
+        ]
+      },
+      {
+        "surface": "view",
+        "name": "live_message_count",
+        "tables": [
+          "messages"
+        ],
+        "tags": [
+          "aggregate",
+          "v1"
+        ]
+      }
+    ]
+  },
+  "migrations": {
+    "module": {
+      "module_version": "v1.0.0",
+      "schema_version": 3,
+      "contract_version": 1,
+      "previous_version": "v0.9.0",
+      "compatibility": "compatible",
+      "classifications": [
+        "additive"
+      ],
+      "notes": "representative v1 contract fixture"
+    },
+    "declarations": [
+      {
+        "surface": "table",
+        "name": "messages",
+        "metadata": {
+          "module_version": "",
+          "schema_version": 0,
+          "contract_version": 0,
+          "previous_version": "",
+          "compatibility": "compatible",
+          "classifications": [
+            "additive"
+          ],
+          "notes": "messages table fixture"
+        }
+      },
+      {
+        "surface": "query",
+        "name": "recent_messages",
+        "metadata": {
+          "module_version": "",
+          "schema_version": 0,
+          "contract_version": 0,
+          "previous_version": "",
+          "compatibility": "compatible",
+          "classifications": [
+            "additive"
+          ],
+          "notes": "declared query fixture"
+        }
+      },
+      {
+        "surface": "view",
+        "name": "live_message_projection",
+        "metadata": {
+          "module_version": "",
+          "schema_version": 0,
+          "contract_version": 0,
+          "previous_version": "",
+          "compatibility": "compatible",
+          "classifications": [
+            "additive"
+          ],
+          "notes": "declared live view projection fixture"
+        }
+      },
+      {
+        "surface": "view",
+        "name": "live_message_count",
+        "metadata": {
+          "module_version": "",
+          "schema_version": 0,
+          "contract_version": 0,
+          "previous_version": "",
+          "compatibility": "compatible",
+          "classifications": [
+            "additive"
+          ],
+          "notes": "declared live view count fixture"
+        }
+      }
+    ]
+  },
+  "codegen": {
+    "contract_format": "shunter.module_contract",
+    "contract_version": 1,
+    "default_snapshot_filename": "shunter.contract.json"
+  }
+}
