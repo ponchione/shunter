@@ -152,7 +152,7 @@ func mutateMultiJoinPlacement(idx *PruningIndexes, pred MultiJoin, hash QueryHas
 	}
 }
 
-func mutateAliasCompoundPlacement(idx *PruningIndexes, pred MultiJoin, conditions []MultiJoinCondition, t TableID, hash QueryHash, add bool, resolver IndexResolver) bool {
+func mutateAliasCompoundPlacement(idx *PruningIndexes, pred MultiJoin, conditions multiJoinPlacementConditionSet, t TableID, hash QueryHash, add bool, resolver IndexResolver) bool {
 	relationIndexes := multiJoinRelationIndexesForTable(pred.Relations, t)
 	if len(relationIndexes) == 0 {
 		return false
@@ -165,7 +165,7 @@ func mutateAliasCompoundPlacement(idx *PruningIndexes, pred MultiJoin, condition
 			filters = mergeColFilterPlacements(filters, aliasPlacements)
 			continue
 		}
-		relationEdges := multiJoinExistenceEdgesForRelation(conditions, relation, resolver)
+		relationEdges := multiJoinExistenceEdgesForRelation(multiJoinConditionsForRelation(conditions, relation), relation, resolver)
 		if len(relationEdges) == 0 {
 			return false
 		}
@@ -194,21 +194,33 @@ func multiJoinTableCounts(pred MultiJoin) map[TableID]int {
 	return counts
 }
 
-func multiJoinPlacementConditions(pred MultiJoin) []MultiJoinCondition {
-	filterConditions := requiredMultiJoinFilterConditions(pred.Filter, pred.Relations)
-	if len(filterConditions) == 0 {
-		return pred.Conditions
+type multiJoinPlacementConditionSet struct {
+	required []MultiJoinCondition
+	filter   map[int][]MultiJoinCondition
+}
+
+func multiJoinPlacementConditions(pred MultiJoin) multiJoinPlacementConditionSet {
+	return multiJoinPlacementConditionSet{
+		required: pred.Conditions,
+		filter:   multiJoinFilterConditionsByRelation(pred.Filter, pred.Relations),
 	}
-	out := make([]MultiJoinCondition, 0, len(pred.Conditions)+len(filterConditions))
-	out = append(out, pred.Conditions...)
+}
+
+func multiJoinConditionsForRelation(conditions multiJoinPlacementConditionSet, relation int) []MultiJoinCondition {
+	filterConditions := conditions.filter[relation]
+	if len(filterConditions) == 0 {
+		return conditions.required
+	}
+	out := make([]MultiJoinCondition, 0, len(conditions.required)+len(filterConditions))
+	out = append(out, conditions.required...)
 	out = append(out, filterConditions...)
 	return out
 }
 
-// Filter column equalities are placement conditions only when every matching
-// tuple must satisfy them directly or through AND. OR stays on broader fallback
-// until there is a disjunctive edge planner.
-func requiredMultiJoinFilterConditions(pred Predicate, relations []MultiJoinRelation) []MultiJoinCondition {
+// Filter column equalities are placement edges for a relation only when every
+// matching tuple must satisfy at least one equality edge for that relation.
+// For OR this keeps only relation coverage common to every branch.
+func multiJoinFilterConditionsByRelation(pred Predicate, relations []MultiJoinRelation) map[int][]MultiJoinCondition {
 	switch p := pred.(type) {
 	case ColEqCol:
 		left, ok := multiJoinFilterColumnRef(relations, p.LeftTable, p.LeftAlias, p.LeftColumn)
@@ -219,20 +231,59 @@ func requiredMultiJoinFilterConditions(pred Predicate, relations []MultiJoinRela
 		if !ok || left.Relation == right.Relation {
 			return nil
 		}
-		return []MultiJoinCondition{{Left: left, Right: right}}
+		condition := MultiJoinCondition{Left: left, Right: right}
+		return map[int][]MultiJoinCondition{
+			left.Relation:  {condition},
+			right.Relation: {condition},
+		}
 	case And:
-		left := requiredMultiJoinFilterConditions(p.Left, relations)
-		right := requiredMultiJoinFilterConditions(p.Right, relations)
-		if len(left) == 0 {
-			return right
-		}
-		if len(right) == 0 {
-			return left
-		}
-		return append(left, right...)
+		return mergeMultiJoinFilterConditionMaps(
+			multiJoinFilterConditionsByRelation(p.Left, relations),
+			multiJoinFilterConditionsByRelation(p.Right, relations),
+		)
+	case Or:
+		return intersectMultiJoinFilterConditionMaps(
+			multiJoinFilterConditionsByRelation(p.Left, relations),
+			multiJoinFilterConditionsByRelation(p.Right, relations),
+		)
 	default:
 		return nil
 	}
+}
+
+func mergeMultiJoinFilterConditionMaps(left, right map[int][]MultiJoinCondition) map[int][]MultiJoinCondition {
+	if len(left) == 0 {
+		return right
+	}
+	if len(right) == 0 {
+		return left
+	}
+	out := make(map[int][]MultiJoinCondition, len(left)+len(right))
+	for relation, conditions := range left {
+		out[relation] = append(out[relation], conditions...)
+	}
+	for relation, conditions := range right {
+		out[relation] = append(out[relation], conditions...)
+	}
+	return out
+}
+
+func intersectMultiJoinFilterConditionMaps(left, right map[int][]MultiJoinCondition) map[int][]MultiJoinCondition {
+	if len(left) == 0 || len(right) == 0 {
+		return nil
+	}
+	out := make(map[int][]MultiJoinCondition)
+	for relation, leftConditions := range left {
+		rightConditions, ok := right[relation]
+		if !ok {
+			continue
+		}
+		out[relation] = append(append([]MultiJoinCondition{}, leftConditions...), rightConditions...)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func multiJoinFilterColumnRef(relations []MultiJoinRelation, table TableID, alias uint8, column ColID) (MultiJoinColumnRef, bool) {
@@ -329,7 +380,7 @@ func requiredAliasLocalFilterPlacements(pred Predicate, table TableID, alias uin
 	return colFilterPlacements{}, false
 }
 
-func multiJoinExistenceEdgesFor(relations []MultiJoinRelation, conditions []MultiJoinCondition, t TableID, resolver IndexResolver) []joinExistenceEdgePlacement {
+func multiJoinExistenceEdgesFor(relations []MultiJoinRelation, conditions multiJoinPlacementConditionSet, t TableID, resolver IndexResolver) []joinExistenceEdgePlacement {
 	if resolver == nil {
 		return nil
 	}
@@ -339,7 +390,7 @@ func multiJoinExistenceEdgesFor(relations []MultiJoinRelation, conditions []Mult
 	}
 	var placements []joinExistenceEdgePlacement
 	for _, relation := range relationIndexes {
-		relationPlacements := multiJoinExistenceEdgesForRelation(conditions, relation, resolver)
+		relationPlacements := multiJoinExistenceEdgesForRelation(multiJoinConditionsForRelation(conditions, relation), relation, resolver)
 		if len(relationPlacements) == 0 {
 			return nil
 		}
