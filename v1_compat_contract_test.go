@@ -59,6 +59,45 @@ func TestV1CompatibilityModuleContractJSONIgnoresUnknownFields(t *testing.T) {
 	}
 }
 
+func TestV1CompatibilityModuleContractFixtureCoversStableArtifacts(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "v1_module_contract.json"))
+	if err != nil {
+		t.Fatalf("read v1 contract fixture: %v", err)
+	}
+	var topLevel map[string]json.RawMessage
+	if err := json.Unmarshal(data, &topLevel); err != nil {
+		t.Fatalf("Unmarshal top-level contract JSON: %v", err)
+	}
+	for _, key := range []string{
+		"contract_version",
+		"module",
+		"schema",
+		"queries",
+		"views",
+		"visibility_filters",
+		"permissions",
+		"read_model",
+		"migrations",
+		"codegen",
+	} {
+		if _, ok := topLevel[key]; !ok {
+			t.Fatalf("v1 contract fixture missing top-level key %q", key)
+		}
+	}
+
+	var contract ModuleContract
+	if err := json.Unmarshal(data, &contract); err != nil {
+		t.Fatalf("Unmarshal v1 contract fixture: %v", err)
+	}
+	if contract.ContractVersion != ModuleContractVersion {
+		t.Fatalf("contract_version = %d, want %d", contract.ContractVersion, ModuleContractVersion)
+	}
+	assertV1FixtureTable(t, contract)
+	assertV1FixtureDeclaredReads(t, contract)
+	assertV1FixtureVisibilityFilter(t, contract)
+	assertV1FixtureMetadata(t, contract)
+}
+
 func buildV1CompatibilityRuntime(t *testing.T) *Runtime {
 	t.Helper()
 
@@ -144,6 +183,168 @@ func v1CompatibilityMessagesTableDef() schema.TableDefinition {
 			{Name: "messages_sent_at_idx", Columns: []string{"sent_at"}},
 		},
 	}
+}
+
+func assertV1FixtureTable(t *testing.T, contract ModuleContract) {
+	t.Helper()
+	for _, table := range contract.Schema.Tables {
+		if table.Name != "messages" {
+			continue
+		}
+		if got, want := table.ReadPolicy.Access, schema.TableAccessPermissioned; got != want {
+			t.Fatalf("messages read policy access = %s, want %s", got, want)
+		}
+		if len(table.ReadPolicy.Permissions) != 1 || table.ReadPolicy.Permissions[0] != "messages:read" {
+			t.Fatalf("messages read permissions = %#v, want [messages:read]", table.ReadPolicy.Permissions)
+		}
+		for _, column := range []string{"id", "sender", "body", "sent_at"} {
+			if !v1FixtureHasColumn(table.Columns, column) {
+				t.Fatalf("messages table missing column %q: %#v", column, table.Columns)
+			}
+		}
+		return
+	}
+	t.Fatalf("v1 contract fixture missing messages table: %#v", contract.Schema.Tables)
+}
+
+func assertV1FixtureDeclaredReads(t *testing.T, contract ModuleContract) {
+	t.Helper()
+	assertV1FixtureQuerySQL(t, contract.Queries, "recent_messages", "SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25")
+	assertV1FixtureViewSQL(t, contract.Views, "live_message_projection", "SELECT id, body AS text FROM messages")
+	assertV1FixtureViewSQL(t, contract.Views, "live_message_count", "SELECT COUNT(*) AS n FROM messages")
+	assertV1FixturePermission(t, contract.Permissions.Reducers, "create_message", "messages:write")
+	assertV1FixturePermission(t, contract.Permissions.Queries, "recent_messages", "messages:read")
+	assertV1FixturePermission(t, contract.Permissions.Views, "live_message_projection", "messages:subscribe")
+	assertV1FixturePermission(t, contract.Permissions.Views, "live_message_count", "messages:subscribe")
+	assertV1FixtureReadModel(t, contract.ReadModel.Declarations, ReadModelSurfaceQuery, "recent_messages", "history")
+	assertV1FixtureReadModel(t, contract.ReadModel.Declarations, ReadModelSurfaceView, "live_message_projection", "projection")
+	assertV1FixtureReadModel(t, contract.ReadModel.Declarations, ReadModelSurfaceView, "live_message_count", "aggregate")
+}
+
+func assertV1FixtureVisibilityFilter(t *testing.T, contract ModuleContract) {
+	t.Helper()
+	if len(contract.VisibilityFilters) != 1 {
+		t.Fatalf("visibility_filters = %#v, want one own_messages filter", contract.VisibilityFilters)
+	}
+	filter := contract.VisibilityFilters[0]
+	if filter.Name != "own_messages" ||
+		filter.SQL != "SELECT * FROM messages WHERE sender = :sender" ||
+		filter.ReturnTable != "messages" ||
+		filter.ReturnTableID != 0 ||
+		!filter.UsesCallerIdentity {
+		t.Fatalf("visibility filter = %#v, want own_messages caller filter on messages", filter)
+	}
+}
+
+func assertV1FixtureMetadata(t *testing.T, contract ModuleContract) {
+	t.Helper()
+	if contract.Module.Name != "v1_guardrails" || contract.Module.Version != "v1.0.0" {
+		t.Fatalf("module identity = %#v, want v1_guardrails v1.0.0", contract.Module)
+	}
+	if contract.Migrations.Module.ContractVersion != ModuleContractVersion ||
+		contract.Migrations.Module.Compatibility != MigrationCompatibilityCompatible {
+		t.Fatalf("module migration metadata = %#v, want v1 compatible metadata", contract.Migrations.Module)
+	}
+	for _, want := range []struct {
+		surface string
+		name    string
+	}{
+		{MigrationSurfaceTable, "messages"},
+		{MigrationSurfaceQuery, "recent_messages"},
+		{MigrationSurfaceView, "live_message_projection"},
+		{MigrationSurfaceView, "live_message_count"},
+	} {
+		if !v1FixtureHasMigration(contract.Migrations.Declarations, want.surface, want.name) {
+			t.Fatalf("migrations missing %s %q: %#v", want.surface, want.name, contract.Migrations.Declarations)
+		}
+	}
+	if contract.Codegen.ContractFormat != ModuleContractFormat ||
+		contract.Codegen.ContractVersion != ModuleContractVersion ||
+		contract.Codegen.DefaultSnapshotFilename != DefaultContractSnapshotFilename {
+		t.Fatalf("codegen metadata = %#v, want v1 defaults", contract.Codegen)
+	}
+}
+
+func v1FixtureHasColumn(columns []schema.ColumnExport, name string) bool {
+	for _, column := range columns {
+		if column.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func assertV1FixtureQuerySQL(t *testing.T, queries []QueryDescription, name, sql string) {
+	t.Helper()
+	for _, query := range queries {
+		if query.Name == name {
+			if query.SQL != sql {
+				t.Fatalf("query %q SQL = %q, want %q", name, query.SQL, sql)
+			}
+			return
+		}
+	}
+	t.Fatalf("queries missing %q: %#v", name, queries)
+}
+
+func assertV1FixtureViewSQL(t *testing.T, views []ViewDescription, name, sql string) {
+	t.Helper()
+	for _, view := range views {
+		if view.Name == name {
+			if view.SQL != sql {
+				t.Fatalf("view %q SQL = %q, want %q", name, view.SQL, sql)
+			}
+			return
+		}
+	}
+	t.Fatalf("views missing %q: %#v", name, views)
+}
+
+func assertV1FixturePermission(t *testing.T, declarations []PermissionContractDeclaration, name, required string) {
+	t.Helper()
+	for _, declaration := range declarations {
+		if declaration.Name == name {
+			if len(declaration.Required) != 1 || declaration.Required[0] != required {
+				t.Fatalf("permission %q = %#v, want required %q", name, declaration.Required, required)
+			}
+			return
+		}
+	}
+	t.Fatalf("permissions missing %q: %#v", name, declarations)
+}
+
+func assertV1FixtureReadModel(t *testing.T, declarations []ReadModelContractDeclaration, surface, name, tag string) {
+	t.Helper()
+	for _, declaration := range declarations {
+		if declaration.Surface == surface && declaration.Name == name {
+			if len(declaration.Tables) != 1 || declaration.Tables[0] != "messages" {
+				t.Fatalf("read model %s %q tables = %#v, want [messages]", surface, name, declaration.Tables)
+			}
+			if !v1FixtureHasString(declaration.Tags, tag) || !v1FixtureHasString(declaration.Tags, "v1") {
+				t.Fatalf("read model %s %q tags = %#v, want %q and v1", surface, name, declaration.Tags, tag)
+			}
+			return
+		}
+	}
+	t.Fatalf("read models missing %s %q: %#v", surface, name, declarations)
+}
+
+func v1FixtureHasMigration(declarations []MigrationContractDeclaration, surface, name string) bool {
+	for _, declaration := range declarations {
+		if declaration.Surface == surface && declaration.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func v1FixtureHasString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func v1ContractJSONWithUnknownFields(t *testing.T, data []byte) []byte {

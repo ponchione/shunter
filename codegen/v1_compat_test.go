@@ -73,6 +73,62 @@ func TestV1CompatibilityTypeScriptEntryPointsMatchGolden(t *testing.T) {
 	}
 }
 
+func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "v1_module_contract.ts"))
+	if err != nil {
+		t.Fatalf("read v1 TypeScript fixture: %v", err)
+	}
+	ts := string(data)
+
+	for _, want := range []string{
+		`export const shunterProtocol = {`,
+		`defaultSubprotocol: "v1.bsatn.shunter",`,
+		`export interface MessagesRow {`,
+		`id: bigint;`,
+		`sender: string;`,
+		`body: string;`,
+		`sentAt: bigint;`,
+		`export const tables = {`,
+		`messages: "messages",`,
+		`export type TableName = (typeof tables)[keyof typeof tables];`,
+		`export type TableRows = {`,
+		`"messages": MessagesRow;`,
+		`export const tableReadPolicies = {`,
+		`messages: { access: "permissioned", permissions: ["messages:read"] },`,
+		`export const visibilityFilters = {`,
+		`ownMessages: { sql: "SELECT * FROM messages WHERE sender = :sender", returnTable: "messages", returnTableId: 0, usesCallerIdentity: true },`,
+		`export const reducers = {`,
+		`createMessage: "create_message",`,
+		`export function callCreateMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`,
+		`export const lifecycleReducers = {`,
+		`OnConnect: "OnConnect",`,
+		`export const queries = {`,
+		`recentMessages: "recent_messages",`,
+		`export const querySQL = {`,
+		`recentMessages: "SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25",`,
+		`export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`,
+		`export const views = {`,
+		`liveMessageProjection: "live_message_projection",`,
+		`liveMessageCount: "live_message_count",`,
+		`export const viewSQL = {`,
+		`liveMessageProjection: "SELECT id, body AS text FROM messages",`,
+		`liveMessageCount: "SELECT COUNT(*) AS n FROM messages",`,
+		`export function subscribeLiveMessageProjection(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`,
+		`export function subscribeLiveMessageCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`,
+		`export const permissions = {`,
+		`createMessage: { required: ["messages:write"] },`,
+		`recentMessages: { required: ["messages:read"] },`,
+		`liveMessageProjection: { required: ["messages:subscribe"] },`,
+		`liveMessageCount: { required: ["messages:subscribe"] },`,
+		`export const readModels = {`,
+		`recentMessages: { tables: ["messages"], tags: ["history", "v1"] },`,
+		`liveMessageProjection: { tables: ["messages"], tags: ["projection", "v1"] },`,
+		`liveMessageCount: { tables: ["messages"], tags: ["aggregate", "v1"] },`,
+	} {
+		assertContains(t, ts, want)
+	}
+}
+
 func TestV1CompatibilityTypeScriptIgnoresUnknownContractJSONFields(t *testing.T) {
 	contractJSON, err := os.ReadFile(filepath.Join("..", "testdata", "v1_module_contract.json"))
 	if err != nil {
