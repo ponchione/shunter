@@ -31,6 +31,60 @@ func TestProtocolV1CompatibilityPinsTokenAndVersionNumbers(t *testing.T) {
 	}
 }
 
+func TestProtocolV1CompatibilityPinsStableMessageTagAssignments(t *testing.T) {
+	clientTags := []struct {
+		name string
+		got  uint8
+		want uint8
+	}{
+		{name: "SubscribeSingle", got: TagSubscribeSingle, want: 1},
+		{name: "UnsubscribeSingle", got: TagUnsubscribeSingle, want: 2},
+		{name: "CallReducer", got: TagCallReducer, want: 3},
+		{name: "OneOffQuery", got: TagOneOffQuery, want: 4},
+		{name: "SubscribeMulti", got: TagSubscribeMulti, want: 5},
+		{name: "UnsubscribeMulti", got: TagUnsubscribeMulti, want: 6},
+		{name: "DeclaredQuery", got: TagDeclaredQuery, want: 7},
+		{name: "SubscribeDeclaredView", got: TagSubscribeDeclaredView, want: 8},
+	}
+	for _, tag := range clientTags {
+		if tag.got != tag.want {
+			t.Fatalf("client tag %s = %d, want %d", tag.name, tag.got, tag.want)
+		}
+	}
+
+	serverTags := []struct {
+		name string
+		got  uint8
+		want uint8
+	}{
+		{name: "IdentityToken", got: TagIdentityToken, want: 1},
+		{name: "SubscribeSingleApplied", got: TagSubscribeSingleApplied, want: 2},
+		{name: "UnsubscribeSingleApplied", got: TagUnsubscribeSingleApplied, want: 3},
+		{name: "SubscriptionError", got: TagSubscriptionError, want: 4},
+		{name: "TransactionUpdate", got: TagTransactionUpdate, want: 5},
+		{name: "OneOffQueryResponse", got: TagOneOffQueryResponse, want: 6},
+		{name: "ReducerCallResultReserved", got: TagReducerCallResult, want: 7},
+		{name: "TransactionUpdateLight", got: TagTransactionUpdateLight, want: 8},
+		{name: "SubscribeMultiApplied", got: TagSubscribeMultiApplied, want: 9},
+		{name: "UnsubscribeMultiApplied", got: TagUnsubscribeMultiApplied, want: 10},
+	}
+	for _, tag := range serverTags {
+		if tag.got != tag.want {
+			t.Fatalf("server tag %s = %d, want %d", tag.name, tag.got, tag.want)
+		}
+	}
+
+	if !IsReservedV1Tag(TagReservedZero) {
+		t.Fatal("TagReservedZero is not reserved in v1")
+	}
+	if !IsReservedV1Tag(TagReservedExtensionStart) || !IsReservedV1Tag(TagReservedExtensionEnd) {
+		t.Fatal("extension tag range is not reserved in v1")
+	}
+	if !IsReservedV1ServerTag(TagReducerCallResult) {
+		t.Fatal("retired server reducer-call result tag is not reserved in v1")
+	}
+}
+
 func TestProtocolCompiledAggregateOrderByIsObservable(t *testing.T) {
 	sl := newMockSchema("messages", 1,
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},
