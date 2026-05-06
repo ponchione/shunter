@@ -263,3 +263,66 @@ func TestCollectCandidatesMultiJoinSplitOrColumnEqualityBranchUsesSameTransactio
 		t.Fatalf("overlapping multi-way split-OR column-equality same-tx delete candidates = %v, want only %v", got, hash)
 	}
 }
+
+func pureColumnEqualitySplitOrMultiJoinPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 2, Alias: 1},
+			{Table: 3, Alias: 2},
+		},
+		ProjectedRelation: 0,
+		Filter: Or{
+			Left: ColEqCol{
+				LeftTable:   1,
+				LeftColumn:  0,
+				LeftAlias:   0,
+				RightTable:  2,
+				RightColumn: 0,
+				RightAlias:  1,
+			},
+			Right: ColEqCol{
+				LeftTable:   2,
+				LeftColumn:  0,
+				LeftAlias:   1,
+				RightTable:  3,
+				RightColumn: 0,
+				RightAlias:  2,
+			},
+		},
+	}
+}
+
+func TestMultiJoinPlacementSplitOrColumnEqualityBranchesFallBackWhenPartiallyCovered(t *testing.T) {
+	s := newFakeSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(1, cols, 0)
+	s.addTable(2, cols)
+	s.addTable(3, cols)
+	idx := NewPruningIndexes()
+	pred := pureColumnEqualitySplitOrMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	coveredBranchEdge := JoinEdge{LHSTable: 2, RHSTable: 1, LHSJoinCol: 0, RHSJoinCol: 0, RHSFilterCol: 0}
+	if got := idx.JoinEdge.exists[coveredBranchEdge]; len(got) != 0 {
+		t.Fatalf("partial column-equality branch edge = %v, want empty when another branch is uncovered", got)
+	}
+	if got := idx.Table.Lookup(2); len(got) != 1 || got[0] != hash {
+		t.Fatalf("TableIndex[2] = %v, want fallback [%v]", got, hash)
+	}
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		3: {{types.NewUint64(8), types.NewUint64(99)}},
+	})
+	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+	got := CollectCandidatesForTable(idx, 2, changed, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("fallback column-equality split-OR candidates = %v, want [%v]", got, hash)
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}

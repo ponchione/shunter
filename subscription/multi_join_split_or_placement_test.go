@@ -106,6 +106,105 @@ func splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate() MultiJoin {
 	}
 }
 
+func fourTableDualIndexedMultiJoinTestSchema() *fakeSchema {
+	s := dualIndexedMultiJoinTestSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(4, cols, 0, 1)
+	return s
+}
+
+func splitOrLongNonKeyPreservingMultiHopFilterMultiJoinPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 2, Alias: 1},
+			{Table: 3, Alias: 2},
+			{Table: 4, Alias: 3},
+		},
+		Conditions: []MultiJoinCondition{
+			{
+				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
+				Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 1, Table: 2, Column: 0, Alias: 1},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 2, Table: 3, Column: 0, Alias: 2},
+				Right: MultiJoinColumnRef{Relation: 3, Table: 4, Column: 1, Alias: 3},
+			},
+		},
+		ProjectedRelation: 0,
+		Filter: Or{
+			Left: ColEq{
+				Table:  1,
+				Column: 0,
+				Alias:  0,
+				Value:  types.NewUint64(7),
+			},
+			Right: ColRange{
+				Table:  4,
+				Column: 0,
+				Alias:  3,
+				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper:  Bound{Unbounded: true},
+			},
+		},
+	}
+}
+
+func splitOrThreeHopFilterMultiJoinPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 2, Alias: 1},
+			{Table: 3, Alias: 2},
+			{Table: 4, Alias: 3},
+		},
+		Conditions: []MultiJoinCondition{
+			{
+				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
+				Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 1, Table: 2, Column: 0, Alias: 1},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 2, Table: 3, Column: 0, Alias: 2},
+				Right: MultiJoinColumnRef{Relation: 3, Table: 4, Column: 1, Alias: 3},
+			},
+		},
+		ProjectedRelation: 0,
+		Filter: Or{
+			Left: ColEq{
+				Table:  1,
+				Column: 0,
+				Alias:  0,
+				Value:  types.NewUint64(7),
+			},
+			Right: ColRange{
+				Table:  4,
+				Column: 0,
+				Alias:  3,
+				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper:  Bound{Unbounded: true},
+			},
+		},
+	}
+}
+
+func path3MultiJoinTestSchema() *fakeSchema {
+	s := newFakeSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(1, cols, 1)
+	s.addTable(2, cols, 1)
+	s.addTable(3, cols, 1)
+	s.addTable(4, cols, 1)
+	return s
+}
+
 func splitOrRepeatedAliasMultiHopFilterMultiJoinPredicate() MultiJoin {
 	return MultiJoin{
 		Relations: []MultiJoinRelation{
@@ -1069,6 +1168,171 @@ func TestCollectCandidatesMultiJoinSplitOrNonKeyPreservingPathEdgesUseSameTransa
 	}
 }
 
+func TestMultiJoinPlacementSplitOrThreeHopUsesPath3Edges(t *testing.T) {
+	s := path3MultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrThreeHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	path3Edge := JoinPath3Edge{
+		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, RHSTable: 4,
+		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
+		Mid2FirstCol: 1, Mid2SecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
+	}
+	if got := idx.JoinRangePath3Edge.Lookup(path3Edge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("three-hop path range edge placement = %v, want [%v]", got, hash)
+	}
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("three-hop endpoint local placement = %v, want [%v]", got, hash)
+	}
+	shortPathEdge := JoinPathEdge{
+		LHSTable: 1, MidTable: 2, RHSTable: 4,
+		LHSJoinCol: 1, MidFirstCol: 1, MidSecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
+	}
+	if got := idx.JoinRangePathEdge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
+		t.Fatalf("two-hop path edge placement = %v, want empty for three-hop path", got)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex[1] = %v, want empty for covered three-hop path", got)
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrThreeHopPathEdgesUseCommittedRows(t *testing.T) {
+	s := path3MultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrThreeHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(30)}},
+		4: {{types.NewUint64(40), types.NewUint64(40)}},
+	})
+	if got := CollectCandidatesForTable(idx, 1, changed, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched three-hop path candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(30)}},
+		4: {{types.NewUint64(60), types.NewUint64(40)}},
+	})
+	got := CollectCandidatesForTable(idx, 1, changed, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("matching three-hop path candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrThreeHopPathEdgesUseSameTransactionRows(t *testing.T) {
+	s := path3MultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrThreeHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+	candidates := make(map[QueryHash]struct{})
+	add := func(h QueryHash) {
+		candidates[h] = struct{}{}
+	}
+
+	rejected := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(30)}}},
+			4: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(40)}}},
+		},
+	}
+	collectJoinPath3FilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
+	if len(candidates) != 0 {
+		t.Fatalf("rejected same-tx three-hop path candidates = %v, want empty", candidates)
+	}
+
+	allChangedOverlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(30)}}},
+			4: {Inserts: []types.ProductValue{{types.NewUint64(60), types.NewUint64(40)}}},
+		},
+	}
+	clear(candidates)
+	collectJoinPath3FilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("all-changed same-tx three-hop path candidates = %v, want only %v", candidates, hash)
+	}
+
+	deleteOverlap := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Deletes: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Deletes: []types.ProductValue{{types.NewUint64(40), types.NewUint64(30)}}},
+			4: {Deletes: []types.ProductValue{{types.NewUint64(60), types.NewUint64(40)}}},
+		},
+	}
+	clear(candidates)
+	collectJoinPath3FilterDeltaCandidates(idx, 1, changed, deleteOverlap, nil, nil, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("delete same-tx three-hop path candidates = %v, want only %v", candidates, hash)
+	}
+
+	rhsChanged := &store.Changeset{
+		TxID: 4,
+		Tables: map[TableID]*store.TableChangeset{
+			4: {Inserts: []types.ProductValue{{types.NewUint64(60), types.NewUint64(40)}}},
+		},
+	}
+	midCommitted := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(30)}},
+	})
+	clear(candidates)
+	collectJoinPath3FilterDeltaCandidates(idx, 1, changed, rhsChanged, midCommitted, s, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("rhs-changed same-tx three-hop path candidates = %v, want only %v", candidates, hash)
+	}
+
+	mid2Changed := &store.Changeset{
+		TxID: 5,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(30)}}},
+		},
+	}
+	outerCommitted := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		4: {{types.NewUint64(60), types.NewUint64(40)}},
+	})
+	clear(candidates)
+	collectJoinPath3FilterDeltaCandidates(idx, 1, changed, mid2Changed, outerCommitted, s, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("mid2-changed same-tx three-hop path candidates = %v, want only %v", candidates, hash)
+	}
+
+	mid1Changed := &store.Changeset{
+		TxID: 6,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+		},
+	}
+	tailCommitted := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		3: {{types.NewUint64(40), types.NewUint64(30)}},
+		4: {{types.NewUint64(60), types.NewUint64(40)}},
+	})
+	clear(candidates)
+	collectJoinPath3FilterDeltaCandidates(idx, 1, changed, mid1Changed, tailCommitted, s, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("mid1-changed same-tx three-hop path candidates = %v, want only %v", candidates, hash)
+	}
+}
+
 func TestMultiJoinPlacementSplitOrNonKeyPreservingPathFallsBackWhenMidUnindexed(t *testing.T) {
 	s := newFakeSchema()
 	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
@@ -1132,6 +1396,160 @@ func TestMultiJoinPlacementSplitOrNonKeyPreservingPathFallsBackWhenRHSUnindexed(
 	removeSubscriptionForResolver(idx, pred, hash, s)
 	if !pruningIndexesEmpty(idx) {
 		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestMultiJoinPlacementSplitOrLongNonKeyPreservingMultiHopUsesPath3Edges(t *testing.T) {
+	s := fourTableDualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrLongNonKeyPreservingMultiHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	leftPathEdge := JoinPath3Edge{
+		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, RHSTable: 4,
+		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0, Mid2FirstCol: 1, Mid2SecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
+	}
+	if got := idx.JoinRangePath3Edge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("long non-key-preserving path3 range placement = %v, want [%v]", got, hash)
+	}
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("long non-key-preserving left local placement = %v, want [%v]", got, hash)
+	}
+	rightPathEdge := JoinPath3Edge{
+		LHSTable: 4, Mid1Table: 3, Mid2Table: 2, RHSTable: 1,
+		LHSJoinCol: 1, Mid1FirstCol: 0, Mid1SecondCol: 1, Mid2FirstCol: 0, Mid2SecondCol: 1, RHSJoinCol: 1, RHSFilterCol: 0,
+	}
+	if got := idx.JoinPath3Edge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("long non-key-preserving path3 value placement = %v, want [%v]", got, hash)
+	}
+	if len(idx.JoinEdge.exists) != 0 {
+		t.Fatalf("long non-key-preserving broad existence fallback = %+v, want none", idx.JoinEdge.exists)
+	}
+	for _, table := range []TableID{1, 2, 3, 4} {
+		if got := idx.Table.Lookup(table); len(got) != 0 {
+			t.Fatalf("TableIndex[%d] = %v, want empty for long non-key path placement", table, got)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingPath3PrunesMismatch(t *testing.T) {
+	s := fourTableDualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrLongNonKeyPreservingMultiHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(30)}},
+		4: {{types.NewUint64(40), types.NewUint64(40)}},
+	})
+	leftMismatch := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 1, leftMismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched long non-key path3 left candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(30)}},
+		4: {{types.NewUint64(60), types.NewUint64(40)}},
+	})
+	got := CollectCandidatesForTable(idx, 1, leftMismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("matching long non-key path3 left candidates = %v, want [%v]", got, hash)
+	}
+
+	localMatch := []types.ProductValue{{types.NewUint64(7), types.NewUint64(99)}}
+	got = CollectCandidatesForTable(idx, 1, localMatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("local long non-key path3 left candidates = %v, want [%v]", got, hash)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(8), types.NewUint64(20)}},
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(30)}},
+	})
+	rightMismatch := []types.ProductValue{{types.NewUint64(40), types.NewUint64(40)}}
+	if got := CollectCandidatesForTable(idx, 4, rightMismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched long non-key path3 right candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(7), types.NewUint64(20)}},
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(30)}},
+	})
+	got = CollectCandidatesForTable(idx, 4, rightMismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("matching long non-key path3 right candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingPath3UsesDeltaRows(t *testing.T) {
+	s := fourTableDualIndexedMultiJoinTestSchema()
+	mgr := NewManager(s, s)
+	pred := splitOrLongNonKeyPreservingMultiHopFilterMultiJoinPredicate()
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{23},
+		QueryID:    230,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	var hash QueryHash
+	for h := range mgr.registry.byHash {
+		hash = h
+	}
+	committed := buildMockCommitted(s, nil)
+	scratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(scratch)
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(30)}}},
+			4: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(40)}}},
+		},
+	}
+	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
+		t.Fatalf("non-overlapping long non-key path3 candidates = %v, want empty", got)
+	}
+
+	overlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(30)}}},
+			4: {Inserts: []types.ProductValue{{types.NewUint64(60), types.NewUint64(40)}}},
+		},
+	}
+	got := mgr.collectCandidatesInto(overlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping long non-key path3 candidates = %v, want only %v", got, hash)
+	}
+
+	deleteOverlap := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Deletes: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			2: {Deletes: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Deletes: []types.ProductValue{{types.NewUint64(40), types.NewUint64(30)}}},
+			4: {Deletes: []types.ProductValue{{types.NewUint64(60), types.NewUint64(40)}}},
+		},
+	}
+	got = mgr.collectCandidatesInto(deleteOverlap, committed, scratch)
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("overlapping long non-key path3 delete candidates = %v, want only %v", got, hash)
 	}
 }
 
