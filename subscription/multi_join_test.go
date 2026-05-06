@@ -530,6 +530,94 @@ func TestMultiJoinPlacementUsesRequiredRemoteFilterPathEdges(t *testing.T) {
 	}
 }
 
+func TestCollectCandidatesMultiJoinRequiredRemoteFilterPathEdgesUseSameTransactionRows(t *testing.T) {
+	s := dualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate()
+	pred.Filter = ColNe{Table: 3, Column: 0, Alias: 2, Value: types.NewUint64(99)}
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	leftRows := []types.ProductValue{{types.NewUint64(500), types.NewUint64(20)}}
+
+	rejected := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(99), types.NewUint64(30)}}},
+		},
+	}
+	got := make(map[QueryHash]struct{})
+	collectJoinPathFilterDeltaCandidates(idx, 1, leftRows, rejected, nil, nil, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if len(got) != 0 {
+		t.Fatalf("rejected same-tx required remote path candidates = %v, want empty", got)
+	}
+
+	allChangedOverlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(100), types.NewUint64(30)}}},
+		},
+	}
+	collectJoinPathFilterDeltaCandidates(idx, 1, leftRows, allChangedOverlap, nil, nil, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("all-changed same-tx required remote path candidates = %v, want only %v", got, hash)
+	}
+
+	deleteOverlap := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Deletes: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Deletes: []types.ProductValue{{types.NewUint64(100), types.NewUint64(30)}}},
+		},
+	}
+	clear(got)
+	collectJoinPathFilterDeltaCandidates(idx, 1, leftRows, deleteOverlap, nil, nil, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("all-changed same-tx required remote path delete candidates = %v, want only %v", got, hash)
+	}
+
+	midCommitted := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+	})
+	rhsChangedOverlap := &store.Changeset{
+		TxID: 4,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Inserts: []types.ProductValue{{types.NewUint64(100), types.NewUint64(30)}}},
+		},
+	}
+	clear(got)
+	collectJoinPathFilterDeltaCandidates(idx, 1, leftRows, rhsChangedOverlap, midCommitted, s, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("rhs-changed same-tx required remote path candidates = %v, want only %v", got, hash)
+	}
+
+	rhsCommitted := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		3: {{types.NewUint64(100), types.NewUint64(30)}},
+	})
+	midChangedOverlap := &store.Changeset{
+		TxID: 5,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+		},
+	}
+	clear(got)
+	collectJoinPathFilterDeltaCandidates(idx, 1, leftRows, midChangedOverlap, rhsCommitted, s, func(h QueryHash) {
+		got[h] = struct{}{}
+	})
+	if _, ok := got[hash]; !ok || len(got) != 1 {
+		t.Fatalf("mid-changed same-tx required remote path candidates = %v, want only %v", got, hash)
+	}
+}
+
 func TestCollectCandidatesMultiJoinRequiredRemoteFilterEdgesUseSameTransactionRows(t *testing.T) {
 	s := multiJoinTestSchema()
 	idx := NewPruningIndexes()

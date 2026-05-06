@@ -119,6 +119,52 @@ func splitOrRepeatedAliasMultiHopFilterMultiJoinPredicate() MultiJoin {
 	}
 }
 
+func splitOrBranchLocalConnectorMultiJoinPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 2, Alias: 1},
+			{Table: 3, Alias: 2},
+		},
+		ProjectedRelation: 0,
+		Filter: Or{
+			Left: And{
+				Left: ColEq{
+					Table:  1,
+					Column: 0,
+					Alias:  0,
+					Value:  types.NewUint64(7),
+				},
+				Right: ColEqCol{
+					LeftTable:   1,
+					LeftColumn:  1,
+					LeftAlias:   0,
+					RightTable:  2,
+					RightColumn: 1,
+					RightAlias:  1,
+				},
+			},
+			Right: And{
+				Left: ColRange{
+					Table:  3,
+					Column: 0,
+					Alias:  2,
+					Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
+					Upper:  Bound{Unbounded: true},
+				},
+				Right: ColEqCol{
+					LeftTable:   2,
+					LeftColumn:  1,
+					LeftAlias:   1,
+					RightTable:  3,
+					RightColumn: 1,
+					RightAlias:  2,
+				},
+			},
+		},
+	}
+}
+
 func TestMultiJoinPlacementUsesSplitOrLocalFilterEdges(t *testing.T) {
 	s := multiJoinTestSchema()
 	idx := NewPruningIndexes()
@@ -202,6 +248,135 @@ func TestMultiJoinPlacementSplitOrMultiHopUsesTransitiveEndpointAndMiddleRelatio
 	removeSubscriptionForResolver(idx, pred, hash, s)
 	if !pruningIndexesEmpty(idx) {
 		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestMultiJoinPlacementSplitOrUsesBranchLocalConnectorFilterEdges(t *testing.T) {
+	s := dualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrBranchLocalConnectorMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	valueEdge := JoinEdge{LHSTable: 2, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinEdge.Lookup(valueEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("branch-local connector value edge = %v, want [%v]", got, hash)
+	}
+	rangeEdge := JoinEdge{LHSTable: 2, RHSTable: 3, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinRangeEdge.Lookup(rangeEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("branch-local connector range edge = %v, want [%v]", got, hash)
+	}
+	if len(idx.JoinEdge.exists) != 0 {
+		t.Fatalf("branch-local connector existence fallback = %+v, want none", idx.JoinEdge.exists)
+	}
+	if got := idx.Table.Lookup(2); len(got) != 0 {
+		t.Fatalf("TableIndex[2] = %v, want empty for covered middle relation", got)
+	}
+	for _, table := range []TableID{1, 3} {
+		if got := idx.Table.Lookup(table); len(got) != 1 || got[0] != hash {
+			t.Fatalf("TableIndex[%d] = %v, want fallback [%v]", table, got, hash)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrBranchLocalConnectorPrunesMismatch(t *testing.T) {
+	s := dualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrBranchLocalConnectorMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(8), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(20)}},
+	})
+	mismatch := []types.ProductValue{{types.NewUint64(200), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 2, mismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched branch-local connector candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(7), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(20)}},
+	})
+	got := CollectCandidatesForTable(idx, 2, mismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("value branch-local connector candidates = %v, want [%v]", got, hash)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(8), types.NewUint64(20)}},
+		3: {{types.NewUint64(60), types.NewUint64(20)}},
+	})
+	got = CollectCandidatesForTable(idx, 2, mismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("range branch-local connector candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrBranchLocalConnectorUsesDeltaRows(t *testing.T) {
+	s := dualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrBranchLocalConnectorMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	changedRows := []types.ProductValue{{types.NewUint64(200), types.NewUint64(20)}}
+	candidates := make(map[QueryHash]struct{})
+	add := func(h QueryHash) {
+		candidates[h] = struct{}{}
+	}
+
+	noOverlap := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(20)}}},
+		},
+	}
+	collectJoinFilterDeltaCandidates(idx, 2, changedRows, noOverlap, add)
+	if len(candidates) != 0 {
+		t.Fatalf("non-overlapping branch-local connector candidates = %v, want empty", candidates)
+	}
+
+	valueOverlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {Inserts: []types.ProductValue{{types.NewUint64(7), types.NewUint64(20)}}},
+		},
+	}
+	clear(candidates)
+	collectJoinFilterDeltaCandidates(idx, 2, changedRows, valueOverlap, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("value-overlap branch-local connector candidates = %v, want only %v", candidates, hash)
+	}
+
+	rangeOverlap := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Inserts: []types.ProductValue{{types.NewUint64(60), types.NewUint64(20)}}},
+		},
+	}
+	clear(candidates)
+	collectJoinFilterDeltaCandidates(idx, 2, changedRows, rangeOverlap, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("range-overlap branch-local connector candidates = %v, want only %v", candidates, hash)
+	}
+
+	deleteOverlap := &store.Changeset{
+		TxID: 4,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Deletes: []types.ProductValue{{types.NewUint64(60), types.NewUint64(20)}}},
+		},
+	}
+	clear(candidates)
+	collectJoinFilterDeltaCandidates(idx, 2, changedRows, deleteOverlap, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("delete-overlap branch-local connector candidates = %v, want only %v", candidates, hash)
 	}
 }
 
@@ -737,6 +912,41 @@ func TestMultiJoinPlacementSplitOrNonKeyPreservingPathFallsBackWhenMidUnindexed(
 	}
 	if got := idx.Table.Lookup(1); len(got) != 1 || got[0] != hash {
 		t.Fatalf("TableIndex[1] = %v, want fallback [%v]", got, hash)
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestMultiJoinPlacementSplitOrNonKeyPreservingPathFallsBackWhenRHSUnindexed(t *testing.T) {
+	s := newFakeSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(1, cols, 1)
+	s.addTable(2, cols, 0, 1)
+	s.addTable(3, cols)
+	idx := NewPruningIndexes()
+	pred := splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	leftPathEdge := JoinPathEdge{
+		LHSTable: 1, MidTable: 2, RHSTable: 3,
+		LHSJoinCol: 1, MidFirstCol: 1, MidSecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
+	}
+	if got := idx.JoinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 0 {
+		t.Fatalf("rhs-unindexed non-key-preserving path edge = %v, want empty", got)
+	}
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
+		t.Fatalf("partial endpoint local placement = %v, want empty when RHS path is uncovered", got)
+	}
+	conditionEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
+	if _, ok := idx.JoinEdge.exists[conditionEdge][hash]; !ok {
+		t.Fatalf("condition-edge fallback missing: %+v", idx.JoinEdge.exists)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex[1] = %v, want condition-edge fallback", got)
 	}
 
 	removeSubscriptionForResolver(idx, pred, hash, s)

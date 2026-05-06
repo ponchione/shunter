@@ -1,6 +1,8 @@
 package subscription
 
 import (
+	"slices"
+
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
@@ -152,10 +154,10 @@ func mutateMultiJoinPlacement(idx *PruningIndexes, pred MultiJoin, hash QueryHas
 		if tableCounts[t] == 1 && mutateLocalFilterPlacement(idx, pred.Filter, t, hash, add) {
 			continue
 		}
-		if mutateMultiJoinFilterPlacement(idx, pred.Relations, conditions, t, hash, add, resolver) {
+		if mutateMultiJoinSplitOrFilterPlacement(idx, pred.Relations, conditions.required, pred.Filter, t, hash, add, resolver) {
 			continue
 		}
-		if mutateMultiJoinSplitOrFilterPlacement(idx, pred.Relations, conditions.required, pred.Filter, t, hash, add, resolver) {
+		if mutateMultiJoinFilterPlacement(idx, pred.Relations, conditions, t, hash, add, resolver) {
 			continue
 		}
 		if mutateMultiJoinRequiredFilterEdgePlacement(idx, pred.Relations, conditions, t, hash, add, resolver) {
@@ -569,14 +571,16 @@ func splitMultiJoinOrBranchPlacementsForRelation(
 	}
 
 	var out splitJoinOrPlacements
+	branchConditions := multiJoinBranchColumnEqualityConditions(branch, relations)
+	filterEdgeConditions := append(slices.Clone(conditions), branchConditions...)
 	for targetRelation, filters := range branchFilters {
 		if targetRelation == relation || !filters.hasAny() {
 			continue
 		}
-		out.append(multiJoinFilterEdgesBetweenRelations(conditions, relation, targetRelation, filters, resolver))
+		out.append(multiJoinFilterEdgesBetweenRelations(filterEdgeConditions, relation, targetRelation, filters, resolver))
 	}
 	if !out.hasAny() {
-		out.append(multiJoinBranchColumnEqualityPlacements(branch, relations, relation, resolver))
+		out.append(multiJoinColumnEqualityPlacementsForConditions(branchConditions, relation, resolver))
 	}
 	return out, out.hasAny()
 }
@@ -591,6 +595,14 @@ func multiJoinBranchColumnEqualityPlacements(
 	if len(conditions) == 0 {
 		return splitJoinOrPlacements{}
 	}
+	return multiJoinColumnEqualityPlacementsForConditions(conditions, relation, resolver)
+}
+
+func multiJoinColumnEqualityPlacementsForConditions(
+	conditions []MultiJoinCondition,
+	relation int,
+	resolver IndexResolver,
+) splitJoinOrPlacements {
 	edges := multiJoinExistenceEdgesForRelation(conditions, relation, resolver)
 	if len(edges) == 0 {
 		return splitJoinOrPlacements{}

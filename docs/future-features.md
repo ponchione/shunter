@@ -78,7 +78,7 @@ Likely feature slices:
 
 - broader index-aware planning for complex live join paths, especially
   disjunctive cross-alias filter shapes that need longer non-key-preserving
-  multi-hop condition paths or non-local branch predicates
+  multi-hop condition paths or more complex non-local branch predicates
 - remaining live subscription candidate pruning beyond current local-filter,
   join-condition, required filter-edge, direct split-OR placement, required-AND
   split-OR placement, direct column-equality split-OR branches, all-remote
@@ -87,6 +87,9 @@ Likely feature slices:
 
 Completed slices:
 
+- multi-way live join split-`OR` branches with branch-local column-equality
+  connectors use indexed remote value/range filter-edge pruning instead of
+  broad existence-edge fallback for the covered relation
 - multi-way live joins with non-key-preserving two-hop paths use indexed path
   edges for required and split-`OR` remote value/range filters, including
   same-transaction changed middle and endpoint rows
