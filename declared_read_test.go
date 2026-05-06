@@ -549,20 +549,30 @@ func TestDeclaredViewRejectsJoinOffset(t *testing.T) {
 	}
 }
 
-func TestDeclaredViewRejectsSumColumnAggregate(t *testing.T) {
-	_, err := Build(validChatModule().
+func TestDeclaredViewAllowsSumColumnAggregate(t *testing.T) {
+	if _, err := Build(validChatModule().
 		View(ViewDeclaration{
 			Name: "live_messages",
 			SQL:  "SELECT SUM(id) AS total FROM messages",
+		}), Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build rejected SUM aggregate declared view: %v", err)
+	}
+}
+
+func TestDeclaredViewRejectsSumStringAggregate(t *testing.T) {
+	_, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT SUM(body) AS total FROM messages",
 		}), Config{DataDir: t.TempDir()})
 	if err == nil {
-		t.Fatal("Build error = nil, want aggregate rejection for declared view")
+		t.Fatal("Build error = nil, want string SUM rejection for declared view")
 	}
 	if !errors.Is(err, ErrInvalidDeclarationSQL) {
 		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
 	}
-	if !strings.Contains(err.Error(), "live aggregate views support COUNT only") {
-		t.Fatalf("Build error = %v, want live COUNT-only aggregate rejection", err)
+	if !strings.Contains(err.Error(), "SUM aggregate only supports 64-bit integer and float columns") {
+		t.Fatalf("Build error = %v, want SUM numeric-column rejection", err)
 	}
 }
 
@@ -862,6 +872,11 @@ func TestSubscribeViewAggregateCountInitialRows(t *testing.T) {
 			Name:        "live_non_null_score_count",
 			SQL:         "SELECT COUNT(score) AS n FROM scores",
 			Permissions: PermissionMetadata{Required: []string{"scores:subscribe"}},
+		}).
+		View(ViewDeclaration{
+			Name:        "live_score_total",
+			SQL:         "SELECT SUM(score) AS total FROM scores",
+			Permissions: PermissionMetadata{Required: []string{"scores:subscribe"}},
 		}))
 	defer rt.Close()
 	res, err := rt.CallReducer(context.Background(), "seed_scores", nil)
@@ -892,6 +907,17 @@ func TestSubscribeViewAggregateCountInitialRows(t *testing.T) {
 	}
 	if len(nonNullRows.InitialRows) != 1 || nonNullRows.InitialRows[0][0].AsUint64() != 3 {
 		t.Fatalf("COUNT(score) initial rows = %#v, want non-null count 3", nonNullRows.InitialRows)
+	}
+
+	totalRows, err := rt.SubscribeView(context.Background(), "live_score_total", 20, WithDeclaredReadPermissions("scores:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView SUM(score): %v", err)
+	}
+	if totalRows.TableName != "scores" || len(totalRows.Columns) != 1 || totalRows.Columns[0].Name != "total" || totalRows.Columns[0].Type != types.KindUint64 || !totalRows.Columns[0].Nullable {
+		t.Fatalf("SUM(score) subscription shape = table %q columns %#v, want scores/total nullable Uint64", totalRows.TableName, totalRows.Columns)
+	}
+	if len(totalRows.InitialRows) != 1 || totalRows.InitialRows[0][0].AsUint64() != 23 {
+		t.Fatalf("SUM(score) initial rows = %#v, want total 23", totalRows.InitialRows)
 	}
 }
 
@@ -1264,6 +1290,37 @@ func TestDeclaredViewAggregateCountAppliesVisibilityAfterPermissionSucceeds(t *t
 	}
 }
 
+func TestDeclaredViewAggregateSumAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x3b)
+	bob := visibilityRuntimeIdentity(0x3c)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        "live_visible_message_total",
+			SQL:         "SELECT SUM(id) AS total FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+	insertMessageWithBody(t, rt, 3, alice.Hex())
+
+	sub, err := rt.SubscribeView(context.Background(), "live_visible_message_total", 31,
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:subscribe"),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView SUM visibility: %v", err)
+	}
+	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 4 {
+		t.Fatalf("visible SUM view rows = %#v, want total 4", sub.InitialRows)
+	}
+}
+
 func TestDeclaredViewJoinWhereColumnComparisonAppliesVisibility(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x25)
 	bob := visibilityRuntimeIdentity(0x26)
@@ -1327,25 +1384,25 @@ func TestDeclaredReadMissingPermissionRejectsBeforeExecutionOrRegistration(t *te
 
 func TestDeclaredAggregateViewMissingPermissionRejectsBeforeRegistration(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message", insertMessageReducer).
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
 		View(ViewDeclaration{
-			Name:        "live_message_count",
-			SQL:         "SELECT COUNT(*) AS n FROM messages",
+			Name:        "live_message_total",
+			SQL:         "SELECT SUM(id) AS total FROM messages",
 			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
 		}))
 	defer rt.Close()
-	insertMessage(t, rt, "hello")
+	insertMessageWithBody(t, rt, 3, "hello")
 
-	_, err := rt.SubscribeView(context.Background(), "live_message_count", 21, WithDeclaredReadPermissions("messages:read"))
+	_, err := rt.SubscribeView(context.Background(), "live_message_total", 21, WithDeclaredReadPermissions("messages:read"))
 	if !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("SubscribeView aggregate missing permission error = %v, want ErrPermissionDenied", err)
 	}
-	sub, err := rt.SubscribeView(context.Background(), "live_message_count", 21, WithDeclaredReadPermissions("messages:subscribe"))
+	sub, err := rt.SubscribeView(context.Background(), "live_message_total", 21, WithDeclaredReadPermissions("messages:subscribe"))
 	if err != nil {
 		t.Fatalf("SubscribeView aggregate after rejected attempt with same query id: %v", err)
 	}
-	if len(sub.InitialRows) != 1 || sub.InitialRows[0][0].AsUint64() != 1 {
-		t.Fatalf("aggregate initial rows after permission success = %#v, want count 1", sub.InitialRows)
+	if len(sub.InitialRows) != 1 || sub.InitialRows[0][0].AsUint64() != 3 {
+		t.Fatalf("aggregate initial rows after permission success = %#v, want total 3", sub.InitialRows)
 	}
 }
 

@@ -78,7 +78,7 @@ Likely feature slices:
 
 - broader index-aware planning for remaining live subscription candidate
   pruning and complex live join paths
-- live-view expansion for remaining query-only shapes such as non-COUNT or join
+- live-view expansion for remaining query-only shapes such as DISTINCT or join
   aggregate views after delta semantics are explicit
 
 Completed slices:
@@ -105,6 +105,8 @@ Completed slices:
   including projected initial rows and subscription deltas
 - declared live views support single-table `COUNT(*) AS name` and
   `COUNT(column) AS name` aggregate rows, including count-change deltas
+- declared live views support single-table `SUM(column) AS name` aggregate rows
+  for numeric columns, including nullable sum semantics and sum-change deltas
 - declared live views support single-table `ORDER BY` initial snapshots for
   table-shaped and projected views without positional delta semantics
 - declared live views support single-table `LIMIT` initial snapshots for

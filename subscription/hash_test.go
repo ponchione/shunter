@@ -122,6 +122,15 @@ func TestQueryShapeHashIncludesAggregateMetadata(t *testing.T) {
 		},
 	}
 	renamed := &Aggregate{Func: AggregateCount, ResultColumn: schema.ColumnSchema{Index: 0, Name: "total", Type: types.KindUint64}}
+	sumID := &Aggregate{
+		Func:         AggregateSum,
+		ResultColumn: schema.ColumnSchema{Index: 0, Name: "total", Type: types.KindUint64},
+		Argument: &AggregateColumn{
+			Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+			Table:  1,
+			Column: 0,
+		},
+	}
 	projection := []ProjectionColumn{{Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64}, Table: 1, Column: 0}}
 
 	tableHash := ComputeQueryPlanHash(pred, nil, nil)
@@ -129,6 +138,7 @@ func TestQueryShapeHashIncludesAggregateMetadata(t *testing.T) {
 	countStarHash := ComputeQueryShapeHash(pred, nil, countStar, nil)
 	countBodyHash := ComputeQueryShapeHash(pred, nil, countBody, nil)
 	renamedHash := ComputeQueryShapeHash(pred, nil, renamed, nil)
+	sumHash := ComputeQueryShapeHash(pred, nil, sumID, nil)
 
 	if countStarHash == tableHash {
 		t.Fatal("aggregate query shape should not collapse to table-shaped hash")
@@ -141,6 +151,9 @@ func TestQueryShapeHashIncludesAggregateMetadata(t *testing.T) {
 	}
 	if countStarHash == renamedHash {
 		t.Fatal("aggregate result column schema should affect query identity")
+	}
+	if countStarHash == sumHash {
+		t.Fatal("COUNT and SUM should hash differently")
 	}
 }
 

@@ -517,7 +517,10 @@ func evalAllQueries(mgr *Manager, cs *store.Changeset, view store.CommittedReadV
 	dv := NewDeltaView(view, cs, activeCols)
 	out := map[QueryHash]deltaBag{}
 	for h, qs := range mgr.registry.byHash {
-		updates := mgr.evalQuery(qs, dv)
+		updates, err := mgr.evalQuery(qs, dv)
+		if err != nil {
+			panic(err)
+		}
 		var bag deltaBag
 		for _, u := range updates {
 			bag.inserts = append(bag.inserts, u.Inserts...)

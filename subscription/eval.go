@@ -369,8 +369,7 @@ func (m *Manager) evalQuerySafe(qs *queryState, dv *DeltaView) (updates []Subscr
 			err = &evalPanic{hash: qs.hash, cause: r}
 		}
 	}()
-	updates = m.evalQuery(qs, dv)
-	return updates, nil
+	return m.evalQuery(qs, dv)
 }
 
 type evalPanic struct {
@@ -388,7 +387,7 @@ func (e *evalPanic) Unwrap() error { return ErrSubscriptionEval }
 // table; join predicates produce one SubscriptionUpdate carrying the joined
 // rows (TableID = Join.Left by convention). SubscriptionID is filled in by
 // the caller because it varies per subscriber.
-func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate {
+func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) ([]SubscriptionUpdate, error) {
 	if qs.aggregate != nil {
 		return m.evalAggregateQuery(qs, dv)
 	}
@@ -400,7 +399,7 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 		projectJoinFragments(frags.Deletes[:], lhsWidth, p.ProjectRight)
 		ins, del := ReconcileJoinDelta(frags.Inserts[:], frags.Deletes[:])
 		if len(ins) == 0 && len(del) == 0 {
-			return nil
+			return nil, nil
 		}
 		projected := p.ProjectedTable()
 		columns := projectionUpdateColumns(m.columnsForUpdate(projected), qs.projection)
@@ -410,11 +409,11 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 			Columns:   columns,
 			Inserts:   projectRows(ins, qs.projection),
 			Deletes:   projectRows(del, qs.projection),
-		}}
+		}}, nil
 	case CrossJoin:
 		ins, del := evalCrossJoinDelta(dv, p)
 		if len(ins) == 0 && len(del) == 0 {
-			return nil
+			return nil, nil
 		}
 		projected := p.ProjectedTable()
 		columns := projectionUpdateColumns(m.columnsForUpdate(projected), qs.projection)
@@ -424,11 +423,11 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 			Columns:   columns,
 			Inserts:   projectRows(ins, qs.projection),
 			Deletes:   projectRows(del, qs.projection),
-		}}
+		}}, nil
 	case MultiJoin:
 		ins, del := evalMultiJoinDelta(dv, p)
 		if len(ins) == 0 && len(del) == 0 {
-			return nil
+			return nil, nil
 		}
 		projected := p.ProjectedTable()
 		columns := projectionUpdateColumns(m.columnsForUpdate(projected), qs.projection)
@@ -438,7 +437,7 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 			Columns:   columns,
 			Inserts:   projectRows(ins, qs.projection),
 			Deletes:   projectRows(del, qs.projection),
-		}}
+		}}, nil
 	default:
 		var updates []SubscriptionUpdate
 		for _, t := range qs.predicate.Tables() {
@@ -454,7 +453,7 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 				Deletes:   projectRows(del, qs.projection),
 			})
 		}
-		return updates
+		return updates, nil
 	}
 }
 

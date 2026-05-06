@@ -275,6 +275,51 @@ func TestProtocolDeclaredViewAggregateSendsInitialRowsAndDeltas(t *testing.T) {
 	}
 }
 
+func TestProtocolDeclaredViewSumAggregateSendsInitialRowsAndDeltas(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		Reducer("delete_message_by_id", deleteMessageByIDReducer).
+		View(ViewDeclaration{
+			Name:        "live_message_total",
+			SQL:         "SELECT SUM(id) AS total FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, "alpha")
+	insertMessageWithBody(t, rt, 2, "bravo")
+	insertMessageWithBody(t, rt, 3, "charlie")
+
+	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "sum-aggregate-subscriber", "messages:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 38,
+		QueryID:   48,
+		Name:      "live_message_total",
+	})
+	aggregateColumns := []schema.ColumnSchema{{Name: "total", Type: types.KindUint64}}
+	initial := requireDeclaredReadAppliedValues(t, client, 38, 48, "messages", aggregateColumns)
+	if len(initial) != 1 || len(initial[0]) != 1 || initial[0][0].AsUint64() != 6 {
+		t.Fatalf("SUM aggregate initial rows = %#v, want total 6", initial)
+	}
+
+	insertMessageWithBody(t, rt, 4, "delta")
+	inserts, deletes := requireDeclaredReadDeltaValues(t, client, 48, "messages", aggregateColumns)
+	if len(deletes) != 1 || len(deletes[0]) != 1 || deletes[0][0].AsUint64() != 6 {
+		t.Fatalf("SUM aggregate delta deletes = %#v, want old total 6", deletes)
+	}
+	if len(inserts) != 1 || len(inserts[0]) != 1 || inserts[0][0].AsUint64() != 10 {
+		t.Fatalf("SUM aggregate delta inserts = %#v, want new total 10", inserts)
+	}
+
+	deleteMessageByID(t, rt, 2)
+	inserts, deletes = requireDeclaredReadDeltaValues(t, client, 48, "messages", aggregateColumns)
+	if len(deletes) != 1 || len(deletes[0]) != 1 || deletes[0][0].AsUint64() != 10 {
+		t.Fatalf("SUM aggregate delete delta deletes = %#v, want old total 10", deletes)
+	}
+	if len(inserts) != 1 || len(inserts[0]) != 1 || inserts[0][0].AsUint64() != 8 {
+		t.Fatalf("SUM aggregate delete delta inserts = %#v, want new total 8", inserts)
+	}
+}
+
 func TestProtocolDeclaredReadsSurviveCleanRestart(t *testing.T) {
 	dataDir := t.TempDir()
 	cfg := declaredReadProtocolConfig(t)

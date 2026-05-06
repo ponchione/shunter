@@ -27,6 +27,18 @@ func countBodyAggregate() *Aggregate {
 	}
 }
 
+func sumIDAggregate() *Aggregate {
+	return &Aggregate{
+		Func:         AggregateSum,
+		ResultColumn: schema.ColumnSchema{Index: 0, Name: "total", Type: types.KindUint64},
+		Argument: &AggregateColumn{
+			Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+			Table:  1,
+			Column: 0,
+		},
+	}
+}
+
 func TestRegisterSetAggregateReturnsOneInitialRow(t *testing.T) {
 	s := testSchema()
 	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
@@ -56,6 +68,38 @@ func TestRegisterSetAggregateReturnsOneInitialRow(t *testing.T) {
 	}
 	if len(update.Inserts) != 1 || update.Inserts[0][0].AsUint64() != 2 {
 		t.Fatalf("aggregate initial rows = %#v, want count 2", update.Inserts)
+	}
+}
+
+func TestRegisterSetSumAggregateReturnsOneInitialRow(t *testing.T) {
+	s := testSchema()
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewNull(types.KindString)},
+			{types.NewUint64(3), types.NewString("b")},
+		},
+	})
+	mgr := NewManager(s, s)
+
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    20,
+		Predicates: []Predicate{AllRows{Table: 1}},
+		Aggregates: []*Aggregate{sumIDAggregate()},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet SUM aggregate = %v", err)
+	}
+	if len(res.Update) != 1 {
+		t.Fatalf("initial update count = %d, want 1", len(res.Update))
+	}
+	update := res.Update[0]
+	if len(update.Columns) != 1 || update.Columns[0].Name != "total" || update.Columns[0].Type != types.KindUint64 {
+		t.Fatalf("aggregate columns = %#v, want total Uint64", update.Columns)
+	}
+	if len(update.Inserts) != 1 || update.Inserts[0][0].AsUint64() != 6 {
+		t.Fatalf("SUM aggregate initial rows = %#v, want total 6", update.Inserts)
 	}
 }
 
@@ -125,6 +169,84 @@ func TestEvalAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) 
 	msg = <-inbox
 	if len(msg.Fanout[connID]) != 0 {
 		t.Fatalf("unchanged aggregate fanout = %+v, want no updates", msg.Fanout)
+	}
+}
+
+func TestEvalSumAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) {
+	s := testSchema()
+	inbox := make(chan FanOutMessage, 2)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	connID := types.ConnectionID{1}
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewNull(types.KindString)},
+			{types.NewUint64(3), types.NewString("b")},
+		},
+	})
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    21,
+		Predicates: []Predicate{AllRows{Table: 1}},
+		Aggregates: []*Aggregate{sumIDAggregate()},
+	}, before); err != nil {
+		t.Fatalf("RegisterSet SUM aggregate = %v", err)
+	}
+
+	afterChanged := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(3), types.NewString("b")},
+			{types.NewUint64(4), types.NewString("c")},
+		},
+	})
+	changed := &store.Changeset{TxID: 1, Tables: map[TableID]*store.TableChangeset{
+		1: {
+			TableID: 1,
+			Inserts: []types.ProductValue{
+				{types.NewUint64(4), types.NewString("c")},
+			},
+			Deletes: []types.ProductValue{
+				{types.NewUint64(2), types.NewNull(types.KindString)},
+			},
+		},
+	}}
+	mgr.EvalAndBroadcast(types.TxID(1), changed, afterChanged, PostCommitMeta{})
+	msg := <-inbox
+	updates := msg.Fanout[connID]
+	if len(updates) != 1 {
+		t.Fatalf("SUM aggregate fanout updates = %+v, want one update", updates)
+	}
+	update := updates[0]
+	if len(update.Deletes) != 1 || update.Deletes[0][0].AsUint64() != 6 {
+		t.Fatalf("SUM aggregate deletes = %#v, want old total 6", update.Deletes)
+	}
+	if len(update.Inserts) != 1 || update.Inserts[0][0].AsUint64() != 8 {
+		t.Fatalf("SUM aggregate inserts = %#v, want new total 8", update.Inserts)
+	}
+
+	afterUnchanged := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(3), types.NewString("b")},
+			{types.NewUint64(4), types.NewString("d")},
+		},
+	})
+	unchanged := &store.Changeset{TxID: 2, Tables: map[TableID]*store.TableChangeset{
+		1: {
+			TableID: 1,
+			Inserts: []types.ProductValue{
+				{types.NewUint64(4), types.NewString("d")},
+			},
+			Deletes: []types.ProductValue{
+				{types.NewUint64(4), types.NewString("c")},
+			},
+		},
+	}}
+	mgr.EvalAndBroadcast(types.TxID(2), unchanged, afterUnchanged, PostCommitMeta{})
+	msg = <-inbox
+	if len(msg.Fanout[connID]) != 0 {
+		t.Fatalf("unchanged SUM aggregate fanout = %+v, want no updates", msg.Fanout)
 	}
 }
 
@@ -202,9 +324,9 @@ func TestValidateAggregateRejectsUnsupportedLiveShapes(t *testing.T) {
 			aggregate: &Aggregate{Func: AggregateCount, Distinct: true, ResultColumn: schema.ColumnSchema{Index: 0, Name: "n", Type: types.KindUint64}},
 		},
 		{
-			name:      "sum",
+			name:      "unsupported function",
 			pred:      AllRows{Table: 1},
-			aggregate: &Aggregate{Func: AggregateFunc("SUM"), ResultColumn: schema.ColumnSchema{Index: 0, Name: "total", Type: types.KindUint64}},
+			aggregate: &Aggregate{Func: AggregateFunc("AVG"), ResultColumn: schema.ColumnSchema{Index: 0, Name: "avg", Type: types.KindUint64}},
 		},
 		{
 			name:      "join",
