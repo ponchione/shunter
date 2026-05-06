@@ -25,6 +25,7 @@ type SubscriptionSetRegisterRequest struct {
 	Aggregates              []*Aggregate
 	OrderByColumns          [][]OrderByColumn
 	Limits                  []*uint64
+	Offsets                 []*uint64
 	PredicateHashIdentities []*types.Identity
 	ClientIdentity          *types.Identity
 	RequestID               uint32

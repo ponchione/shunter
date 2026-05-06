@@ -469,6 +469,26 @@ func TestDeclaredViewAllowsOrderByLimitProjectionAlias(t *testing.T) {
 	}
 }
 
+func TestDeclaredViewAllowsOffset(t *testing.T) {
+	if _, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT * FROM messages OFFSET 1",
+		}), Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build rejected offset declared view: %v", err)
+	}
+}
+
+func TestDeclaredViewAllowsOrderByOffsetLimitProjectionAlias(t *testing.T) {
+	if _, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC LIMIT 2 OFFSET 1",
+		}), Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build rejected projected ordered offset declared view: %v", err)
+	}
+}
+
 func TestDeclaredViewRejectsJoinOrderBy(t *testing.T) {
 	_, err := Build(NewModule("live_join_ordered").
 		SchemaVersion(1).
@@ -509,20 +529,23 @@ func TestDeclaredViewRejectsJoinLimit(t *testing.T) {
 	}
 }
 
-func TestDeclaredViewRejectsOffset(t *testing.T) {
-	_, err := Build(validChatModule().
+func TestDeclaredViewRejectsJoinOffset(t *testing.T) {
+	_, err := Build(NewModule("live_join_offset").
+		SchemaVersion(1).
+		TableDef(joinReadIndexedTableDef("t")).
+		TableDef(joinReadIndexedTableDef("s")).
 		View(ViewDeclaration{
-			Name: "live_messages",
-			SQL:  "SELECT * FROM messages OFFSET 1",
+			Name: "live_matching_t_rows",
+			SQL:  "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 OFFSET 1",
 		}), Config{DataDir: t.TempDir()})
 	if err == nil {
-		t.Fatal("Build error = nil, want OFFSET rejection for declared view")
+		t.Fatal("Build error = nil, want join OFFSET rejection for declared view")
 	}
 	if !errors.Is(err, ErrInvalidDeclarationSQL) {
 		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
 	}
-	if !strings.Contains(err.Error(), "Unsupported: SELECT * FROM messages OFFSET 1") {
-		t.Fatalf("Build error = %v, want OFFSET unsupported text", err)
+	if !strings.Contains(err.Error(), "live OFFSET views require a single table") {
+		t.Fatalf("Build error = %v, want live single-table OFFSET rejection", err)
 	}
 }
 
@@ -594,6 +617,23 @@ func TestDeclaredViewRejectsAggregateLimit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "live LIMIT views do not support aggregate views") {
 		t.Fatalf("Build error = %v, want aggregate LIMIT rejection", err)
+	}
+}
+
+func TestDeclaredViewRejectsAggregateOffset(t *testing.T) {
+	_, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_message_count",
+			SQL:  "SELECT COUNT(*) AS n FROM messages OFFSET 1",
+		}), Config{DataDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Build error = nil, want aggregate OFFSET rejection for declared view")
+	}
+	if !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
+	}
+	if !strings.Contains(err.Error(), "live OFFSET views do not support aggregate views") {
+		t.Fatalf("Build error = %v, want aggregate OFFSET rejection", err)
 	}
 }
 
@@ -728,6 +768,54 @@ func TestSubscribeViewLimitReturnsLimitedProjectedInitialRows(t *testing.T) {
 	}
 	if got, want := rowUint64IDs(sub.InitialRows), []uint64{1, 2}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("limited projected initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
+	}
+	if len(sub.Columns) != 2 || sub.Columns[0].Name != "id" || sub.Columns[1].Name != "text" {
+		t.Fatalf("projected columns = %#v, want id/text", sub.Columns)
+	}
+}
+
+func TestSubscribeViewOffsetReturnsOffsetInitialRows(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		View(ViewDeclaration{
+			Name:        "live_offset_messages",
+			SQL:         "SELECT * FROM messages ORDER BY id ASC OFFSET 1",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 3, "bravo")
+	insertMessageWithBody(t, rt, 1, "charlie")
+	insertMessageWithBody(t, rt, 2, "alpha")
+
+	sub, err := rt.SubscribeView(context.Background(), "live_offset_messages", 28, WithDeclaredReadPermissions("messages:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView offset table-shaped view: %v", err)
+	}
+	if got, want := rowUint64IDs(sub.InitialRows), []uint64{2, 3}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("offset initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
+	}
+}
+
+func TestSubscribeViewOffsetReturnsOffsetProjectedInitialRows(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		View(ViewDeclaration{
+			Name:        "live_offset_message_ranks",
+			SQL:         "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC LIMIT 2 OFFSET 1",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 3, "bravo")
+	insertMessageWithBody(t, rt, 1, "charlie")
+	insertMessageWithBody(t, rt, 2, "charlie")
+	insertMessageWithBody(t, rt, 4, "alpha")
+
+	sub, err := rt.SubscribeView(context.Background(), "live_offset_message_ranks", 29, WithDeclaredReadPermissions("messages:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView offset projected view: %v", err)
+	}
+	if got, want := rowUint64IDs(sub.InitialRows), []uint64{2, 3}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("offset projected initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
 	}
 	if len(sub.Columns) != 2 || sub.Columns[0].Name != "id" || sub.Columns[1].Name != "text" {
 		t.Fatalf("projected columns = %#v, want id/text", sub.Columns)
@@ -1083,6 +1171,38 @@ func TestDeclaredViewLimitAppliesAfterVisibility(t *testing.T) {
 	}
 }
 
+func TestDeclaredViewOffsetAppliesAfterVisibility(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x39)
+	bob := visibilityRuntimeIdentity(0x3a)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        "live_visible_offset_messages",
+			SQL:         "SELECT * FROM messages ORDER BY id DESC OFFSET 1",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 3, alice.Hex())
+	insertMessageWithBody(t, rt, 4, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+
+	sub, err := rt.SubscribeView(context.Background(), "live_visible_offset_messages", 30,
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:subscribe"),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView offset visibility: %v", err)
+	}
+	if got, want := rowUint64IDs(sub.InitialRows), []uint64{3, 1}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("visible offset initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
+	}
+}
+
 func TestDeclaredViewColumnProjectionAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x31)
 	bob := visibilityRuntimeIdentity(0x32)
@@ -1184,7 +1304,7 @@ func TestDeclaredReadMissingPermissionRejectsBeforeExecutionOrRegistration(t *te
 		}).
 		View(ViewDeclaration{
 			Name:        "live_messages",
-			SQL:         "SELECT * FROM messages ORDER BY body LIMIT 1",
+			SQL:         "SELECT * FROM messages ORDER BY body LIMIT 1 OFFSET 0",
 			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
 		}))
 	defer rt.Close()

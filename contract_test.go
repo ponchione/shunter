@@ -352,6 +352,18 @@ func TestModuleContractValidationAllowsLimitViewSQL(t *testing.T) {
 	}
 }
 
+func TestModuleContractValidationAllowsOffsetViewSQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Views = []ViewDescription{{
+		Name: "live_messages",
+		SQL:  "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC LIMIT 2 OFFSET 1",
+	}}
+
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected OFFSET view SQL: %v", err)
+	}
+}
+
 func TestModuleContractValidationRejectsJoinOrderByViewSQL(t *testing.T) {
 	contract := buildJoinReadIndexedContract(t)
 	contract.Views = []ViewDescription{{
@@ -387,6 +399,25 @@ func TestModuleContractValidationRejectsJoinLimitViewSQL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "live LIMIT views require a single table") {
 		t.Fatalf("ValidateModuleContract error = %v, want single-table LIMIT unsupported text", err)
+	}
+}
+
+func TestModuleContractValidationRejectsJoinOffsetViewSQL(t *testing.T) {
+	contract := buildJoinReadIndexedContract(t)
+	contract.Views = []ViewDescription{{
+		Name: "live_matching_t_rows",
+		SQL:  "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 OFFSET 1",
+	}}
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted join OFFSET view SQL")
+	}
+	if !strings.Contains(err.Error(), "views.live_matching_t_rows.sql") {
+		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
+	}
+	if !strings.Contains(err.Error(), "live OFFSET views require a single table") {
+		t.Fatalf("ValidateModuleContract error = %v, want single-table OFFSET unsupported text", err)
 	}
 }
 
@@ -566,6 +597,25 @@ func TestModuleContractValidationRejectsAggregateLimitViewSQL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "live LIMIT views do not support aggregate views") {
 		t.Fatalf("ValidateModuleContract error = %v, want aggregate LIMIT unsupported text", err)
+	}
+}
+
+func TestModuleContractValidationRejectsAggregateOffsetViewSQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Views = []ViewDescription{{
+		Name: "live_message_count",
+		SQL:  "SELECT COUNT(*) AS n FROM messages OFFSET 1",
+	}}
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted aggregate OFFSET view SQL")
+	}
+	if !strings.Contains(err.Error(), "views.live_message_count.sql") {
+		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
+	}
+	if !strings.Contains(err.Error(), "live OFFSET views do not support aggregate views") {
+		t.Fatalf("ValidateModuleContract error = %v, want aggregate OFFSET unsupported text", err)
 	}
 }
 

@@ -199,6 +199,27 @@ func TestQueryLimitedShapeHashIncludesLimitMetadata(t *testing.T) {
 	}
 }
 
+func TestQueryWindowedShapeHashIncludesOffsetMetadata(t *testing.T) {
+	pred := AllRows{Table: 1}
+	limitTwo := uint64(2)
+	offsetOne := uint64(1)
+	offsetTwo := uint64(2)
+	orderBy := []OrderByColumn{{
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Table:  1,
+		Column: 0,
+	}}
+
+	withoutOffset := ComputeQueryLimitedShapeHash(pred, nil, nil, orderBy, &limitTwo, nil)
+	withOffset := ComputeQueryWindowedShapeHash(pred, nil, nil, orderBy, &limitTwo, &offsetOne, nil)
+	if withoutOffset == withOffset {
+		t.Fatal("OFFSET metadata should change query identity from limited shape")
+	}
+	if withOffset == ComputeQueryWindowedShapeHash(pred, nil, nil, orderBy, &limitTwo, &offsetTwo, nil) {
+		t.Fatal("different OFFSET values should hash differently")
+	}
+}
+
 func TestQueryHashOrDiffersFromAnd(t *testing.T) {
 	left := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
 	right := ColEq{Table: 1, Column: 1, Value: types.NewString("alice")}

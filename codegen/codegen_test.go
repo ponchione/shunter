@@ -292,6 +292,25 @@ func TestTypeScriptGeneratorExportsLimitedDeclaredViewSQL(t *testing.T) {
 	assertContains(t, ts, `return subscribeDeclaredView("live_limited_messages");`)
 }
 
+func TestTypeScriptGeneratorExportsOffsetDeclaredViewSQL(t *testing.T) {
+	contract := contractFixture()
+	contract.Views = append(contract.Views, shunter.ViewDescription{
+		Name: "live_offset_messages",
+		SQL:  "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC LIMIT 2 OFFSET 1",
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `liveOffsetMessages: "live_offset_messages",`)
+	assertContains(t, ts, `liveOffsetMessages: "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC LIMIT 2 OFFSET 1",`)
+	assertContains(t, ts, `export function subscribeLiveOffsetMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_offset_messages");`)
+}
+
 func TestTypeScriptGeneratorExportsAggregateDeclaredViewSQL(t *testing.T) {
 	contract := contractFixture()
 	contract.Views = append(contract.Views, shunter.ViewDescription{

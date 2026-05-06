@@ -449,6 +449,37 @@ func TestRegisterSetLimitAffectsSameConnectionQueryIdentity(t *testing.T) {
 	}
 }
 
+func TestRegisterSetOffsetAffectsSameConnectionQueryIdentity(t *testing.T) {
+	mgr, view := newRegisterSetTestManagerWithRows(t)
+	connID := types.ConnectionID{1}
+	pred := AllRows{Table: 1}
+	offsetOne := uint64(1)
+
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    1,
+		Predicates: []Predicate{pred},
+	}, view); err != nil {
+		t.Fatalf("unoffset RegisterSet: %v", err)
+	}
+
+	offset, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    2,
+		Predicates: []Predicate{pred},
+		Offsets:    []*uint64{&offsetOne},
+	}, view)
+	if err != nil {
+		t.Fatalf("offset RegisterSet: %v", err)
+	}
+	if len(offset.Update) != 1 || len(offset.Update[0].Inserts) != 1 {
+		t.Fatalf("offset Update = %+v, want fresh one-row initial snapshot distinct from unoffset hash", offset.Update)
+	}
+	if got := offset.Update[0].Inserts[0][0].AsUint64(); got != 2 {
+		t.Fatalf("offset initial first id = %d, want 2", got)
+	}
+}
+
 // TestRegisterSetCrossConnectionReusedHashStillEmitsInitialSnapshot —
 // reuse-hash elision is same-connection only. A different connection
 // subscribing to the same predicate hash still receives its own initial

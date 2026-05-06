@@ -39,6 +39,7 @@ const (
 	tagAggregate  byte = 0x0D
 	tagOrderBy    byte = 0x0E
 	tagLimit      byte = 0x0F
+	tagOffset     byte = 0x10
 )
 
 // Within a canonical Bound encoding.
@@ -480,6 +481,14 @@ func ComputeQueryOrderedShapeHash(pred Predicate, projection []ProjectionColumn,
 // metadata. Empty ordering and nil limit preserve the unordered query shape
 // hash.
 func ComputeQueryLimitedShapeHash(pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, orderBy []OrderByColumn, limit *uint64, clientID *types.Identity) QueryHash {
+	return ComputeQueryWindowedShapeHash(pred, projection, aggregate, orderBy, limit, nil, clientID)
+}
+
+// ComputeQueryWindowedShapeHash returns the canonical hash for a predicate plus
+// emitted row shape, initial snapshot ordering, limit, and offset metadata.
+// Empty ordering, nil limit, and nil offset preserve the unordered query shape
+// hash.
+func ComputeQueryWindowedShapeHash(pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, orderBy []OrderByColumn, limit *uint64, offset *uint64, clientID *types.Identity) QueryHash {
 	if pred == nil {
 		panic("subscription: ComputeQueryHash on nil predicate")
 	}
@@ -490,6 +499,7 @@ func ComputeQueryLimitedShapeHash(pred Predicate, projection []ProjectionColumn,
 	encodeProjection(enc, projection)
 	encodeAggregate(enc, aggregate)
 	encodeOrderBy(enc, orderBy)
+	encodeOffset(enc, offset)
 	encodeLimit(enc, limit)
 	if clientID != nil {
 		enc.buf = append(enc.buf, clientID[:]...)
@@ -567,6 +577,14 @@ func encodeLimit(e *canonicalEncoder, limit *uint64) {
 	}
 	e.writeByte(tagLimit)
 	e.writeU64(*limit)
+}
+
+func encodeOffset(e *canonicalEncoder, offset *uint64) {
+	if offset == nil {
+		return
+	}
+	e.writeByte(tagOffset)
+	e.writeU64(*offset)
 }
 
 func encodeColumnSchema(e *canonicalEncoder, col schema.ColumnSchema) {

@@ -72,14 +72,14 @@ Direction:
 - Keep declared query support aligned with one-off reads once the execution path
   is proven.
 - Grow live views/subscriptions more carefully because incremental deltas over
-  joins, richer aggregates, ordering, and limits carry higher correctness risk.
+  joins and richer aggregates carry higher correctness risk.
 
 Likely feature slices:
 
 - broader index-aware planning for remaining live subscription candidate
   pruning and complex live join paths
-- live-view expansion for remaining query-only shapes such as offsets and
-  non-COUNT or join aggregate views after delta semantics are explicit
+- live-view expansion for remaining query-only shapes such as non-COUNT or join
+  aggregate views after delta semantics are explicit
 
 Completed slices:
 
@@ -108,6 +108,9 @@ Completed slices:
 - declared live views support single-table `ORDER BY` initial snapshots for
   table-shaped and projected views without positional delta semantics
 - declared live views support single-table `LIMIT` initial snapshots for
+  table-shaped and projected views while post-commit delivery remains row
+  deltas over matching rows
+- declared live views support single-table `OFFSET` initial snapshots for
   table-shaped and projected views while post-commit delivery remains row
   deltas over matching rows
 

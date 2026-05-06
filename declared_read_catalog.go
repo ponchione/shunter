@@ -86,6 +86,7 @@ func declaredReadSpecs(queries []QueryDeclaration, views []ViewDeclaration) []de
 				AllowLimit:      true,
 				AllowProjection: true,
 				AllowOrderBy:    true,
+				AllowOffset:     true,
 			},
 		})
 	}
@@ -119,6 +120,9 @@ func declaredReadCatalogEntry(spec declaredReadSpec, sl protocol.SchemaLookup) (
 			if compiled.HasLimit() {
 				return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, fmt.Errorf("%w: live LIMIT views do not support aggregate views", subscription.ErrInvalidPredicate))
 			}
+			if compiled.HasOffset() {
+				return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, fmt.Errorf("%w: live OFFSET views do not support aggregate views", subscription.ErrInvalidPredicate))
+			}
 		} else if err := subscription.ValidateProjection(compiled.Predicate(), compiled.SubscriptionProjection(), sl); err != nil {
 			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 		}
@@ -126,6 +130,9 @@ func declaredReadCatalogEntry(spec declaredReadSpec, sl protocol.SchemaLookup) (
 			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 		}
 		if err := subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), compiled.SubscriptionAggregate(), sl); err != nil {
+			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
+		}
+		if err := subscription.ValidateOffset(compiled.Predicate(), compiled.SubscriptionOffset(), compiled.SubscriptionAggregate(), sl); err != nil {
 			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 		}
 	}

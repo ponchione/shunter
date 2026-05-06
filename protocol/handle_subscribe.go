@@ -196,6 +196,16 @@ func (q CompiledSQLQuery) SubscriptionLimit() *uint64 {
 	return &limit
 }
 
+// SubscriptionOffset returns optional initial-snapshot OFFSET metadata for
+// declared live views. Post-commit delivery remains ordinary row deltas.
+func (q CompiledSQLQuery) SubscriptionOffset() *uint64 {
+	if q.query.Offset == nil {
+		return nil
+	}
+	offset := *q.query.Offset
+	return &offset
+}
+
 // HasOrderBy reports whether the source SQL included an ORDER BY clause.
 func (q CompiledSQLQuery) HasOrderBy() bool {
 	return q.query.OrderByPresent || len(q.query.OrderBy) != 0
@@ -204,6 +214,11 @@ func (q CompiledSQLQuery) HasOrderBy() bool {
 // HasLimit reports whether the source SQL included a LIMIT clause.
 func (q CompiledSQLQuery) HasLimit() bool {
 	return q.query.Limit != nil
+}
+
+// HasOffset reports whether the source SQL included an OFFSET clause.
+func (q CompiledSQLQuery) HasOffset() bool {
+	return q.query.Offset != nil
 }
 
 // HasAggregate reports whether this query returns an aggregate row shape.

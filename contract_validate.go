@@ -153,6 +153,7 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			AllowLimit:      true,
 			AllowProjection: true,
 			AllowOrderBy:    true,
+			AllowOffset:     true,
 		})
 		if err != nil {
 			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
@@ -168,10 +169,16 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			if compiled.HasLimit() {
 				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, fmt.Errorf("%w: live LIMIT views do not support aggregate views", subscription.ErrInvalidPredicate)))
 			}
+			if compiled.HasOffset() {
+				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, fmt.Errorf("%w: live OFFSET views do not support aggregate views", subscription.ErrInvalidPredicate)))
+			}
 			if err := subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), aggregate, lookup); err != nil {
 				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
 			}
 			if err := subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), aggregate, lookup); err != nil {
+				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
+			}
+			if err := subscription.ValidateOffset(compiled.Predicate(), compiled.SubscriptionOffset(), aggregate, lookup); err != nil {
 				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
 			}
 			continue
@@ -183,6 +190,9 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
 		}
 		if err := subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), compiled.SubscriptionAggregate(), lookup); err != nil {
+			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
+		}
+		if err := subscription.ValidateOffset(compiled.Predicate(), compiled.SubscriptionOffset(), compiled.SubscriptionAggregate(), lookup); err != nil {
 			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
 		}
 	}

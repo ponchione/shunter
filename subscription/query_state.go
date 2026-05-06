@@ -11,6 +11,7 @@ type queryState struct {
 	aggregate  *Aggregate
 	orderBy    []OrderByColumn
 	limit      *uint64
+	offset     *uint64
 	// sqlText is the original Single-subscribe SQL used for final-eval errors.
 	sqlText string
 	// subscribers is keyed first by connection and then by subscription ID so
@@ -50,7 +51,7 @@ func newQueryRegistry() *queryRegistry {
 }
 
 // createQueryState creates a new query state entry. Panics if hash already exists.
-func (r *queryRegistry) createQueryState(hash QueryHash, pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, orderBy []OrderByColumn, limit *uint64) *queryState {
+func (r *queryRegistry) createQueryState(hash QueryHash, pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, orderBy []OrderByColumn, limit *uint64, offset *uint64) *queryState {
 	if _, ok := r.byHash[hash]; ok {
 		panic("subscription: createQueryState on existing hash")
 	}
@@ -61,6 +62,7 @@ func (r *queryRegistry) createQueryState(hash QueryHash, pred Predicate, project
 		aggregate:   copyAggregate(aggregate),
 		orderBy:     copyOrderByColumns(orderBy),
 		limit:       copyRowLimit(limit),
+		offset:      copyRowOffset(offset),
 		subscribers: make(map[types.ConnectionID]map[types.SubscriptionID]subscriptionDeliveryMeta),
 	}
 	r.byHash[hash] = qs

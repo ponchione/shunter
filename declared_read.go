@@ -175,6 +175,7 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 			Aggregates:              []*subscription.Aggregate{compiled.SubscriptionAggregate()},
 			OrderByColumns:          [][]subscription.OrderByColumn{compiled.SubscriptionOrderBy()},
 			Limits:                  []*uint64{compiled.SubscriptionLimit()},
+			Offsets:                 []*uint64{compiled.SubscriptionOffset()},
 			PredicateHashIdentities: []*types.Identity{compiled.PredicateHashIdentity(callOpts.caller.Identity)},
 			SQLText:                 entry.SQL,
 		},
@@ -259,7 +260,7 @@ func (r *Runtime) applyDeclaredReadVisibility(compiled protocol.CompiledSQLQuery
 
 func validationOptionsForDeclaredRead(kind declaredReadKind) protocol.SQLQueryValidationOptions {
 	if kind == declaredReadKindView {
-		return protocol.SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true}
+		return protocol.SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true}
 	}
 	return protocol.SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true}
 }

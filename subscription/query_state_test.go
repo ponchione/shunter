@@ -10,7 +10,7 @@ func TestQueryRegistryCreateAndSubscribe(t *testing.T) {
 	r := newQueryRegistry()
 	h := hashN(1)
 	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
-	r.createQueryState(h, pred, nil, nil, nil, nil)
+	r.createQueryState(h, pred, nil, nil, nil, nil, nil)
 	r.addSubscriber(h, types.ConnectionID{1}, types.SubscriptionID(10), 0, 0)
 	qs := r.getQuery(h)
 	if qs == nil {
@@ -24,7 +24,7 @@ func TestQueryRegistryCreateAndSubscribe(t *testing.T) {
 func TestQueryRegistrySecondSubscriberSharesState(t *testing.T) {
 	r := newQueryRegistry()
 	h := hashN(1)
-	r.createQueryState(h, AllRows{Table: 1}, nil, nil, nil, nil)
+	r.createQueryState(h, AllRows{Table: 1}, nil, nil, nil, nil, nil)
 	r.addSubscriber(h, types.ConnectionID{1}, types.SubscriptionID(10), 0, 0)
 	r.addSubscriber(h, types.ConnectionID{2}, types.SubscriptionID(11), 0, 0)
 	if qs := r.getQuery(h); qs.refCount != 2 {
@@ -36,7 +36,7 @@ func TestQueryRegistrySameConnectionCanTrackMultipleSubscriptionIDs(t *testing.T
 	r := newQueryRegistry()
 	h := hashN(1)
 	c := types.ConnectionID{1}
-	r.createQueryState(h, AllRows{Table: 1}, nil, nil, nil, nil)
+	r.createQueryState(h, AllRows{Table: 1}, nil, nil, nil, nil, nil)
 	r.addSubscriber(h, c, types.SubscriptionID(10), 0, 0)
 	r.addSubscriber(h, c, types.SubscriptionID(11), 0, 0)
 	qs := r.getQuery(h)
@@ -54,7 +54,7 @@ func TestQueryRegistrySameConnectionCanTrackMultipleSubscriptionIDs(t *testing.T
 func TestQueryRegistryRemoveNotLast(t *testing.T) {
 	r := newQueryRegistry()
 	h := hashN(1)
-	r.createQueryState(h, AllRows{Table: 1}, nil, nil, nil, nil)
+	r.createQueryState(h, AllRows{Table: 1}, nil, nil, nil, nil, nil)
 	r.addSubscriber(h, types.ConnectionID{1}, types.SubscriptionID(10), 0, 0)
 	r.addSubscriber(h, types.ConnectionID{2}, types.SubscriptionID(11), 0, 0)
 	_, last, ok := r.removeSubscriber(types.ConnectionID{1}, types.SubscriptionID(10))
@@ -69,7 +69,7 @@ func TestQueryRegistryRemoveNotLast(t *testing.T) {
 func TestQueryRegistryRemoveLast(t *testing.T) {
 	r := newQueryRegistry()
 	h := hashN(1)
-	r.createQueryState(h, AllRows{Table: 1}, nil, nil, nil, nil)
+	r.createQueryState(h, AllRows{Table: 1}, nil, nil, nil, nil, nil)
 	r.addSubscriber(h, types.ConnectionID{1}, types.SubscriptionID(10), 0, 0)
 	_, last, ok := r.removeSubscriber(types.ConnectionID{1}, types.SubscriptionID(10))
 	if !ok || !last {
@@ -80,7 +80,7 @@ func TestQueryRegistryRemoveLast(t *testing.T) {
 func TestQueryRegistryReverseLookupCleared(t *testing.T) {
 	r := newQueryRegistry()
 	h := hashN(1)
-	r.createQueryState(h, AllRows{Table: 1}, nil, nil, nil, nil)
+	r.createQueryState(h, AllRows{Table: 1}, nil, nil, nil, nil, nil)
 	r.addSubscriber(h, types.ConnectionID{1}, types.SubscriptionID(10), 0, 0)
 	r.removeSubscriber(types.ConnectionID{1}, types.SubscriptionID(10))
 	if _, ok := r.bySub[subscriptionRef{connID: types.ConnectionID{1}, subID: types.SubscriptionID(10)}]; ok {
@@ -95,8 +95,8 @@ func TestQueryRegistrySubscriptionsForConn(t *testing.T) {
 	r := newQueryRegistry()
 	hA := hashN(1)
 	hB := hashN(2)
-	r.createQueryState(hA, AllRows{Table: 1}, nil, nil, nil, nil)
-	r.createQueryState(hB, AllRows{Table: 2}, nil, nil, nil, nil)
+	r.createQueryState(hA, AllRows{Table: 1}, nil, nil, nil, nil, nil)
+	r.createQueryState(hB, AllRows{Table: 2}, nil, nil, nil, nil, nil)
 	c := types.ConnectionID{1}
 	r.addSubscriber(hA, c, types.SubscriptionID(10), 0, 0)
 	r.addSubscriber(hB, c, types.SubscriptionID(11), 0, 0)
