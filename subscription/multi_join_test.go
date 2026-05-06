@@ -112,6 +112,28 @@ func repeatedMultiJoinMixedAliasPredicate() MultiJoin {
 	}
 }
 
+func repeatedMultiJoinKeyPreservingAliasFilterPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 1, Alias: 1},
+			{Table: 2, Alias: 2},
+		},
+		Conditions: []MultiJoinCondition{
+			{
+				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 2, Column: 1, Alias: 2},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 1, Table: 1, Column: 1, Alias: 1},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 2, Column: 1, Alias: 2},
+			},
+		},
+		ProjectedRelation: 0,
+		Filter:            ColEq{Table: 1, Column: 0, Alias: 0, Value: types.NewUint64(7)},
+	}
+}
+
 func repeatedMultiJoinUncoveredAliasPredicate() MultiJoin {
 	return MultiJoin{
 		Relations: []MultiJoinRelation{
@@ -377,6 +399,79 @@ func TestMultiJoinPlacementUsesLocalFilterIndexesForDistinctTables(t *testing.T)
 	}
 }
 
+func TestMultiJoinPlacementUsesRequiredRemoteFilterEdgesForDistinctTables(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := multiJoinTestPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	leftEdge := JoinEdge{LHSTable: 1, RHSTable: 3, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinRangeEdge.Lookup(leftEdge, types.NewUint64(100)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("left required remote range-edge placement = %v, want [%v]", got, hash)
+	}
+	if got := idx.JoinRangeEdge.Lookup(leftEdge, types.NewUint64(99)); len(got) != 0 {
+		t.Fatalf("left rejected required remote range-edge placement = %v, want empty", got)
+	}
+	middleEdge := JoinEdge{LHSTable: 2, RHSTable: 3, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinRangeEdge.Lookup(middleEdge, types.NewUint64(100)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("middle required remote range-edge placement = %v, want [%v]", got, hash)
+	}
+	if len(idx.JoinEdge.exists) != 0 {
+		t.Fatalf("required remote filter placement existence edges = %+v, want none", idx.JoinEdge.exists)
+	}
+	for _, table := range []TableID{1, 2, 3} {
+		if got := idx.Table.Lookup(table); len(got) != 0 {
+			t.Fatalf("TableIndex[%d] = %v, want empty for required remote filter placement", table, got)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestCollectCandidatesMultiJoinRequiredRemoteFilterEdgesPruneMismatch(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := multiJoinTestPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		3: {{types.NewUint64(99), types.NewUint64(20)}},
+	})
+	leftMismatch := []types.ProductValue{{types.NewUint64(500), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 1, leftMismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched required remote left candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		3: {{types.NewUint64(100), types.NewUint64(20)}},
+	})
+	got := CollectCandidatesForTable(idx, 1, leftMismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("matching required remote left candidates = %v, want [%v]", got, hash)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		3: {{types.NewUint64(99), types.NewUint64(20)}},
+	})
+	middleMismatch := []types.ProductValue{{types.NewUint64(200), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 2, middleMismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched required remote middle candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		3: {{types.NewUint64(100), types.NewUint64(20)}},
+	})
+	got = CollectCandidatesForTable(idx, 2, middleMismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("matching required remote middle candidates = %v, want [%v]", got, hash)
+	}
+}
+
 func TestMultiJoinPlacementUsesJoinConditionExistenceEdgesForDistinctTables(t *testing.T) {
 	s := multiJoinTestSchema()
 	idx := NewPruningIndexes()
@@ -488,6 +583,85 @@ func TestMultiJoinPlacementRepeatedTableCombinesAliasFiltersAndConditionEdges(t 
 	removeSubscriptionForResolver(idx, pred, hash, s)
 	if !pruningIndexesEmpty(idx) {
 		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestMultiJoinPlacementRepeatedTableUsesRequiredRemoteAliasFilterEdges(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := repeatedMultiJoinKeyPreservingAliasFilterPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("alias-0 required filter placement = %v, want [%v]", got, hash)
+	}
+	selfEdge := JoinEdge{LHSTable: 1, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinEdge.Lookup(selfEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("alias-1 required remote filter edge = %v, want [%v]", got, hash)
+	}
+	middleEdge := JoinEdge{LHSTable: 2, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 0}
+	if got := idx.JoinEdge.Lookup(middleEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("middle required remote filter edge = %v, want [%v]", got, hash)
+	}
+	if len(idx.JoinEdge.exists) != 0 {
+		t.Fatalf("required remote alias filter existence edges = %+v, want none", idx.JoinEdge.exists)
+	}
+	for _, table := range []TableID{1, 2} {
+		if got := idx.Table.Lookup(table); len(got) != 0 {
+			t.Fatalf("TableIndex[%d] = %v, want empty for required remote alias filter placement", table, got)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestCollectCandidatesMultiJoinRepeatedRequiredRemoteAliasFiltersPruneMismatch(t *testing.T) {
+	s := multiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := repeatedMultiJoinKeyPreservingAliasFilterPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(8), types.NewUint64(20)}},
+	})
+	mismatch := []types.ProductValue{{types.NewUint64(9), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 1, mismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched repeated required remote candidates = %v, want empty", got)
+	}
+
+	localMatch := []types.ProductValue{{types.NewUint64(7), types.NewUint64(99)}}
+	got := CollectCandidatesForTable(idx, 1, localMatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("local repeated required remote candidates = %v, want [%v]", got, hash)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(7), types.NewUint64(20)}},
+	})
+	got = CollectCandidatesForTable(idx, 1, mismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("edge repeated required remote candidates = %v, want [%v]", got, hash)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(8), types.NewUint64(20)}},
+	})
+	middleMismatch := []types.ProductValue{{types.NewUint64(100), types.NewUint64(20)}}
+	if got := CollectCandidatesForTable(idx, 2, middleMismatch, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched middle required remote candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(7), types.NewUint64(20)}},
+	})
+	got = CollectCandidatesForTable(idx, 2, middleMismatch, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("matching middle required remote candidates = %v, want [%v]", got, hash)
 	}
 }
 

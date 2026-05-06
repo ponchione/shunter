@@ -16,6 +16,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Live subscription multi-way joins now use indexed existence pruning for required filter-level column equalities, including repeated relation aliases.
 - Live subscription multi-way joins now use per-relation indexed existence pruning for disjunctive filter-level column equalities when every OR branch covers that relation.
 - Live subscription multi-way joins now combine local value/range pruning with indexed column-equality existence pruning for mixed-branch OR filters when every OR branch covers that relation.
+- Live subscription multi-way joins now use indexed remote value/range filter-edge pruning for required relation-local filters, including repeated relation aliases.
 - Live subscription multi-way joins now split OR filters with alias-local value/range branches on directly joined relation instances into local and filter-edge pruning placements.
 - Live subscription multi-way joins now split OR filters across same-key transitive condition paths into endpoint-local and remote filter-edge pruning placements.
 - Live subscription join value/range filter-edge pruning now admits candidates from same-transaction opposite-side inserts and deletes.

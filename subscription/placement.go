@@ -148,6 +148,9 @@ func mutateMultiJoinPlacement(idx *PruningIndexes, pred MultiJoin, hash QueryHas
 		if mutateMultiJoinSplitOrFilterPlacement(idx, pred.Relations, conditions.required, pred.Filter, t, hash, add, resolver) {
 			continue
 		}
+		if mutateMultiJoinRequiredFilterEdgePlacement(idx, pred.Relations, conditions, t, hash, add, resolver) {
+			continue
+		}
 		if tableCounts[t] > 1 && mutateAliasCompoundPlacement(idx, pred, conditions, t, hash, add, resolver) {
 			continue
 		}
@@ -273,6 +276,80 @@ func mutateMultiJoinSplitOrFilterPlacement(
 		mutateJoinExistencePlacement(idx, placement.edge, hash, add)
 	}
 	return true
+}
+
+func mutateMultiJoinRequiredFilterEdgePlacement(
+	idx *PruningIndexes,
+	relations []MultiJoinRelation,
+	conditions multiJoinPlacementConditionSet,
+	t TableID,
+	hash QueryHash,
+	add bool,
+	resolver IndexResolver,
+) bool {
+	if resolver == nil || len(conditions.filter) == 0 {
+		return false
+	}
+	relationIndexes := multiJoinRelationIndexesForTable(relations, t)
+	if len(relationIndexes) == 0 {
+		return false
+	}
+	filterPlacements := multiJoinRequiredLocalFilterPlacements(conditions.filter)
+	if len(filterPlacements) == 0 {
+		return false
+	}
+
+	var placements splitJoinOrPlacements
+	for _, relation := range relationIndexes {
+		if filters := filterPlacements[relation]; filters.hasAny() {
+			placements.eqs = append(placements.eqs, filters.eqs...)
+			placements.ranges = append(placements.ranges, filters.ranges...)
+			continue
+		}
+
+		var relationPlacements splitJoinOrPlacements
+		for targetRelation, filters := range filterPlacements {
+			if targetRelation == relation || !filters.hasAny() {
+				continue
+			}
+			relationPlacements.append(multiJoinFilterEdgesBetweenRelations(conditions.required, relation, targetRelation, filters, resolver))
+		}
+		if !relationPlacements.hasAny() {
+			return false
+		}
+		placements.append(relationPlacements)
+	}
+	if !placements.hasAny() {
+		return false
+	}
+
+	for _, ce := range placements.eqs {
+		mutateValuePlacement(idx, t, ce.Column, ce.Value, hash, add)
+	}
+	for _, cr := range placements.ranges {
+		mutateRangePlacement(idx, t, cr.Column, cr.Lower, cr.Upper, hash, add)
+	}
+	for _, placement := range placements.edges {
+		mutateJoinEdgePlacement(idx, placement.edge, placement.value, hash, add)
+	}
+	for _, placement := range placements.rangeEdges {
+		mutateJoinRangeEdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
+	}
+	return true
+}
+
+func multiJoinRequiredLocalFilterPlacements(placements map[int]multiJoinRelationFilterPlacement) map[int]colFilterPlacements {
+	out := make(map[int]colFilterPlacements, len(placements))
+	for relation, placement := range placements {
+		if !placement.filters.hasAny() {
+			continue
+		}
+		out[relation] = mergeColFilterPlacements(out[relation], placement.filters)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func multiJoinTableCounts(pred MultiJoin) map[TableID]int {
