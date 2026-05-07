@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
@@ -63,6 +64,99 @@ func TestRegisterReturnsInitialRows(t *testing.T) {
 	}
 	if len(res.Update) != 1 || len(res.Update[0].Inserts) != 2 {
 		t.Fatalf("InitialRows update = %+v, want 2 inserts", res.Update)
+	}
+}
+
+func TestRegisterProjectionPreservesInitialAndDeltaShape(t *testing.T) {
+	s := testSchema()
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("alice")},
+			{types.NewUint64(2), types.NewString("bob")},
+		},
+	})
+	projection := []ProjectionColumn{{
+		Schema: schema.ColumnSchema{Index: 1, Name: "body", Type: types.KindString},
+		Table:  1,
+		Column: 1,
+	}}
+	connID := types.ConnectionID{1}
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:            connID,
+		QueryID:           11,
+		Predicates:        []Predicate{AllRows{Table: 1}},
+		ProjectionColumns: [][]ProjectionColumn{projection},
+	}, before)
+	if err != nil {
+		t.Fatalf("RegisterSet projection = %v", err)
+	}
+	if len(res.Update) != 1 {
+		t.Fatalf("initial update count = %d, want 1", len(res.Update))
+	}
+	initial := res.Update[0]
+	if len(initial.Columns) != 1 || initial.Columns[0].Name != "body" {
+		t.Fatalf("initial projection columns = %#v, want body only", initial.Columns)
+	}
+	requireProductRowsEqual(t, initial.Inserts, []types.ProductValue{
+		{types.NewString("alice")},
+		{types.NewString("bob")},
+	})
+
+	inserted := types.ProductValue{types.NewUint64(3), types.NewString("carol")}
+	deleted := types.ProductValue{types.NewUint64(2), types.NewString("bob")}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("alice")},
+			inserted,
+		},
+	})
+	cs := simpleChangeset(1, []types.ProductValue{inserted}, []types.ProductValue{deleted})
+	mgr.EvalAndBroadcast(types.TxID(1), cs, after, PostCommitMeta{})
+	update := requireSingleFanoutUpdate(t, <-inbox, connID)
+	if len(update.Columns) != 1 || update.Columns[0].Name != "body" {
+		t.Fatalf("delta projection columns = %#v, want body only", update.Columns)
+	}
+	requireProductRowsEqual(t, update.Inserts, []types.ProductValue{{types.NewString("carol")}})
+	requireProductRowsEqual(t, update.Deletes, []types.ProductValue{{types.NewString("bob")}})
+}
+
+func TestRegisterProjectionSuppressesUnmatchedDelta(t *testing.T) {
+	s := testSchema()
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(42), types.NewString("match")},
+		},
+	})
+	projection := []ProjectionColumn{{
+		Schema: schema.ColumnSchema{Index: 1, Name: "body", Type: types.KindString},
+		Table:  1,
+		Column: 1,
+	}}
+	connID := types.ConnectionID{2}
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:            connID,
+		QueryID:           12,
+		Predicates:        []Predicate{ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}},
+		ProjectionColumns: [][]ProjectionColumn{projection},
+	}, before); err != nil {
+		t.Fatalf("RegisterSet projection = %v", err)
+	}
+
+	inserted := types.ProductValue{types.NewUint64(7), types.NewString("skip")}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(42), types.NewString("match")},
+			inserted,
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), simpleChangeset(1, []types.ProductValue{inserted}, nil), after, PostCommitMeta{})
+	msg := <-inbox
+	if got := msg.Fanout[connID]; len(got) != 0 {
+		t.Fatalf("unmatched projected fanout = %+v, want no updates", got)
 	}
 }
 
