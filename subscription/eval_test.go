@@ -2020,6 +2020,112 @@ func TestEvalFilteredCrossJoinDeltaMatchesFullBagDiff(t *testing.T) {
 	}
 }
 
+func TestEvalFilteredCrossJoinSameTransactionBothSides(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	left := types.ProductValue{types.NewUint64(7)}
+	rightMatch := types.ProductValue{types.NewUint64(10)}
+	rightMismatch := types.ProductValue{types.NewUint64(20)}
+	pred := CrossJoin{
+		Left:  1,
+		Right: 2,
+		Filter: ColEq{
+			Table:  2,
+			Column: 0,
+			Value:  types.NewUint64(10),
+		},
+	}
+
+	tests := []struct {
+		name        string
+		before      map[TableID][]types.ProductValue
+		after       map[TableID][]types.ProductValue
+		changeset   *store.Changeset
+		wantInserts []types.ProductValue
+		wantDeletes []types.ProductValue
+	}{
+		{
+			name: "matching-inserts",
+			before: map[TableID][]types.ProductValue{
+				1: nil,
+				2: nil,
+			},
+			after: map[TableID][]types.ProductValue{
+				1: {left},
+				2: {rightMatch},
+			},
+			changeset: &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+				1: {TableID: 1, Inserts: []types.ProductValue{left}},
+				2: {TableID: 2, Inserts: []types.ProductValue{rightMatch}},
+			}},
+			wantInserts: []types.ProductValue{left},
+		},
+		{
+			name: "matching-deletes",
+			before: map[TableID][]types.ProductValue{
+				1: {left},
+				2: {rightMatch},
+			},
+			after: map[TableID][]types.ProductValue{
+				1: nil,
+				2: nil,
+			},
+			changeset: &store.Changeset{TxID: 2, Tables: map[schema.TableID]*store.TableChangeset{
+				1: {TableID: 1, Deletes: []types.ProductValue{left}},
+				2: {TableID: 2, Deletes: []types.ProductValue{rightMatch}},
+			}},
+			wantDeletes: []types.ProductValue{left},
+		},
+		{
+			name: "filter-mismatch-inserts",
+			before: map[TableID][]types.ProductValue{
+				1: nil,
+				2: nil,
+			},
+			after: map[TableID][]types.ProductValue{
+				1: {left},
+				2: {rightMismatch},
+			},
+			changeset: &store.Changeset{TxID: 3, Tables: map[schema.TableID]*store.TableChangeset{
+				1: {TableID: 1, Inserts: []types.ProductValue{left}},
+				2: {TableID: 2, Inserts: []types.ProductValue{rightMismatch}},
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := buildMockCommitted(s, tt.before)
+			after := buildMockCommitted(s, tt.after)
+			connID := types.ConnectionID{1}
+			inbox := make(chan FanOutMessage, 1)
+			mgr := NewManager(s, s, WithFanOutInbox(inbox))
+			if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+				ConnID:     connID,
+				QueryID:    32,
+				Predicates: []Predicate{pred},
+			}, before); err != nil {
+				t.Fatalf("RegisterSet = %v", err)
+			}
+			mgr.EvalAndBroadcast(types.TxID(tt.changeset.TxID), tt.changeset, after, PostCommitMeta{})
+			msg := <-inbox
+			updates := msg.Fanout[connID]
+			if len(tt.wantInserts) == 0 && len(tt.wantDeletes) == 0 {
+				if len(updates) != 0 {
+					t.Fatalf("updates = %v, want none", updates)
+				}
+				return
+			}
+			if len(updates) != 1 {
+				t.Fatalf("update count = %d (%v), want 1", len(updates), updates)
+			}
+			requireProductRowsEqual(t, updates[0].Inserts, tt.wantInserts)
+			requireProductRowsEqual(t, updates[0].Deletes, tt.wantDeletes)
+		})
+	}
+}
+
 func sameRowBag(a, b []types.ProductValue) bool {
 	if len(a) != len(b) {
 		return false
