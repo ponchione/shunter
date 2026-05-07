@@ -241,12 +241,43 @@ func TestMigrationPlanClassifiesLooserReadPolicyAsManualReview(t *testing.T) {
 	assertPlanClassification(t, entry, shunter.MigrationClassificationManualReviewNeeded)
 }
 
+func TestMigrationPlanClassifiesReducerPermissionChangesByAccessImpact(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
+		Name:     "send_message",
+		Required: []string{"messages:send"},
+	}}
+
+	plan := Plan(old, current, PlanOptions{})
+
+	entry := requirePlanEntry(t, plan, ChangeKindBreaking, SurfacePermission, "reducer.send_message")
+	if entry.Action != PlanActionManualReviewNeeded || entry.Severity != PlanSeverityBlocking {
+		t.Fatalf("stricter reducer permission action/severity = %s/%s, want blocking manual review", entry.Action, entry.Severity)
+	}
+
+	old = current
+	current = contractFixture()
+
+	plan = Plan(old, current, PlanOptions{})
+
+	entry = requirePlanEntry(t, plan, ChangeKindAdditive, SurfacePermission, "reducer.send_message")
+	if entry.Action != PlanActionManualReviewNeeded || entry.Severity != PlanSeverityWarning {
+		t.Fatalf("looser reducer permission action/severity = %s/%s, want warning manual review", entry.Action, entry.Severity)
+	}
+	assertPlanClassification(t, entry, shunter.MigrationClassificationManualReviewNeeded)
+}
+
 func TestMigrationPlanIgnoresPermissionOrderOnlyChanges(t *testing.T) {
 	old := contractFixture()
 	old.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
 		Access:      schema.TableAccessPermissioned,
 		Permissions: []string{"messages:read", "messages:audit"},
 	}
+	old.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
+		Name:     "send_message",
+		Required: []string{"messages:send", "messages:audit"},
+	}}
 	old.Permissions.Queries = []shunter.PermissionContractDeclaration{{
 		Name:     "history",
 		Required: []string{"messages:read", "messages:audit"},
@@ -260,6 +291,10 @@ func TestMigrationPlanIgnoresPermissionOrderOnlyChanges(t *testing.T) {
 		Access:      schema.TableAccessPermissioned,
 		Permissions: []string{"messages:audit", "messages:read"},
 	}
+	current.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
+		Name:     "send_message",
+		Required: []string{"messages:audit", "messages:send"},
+	}}
 	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{
 		Name:     "history",
 		Required: []string{"messages:audit", "messages:read"},

@@ -92,6 +92,27 @@ func TestPolicyRequiresMigrationMetadataForDeclaredReadPermissionChanges(t *test
 	}
 }
 
+func TestPolicyRequiresModuleMigrationMetadataForReducerPermissionChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
+		Name:     "send_message",
+		Required: []string{"messages:send"},
+	}}
+
+	result := CheckPolicy(Compare(old, current), current, PolicyOptions{})
+	assertWarning(t, result.Warnings, WarningMissingMigrationMetadata, SurfacePermission, "reducer.send_message")
+
+	current.Migrations.Module = shunter.MigrationMetadata{
+		Compatibility: shunter.MigrationCompatibilityBreaking,
+		Notes:         "tighten reducer permission",
+	}
+	result = CheckPolicy(Compare(old, current), current, PolicyOptions{Strict: true})
+	if result.Failed {
+		t.Fatalf("strict policy failed despite module migration metadata: %#v", result.Warnings)
+	}
+}
+
 func TestPolicyRequiresMigrationMetadataForAdditiveTableReadPolicyChanges(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()

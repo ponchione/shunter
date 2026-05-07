@@ -210,8 +210,8 @@ func needsPolicyManualReviewClassification(change Change) bool {
 	case SurfaceTableReadPolicy:
 		return true
 	case SurfacePermission:
-		surface, _, ok := strings.Cut(change.Name, ".")
-		return ok && (surface == shunter.MigrationSurfaceQuery || surface == shunter.MigrationSurfaceView)
+		_, _, ok := strings.Cut(change.Name, ".")
+		return ok
 	default:
 		return false
 	}

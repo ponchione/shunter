@@ -101,12 +101,14 @@ func migrationMetadataForChange(migrations shunter.MigrationContract, change Cha
 			return shunter.MigrationMetadata{}, false
 		}
 		switch surface {
+		case "reducer":
+			return migrations.Module, true
 		case shunter.MigrationSurfaceQuery, shunter.MigrationSurfaceView:
 			return migrationMetadataForNamedSurface(migrations, surface, name, change.Kind)
 		default:
 			return shunter.MigrationMetadata{}, false
 		}
-	case SurfaceVisibilityFilter:
+	case SurfaceCodegen, SurfaceVisibilityFilter:
 		return migrations.Module, true
 	case SurfaceReducer, SurfaceContract, SurfaceModule, SurfaceSchema:
 		return migrations.Module, true

@@ -72,8 +72,15 @@ Tasks:
 - Add or confirm negative tests for unsupported SQL classes listed in
   `09-sql-read-scope.md`; mutation-statement protocol admission is now covered
   for one-off raw SQL and raw subscriptions.
-- Make `contractdiff` and `contractworkflow` policy behavior line up with the
-  final v1 compatibility rules.
+- Keep the completed `contractdiff` and `contractworkflow` policy behavior
+  aligned with the final v1 compatibility rules as contract fields evolve.
+
+Completed in this phase:
+
+- `contractdiff` and `contractworkflow` policy checks now align with the final
+  v1 compatibility rules for stable `ModuleContract` fields, unknown additive
+  JSON metadata, known-field type drift, read-surface metadata,
+  permissions/read_model/migrations/codegen fields, and policy classification.
 
 Exit criteria:
 

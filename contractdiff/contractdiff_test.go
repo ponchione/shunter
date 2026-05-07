@@ -259,8 +259,30 @@ func TestContractDiffClassifiesDeclaredReadPermissionChanges(t *testing.T) {
 	assertChange(t, report.Changes, ChangeKindBreaking, SurfacePermission, "view.live")
 }
 
+func TestContractDiffClassifiesReducerPermissionChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
+		Name:     "send_message",
+		Required: []string{"messages:send"},
+	}}
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfacePermission, "reducer.send_message")
+
+	old = current
+	current = contractFixture()
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfacePermission, "reducer.send_message")
+}
+
 func TestContractDiffIgnoresDeclaredReadPermissionOrder(t *testing.T) {
 	old := contractFixture()
+	old.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
+		Name:     "send_message",
+		Required: []string{"messages:send", "messages:audit"},
+	}}
 	old.Permissions.Queries = []shunter.PermissionContractDeclaration{{
 		Name:     "history",
 		Required: []string{"messages:read", "messages:audit"},
@@ -270,6 +292,10 @@ func TestContractDiffIgnoresDeclaredReadPermissionOrder(t *testing.T) {
 		Required: []string{"messages:subscribe", "messages:audit"},
 	}}
 	current := contractFixture()
+	current.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
+		Name:     "send_message",
+		Required: []string{"messages:audit", "messages:send"},
+	}}
 	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{
 		Name:     "history",
 		Required: []string{"messages:audit", "messages:read"},
@@ -281,6 +307,7 @@ func TestContractDiffIgnoresDeclaredReadPermissionOrder(t *testing.T) {
 
 	report := Compare(old, current)
 
+	assertNoChange(t, report.Changes, SurfacePermission, "reducer.send_message")
 	assertNoChange(t, report.Changes, SurfacePermission, "query.history")
 	assertNoChange(t, report.Changes, SurfacePermission, "view.live")
 }
@@ -452,6 +479,50 @@ func TestContractDiffDetectsVisibilityFilterChanges(t *testing.T) {
 
 	report = Compare(old, current)
 	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceVisibilityFilter, "own_messages")
+}
+
+func TestContractDiffDetectsStableCodegenMetadataChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Codegen.ContractFormat = "future.module_contract"
+	current.Codegen.ContractVersion = shunter.ModuleContractVersion + 1
+	current.Codegen.DefaultSnapshotFilename = "future.contract.json"
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceCodegen, "contract_format")
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceCodegen, "contract_version")
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceCodegen, "default_snapshot_filename")
+}
+
+func TestContractDiffJSONIgnoresUnknownV1Fields(t *testing.T) {
+	oldData := mustContractJSONWithUnknownFields(t, contractFixtureWithStableMetadata())
+	currentData := mustContractJSONWithUnknownFields(t, contractFixtureWithStableMetadata())
+
+	report, err := CompareJSON(oldData, currentData)
+	if err != nil {
+		t.Fatalf("CompareJSON returned error for unknown fields: %v", err)
+	}
+	if len(report.Changes) != 0 {
+		t.Fatalf("changes = %#v, want none for unknown fields", report.Changes)
+	}
+
+	plan, err := PlanJSON(oldData, currentData, PlanOptions{ValidateContracts: true})
+	if err != nil {
+		t.Fatalf("PlanJSON returned error for unknown fields: %v", err)
+	}
+	if len(plan.Entries) != 0 || len(plan.Warnings) != 0 {
+		t.Fatalf("plan = %#v, want no entries or warnings for unknown fields", plan)
+	}
+}
+
+func TestContractDiffJSONRejectsKnownFieldTypeChanges(t *testing.T) {
+	oldData := mustContractJSON(t, contractFixture())
+	currentData := []byte(strings.Replace(string(mustContractJSON(t, contractFixture())), `"contract_version": 1`, `"contract_version": "1"`, 1))
+
+	assertJSONEntryPointsRejectInvalidContract(t, oldData, currentData,
+		"current contract",
+		"contract_version",
+	)
 }
 
 func TestContractDiffJSONFailsClearlyForMalformedInput(t *testing.T) {
@@ -819,6 +890,72 @@ func contractFixture() shunter.ModuleContract {
 	}
 }
 
+func contractFixtureWithStableMetadata() shunter.ModuleContract {
+	contract := contractFixture()
+	contract.VisibilityFilters = []shunter.VisibilityFilterDescription{{
+		Name:               "own_messages",
+		SQL:                "SELECT * FROM messages WHERE body = :sender",
+		ReturnTable:        "messages",
+		ReturnTableID:      0,
+		UsesCallerIdentity: true,
+	}}
+	contract.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
+		Name:     "send_message",
+		Required: []string{"messages:send"},
+	}}
+	contract.Permissions.Queries = []shunter.PermissionContractDeclaration{{
+		Name:     "history",
+		Required: []string{"messages:read"},
+	}}
+	contract.Permissions.Views = []shunter.PermissionContractDeclaration{{
+		Name:     "live",
+		Required: []string{"messages:subscribe"},
+	}}
+	contract.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{
+		{Surface: shunter.ReadModelSurfaceQuery, Name: "history", Tables: []string{"messages"}, Tags: []string{"history"}},
+		{Surface: shunter.ReadModelSurfaceView, Name: "live", Tables: []string{"messages"}, Tags: []string{"live"}},
+	}
+	contract.Migrations.Module = shunter.MigrationMetadata{
+		ModuleVersion:   "v1.0.0",
+		SchemaVersion:   1,
+		ContractVersion: shunter.ModuleContractVersion,
+		PreviousVersion: "v1.0.0",
+		Compatibility:   shunter.MigrationCompatibilityCompatible,
+		Classifications: []shunter.MigrationClassification{shunter.MigrationClassificationAdditive},
+		Notes:           "stable metadata fixture",
+	}
+	contract.Migrations.Declarations = []shunter.MigrationContractDeclaration{
+		{
+			Surface: shunter.MigrationSurfaceTable,
+			Name:    "messages",
+			Metadata: shunter.MigrationMetadata{
+				Compatibility:   shunter.MigrationCompatibilityCompatible,
+				Classifications: []shunter.MigrationClassification{shunter.MigrationClassificationAdditive},
+				Notes:           "table metadata",
+			},
+		},
+		{
+			Surface: shunter.MigrationSurfaceQuery,
+			Name:    "history",
+			Metadata: shunter.MigrationMetadata{
+				Compatibility:   shunter.MigrationCompatibilityCompatible,
+				Classifications: []shunter.MigrationClassification{shunter.MigrationClassificationManualReviewNeeded},
+				Notes:           "query metadata",
+			},
+		},
+		{
+			Surface: shunter.MigrationSurfaceView,
+			Name:    "live",
+			Metadata: shunter.MigrationMetadata{
+				Compatibility:   shunter.MigrationCompatibilityCompatible,
+				Classifications: []shunter.MigrationClassification{shunter.MigrationClassificationManualReviewNeeded},
+				Notes:           "view metadata",
+			},
+		},
+	}
+	return contract
+}
+
 func mustContractJSON(t *testing.T, contract shunter.ModuleContract) []byte {
 	t.Helper()
 	data, err := contract.MarshalCanonicalJSON()
@@ -826,6 +963,78 @@ func mustContractJSON(t *testing.T, contract shunter.ModuleContract) []byte {
 		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
 	}
 	return data
+}
+
+func mustContractJSONWithUnknownFields(t *testing.T, contract shunter.ModuleContract) []byte {
+	t.Helper()
+	data := mustContractJSON(t, contract)
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal contract fixture: %v", err)
+	}
+	raw["future_top_level"] = map[string]any{"ignored": true}
+	mustObject(t, raw, "module")["future_module_field"] = "ignored"
+	schemaRaw := mustObject(t, raw, "schema")
+	schemaRaw["future_schema_field"] = []any{"ignored"}
+	table := mustObjectAt(t, mustArray(t, schemaRaw, "tables"), 0)
+	table["future_table_field"] = "ignored"
+	mustObjectAt(t, mustArray(t, table, "columns"), 0)["future_column_field"] = "ignored"
+	mustObjectAt(t, mustArray(t, table, "indexes"), 0)["future_index_field"] = "ignored"
+	mustObject(t, table, "read_policy")["future_read_policy_field"] = "ignored"
+	mustObjectAt(t, mustArray(t, schemaRaw, "reducers"), 0)["future_reducer_field"] = "ignored"
+	mustObjectAt(t, mustArray(t, raw, "queries"), 0)["future_query_field"] = "ignored"
+	mustObjectAt(t, mustArray(t, raw, "views"), 0)["future_view_field"] = "ignored"
+	mustObjectAt(t, mustArray(t, raw, "visibility_filters"), 0)["future_visibility_filter_field"] = "ignored"
+	permissions := mustObject(t, raw, "permissions")
+	permissions["future_permissions_field"] = "ignored"
+	mustObjectAt(t, mustArray(t, permissions, "reducers"), 0)["future_permission_declaration_field"] = "ignored"
+	mustObjectAt(t, mustArray(t, permissions, "queries"), 0)["future_permission_declaration_field"] = "ignored"
+	mustObjectAt(t, mustArray(t, permissions, "views"), 0)["future_permission_declaration_field"] = "ignored"
+	readModel := mustObject(t, raw, "read_model")
+	readModel["future_read_model_field"] = "ignored"
+	mustObjectAt(t, mustArray(t, readModel, "declarations"), 0)["future_read_model_declaration_field"] = "ignored"
+	migrations := mustObject(t, raw, "migrations")
+	migrations["future_migrations_field"] = "ignored"
+	mustObject(t, migrations, "module")["future_module_migration_field"] = "ignored"
+	migrationDeclaration := mustObjectAt(t, mustArray(t, migrations, "declarations"), 0)
+	migrationDeclaration["future_migration_declaration_field"] = "ignored"
+	mustObject(t, migrationDeclaration, "metadata")["future_migration_metadata_field"] = "ignored"
+	mustObject(t, raw, "codegen")["future_codegen_field"] = "ignored"
+	out, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("Marshal contract fixture with unknown fields: %v", err)
+	}
+	return out
+}
+
+func mustObject(t *testing.T, raw map[string]any, key string) map[string]any {
+	t.Helper()
+	value, ok := raw[key].(map[string]any)
+	if !ok {
+		t.Fatalf("contract fixture field %q = %#v, want object", key, raw[key])
+	}
+	return value
+}
+
+func mustArray(t *testing.T, raw map[string]any, key string) []any {
+	t.Helper()
+	value, ok := raw[key].([]any)
+	if !ok {
+		t.Fatalf("contract fixture field %q = %#v, want array", key, raw[key])
+	}
+	return value
+}
+
+func mustObjectAt(t *testing.T, values []any, index int) map[string]any {
+	t.Helper()
+	if index >= len(values) {
+		t.Fatalf("contract fixture array length = %d, want index %d", len(values), index)
+	}
+	value, ok := values[index].(map[string]any)
+	if !ok {
+		t.Fatalf("contract fixture array[%d] = %#v, want object", index, values[index])
+	}
+	return value
 }
 
 func mustRawContractJSON(t *testing.T, contract shunter.ModuleContract) []byte {

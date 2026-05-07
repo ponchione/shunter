@@ -7,6 +7,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Current development line.
 - Added `Config.AuthIssuers` for strict JWT issuer allowlist validation.
 - Strict JWT validation now rejects future `iat` claims.
+- Contract diff and workflow policy checks now classify stable v1 contract
+  permission/codegen drift according to the compatibility matrix.
 - Runtime builds now write `shunter.datadir.json` metadata that keeps Shunter
   build version and app module version separate and rejects mismatched module
   data directories.

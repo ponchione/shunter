@@ -53,7 +53,7 @@ Package: `github.com/ponchione/shunter`
 | `bsatn` | Stable for v1 | Shunter's binary value and product-row encoding for v1 protocol/runtime boundaries. It is Shunter-native and not a promise of another runtime's byte-for-byte format. |
 | `codegen` | Stable for v1 TypeScript target | `Generate`, `GenerateFromJSON`, `GenerateTypeScript`, `Options`, and `LanguageTypeScript` for valid v1 `ModuleContract` inputs. |
 | `protocol` | Preview/advanced Go API, stable wire contract | The wire protocol is stable as documented below. The Go package is a low-level client/server helper surface and may change where it is not part of the wire payload contract. |
-| `contractdiff` and `contractworkflow` | Preview/advanced | Useful review and CLI workflow helpers, but v1 migration policy hardening is still in progress. |
+| `contractdiff` and `contractworkflow` | Preview/advanced | Useful review and CLI workflow helpers. Their policy checks now align with the stable v1 `ModuleContract` field, read-policy, permission, unknown-field, and codegen metadata rules, but the helper APIs remain workflow-oriented preview surfaces. |
 | `auth` and `observability/prometheus` | Preview/advanced | Supported for Shunter-owned runtime wiring and advanced integrations. Production auth/ops policy is still a separate v1 readiness track. |
 | `store`, `subscription`, `executor`, `commitlog`, and `query/sql` | Internal implementation detail | These are runtime implementation packages. Prefer root APIs, contract JSON, generated clients, or the Shunter protocol unless a task explicitly owns subsystem work. |
 | `internal/*` | Internal implementation detail | Go-internal packages have no app compatibility promise. |
@@ -204,6 +204,13 @@ cross-module behavior.
 No lower-level package beyond the stable subsets listed in this matrix receives
 a normal Go compatibility promise for v1. Runtime implementation packages stay
 implementation details even when importable.
+
+`contractdiff` and `contractworkflow` now enforce the final v1 contract policy
+for stable contract fields: unknown JSON fields are ignored by readers,
+known-field type or version drift is rejected by JSON entry points, stable
+codegen metadata drift is reported as breaking in direct diffs, and reducer
+permission changes are classified by their runtime access impact instead of as
+passive metadata.
 
 Remaining coverage before cutting `v1.0.0`:
 

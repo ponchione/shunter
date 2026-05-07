@@ -39,6 +39,7 @@ const (
 	SurfacePermission        Surface = "permission"
 	SurfaceReadModel         Surface = "read_model"
 	SurfaceMigrationMetadata Surface = "migration_metadata"
+	SurfaceCodegen           Surface = "codegen"
 )
 
 type Change struct {
@@ -87,6 +88,7 @@ func Compare(old, current shunter.ModuleContract) Report {
 	comparePermissions(&out, old.Permissions, current.Permissions)
 	compareReadModels(&out, old.ReadModel.Declarations, current.ReadModel.Declarations)
 	compareMigrations(&out, old.Migrations, current.Migrations)
+	compareCodegen(&out, old.Codegen, current.Codegen)
 	sortChanges(out.Changes)
 	return out
 }
@@ -104,7 +106,7 @@ func (r Report) Text() string {
 
 func compareVersions(out *Report, old, current shunter.ModuleContract) {
 	if old.ContractVersion != current.ContractVersion {
-		out.add(ChangeKindMetadata, SurfaceContract, "contract", fmt.Sprintf("contract version changed from %d to %d", old.ContractVersion, current.ContractVersion))
+		out.add(ChangeKindBreaking, SurfaceContract, "contract", fmt.Sprintf("contract version changed from %d to %d", old.ContractVersion, current.ContractVersion))
 	}
 	if old.Module.Name != current.Module.Name {
 		out.add(ChangeKindMetadata, SurfaceModule, nonEmptyName(current.Module.Name, old.Module.Name), fmt.Sprintf("module name changed from %q to %q", old.Module.Name, current.Module.Name))
@@ -357,9 +359,6 @@ func comparePermissionCategory(out *Report, category string, oldDeclarations, cu
 }
 
 func permissionChangeKind(category string, oldRequired, currentRequired []string) ChangeKind {
-	if category == "reducer" {
-		return ChangeKindMetadata
-	}
 	if stringSliceSubset(currentRequired, oldRequired) {
 		return ChangeKindAdditive
 	}
@@ -408,6 +407,18 @@ func compareMigrations(out *Report, oldMigrations, currentMigrations shunter.Mig
 		if _, ok := currentByName[key]; !ok {
 			out.add(ChangeKindMetadata, SurfaceMigrationMetadata, migrationDeclarationDisplayName(key), "migration metadata removed")
 		}
+	}
+}
+
+func compareCodegen(out *Report, old, current shunter.CodegenContractMetadata) {
+	if old.ContractFormat != current.ContractFormat {
+		out.add(ChangeKindBreaking, SurfaceCodegen, "contract_format", fmt.Sprintf("codegen contract_format changed from %q to %q", old.ContractFormat, current.ContractFormat))
+	}
+	if old.ContractVersion != current.ContractVersion {
+		out.add(ChangeKindBreaking, SurfaceCodegen, "contract_version", fmt.Sprintf("codegen contract_version changed from %d to %d", old.ContractVersion, current.ContractVersion))
+	}
+	if old.DefaultSnapshotFilename != current.DefaultSnapshotFilename {
+		out.add(ChangeKindBreaking, SurfaceCodegen, "default_snapshot_filename", fmt.Sprintf("codegen default_snapshot_filename changed from %q to %q", old.DefaultSnapshotFilename, current.DefaultSnapshotFilename))
 	}
 }
 

@@ -95,6 +95,44 @@ func TestCheckPolicyFilesReturnsDeterministicWarningsAndStrictFailure(t *testing
 	assertContains(t, string(jsonOut), `"code": "missing-migration-metadata"`)
 }
 
+func TestCheckPolicyFilesUsesV1ReducerPermissionPolicy(t *testing.T) {
+	dir := t.TempDir()
+	previousPath := writeContractFixture(t, dir, "previous.json", workflowContractFixture())
+	current := workflowContractFixture()
+	current.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
+		Name:     "send_message",
+		Required: []string{"messages:send"},
+	}}
+	currentPath := writeContractFixture(t, dir, "current.json", current)
+
+	result, err := CheckPolicyFiles(previousPath, currentPath, contractdiff.PolicyOptions{Strict: true})
+	if err != nil {
+		t.Fatalf("CheckPolicyFiles returned error: %v", err)
+	}
+	if !result.Failed {
+		t.Fatal("strict reducer permission policy result did not fail on missing migration metadata")
+	}
+	got, err := FormatPolicy(result, FormatText)
+	if err != nil {
+		t.Fatalf("FormatPolicy returned error: %v", err)
+	}
+	assertContains(t, string(got), "missing-migration-metadata permission reducer.send_message: breaking change has no migration metadata")
+
+	current.Migrations.Module = shunter.MigrationMetadata{
+		Compatibility: shunter.MigrationCompatibilityBreaking,
+		Notes:         "tighten reducer permission",
+	}
+	currentPath = writeContractFixture(t, dir, "current-with-metadata.json", current)
+
+	result, err = CheckPolicyFiles(previousPath, currentPath, contractdiff.PolicyOptions{Strict: true})
+	if err != nil {
+		t.Fatalf("CheckPolicyFiles with metadata returned error: %v", err)
+	}
+	if result.Failed {
+		t.Fatalf("strict reducer permission policy failed despite module migration metadata: %#v", result.Warnings)
+	}
+}
+
 func TestPlanFilesReturnsDeterministicMigrationPlan(t *testing.T) {
 	dir := t.TempDir()
 	previousPath := writeContractFixture(t, dir, "previous.json", workflowContractFixture())

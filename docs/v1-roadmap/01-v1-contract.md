@@ -1,6 +1,6 @@
 # v1 Contract Freeze
 
-Status: open, v1 support decisions settled; coverage and policy audit remain
+Status: open, v1 support decisions settled; coverage audit remains
 Owner: unassigned
 Scope: supported Shunter v1 API, protocol, contract JSON, generated client
 shape, and read/query behavior.
@@ -64,6 +64,9 @@ Code reality as of this roadmap cleanup:
 - Generated TypeScript is a stable contract-generation target, not a full SDK.
 - Offline operations and migration hooks are preview/advanced in the matrix,
   even though helpers and CLI commands already exist.
+- `contractdiff` and `contractworkflow` policy behavior now matches the final
+  v1 matrix for stable contract fields, unknown JSON metadata, read-policy and
+  permission changes, migration metadata, and codegen metadata drift.
 
 ## v1 Decisions To Make
 
@@ -100,6 +103,9 @@ Completed or partially complete:
   live-view projection, aggregate, order, limit, and offset behavior.
 - Clarify package comments for runtime implementation packages that remain
   importable but are not v1 app-facing compatibility surfaces.
+- Ensure `contractdiff` treats stable-field changes consistently with the final
+  v1 compatibility policy, and verify the `contractworkflow` file wrappers use
+  the same policy behavior.
 
 Remaining:
 
@@ -109,8 +115,6 @@ Remaining:
   levels change.
 - Confirm protocol, contract JSON, and TypeScript golden coverage for every
   stable payload shape in the matrix.
-- Ensure `contractdiff` treats stable-field changes consistently with the final
-  v1 compatibility policy.
 - Keep generated TypeScript identifier normalization compatibility tests current
   when codegen naming changes.
 
