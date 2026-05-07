@@ -76,6 +76,41 @@ func TestHandleUnsubscribeSingle_DeliversUnsubscribeAppliedViaReplyClosure(t *te
 	}
 }
 
+func TestHandleUnsubscribeSingle_DeliversSubscriptionErrorViaReplyClosure(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockDispatchExecutor{}
+
+	msg := &UnsubscribeSingleMsg{RequestID: 1, QueryID: 42}
+	handleUnsubscribeSingle(context.Background(), conn, msg, exec)
+
+	exec.mu.Lock()
+	reply := exec.unregisterSetReq.Reply
+	exec.mu.Unlock()
+	if reply == nil {
+		t.Fatal("missing unsubscribe reply closure")
+	}
+	requestID := uint32(1)
+	queryID := uint32(42)
+	reply(UnsubscribeSetCommandResponse{
+		Error: &SubscriptionError{
+			RequestID: &requestID,
+			QueryID:   &queryID,
+			Error:     "subscription: subscription not found",
+		},
+	})
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	subErr := decoded.(SubscriptionError)
+	requireOptionalUint32Value(t, subErr.RequestID, 1, "SubscriptionError.RequestID")
+	requireOptionalUint32Value(t, subErr.QueryID, 42, "SubscriptionError.QueryID")
+	if subErr.Error != "subscription: subscription not found" {
+		t.Fatalf("SubscriptionError.Error = %q", subErr.Error)
+	}
+}
+
 func TestHandleUnsubscribeSingle_ExecutorReject(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockDispatchExecutor{unregisterSetErr: errors.New("db down")}

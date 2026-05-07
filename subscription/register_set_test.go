@@ -799,6 +799,81 @@ func TestDisconnectClientClearsQuerySets(t *testing.T) {
 	}
 }
 
+func TestDisconnectClientDropsRegistryPruningAndDeltaIndexState(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{1: types.KindUint64, 2: types.KindString}, 1)
+	mgr := NewManager(s, s)
+	connID := types.ConnectionID{1}
+	value := types.NewUint64(7)
+	red := types.NewString("red")
+	join := Join{
+		Left:     1,
+		Right:    2,
+		LeftCol:  0,
+		RightCol: 1,
+		Filter:   ColEq{Table: 2, Column: 2, Value: red},
+	}
+
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    1,
+		Predicates: []Predicate{ColEq{Table: 1, Column: 0, Value: value}},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet value: %v", err)
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    2,
+		Predicates: []Predicate{AllRows{Table: 2}},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet table: %v", err)
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    3,
+		Predicates: []Predicate{join},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet join: %v", err)
+	}
+
+	if got := mgr.indexes.Value.Lookup(1, 0, value); len(got) != 1 {
+		t.Fatalf("value index before disconnect = %v, want one", got)
+	}
+	if got := mgr.indexes.Table.Lookup(2); len(got) != 1 {
+		t.Fatalf("table index before disconnect = %v, want one", got)
+	}
+	edge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 2}
+	if got := mgr.indexes.JoinEdge.Lookup(edge, red); len(got) != 1 {
+		t.Fatalf("join edge before disconnect = %v, want one", got)
+	}
+	if refs := mgr.deltaIndexColumns[1][0]; refs != 1 {
+		t.Fatalf("left delta index refs before disconnect = %d, want 1", refs)
+	}
+	if refs := mgr.deltaIndexColumns[2][1]; refs != 1 {
+		t.Fatalf("right delta index refs before disconnect = %d, want 1", refs)
+	}
+
+	if err := mgr.DisconnectClient(connID); err != nil {
+		t.Fatalf("DisconnectClient: %v", err)
+	}
+	if active := mgr.ActiveSubscriptionSets(); active != 0 {
+		t.Fatalf("ActiveSubscriptionSets = %d, want 0", active)
+	}
+	if _, ok := mgr.querySets[connID]; ok {
+		t.Fatalf("querySets[%v] not cleared", connID)
+	}
+	if mgr.registry.hasActive() {
+		t.Fatal("registry still has active queries after disconnect")
+	}
+	if !pruningIndexesEmpty(mgr.indexes) {
+		t.Fatalf("pruning indexes not cleared after disconnect: value=%+v table=%+v join=%+v", mgr.indexes.Value, mgr.indexes.Table, mgr.indexes.JoinEdge)
+	}
+	if len(mgr.deltaIndexColumns) != 0 {
+		t.Fatalf("delta index refs not cleared after disconnect: %+v", mgr.deltaIndexColumns)
+	}
+}
+
 func TestRegisterSetJoinInitialQueryStreamsScanSideBeforeProbe(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)

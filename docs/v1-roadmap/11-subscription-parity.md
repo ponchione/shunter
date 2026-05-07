@@ -455,6 +455,24 @@ Acceptance criteria:
 - Failure behavior is stable enough for generated clients.
 - No rejected subscription reaches executor registration.
 
+Current status: in progress, with the main lifecycle seams covered by focused
+tests.
+
+- Coverage is split across surface and lower-seam tests for success, compile
+  or validation rejection, auth/read-policy rejection, missing live-join
+  indexes, duplicate query ids, and initial-evaluation failures on raw
+  subscribe, declared-view subscribe, executor-adapter, and
+  subscription-manager paths.
+- Subscribe and unsubscribe applied envelopes are pinned for Single and Multi
+  variants, and reply-closure `SubscriptionError` delivery now has direct
+  handler coverage for both subscribe and unsubscribe paths.
+- Initial applied frames are pinned ahead of later fan-out on the same
+  connection; unsubscribe and disconnect cleanup tests verify that later
+  updates no longer observe removed subscription state.
+- Backpressure, dropped-client signaling, fan-out worker cleanup, and stable
+  wire shapes have named protocol/subscription tests, but this workstream still
+  needs one final lifecycle audit before it should be marked complete.
+
 Recommended verification:
 
 ```bash

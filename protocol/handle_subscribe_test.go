@@ -2075,6 +2075,47 @@ func TestHandleSubscribeSingle_DeliversSubscribeAppliedViaReplyClosure(t *testin
 	}
 }
 
+func TestHandleSubscribeSingle_DeliversSubscriptionErrorViaReplyClosure(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   10,
+		QueryID:     7,
+		QueryString: "SELECT * FROM users",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	req := executor.getRegisterSetReq()
+	if req == nil || req.Reply == nil {
+		t.Fatal("executor did not receive subscribe reply closure")
+	}
+	requestID := uint32(10)
+	queryID := uint32(7)
+	req.Reply(SubscriptionSetCommandResponse{
+		Error: &SubscriptionError{
+			RequestID: &requestID,
+			QueryID:   &queryID,
+			Error:     "subscription: query id already live on connection",
+		},
+	})
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	subErr := decoded.(SubscriptionError)
+	requireOptionalUint32(t, subErr.RequestID, 10, "SubscriptionError.RequestID")
+	requireOptionalUint32(t, subErr.QueryID, 7, "SubscriptionError.QueryID")
+	if subErr.Error != "subscription: query id already live on connection" {
+		t.Fatalf("SubscriptionError.Error = %q", subErr.Error)
+	}
+}
+
 func TestHandleSubscribeSingle_AliasedBaseTableQualifiedWhereRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
