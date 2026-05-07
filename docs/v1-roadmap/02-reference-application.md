@@ -1,6 +1,6 @@
 # Reference Application
 
-Status: open
+Status: open, not started as maintained app
 Owner: unassigned
 Scope: one maintained end-to-end application that proves the normal Shunter v1
 developer and operator workflows.
@@ -18,9 +18,15 @@ be small enough to maintain, but rich enough to expose missing v1 capabilities.
 ## Current State
 
 Shunter has implementation and package-level coverage, but the public docs note
-limited onboarding and no maintained hello-world or tutorial. That leaves a gap:
-the runtime can pass package tests while the whole app-author workflow still
-feels unclear.
+limited onboarding and no maintained hello-world or tutorial. `README.md` still
+states that there is no bundled demo command.
+
+There is a release-candidate task-board workload in `rc_app_workload_test.go`
+that exercises strict auth, reducers, declared reads, protocol traffic,
+subscriptions, and restart behavior through public runtime APIs. That workload
+is useful proof, but it is test-only: there is no `examples/` app, no app-owned
+server binary, no generated TypeScript artifacts checked in for app authors, and
+no browser or Node client.
 
 SpacetimeDB's reference material is useful here because its product experience
 is centered around modules, generated clients, local cache, reducer calls, and
@@ -106,4 +112,3 @@ and subscriptions after recovery.
 - Cloud deployment automation.
 - Multiple language clients before the first TypeScript path is solid.
 - A showcase UI that hides weak runtime ergonomics behind custom glue.
-

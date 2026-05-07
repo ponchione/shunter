@@ -1,6 +1,6 @@
 # Shunter v1 Roadmap Docs
 
-Status: planning backlog
+Status: active planning backlog
 Scope: focused implementation tracks required before cutting a real `v1.0.0`.
 
 These docs turn the current v1 gap analysis into agent-sized work areas. They
@@ -43,6 +43,24 @@ decision that can be reviewed independently.
   Shunter's in-process trust model and future isolation boundary.
 - [09-sql-read-scope.md](09-sql-read-scope.md) - define the SQL/query depth
   Shunter actually needs for v1.
+- [10-v1-execution-plan.md](10-v1-execution-plan.md) - ordered execution plan
+  for finishing the remaining v1 workstreams.
+
+## Current Reality Check
+
+Several original roadmap gaps now have partial implementation:
+
+- `docs/v1-compatibility.md` is the current v1 support matrix.
+- Offline backup/restore helpers, CLI commands, migration hooks, snapshot, and
+  compaction helpers exist, but the operator runbook and upgrade policy are not
+  complete.
+- Runtime gauntlet, recovery, storage-fault, fuzz, and benchmark coverage exist,
+  but the release qualification command set and published performance envelopes
+  are not complete.
+- TypeScript codegen exists. A maintained TypeScript client runtime/package does
+  not.
+- A release-candidate app workload exists in tests. A maintained in-repo
+  reference app for users does not.
 
 ## v1 Product Thesis
 
@@ -55,4 +73,3 @@ Features outside that thesis should be deferred unless they directly support
 the v1 contract. In particular, v1 should not chase SpacetimeDB wire
 compatibility, cloud hosting, multi-language module upload, broad SQL database
 compatibility, or a full framework/template ecosystem.
-

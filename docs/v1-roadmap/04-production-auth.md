@@ -1,6 +1,6 @@
 # Production Auth
 
-Status: open
+Status: open, strict HS256 base implemented
 Owner: unassigned
 Scope: production-ready authentication, principal derivation, permission
 mapping, and operational auth documentation for Shunter v1.
@@ -27,6 +27,20 @@ read policy, reducer permissions, declared read permissions, visibility filters,
 and dev/strict auth modes. This is a strong base, but production operation
 still needs a clearer strict-mode contract and likely broader token validation
 support.
+
+Current code reality:
+
+- Root `Config` exposes `AuthMode`, `AuthSigningKey`, `AuthAudiences`, and dev
+  anonymous-token settings.
+- `AuthModeStrict` requires a non-empty signing key when protocol auth config is
+  built.
+- JWT validation currently accepts HS256 signed tokens and optional audience
+  allowlists. It derives identity from `(iss, sub)` and carries optional
+  `permissions` claims into the caller principal.
+- Dev mode can mint anonymous tokens with an ephemeral or configured signing
+  key. This is still the zero-value convenience path.
+- There is no issuer allowlist, asymmetric key support, JWKS/OIDC discovery,
+  key-rotation cache, or app-provided claim mapper in the current root config.
 
 The current `AuthModeDev` behavior is useful for local development. It should
 remain easy, but v1 must prevent accidental production use of dev auth.
@@ -99,4 +113,3 @@ rtk go tool staticcheck ./...
 - SpacetimeDB auth compatibility.
 - Application-specific authorization policy beyond Shunter's permission and
   visibility hooks.
-

@@ -1,6 +1,6 @@
 # Process Isolation And App Trust Model
 
-Status: open
+Status: open, trust model not yet documented
 Owner: unassigned
 Scope: Shunter's execution trust boundary for Go modules, reducer behavior,
 side effects, global state, and future out-of-process isolation.
@@ -31,6 +31,17 @@ normal app binary. It also means Shunter does not automatically prevent:
 SpacetimeDB's reference model is useful as contrast: its module execution model
 creates stronger isolation expectations. Shunter does not need to copy that
 model for v1, but Shunter must not imply guarantees it does not enforce.
+
+Current code reality:
+
+- Shunter is still an in-process Go runtime. There is no WASM/plugin sandbox,
+  dynamic module upload, or out-of-process reducer runner in the app-facing v1
+  surface.
+- Reducer panic, lifecycle, scheduler, shutdown, and migration-hook behavior has
+  package and gauntlet coverage, but the app-author docs do not yet have one
+  explicit v1 trust-model section.
+- `internal/processboundary` remains internal and should not be treated as a v1
+  feature without a separate decision.
 
 ## v1 Decisions To Make
 
@@ -86,4 +97,3 @@ not hang indefinitely when app code returns errors or panics.
 - Dynamic module upload.
 - Sandboxing arbitrary untrusted code.
 - Matching SpacetimeDB's execution isolation model.
-

@@ -1,6 +1,6 @@
 # Operations, Backup, Restore, And Migrations
 
-Status: open
+Status: open, operational primitives landed
 Owner: unassigned
 Scope: operator-facing workflows for data durability, backup/restore,
 compaction, schema compatibility, migrations, and upgrades.
@@ -16,6 +16,17 @@ without guessing at hidden runtime behavior.
 Shunter has real durability primitives: commitlog, snapshots, compaction,
 backup/restore helpers, data-dir compatibility checks, contract diffing,
 contract policy, migration hooks, and app-owned runtime startup.
+
+Current code and docs now include:
+
+- `Runtime.WaitUntilDurable`, `Runtime.CreateSnapshot`, and
+  `Runtime.CompactCommitLog`.
+- `BackupDataDir` and `RestoreDataDir` offline helpers plus `shunter backup`
+  and `shunter restore` CLI commands.
+- `CheckDataDirCompatibility`, `Module.MigrationHook`,
+  `RunDataDirMigrations`, and `RunModuleDataDirMigrations`.
+- App-author backup, restore, migration, contract plan, and versioning guidance
+  in `docs/how-to-use-shunter.md`.
 
 The missing v1 work is turning those primitives into an opinionated operating
 model with tested failure behavior.
@@ -38,8 +49,8 @@ model with tested failure behavior.
 
 ## v1 Decisions To Make
 
-- Decide whether backup is offline-only for v1 or whether any online backup
-  behavior is supported.
+- Confirm the documented offline-only backup stance for v1, or explicitly
+  design an online backup path.
 - Decide snapshot retention defaults and whether Shunter owns cleanup.
 - Decide whether compaction is manual, automatic, or app-configured.
 - Decide whether migrations are only app-owned hooks or also have a Shunter
@@ -52,8 +63,18 @@ model with tested failure behavior.
 
 ## Implementation Work
 
+Completed or partially complete:
+
 - Audit root backup/restore/migration APIs and `cmd/shunter` commands.
-- Write an operator runbook under `docs/`.
+- Add backup/restore CLI commands and helper tests.
+- Add app-author guidance for offline backup/restore, data-dir compatibility
+  checks, migration hooks, contract plans, and release metadata stamping.
+- Add tests for backup/restore helper refusal cases, migration hook success and
+  failure, and basic snapshot/compaction behavior.
+
+Remaining:
+
+- Write a focused operator runbook under `docs/`.
 - Add or update tests for:
   - backup from clean shutdown
   - restore into fresh data dir
@@ -64,7 +85,8 @@ model with tested failure behavior.
   - migration hook failure
   - startup after failed migration
   - version metadata compatibility
-- Ensure CLI and library helpers return actionable errors.
+- Ensure CLI and library helpers return actionable errors across the full
+  operator workflow.
 - Add backup/restore/migration flow to the reference app.
 - Add release checklist items for `VERSION`, `CHANGELOG.md`, git tag, and
   linker-stamped build metadata.
@@ -97,4 +119,3 @@ documented reason why the behavior cannot be tested at that layer.
 - Automatic zero-downtime migrations.
 - Database-level SQL migrations.
 - Generic dynamic module loading by the `shunter` CLI.
-

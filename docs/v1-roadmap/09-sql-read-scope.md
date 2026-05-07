@@ -1,6 +1,6 @@
 # SQL And Read Scope
 
-Status: open
+Status: open, matrix exists and needs final coverage
 Owner: unassigned
 Scope: the amount of SQL and declared-read behavior Shunter actually needs for
 v1.
@@ -37,6 +37,19 @@ Shunter already has a meaningful SQL/read implementation:
 The risk is not lack of parser ambition. The risk is accepting SQL shapes whose
 runtime, auth, visibility, or live delta semantics are not precise enough for a
 stable v1 contract.
+
+Current code/docs reality:
+
+- `docs/v1-compatibility.md` now contains the active read-surface matrix for
+  one-off raw SQL, declared queries, raw subscriptions, declared live views, and
+  local runtime reads.
+- Declared live views currently support more than the original roadmap draft:
+  column projections over the emitted relation, single-table `ORDER BY`,
+  `LIMIT`, and `OFFSET` initial snapshots, single-table `COUNT`/`SUM`
+  aggregates, and join/cross-join `COUNT`/`SUM` aggregates including multi-way
+  joins. Aggregate aliases without `AS` are rejected.
+- Raw subscriptions remain narrower than declared live views and reject column
+  projections, aggregates, `ORDER BY`, `LIMIT`, and `OFFSET`.
 
 ## SpacetimeDB Reference Lesson
 
@@ -88,7 +101,7 @@ the documented performance envelope permits it.
 
 ## Recommended v1 Live Read SQL
 
-Support for raw subscriptions and declared live views should be narrower:
+Support for raw subscriptions should remain narrow:
 
 - whole-table subscriptions
 - table-shaped join subscriptions
@@ -97,18 +110,27 @@ Support for raw subscriptions and declared live views should be narrower:
 - visibility filtering before matching and delta delivery
 - two-table joins where join semantics and index requirements are documented
 - multi-way table-shaped joins only under documented size/index constraints
-- declared view projections only if initial rows, deltas, contract export, and
-  codegen all agree on the exact projected row shape
 
-Do not include live support for these in v1 unless a separate design proves the
-delta semantics:
+Raw subscriptions should reject column projections, aggregates, `ORDER BY`,
+`LIMIT`, and `OFFSET`.
 
-- live `ORDER BY`
-- live `LIMIT`
-- live `OFFSET`
-- live aggregates
+Declared live views are the richer named live-read surface. Current v1 docs and
+tests should preserve support for:
+
+- table-shaped reads and table-shaped joins/multi-way joins
+- column projections over the emitted relation
+- single-table `ORDER BY`, `LIMIT`, and `OFFSET` initial snapshots
+- single-table `COUNT`/`SUM` aggregates
+- join and cross-join `COUNT`/`SUM` aggregates, including multi-way joins
+- rejection of aggregate aliases without `AS`
+
+Do not include support for these in v1 unless a separate design proves the
+semantics:
+
 - live grouped results
-- live arbitrary expression projections
+- arbitrary expression projections
+- general scalar functions
+- `GROUP BY` or `HAVING`
 
 ## Explicit v1 Non-Goals
 
@@ -137,10 +159,12 @@ application model.
 
 ## Decisions To Make
 
-1. Decide the exact grammar supported by each read surface.
-2. Decide whether declared queries are always a subset of one-off query SQL or
+1. Confirm the exact grammar supported by each read surface in the compatibility
+   matrix.
+2. Confirm whether declared queries are always a subset of one-off query SQL or
    whether they may add metadata-only declarations.
-3. Decide whether declared live views support projections in v1.
+3. Keep declared live-view projection and aggregate support aligned across
+   initial rows, deltas, contract export, codegen, docs, and tests.
 4. Decide index requirements for raw/live joins.
 5. Decide whether query scan fallback is allowed by default.
 6. Decide how unsupported SQL errors are represented in local and protocol APIs.
@@ -149,12 +173,23 @@ application model.
 
 ## Implementation Work
 
+Completed or partially complete:
+
 - Create a read-surface support matrix in docs.
-- Add parser/planner tests for every supported and rejected shape.
-- Add runtime tests that prove auth and visibility are applied before query
-  evaluation and live delivery.
-- Add protocol tests for unsupported SQL errors.
-- Add contract/codegen tests for declared query and declared view result shapes.
+- Add broad parser, planner, protocol, declared-read, subscription, and
+  compatibility coverage for the currently supported query/read surfaces.
+- Update app-author docs to match current declared-live-view projection,
+  aggregate, order, limit, and offset behavior.
+
+Remaining:
+
+- Add or confirm parser/planner tests for every supported and rejected shape in
+  the final matrix.
+- Add or confirm runtime tests that prove auth and visibility are applied before
+  query evaluation and live delivery.
+- Add or confirm protocol tests for unsupported SQL errors.
+- Add or confirm contract/codegen tests for declared query and declared view
+  result shapes.
 - Add performance tests for expensive supported shapes.
 - Remove or label docs that imply broader SQL support than the code guarantees.
 

@@ -1,6 +1,6 @@
 # TypeScript Client SDK
 
-Status: open
+Status: open, codegen-only today
 Owner: unassigned
 Scope: production-credible TypeScript client and generated bindings for Shunter
 v1 applications.
@@ -17,9 +17,15 @@ top of it.
 
 ## Current State
 
-Shunter has contract export and TypeScript codegen. That is necessary but not
-sufficient for v1. Generated type definitions alone do not solve connection
-lifecycle, subscription handles, auth refresh, local cache updates, or protocol
+Shunter has contract export and TypeScript codegen. Generated TypeScript
+currently includes protocol metadata, row interfaces, table maps, reducer and
+declared-read constants/helpers, permission metadata, read-model metadata, and
+value-kind mappings.
+
+That is necessary but not sufficient for v1. There is no `package.json`, no
+maintained npm/runtime package, and no browser or Node client in the repo.
+Generated definitions alone do not solve connection lifecycle, subscription
+handles, auth refresh, local cache updates, reconnect policy, or protocol
 version mismatch behavior.
 
 SpacetimeDB's client SDKs are a useful reference for user experience:
@@ -56,7 +62,8 @@ The generated code should provide:
 ## Decisions To Make
 
 1. Decide whether the SDK lives inside this repo, a sibling package, or generated
-   output plus a small runtime library.
+   output plus a small runtime library. Until this is decided, the only stable
+   TypeScript surface is contract generation.
 2. Decide how reducer argument encoding is represented. The current Go reducer
    boundary uses raw bytes, so v1 needs either typed adapter conventions or
    generated helpers that make the byte boundary invisible to normal clients.
@@ -112,4 +119,3 @@ exists, and record it in this document and the package README.
 - All SpacetimeDB client SDK features.
 - Multi-language clients.
 - Raw SQL as the primary client programming model.
-

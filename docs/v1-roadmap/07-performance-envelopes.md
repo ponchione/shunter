@@ -1,6 +1,6 @@
 # Performance Envelopes
 
-Status: open
+Status: open, benchmark baseline exists
 Owner: unassigned
 Scope: benchmarked and documented workload limits for Shunter v1.
 
@@ -17,11 +17,18 @@ production support surface.
 
 Shunter has benchmark guidance in `docs/PERFORMANCE-BENCHMARKS.md` and real
 store, index, query, subscription, commitlog, snapshot, and protocol
-implementation. Some advanced live query paths, especially table-shaped
-multi-way joins, intentionally favor correctness and broad semantics over
-fully incremental planning.
+implementation. The current benchmark snapshot covers protocol compression,
+commitlog snapshot creation, and subscription evaluator hot paths. Additional
+benchmarks exist for reducer commit round trips, scheduler scanning, one-off
+query common paths, and subscription fanout/candidate collection.
 
-v1 needs measured limits and tests that detect severe regressions.
+Some advanced live query paths, especially table-shaped multi-way joins,
+intentionally favor correctness and broad semantics over fully incremental
+planning.
+
+v1 still needs measured workload limits and tests that detect severe
+regressions. The current benchmark document is a baseline log, not a published
+support envelope.
 
 ## Workload Dimensions
 
@@ -56,8 +63,17 @@ Measure and document at least:
 
 ## Implementation Work
 
+Completed or partially complete:
+
+- Add benchmark run guidance and a 2026-04-30 cleanup baseline under `docs/`.
+- Add benchmark coverage for protocol compression, commitlog snapshots,
+  subscription evaluation/fanout, reducer commit round trips, scheduler scans,
+  and one-off query common paths.
+
+Remaining:
+
 - Audit existing benchmarks and identify missing v1 workflows.
-- Add benchmarks for:
+- Add or expand benchmarks for:
   - reducer write throughput
   - indexed lookup and range scans
   - one-off joins
@@ -104,4 +120,3 @@ updating published baselines.
 - Supporting arbitrary large analytical SQL workloads.
 - Making every live query shape fully incremental before v1.
 - Hiding performance limits behind vague "depends on workload" language.
-

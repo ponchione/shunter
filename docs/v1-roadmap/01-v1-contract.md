@@ -1,6 +1,6 @@
 # v1 Contract Freeze
 
-Status: open, initial support matrix added
+Status: open, partial implementation landed
 Owner: unassigned
 Scope: supported Shunter v1 API, protocol, contract JSON, generated client
 shape, and read/query behavior.
@@ -35,15 +35,28 @@ Lower-level packages also expose useful APIs, including `schema`, `store`,
 `contractworkflow`, and `codegen`. Some of these are probably stable enough to
 document; others should remain implementation-facing.
 
-The docs and live code are close but not fully aligned. One concrete example:
-live view projection support must be stated consistently across the app-author
-guide, declared-read validation, protocol behavior, generated contracts, and
-tests.
+The docs and live code are closer than the original roadmap assumed. Past drift
+around live-view projection, aggregate, order, limit, and offset support has
+been reconciled in the compatibility matrix and app-author guide. The remaining
+contract work is a final audit: every stable promise needs an explicit fixture,
+test, or documented preview boundary.
 
-Current slice note: the initial support matrix records declared live-view
-column projection support and narrow single-table `COUNT` aggregate support.
-The app-author guide has been updated to match current declared-read and
-subscription behavior.
+Current slice note: the initial support matrix records the root API support
+levels, stable v1 protocol token, stable `ModuleContract` JSON fields,
+TypeScript codegen boundary, read-surface matrix, multi-module host preview
+status, and the separation between app module metadata and Shunter
+runtime/tool version metadata.
+
+Code reality as of this roadmap cleanup:
+
+- `docs/v1-compatibility.md` is the current compatibility matrix and is linked
+  from `docs/README.md`.
+- Protocol, contract, and TypeScript compatibility tests and a representative
+  contract fixture exist, but the matrix still needs a final audit against every
+  stable payload shape.
+- Generated TypeScript is a stable contract-generation target, not a full SDK.
+- Offline operations and migration hooks are preview/advanced in the matrix,
+  even though helpers and CLI commands already exist.
 
 ## v1 Decisions To Make
 
@@ -67,17 +80,29 @@ subscription behavior.
 
 ## Implementation Work
 
+Completed or partially complete:
+
 - Add or update a compact v1 compatibility document under `docs/`.
 - Audit exported identifiers in root `shunter` and classify them as stable,
   preview, deprecated, or internal-by-convention.
-- Add package comments where support level is ambiguous.
-- Add contract/protocol compatibility tests for every stable payload shape.
-- Add golden contract fixtures for representative modules.
-- Ensure `contractdiff` treats stable-field changes consistently with the v1
-  compatibility policy.
-- Ensure generated TypeScript output has a documented stability boundary.
-- Make docs, package comments, README, and tests agree on live view projection,
-  aggregate, order, limit, and offset support.
+- Document the protocol token, contract JSON compatibility rules, read surfaces,
+  generated TypeScript boundary, and multi-module host preview status.
+- Add protocol, contract, and TypeScript compatibility tests and representative
+  contract fixtures for the already-pinned surfaces.
+- Make app-author docs and the compatibility matrix agree on current declared
+  live-view projection, aggregate, order, limit, and offset behavior.
+
+Remaining:
+
+- Re-audit every exported root identifier and lower-level package after the
+  next implementation slices land.
+- Add or update package comments where support level remains ambiguous.
+- Confirm protocol, contract JSON, and TypeScript golden coverage for every
+  stable payload shape in the matrix.
+- Ensure `contractdiff` treats stable-field changes consistently with the final
+  v1 compatibility policy.
+- Resolve the remaining `Host`, TypeScript identifier normalization, and
+  lower-level-package compatibility decisions before cutting `v1.0.0`.
 
 ## Verification
 
