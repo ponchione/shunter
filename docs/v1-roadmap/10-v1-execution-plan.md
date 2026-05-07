@@ -216,11 +216,13 @@ Tasks:
 - Keep `docs/v1-roadmap/typescript-sdk-contract.md` current as the runtime API
   target before generating more helpers.
 - Generate schema-aware typed reducer argument/result codecs beyond the current
-  explicit encoder hooks and raw `Uint8Array` request path.
+  explicit encoder hooks and raw `Uint8Array` request path after the contract
+  exports reducer argument/result product schemas.
 - Build typed reducer result decoding, declared query/view projection row
-  decoding, declared-query/view cache behavior, typed row callback delivery, and
-  unsubscribe acknowledgement integration with managed handles on top of the
-  minimal WebSocket lifecycle shell.
+  decoding after projection schemas are exported, declared-query/view cache
+  behavior, typed row callback delivery, and unsubscribe acknowledgement
+  integration with managed handles on top of the minimal WebSocket lifecycle
+  shell.
 - Expand the current managed subscription handle integration beyond table
   subscription rows and declared-view lifecycle state once projection schemas
   exist.

@@ -242,11 +242,12 @@ Completed or partially complete:
 Remaining:
 
 - Generate schema-aware reducer argument/result codecs beyond the current
-  explicit encoder hooks and raw `Uint8Array` request path.
+  explicit encoder hooks and raw `Uint8Array` request path once `ModuleContract`
+  exports reducer argument/result product schemas.
 - Implement typed reducer result decoding beyond the current raw
   `TransactionUpdate` frame result, generated declared-query/view projection
-  row decoders, and declared-query/view cache behavior on top of the WebSocket
-  lifecycle shell.
+  row decoders once declared-read projection schemas are exported, and
+  declared-query/view cache behavior on top of the WebSocket lifecycle shell.
 - Expand managed cache/update behavior beyond table subscription handles to
   declared-query/view rows once projection schemas are exported.
 - Broaden reconnect coverage in the external canary and document any

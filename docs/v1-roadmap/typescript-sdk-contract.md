@@ -140,8 +140,9 @@ generated helpers.
 
 Open decision: generated reducer argument/result encoding. The Go runtime
 boundary is raw bytes. The runtime now has an explicit app-facing encoder hook
-convention, but generated schema-derived codecs are still required before
-typed reducer helpers are considered v1-stable.
+convention, but generated schema-derived codecs require `ModuleContract` to
+export reducer argument/result product schemas before typed reducer helpers are
+considered v1-stable.
 
 Current foundation: the runtime can encode and send the raw-byte
 `CallReducerMsg` shape used by the Go protocol: reducer name, raw args bytes,
@@ -196,7 +197,8 @@ slices, duration, message ID, and the raw frame. `decodeDeclaredQueryResult()`
 can then map those table row bytes with caller-supplied decoders and fails
 clearly when a returned table has no decoder. Generated table row decoders are
 available for whole-table result rows. Declared query/view projection row
-decoders and table/view metadata extraction remain required v1 follow-ups.
+decoders require exported projection schemas and table/view metadata extraction
+before they can be generated.
 
 Query calls should return:
 
