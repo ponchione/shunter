@@ -1,6 +1,6 @@
 # Reference Application
 
-Status: open, not started as maintained app
+Status: open, app contract added; implementation not started
 Owner: unassigned
 Scope: one maintained end-to-end application that proves the normal Shunter v1
 developer and operator workflows.
@@ -27,6 +27,8 @@ subscriptions, and restart behavior through public runtime APIs. That workload
 is useful proof, but it is test-only: there is no `examples/` app, no app-owned
 server binary, no generated TypeScript artifacts checked in for app authors, and
 no browser or Node client.
+
+Current target: [`reference-app-taskboard-contract.md`](reference-app-taskboard-contract.md)
 
 SpacetimeDB's reference material is useful here because its product experience
 is centered around modules, generated clients, local cache, reducer calls, and
@@ -63,7 +65,12 @@ payments, rich text, media upload, or third-party integrations.
 
 ## Implementation Work
 
-- Choose the app domain and write a one-page app contract.
+Completed or partially complete:
+
+- Choose the collaborative task-board domain and write the app contract.
+
+Remaining:
+
 - Add the app under an examples or integration-test location agreed with the
   repo layout.
 - Build the server as an app-owned binary using normal `shunter.Module` and

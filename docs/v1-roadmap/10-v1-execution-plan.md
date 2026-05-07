@@ -94,9 +94,12 @@ operator workflow.
 Recommended domain: collaborative task board. It matches existing
 release-candidate tests while leaving room for a richer maintained example.
 
+Status: task-board contract written; implementation, client, and tests remain.
+
 Tasks:
 
-- Write a one-page app contract before implementation.
+- Keep `docs/v1-roadmap/reference-app-taskboard-contract.md` current as the
+  implementation contract.
 - Add the app under an examples or integration-test location agreed with the
   repo layout.
 - Include 5-8 tables with varied schema shapes, at least one private table, one
