@@ -162,6 +162,9 @@ Exit criteria:
 
 Goal: strict auth is safe to configure and clear to operate.
 
+Status: current dev/strict auth behavior documented; broader strict-auth
+decisions and reference-app example remain.
+
 Tasks:
 
 - Decide whether v1 is HS256-only or whether asymmetric/JWKS/OIDC support is
@@ -173,7 +176,7 @@ Tasks:
   an app-provided mapper.
 - Decide strict-mode anonymous-token behavior.
 - Add startup/config validation for any newly required strict fields.
-- Add structured docs for dev auth versus production auth.
+- Keep `docs/authentication.md` current as structured dev/strict auth guidance.
 - Add tests for missing signing config, invalid issuer, invalid audience,
   expired token, future token, malformed token, wrong algorithm, missing
   permissions, and visibility-filtered reads across local and protocol paths.

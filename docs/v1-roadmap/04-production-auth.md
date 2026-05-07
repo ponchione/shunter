@@ -1,6 +1,6 @@
 # Production Auth
 
-Status: open, strict HS256 base implemented
+Status: open, strict HS256 docs added; broader auth decisions remain
 Owner: unassigned
 Scope: production-ready authentication, principal derivation, permission
 mapping, and operational auth documentation for Shunter v1.
@@ -65,21 +65,38 @@ remain easy, but v1 must prevent accidental production use of dev auth.
 
 ## Implementation Work
 
+Completed or partially complete:
+
 - Audit `auth`, `protocol`, root `Config`, reducer permissions, declared read
   permissions, and visibility filtering as one auth flow.
-- Add strict-mode config validation that fails startup when production auth is
-  incomplete.
-- Add tests for missing signing config, invalid issuer, invalid audience,
-  expired token, future token, malformed token, wrong algorithm, missing
-  permissions, and visibility-filtered reads.
-- Add tests that verify auth is enforced consistently across:
+- Add strict-mode config validation that fails protocol auth setup when signing
+  config is incomplete.
+- Document current dev/strict auth behavior, principal derivation, permission
+  mapping, visibility-filter limits, key replacement, and production checklist
+  in `docs/authentication.md`.
+- Add coverage for JWT validation, audience validation, wrong algorithms,
+  protocol upgrade auth, local strict permissions, declared-read permissions,
+  read authorization, and visibility-filtered reads.
+
+Remaining:
+
+- Decide whether HS256-only strict auth is sufficient for v1 or whether
+  asymmetric/JWKS/OIDC support must land before release.
+- Decide whether strict auth needs issuer allowlists in root config.
+- Decide whether key replacement remains restart-based or gains runtime
+  multi-key rotation.
+- Decide whether claim-to-permission mapping stays on the `permissions` claim
+  or gains an app-provided mapper.
+- Add or confirm tests for invalid issuer, future token, expired token,
+  malformed token, wrong algorithm, missing permissions, and visibility-filtered
+  reads.
+- Add or confirm tests that verify auth is enforced consistently across:
   - WebSocket reducer calls
   - local `CallReducer`
   - one-off raw SQL
   - declared queries
   - raw subscriptions
   - declared views
-- Add structured docs for local dev auth versus production auth.
 - Add examples to the reference app using realistic non-dev auth.
 
 ## Verification

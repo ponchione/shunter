@@ -15,6 +15,9 @@ Do not read broad specs by default.
 
 ## Current Docs
 
+- `docs/authentication.md` — current dev/strict auth behavior, principal
+  derivation, permission mapping, visibility, key replacement, and production
+  checklist.
 - `docs/PERFORMANCE-BENCHMARKS.md` — benchmark run instructions and current
   performance baselines for comparison across optimization work.
 - `docs/dependency-considerations.md` — adopted dependency policy, dependency

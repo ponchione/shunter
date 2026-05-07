@@ -162,6 +162,7 @@ Configuration basics:
   permissions unless the caller explicitly sets permissions.
 - `AuthModeStrict` requires explicit auth configuration when protocol serving
   is enabled.
+- See `docs/authentication.md` for the current dev/strict auth contract.
 - `Observability` configures runtime-scoped logs, metrics, diagnostics, and
   tracing. The zero value is a no-op.
 
@@ -473,6 +474,9 @@ mod.VisibilityFilter(shunter.VisibilityFilterDeclaration{
 Use declared read options such as `WithDeclaredReadIdentity`,
 `WithDeclaredReadPermissions`, and `WithDeclaredReadAllowAllPermissions` to test
 caller-specific behavior locally.
+
+For auth mode behavior, token claims, permissions, visibility, and production
+strict-mode setup, see `docs/authentication.md`.
 
 ## Export Contracts
 
