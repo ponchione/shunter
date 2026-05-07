@@ -85,6 +85,8 @@ func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
 		`import type {`,
 		`DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,`,
 		`ProtocolMetadata as ShunterProtocolMetadata,`,
+		`RawDeclaredQueryResult as ShunterRawDeclaredQueryResult,`,
+		`ReducerCallResult as ShunterReducerCallResult,`,
 		`SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,`,
 		`export const shunterProtocol = {`,
 		`defaultSubprotocol: "v1.bsatn.shunter",`,
@@ -106,6 +108,7 @@ func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
 		`ownMessages: { sql: "SELECT * FROM messages WHERE sender = :sender", returnTable: "messages", returnTableId: 0, usesCallerIdentity: true },`,
 		`export const reducers = {`,
 		`createMessage: "create_message",`,
+		`export type ReducerCallResult<Name extends ReducerName = ReducerName> = ShunterReducerCallResult<Name, Uint8Array>;`,
 		`export function callCreateMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`,
 		`export const lifecycleReducers = {`,
 		`OnConnect: "OnConnect",`,
@@ -113,6 +116,7 @@ func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
 		`recentMessages: "recent_messages",`,
 		`export const querySQL = {`,
 		`recentMessages: "SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25",`,
+		`export type RawDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName> = ShunterRawDeclaredQueryResult<Name>;`,
 		`export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`,
 		`export const views = {`,
 		`liveMessageProjection: "live_message_projection",`,
@@ -145,6 +149,7 @@ func TestV1CompatibilityTypeScriptDeclaredReadResultShapeSurface(t *testing.T) {
 
 	for _, want := range []string{
 		`export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;`,
+		`export type RawDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName> = ShunterRawDeclaredQueryResult<Name>;`,
 		`recentMessages: "SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25",`,
 		`export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`,
 		`return runDeclaredQuery("recent_messages");`,

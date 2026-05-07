@@ -36,6 +36,7 @@ import type {
 import {
   callCreateMessage,
   queryRecentMessages,
+  queries,
   reducers,
   shunterProtocol as generatedProtocol,
   subscribeLiveMessageCount,
@@ -49,7 +50,9 @@ import type {
   ExecutableViewName,
   MessagesRow,
   ReducerCaller,
+  ReducerCallResult as GeneratedReducerCallResult,
   ReducerName,
+  RawDeclaredQueryResult as GeneratedRawDeclaredQueryResult,
   SubscriptionUnsubscribe,
   TableName,
   TableRows,
@@ -164,6 +167,8 @@ async function exerciseGeneratedBindings(): Promise<void> {
     value: new Uint8Array([1]),
     rawResult: new Uint8Array([1]),
   };
+  const generatedReducerResult: GeneratedReducerCallResult<typeof reducers.createMessage> =
+    reducerResult;
   const reducerResultDecoder: typeof decodeReducerCallResult = decodeReducerCallResult;
 
   const declaredQueryRunner: DeclaredQueryRunner = async (name) =>
@@ -181,6 +186,8 @@ async function exerciseGeneratedBindings(): Promise<void> {
     totalHostExecutionDuration: 0n,
     rawFrame: new Uint8Array([0]),
   };
+  const generatedRawDeclaredQueryResult: GeneratedRawDeclaredQueryResult<typeof queries.recentMessages> =
+    rawDeclaredQueryResult;
   const rawDeclaredQueryDecoder: typeof decodeRawDeclaredQueryResult = decodeRawDeclaredQueryResult;
 
   const declaredViewSubscriber: DeclaredViewSubscriber = async (_name) => () => {};
@@ -242,6 +249,7 @@ async function exerciseGeneratedBindings(): Promise<void> {
 
   void reducerBytes;
   void reducerResult;
+  void generatedReducerResult;
   void reducerResultDecoder;
   void encodedFrame;
   void encodedQueryFrame;
@@ -250,6 +258,7 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void encodedTableFrame;
   void queryBytes;
   void rawDeclaredQueryResult;
+  void generatedRawDeclaredQueryResult;
   void rawDeclaredQueryDecoder;
 }
 

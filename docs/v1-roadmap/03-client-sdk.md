@@ -21,8 +21,9 @@ Shunter has contract export, TypeScript codegen, and a minimal checked-in
 runtime foundation at `typescript/client` published in-repo as
 `@shunter/client`. Generated TypeScript currently includes protocol metadata,
 row interfaces, table maps, reducer and declared-read constants/helpers,
-permission metadata, read-model metadata, value-kind mappings, and runtime type
-imports for the shared SDK surface.
+permission metadata, read-model metadata, value-kind mappings, module-scoped
+aliases for the reducer result and raw declared-query result envelopes, and
+runtime type imports for the shared SDK surface.
 
 That is necessary but not sufficient for v1. The runtime package currently
 defines protocol constants, protocol compatibility helpers, connection state
@@ -157,6 +158,9 @@ Completed or partially complete:
 - Add a raw declared-query result helper that wraps successful
   `OneOffQueryResponse` frames in a typed envelope while keeping rows as raw
   RowList bytes and split row byte arrays.
+- Export generated TypeScript aliases for the runtime reducer result envelope
+  and raw declared-query result envelope so module-specific helpers can type
+  those surfaces without adding runtime imports.
 - Add raw declared-view subscription request encoding for the live v1
   `SubscribeDeclaredView` wire shape, correlate `SubscribeMultiApplied` and
   `SubscriptionError` frames for acceptance/failure, and return an idempotent

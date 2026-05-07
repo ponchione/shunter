@@ -7,7 +7,9 @@ import type {
   DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,
   ProtocolMetadata as ShunterProtocolMetadata,
   QueryRunner as ShunterQueryRunner,
+  RawDeclaredQueryResult as ShunterRawDeclaredQueryResult,
   ReducerCaller as ShunterReducerCaller,
+  ReducerCallResult as ShunterReducerCallResult,
   SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,
   TableSubscriber as ShunterTableSubscriber,
   ViewSubscriber as ShunterViewSubscriber,
@@ -23,9 +25,11 @@ export const shunterProtocol = {
 export type ShunterSubprotocol = (typeof shunterProtocol.supportedSubprotocols)[number];
 
 export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;
+export type ReducerCallResult<Name extends ReducerName = ReducerName> = ShunterReducerCallResult<Name, Uint8Array>;
 export type QueryRunner = ShunterQueryRunner<Uint8Array>;
 export type ViewSubscriber = ShunterViewSubscriber;
 export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;
+export type RawDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName> = ShunterRawDeclaredQueryResult<Name>;
 export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;
 export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;
 export type TableRow<Name extends TableName> = TableRows[Name];

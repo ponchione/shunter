@@ -32,9 +32,11 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 		return nil, err
 	}
 	b.WriteString("export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;\n")
+	b.WriteString("export type ReducerCallResult<Name extends ReducerName = ReducerName> = ShunterReducerCallResult<Name, Uint8Array>;\n")
 	b.WriteString("export type QueryRunner = ShunterQueryRunner<Uint8Array>;\n")
 	b.WriteString("export type ViewSubscriber = ShunterViewSubscriber;\n")
 	b.WriteString("export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;\n")
+	b.WriteString("export type RawDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName> = ShunterRawDeclaredQueryResult<Name>;\n")
 	b.WriteString("export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;\n")
 	b.WriteString("export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;\n")
 	b.WriteString("export type TableRow<Name extends TableName> = TableRows[Name];\n")
@@ -173,7 +175,9 @@ func writeTypeScriptRuntimeImports(b *bytes.Buffer) {
 	b.WriteString("  DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,\n")
 	b.WriteString("  ProtocolMetadata as ShunterProtocolMetadata,\n")
 	b.WriteString("  QueryRunner as ShunterQueryRunner,\n")
+	b.WriteString("  RawDeclaredQueryResult as ShunterRawDeclaredQueryResult,\n")
 	b.WriteString("  ReducerCaller as ShunterReducerCaller,\n")
+	b.WriteString("  ReducerCallResult as ShunterReducerCallResult,\n")
 	b.WriteString("  SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,\n")
 	b.WriteString("  TableSubscriber as ShunterTableSubscriber,\n")
 	b.WriteString("  ViewSubscriber as ShunterViewSubscriber,\n")

@@ -111,6 +111,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   row byte arrays when their payloads are RowList envelopes.
 - TypeScript declared-view and table subscriptions can now opt into managed
   subscription handles backed by server-acknowledged unsubscribe paths.
+- Generated TypeScript clients now export module-scoped aliases for the
+  reducer result envelope and raw declared-query result envelope.
 
 ## v0.1.0 - 2026-05-05
 

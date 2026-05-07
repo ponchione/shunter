@@ -26,7 +26,10 @@ typechecks can evolve together.
 The runtime package should own protocol connection lifecycle, auth token
 handling, reducer/query/view request plumbing, subscription handles, reconnect
 policy, local cache primitives, and structured errors. Generated bindings should
-own module-specific names and types.
+own module-specific names and types. Generated bindings now also export
+module-scoped aliases for the runtime reducer result envelope and raw
+declared-query result envelope, keeping those helper surfaces typed by the
+module's reducer/query name unions without adding runtime imports.
 
 Current foundation scope: `@shunter/client` exposes protocol constants,
 protocol compatibility helpers, connection state types, structured errors, a
@@ -268,6 +271,7 @@ Generated bindings should expose:
 - table names and table-to-row maps
 - reducer names and typed reducer helper functions
 - declared query/view names and typed helpers
+- module-scoped reducer result and raw declared-query result envelope aliases
 - permissions/read-model metadata
 - module contract format/version metadata
 - runtime protocol metadata needed for negotiation

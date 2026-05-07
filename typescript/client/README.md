@@ -70,6 +70,9 @@ or read `insertRowBytes`/`deleteRowBytes` from raw updates when present.
 
 Generated module bindings should import types from `@shunter/client` and keep
 module-specific table, reducer, query, and view names in the generated file.
+They also export module-scoped aliases for reducer result and raw
+declared-query result envelopes so helper code can keep those surfaces tied to
+generated name unions.
 
 ## Verification
 
