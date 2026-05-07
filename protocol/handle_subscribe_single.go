@@ -42,6 +42,26 @@ type rawSubscribeAdmissionPlanQuery struct {
 	predicateHashIdentity *types.Identity
 	usesCallerIdentity    bool
 	referencedTables      []schema.TableID
+	resultShape           rawSubscribeAdmissionResultShape
+}
+
+type rawSubscribeAdmissionResultShape struct {
+	tableName  string
+	projection []subscription.ProjectionColumn
+	aggregate  *subscription.Aggregate
+	orderBy    []subscription.OrderByColumn
+	hasOrderBy bool
+	limit      *uint64
+	offset     *uint64
+}
+
+func (s rawSubscribeAdmissionResultShape) tableShaped() bool {
+	return len(s.projection) == 0 &&
+		s.aggregate == nil &&
+		len(s.orderBy) == 0 &&
+		!s.hasOrderBy &&
+		s.limit == nil &&
+		s.offset == nil
 }
 
 func (p rawSubscribeAdmissionPlan) predicates() []any {
@@ -83,6 +103,15 @@ func compileRawSubscribeAdmissionPlan(
 			predicateHashIdentity: compiled.PredicateHashIdentity(caller.Identity),
 			usesCallerIdentity:    compiled.UsesCallerIdentity(),
 			referencedTables:      compiled.ReferencedTables(),
+			resultShape: rawSubscribeAdmissionResultShape{
+				tableName:  compiled.TableName(),
+				projection: compiled.SubscriptionProjection(),
+				aggregate:  compiled.SubscriptionAggregate(),
+				orderBy:    compiled.SubscriptionOrderBy(),
+				hasOrderBy: compiled.HasOrderBy(),
+				limit:      compiled.SubscriptionLimit(),
+				offset:     compiled.SubscriptionOffset(),
+			},
 		})
 	}
 	return plan, "", nil

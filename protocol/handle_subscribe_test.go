@@ -2704,6 +2704,12 @@ func TestCompileRawSubscribeAdmissionPlanRecordsPerQueryState(t *testing.T) {
 		if query.predicate == nil {
 			t.Fatalf("query[%d].predicate = nil, want compiled predicate", i)
 		}
+		if query.resultShape.tableName != "users" {
+			t.Fatalf("query[%d].resultShape.tableName = %q, want users", i, query.resultShape.tableName)
+		}
+		if !query.resultShape.tableShaped() {
+			t.Fatalf("query[%d].resultShape = %+v, want raw table-shaped result", i, query.resultShape)
+		}
 	}
 	if plan.queries[0].usesCallerIdentity {
 		t.Fatal("literal predicate usesCallerIdentity = true, want false")
