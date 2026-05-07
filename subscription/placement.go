@@ -34,27 +34,29 @@ type PruningIndexes struct {
 
 // NewPruningIndexes constructs an empty composite.
 func NewPruningIndexes() *PruningIndexes {
+	joinPathEdge := newJoinPathTraversalIndex()
+	joinRangePathEdge := newJoinRangePathTraversalIndex()
 	return &PruningIndexes{
 		Value:              NewValueIndex(),
 		Range:              NewRangeIndex(),
 		JoinEdge:           NewJoinEdgeIndex(),
 		JoinRangeEdge:      NewJoinRangeEdgeIndex(),
-		joinPathEdge:       newJoinPathTraversalIndex(),
-		joinRangePathEdge:  newJoinRangePathTraversalIndex(),
-		JoinPathEdge:       NewJoinPathEdgeIndex(),
-		JoinRangePathEdge:  NewJoinRangePathEdgeIndex(),
-		JoinPath3Edge:      NewJoinPath3EdgeIndex(),
-		JoinRangePath3Edge: NewJoinRangePath3EdgeIndex(),
-		JoinPath4Edge:      NewJoinPath4EdgeIndex(),
-		JoinRangePath4Edge: NewJoinRangePath4EdgeIndex(),
-		JoinPath5Edge:      NewJoinPath5EdgeIndex(),
-		JoinRangePath5Edge: NewJoinRangePath5EdgeIndex(),
-		JoinPath6Edge:      NewJoinPath6EdgeIndex(),
-		JoinRangePath6Edge: NewJoinRangePath6EdgeIndex(),
-		JoinPath7Edge:      NewJoinPath7EdgeIndex(),
-		JoinRangePath7Edge: NewJoinRangePath7EdgeIndex(),
-		JoinPath8Edge:      NewJoinPath8EdgeIndex(),
-		JoinRangePath8Edge: NewJoinRangePath8EdgeIndex(),
+		joinPathEdge:       joinPathEdge,
+		joinRangePathEdge:  joinRangePathEdge,
+		JoinPathEdge:       newJoinPathEdgeIndexWithInner(joinPathEdge),
+		JoinRangePathEdge:  newJoinRangePathEdgeIndexWithInner(joinRangePathEdge),
+		JoinPath3Edge:      newJoinPath3EdgeIndexWithInner(joinPathEdge),
+		JoinRangePath3Edge: newJoinRangePath3EdgeIndexWithInner(joinRangePathEdge),
+		JoinPath4Edge:      newJoinPath4EdgeIndexWithInner(joinPathEdge),
+		JoinRangePath4Edge: newJoinRangePath4EdgeIndexWithInner(joinRangePathEdge),
+		JoinPath5Edge:      newJoinPath5EdgeIndexWithInner(joinPathEdge),
+		JoinRangePath5Edge: newJoinRangePath5EdgeIndexWithInner(joinRangePathEdge),
+		JoinPath6Edge:      newJoinPath6EdgeIndexWithInner(joinPathEdge),
+		JoinRangePath6Edge: newJoinRangePath6EdgeIndexWithInner(joinRangePathEdge),
+		JoinPath7Edge:      newJoinPath7EdgeIndexWithInner(joinPathEdge),
+		JoinRangePath7Edge: newJoinRangePath7EdgeIndexWithInner(joinRangePathEdge),
+		JoinPath8Edge:      newJoinPath8EdgeIndexWithInner(joinPathEdge),
+		JoinRangePath8Edge: newJoinRangePath8EdgeIndexWithInner(joinRangePathEdge),
 		Table:              NewTableIndex(),
 	}
 }
@@ -1172,7 +1174,6 @@ func mutateJoinPathTraversalEdgePlacement(idx *PruningIndexes, edge joinPathTrav
 	} else {
 		idx.joinPathEdge.Remove(edge, value, hash)
 	}
-	mutateJoinPathTraversalFixedCompatibility(idx, edge, value, hash, add)
 }
 
 func mutateJoinRangePathTraversalEdgePlacement(idx *PruningIndexes, edge joinPathTraversalEdge, lower, upper Bound, hash QueryHash, add bool) {
@@ -1181,7 +1182,6 @@ func mutateJoinRangePathTraversalEdgePlacement(idx *PruningIndexes, edge joinPat
 	} else {
 		idx.joinRangePathEdge.Remove(edge, lower, upper, hash)
 	}
-	mutateJoinRangePathTraversalFixedCompatibility(idx, edge, lower, upper, hash, add)
 }
 
 func mutateJoinExistencePlacement(idx *PruningIndexes, edge JoinEdge, hash QueryHash, add bool) {

@@ -246,12 +246,13 @@ type joinPathFixedValueIndex[E any] struct {
 	fromTraversal func(joinPathTraversalEdge) (E, bool)
 }
 
-func newJoinPathFixedValueIndex[E any](
+func newJoinPathFixedValueIndexWithInner[E any](
+	inner *joinPathTraversalIndex,
 	toTraversal func(E) joinPathTraversalEdge,
 	fromTraversal func(joinPathTraversalEdge) (E, bool),
 ) *joinPathFixedValueIndex[E] {
 	return &joinPathFixedValueIndex[E]{
-		inner:         newJoinPathTraversalIndex(),
+		inner:         inner,
 		toTraversal:   toTraversal,
 		fromTraversal: fromTraversal,
 	}
@@ -287,12 +288,13 @@ type joinPathFixedRangeIndex[E any] struct {
 	fromTraversal func(joinPathTraversalEdge) (E, bool)
 }
 
-func newJoinPathFixedRangeIndex[E any](
+func newJoinPathFixedRangeIndexWithInner[E any](
+	inner *joinRangePathTraversalIndex,
 	toTraversal func(E) joinPathTraversalEdge,
 	fromTraversal func(joinPathTraversalEdge) (E, bool),
 ) *joinPathFixedRangeIndex[E] {
 	return &joinPathFixedRangeIndex[E]{
-		inner:         newJoinRangePathTraversalIndex(),
+		inner:         inner,
 		toTraversal:   toTraversal,
 		fromTraversal: fromTraversal,
 	}
@@ -327,7 +329,11 @@ type JoinPathEdgeIndex struct {
 }
 
 func NewJoinPathEdgeIndex() *JoinPathEdgeIndex {
-	return &JoinPathEdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPathEdge, joinPathTraversalEdgeToJoinPathEdge)}
+	return newJoinPathEdgeIndexWithInner(newJoinPathTraversalIndex())
+}
+
+func newJoinPathEdgeIndexWithInner(inner *joinPathTraversalIndex) *JoinPathEdgeIndex {
+	return &JoinPathEdgeIndex{newJoinPathFixedValueIndexWithInner(inner, joinPathTraversalEdgeFromJoinPathEdge, joinPathTraversalEdgeToJoinPathEdge)}
 }
 
 type JoinRangePathEdgeIndex struct {
@@ -335,7 +341,11 @@ type JoinRangePathEdgeIndex struct {
 }
 
 func NewJoinRangePathEdgeIndex() *JoinRangePathEdgeIndex {
-	return &JoinRangePathEdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPathEdge, joinPathTraversalEdgeToJoinPathEdge)}
+	return newJoinRangePathEdgeIndexWithInner(newJoinRangePathTraversalIndex())
+}
+
+func newJoinRangePathEdgeIndexWithInner(inner *joinRangePathTraversalIndex) *JoinRangePathEdgeIndex {
+	return &JoinRangePathEdgeIndex{newJoinPathFixedRangeIndexWithInner(inner, joinPathTraversalEdgeFromJoinPathEdge, joinPathTraversalEdgeToJoinPathEdge)}
 }
 
 type JoinPath3EdgeIndex struct {
@@ -343,7 +353,11 @@ type JoinPath3EdgeIndex struct {
 }
 
 func NewJoinPath3EdgeIndex() *JoinPath3EdgeIndex {
-	return &JoinPath3EdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPath3Edge, joinPathTraversalEdgeToJoinPath3Edge)}
+	return newJoinPath3EdgeIndexWithInner(newJoinPathTraversalIndex())
+}
+
+func newJoinPath3EdgeIndexWithInner(inner *joinPathTraversalIndex) *JoinPath3EdgeIndex {
+	return &JoinPath3EdgeIndex{newJoinPathFixedValueIndexWithInner(inner, joinPathTraversalEdgeFromJoinPath3Edge, joinPathTraversalEdgeToJoinPath3Edge)}
 }
 
 type JoinRangePath3EdgeIndex struct {
@@ -351,7 +365,11 @@ type JoinRangePath3EdgeIndex struct {
 }
 
 func NewJoinRangePath3EdgeIndex() *JoinRangePath3EdgeIndex {
-	return &JoinRangePath3EdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPath3Edge, joinPathTraversalEdgeToJoinPath3Edge)}
+	return newJoinRangePath3EdgeIndexWithInner(newJoinRangePathTraversalIndex())
+}
+
+func newJoinRangePath3EdgeIndexWithInner(inner *joinRangePathTraversalIndex) *JoinRangePath3EdgeIndex {
+	return &JoinRangePath3EdgeIndex{newJoinPathFixedRangeIndexWithInner(inner, joinPathTraversalEdgeFromJoinPath3Edge, joinPathTraversalEdgeToJoinPath3Edge)}
 }
 
 type JoinPath4EdgeIndex struct {
@@ -359,7 +377,11 @@ type JoinPath4EdgeIndex struct {
 }
 
 func NewJoinPath4EdgeIndex() *JoinPath4EdgeIndex {
-	return &JoinPath4EdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPath4Edge, joinPathTraversalEdgeToJoinPath4Edge)}
+	return newJoinPath4EdgeIndexWithInner(newJoinPathTraversalIndex())
+}
+
+func newJoinPath4EdgeIndexWithInner(inner *joinPathTraversalIndex) *JoinPath4EdgeIndex {
+	return &JoinPath4EdgeIndex{newJoinPathFixedValueIndexWithInner(inner, joinPathTraversalEdgeFromJoinPath4Edge, joinPathTraversalEdgeToJoinPath4Edge)}
 }
 
 type JoinRangePath4EdgeIndex struct {
@@ -367,7 +389,11 @@ type JoinRangePath4EdgeIndex struct {
 }
 
 func NewJoinRangePath4EdgeIndex() *JoinRangePath4EdgeIndex {
-	return &JoinRangePath4EdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPath4Edge, joinPathTraversalEdgeToJoinPath4Edge)}
+	return newJoinRangePath4EdgeIndexWithInner(newJoinRangePathTraversalIndex())
+}
+
+func newJoinRangePath4EdgeIndexWithInner(inner *joinRangePathTraversalIndex) *JoinRangePath4EdgeIndex {
+	return &JoinRangePath4EdgeIndex{newJoinPathFixedRangeIndexWithInner(inner, joinPathTraversalEdgeFromJoinPath4Edge, joinPathTraversalEdgeToJoinPath4Edge)}
 }
 
 type JoinPath5EdgeIndex struct {
@@ -375,7 +401,11 @@ type JoinPath5EdgeIndex struct {
 }
 
 func NewJoinPath5EdgeIndex() *JoinPath5EdgeIndex {
-	return &JoinPath5EdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPath5Edge, joinPathTraversalEdgeToJoinPath5Edge)}
+	return newJoinPath5EdgeIndexWithInner(newJoinPathTraversalIndex())
+}
+
+func newJoinPath5EdgeIndexWithInner(inner *joinPathTraversalIndex) *JoinPath5EdgeIndex {
+	return &JoinPath5EdgeIndex{newJoinPathFixedValueIndexWithInner(inner, joinPathTraversalEdgeFromJoinPath5Edge, joinPathTraversalEdgeToJoinPath5Edge)}
 }
 
 type JoinRangePath5EdgeIndex struct {
@@ -383,7 +413,11 @@ type JoinRangePath5EdgeIndex struct {
 }
 
 func NewJoinRangePath5EdgeIndex() *JoinRangePath5EdgeIndex {
-	return &JoinRangePath5EdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPath5Edge, joinPathTraversalEdgeToJoinPath5Edge)}
+	return newJoinRangePath5EdgeIndexWithInner(newJoinRangePathTraversalIndex())
+}
+
+func newJoinRangePath5EdgeIndexWithInner(inner *joinRangePathTraversalIndex) *JoinRangePath5EdgeIndex {
+	return &JoinRangePath5EdgeIndex{newJoinPathFixedRangeIndexWithInner(inner, joinPathTraversalEdgeFromJoinPath5Edge, joinPathTraversalEdgeToJoinPath5Edge)}
 }
 
 type JoinPath6EdgeIndex struct {
@@ -391,7 +425,11 @@ type JoinPath6EdgeIndex struct {
 }
 
 func NewJoinPath6EdgeIndex() *JoinPath6EdgeIndex {
-	return &JoinPath6EdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPath6Edge, joinPathTraversalEdgeToJoinPath6Edge)}
+	return newJoinPath6EdgeIndexWithInner(newJoinPathTraversalIndex())
+}
+
+func newJoinPath6EdgeIndexWithInner(inner *joinPathTraversalIndex) *JoinPath6EdgeIndex {
+	return &JoinPath6EdgeIndex{newJoinPathFixedValueIndexWithInner(inner, joinPathTraversalEdgeFromJoinPath6Edge, joinPathTraversalEdgeToJoinPath6Edge)}
 }
 
 type JoinRangePath6EdgeIndex struct {
@@ -399,7 +437,11 @@ type JoinRangePath6EdgeIndex struct {
 }
 
 func NewJoinRangePath6EdgeIndex() *JoinRangePath6EdgeIndex {
-	return &JoinRangePath6EdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPath6Edge, joinPathTraversalEdgeToJoinPath6Edge)}
+	return newJoinRangePath6EdgeIndexWithInner(newJoinRangePathTraversalIndex())
+}
+
+func newJoinRangePath6EdgeIndexWithInner(inner *joinRangePathTraversalIndex) *JoinRangePath6EdgeIndex {
+	return &JoinRangePath6EdgeIndex{newJoinPathFixedRangeIndexWithInner(inner, joinPathTraversalEdgeFromJoinPath6Edge, joinPathTraversalEdgeToJoinPath6Edge)}
 }
 
 type JoinPath7EdgeIndex struct {
@@ -407,7 +449,11 @@ type JoinPath7EdgeIndex struct {
 }
 
 func NewJoinPath7EdgeIndex() *JoinPath7EdgeIndex {
-	return &JoinPath7EdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPath7Edge, joinPathTraversalEdgeToJoinPath7Edge)}
+	return newJoinPath7EdgeIndexWithInner(newJoinPathTraversalIndex())
+}
+
+func newJoinPath7EdgeIndexWithInner(inner *joinPathTraversalIndex) *JoinPath7EdgeIndex {
+	return &JoinPath7EdgeIndex{newJoinPathFixedValueIndexWithInner(inner, joinPathTraversalEdgeFromJoinPath7Edge, joinPathTraversalEdgeToJoinPath7Edge)}
 }
 
 type JoinRangePath7EdgeIndex struct {
@@ -415,7 +461,11 @@ type JoinRangePath7EdgeIndex struct {
 }
 
 func NewJoinRangePath7EdgeIndex() *JoinRangePath7EdgeIndex {
-	return &JoinRangePath7EdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPath7Edge, joinPathTraversalEdgeToJoinPath7Edge)}
+	return newJoinRangePath7EdgeIndexWithInner(newJoinRangePathTraversalIndex())
+}
+
+func newJoinRangePath7EdgeIndexWithInner(inner *joinRangePathTraversalIndex) *JoinRangePath7EdgeIndex {
+	return &JoinRangePath7EdgeIndex{newJoinPathFixedRangeIndexWithInner(inner, joinPathTraversalEdgeFromJoinPath7Edge, joinPathTraversalEdgeToJoinPath7Edge)}
 }
 
 type JoinPath8EdgeIndex struct {
@@ -423,7 +473,11 @@ type JoinPath8EdgeIndex struct {
 }
 
 func NewJoinPath8EdgeIndex() *JoinPath8EdgeIndex {
-	return &JoinPath8EdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPath8Edge, joinPathTraversalEdgeToJoinPath8Edge)}
+	return newJoinPath8EdgeIndexWithInner(newJoinPathTraversalIndex())
+}
+
+func newJoinPath8EdgeIndexWithInner(inner *joinPathTraversalIndex) *JoinPath8EdgeIndex {
+	return &JoinPath8EdgeIndex{newJoinPathFixedValueIndexWithInner(inner, joinPathTraversalEdgeFromJoinPath8Edge, joinPathTraversalEdgeToJoinPath8Edge)}
 }
 
 type JoinRangePath8EdgeIndex struct {
@@ -431,7 +485,11 @@ type JoinRangePath8EdgeIndex struct {
 }
 
 func NewJoinRangePath8EdgeIndex() *JoinRangePath8EdgeIndex {
-	return &JoinRangePath8EdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPath8Edge, joinPathTraversalEdgeToJoinPath8Edge)}
+	return newJoinRangePath8EdgeIndexWithInner(newJoinRangePathTraversalIndex())
+}
+
+func newJoinRangePath8EdgeIndexWithInner(inner *joinRangePathTraversalIndex) *JoinRangePath8EdgeIndex {
+	return &JoinRangePath8EdgeIndex{newJoinPathFixedRangeIndexWithInner(inner, joinPathTraversalEdgeFromJoinPath8Edge, joinPathTraversalEdgeToJoinPath8Edge)}
 }
 
 func joinPathTraversalEdgeFromJoinPathEdge(edge JoinPathEdge) joinPathTraversalEdge {
