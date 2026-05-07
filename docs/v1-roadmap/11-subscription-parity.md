@@ -391,6 +391,23 @@ Acceptance criteria:
 - Candidate correctness is unchanged for current supported path lengths.
 - New path lengths up to the generic limit require no new index type.
 
+Current status: effectively complete for the current v1 traversal contract.
+
+- `rtk go doc ./subscription` exposes no public fixed-hop path-edge API; the
+  traversal types are package-internal `joinPathTraversalEdge`,
+  `joinPathTraversalIndex`, and `joinRangePathTraversalIndex`.
+- Placement tests build expected edges with `mustJoinPathTraversalEdge` and
+  assert `joinPathEdge`/`joinRangePathEdge` entries for three-hop through
+  nine-hop paths plus `joinPathTraversalMaxHops`; no per-hop index type is
+  needed when path length changes.
+- Paths beyond `joinPathTraversalMaxHops` intentionally use a direct
+  existence-edge fallback, not a fixed-hop table or scan-only admission rule;
+  `TestMultiJoinPlacementSplitOrBeyondMaxHopFallsBackToExistenceEdge` pins that
+  behavior.
+- Candidate tests cover committed rows and same-transaction inserted/deleted
+  path rows, including non-key-preserving mismatch and overlap cases through
+  the generic traversal helpers.
+
 Recommended verification:
 
 ```bash

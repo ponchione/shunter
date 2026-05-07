@@ -195,7 +195,7 @@ func splitOrThreeHopFilterMultiJoinPredicate() MultiJoin {
 	}
 }
 
-func path3MultiJoinTestSchema() *fakeSchema {
+func threeHopMultiJoinTestSchema() *fakeSchema {
 	s := newFakeSchema()
 	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
 	s.addTable(1, cols, 1)
@@ -1624,8 +1624,8 @@ func TestCollectCandidatesMultiJoinSplitOrNonKeyPreservingPathEdgesUseSameTransa
 	}
 }
 
-func TestMultiJoinPlacementSplitOrThreeHopUsesPath3Edges(t *testing.T) {
-	s := path3MultiJoinTestSchema()
+func TestMultiJoinPlacementSplitOrThreeHopUsesGenericPathEdges(t *testing.T) {
+	s := threeHopMultiJoinTestSchema()
 	idx := NewPruningIndexes()
 	pred := splitOrThreeHopFilterMultiJoinPredicate()
 	hash := ComputeQueryHash(pred, nil)
@@ -1663,7 +1663,7 @@ func TestMultiJoinPlacementSplitOrThreeHopUsesPath3Edges(t *testing.T) {
 }
 
 func TestCollectCandidatesMultiJoinSplitOrThreeHopPathEdgesUseCommittedRows(t *testing.T) {
-	s := path3MultiJoinTestSchema()
+	s := threeHopMultiJoinTestSchema()
 	idx := NewPruningIndexes()
 	pred := splitOrThreeHopFilterMultiJoinPredicate()
 	hash := ComputeQueryHash(pred, nil)
@@ -1691,7 +1691,7 @@ func TestCollectCandidatesMultiJoinSplitOrThreeHopPathEdgesUseCommittedRows(t *t
 }
 
 func TestCollectCandidatesMultiJoinSplitOrThreeHopPathEdgesUseSameTransactionRows(t *testing.T) {
-	s := path3MultiJoinTestSchema()
+	s := threeHopMultiJoinTestSchema()
 	idx := NewPruningIndexes()
 	pred := splitOrThreeHopFilterMultiJoinPredicate()
 	hash := ComputeQueryHash(pred, nil)
@@ -1792,7 +1792,7 @@ func TestCollectCandidatesMultiJoinSplitOrThreeHopPathEdgesUseSameTransactionRow
 	}
 }
 
-func TestMultiJoinPlacementSplitOrFourHopUsesPath4Edges(t *testing.T) {
+func TestMultiJoinPlacementSplitOrFourHopUsesGenericPathEdges(t *testing.T) {
 	s := fiveTableDualIndexedMultiJoinTestSchema()
 	idx := NewPruningIndexes()
 	pred := splitOrFourHopFilterMultiJoinPredicate()
@@ -1930,7 +1930,7 @@ func TestCollectCandidatesMultiJoinSplitOrFourHopPathEdgesUseSameTransactionRows
 	}
 }
 
-func TestMultiJoinPlacementSplitOrFiveHopUsesPath5Edges(t *testing.T) {
+func TestMultiJoinPlacementSplitOrFiveHopUsesGenericPathEdges(t *testing.T) {
 	s := sixTableDualIndexedMultiJoinTestSchema()
 	idx := NewPruningIndexes()
 	pred := splitOrFiveHopFilterMultiJoinPredicate()
@@ -2091,7 +2091,7 @@ func TestCollectCandidatesMultiJoinSplitOrFiveHopPathEdgesUseSameTransactionRows
 	}
 }
 
-func TestMultiJoinPlacementSplitOrSixHopUsesPath6Edges(t *testing.T) {
+func TestMultiJoinPlacementSplitOrSixHopUsesGenericPathEdges(t *testing.T) {
 	s := sevenTableDualIndexedMultiJoinTestSchema()
 	idx := NewPruningIndexes()
 	pred := splitOrSixHopFilterMultiJoinPredicate()
@@ -2258,7 +2258,7 @@ func TestCollectCandidatesMultiJoinSplitOrSixHopPathEdgesUseSameTransactionRows(
 	}
 }
 
-func TestMultiJoinPlacementSplitOrSevenHopUsesPath7Edges(t *testing.T) {
+func TestMultiJoinPlacementSplitOrSevenHopUsesGenericPathEdges(t *testing.T) {
 	s := eightTableDualIndexedMultiJoinTestSchema()
 	idx := NewPruningIndexes()
 	pred := splitOrSevenHopFilterMultiJoinPredicate()
@@ -2431,7 +2431,7 @@ func TestCollectCandidatesMultiJoinSplitOrSevenHopPathEdgesUseSameTransactionRow
 	}
 }
 
-func TestMultiJoinPlacementSplitOrEightHopUsesPath8Edges(t *testing.T) {
+func TestMultiJoinPlacementSplitOrEightHopUsesGenericPathEdges(t *testing.T) {
 	s := nineTableDualIndexedMultiJoinTestSchema()
 	idx := NewPruningIndexes()
 	pred := splitOrEightHopFilterMultiJoinPredicate()
@@ -2920,7 +2920,7 @@ func TestMultiJoinPlacementSplitOrNonKeyPreservingPathFallsBackWhenRHSUnindexed(
 	}
 }
 
-func TestMultiJoinPlacementSplitOrLongNonKeyPreservingMultiHopUsesPath3Edges(t *testing.T) {
+func TestMultiJoinPlacementSplitOrLongNonKeyPreservingMultiHopUsesGenericPathEdges(t *testing.T) {
 	s := fourTableDualIndexedMultiJoinTestSchema()
 	idx := NewPruningIndexes()
 	pred := splitOrLongNonKeyPreservingMultiHopFilterMultiJoinPredicate()
@@ -2934,7 +2934,7 @@ func TestMultiJoinPlacementSplitOrLongNonKeyPreservingMultiHopUsesPath3Edges(t *
 		0,
 	)
 	if got := idx.joinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
-		t.Fatalf("long non-key-preserving path3 range placement = %v, want [%v]", got, hash)
+		t.Fatalf("long non-key-preserving generic path range placement = %v, want [%v]", got, hash)
 	}
 	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("long non-key-preserving left local placement = %v, want [%v]", got, hash)
@@ -2946,7 +2946,7 @@ func TestMultiJoinPlacementSplitOrLongNonKeyPreservingMultiHopUsesPath3Edges(t *
 		0,
 	)
 	if got := idx.joinPathEdge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
-		t.Fatalf("long non-key-preserving path3 value placement = %v, want [%v]", got, hash)
+		t.Fatalf("long non-key-preserving generic path value placement = %v, want [%v]", got, hash)
 	}
 	if len(idx.JoinEdge.exists) != 0 {
 		t.Fatalf("long non-key-preserving broad existence fallback = %+v, want none", idx.JoinEdge.exists)
@@ -2963,7 +2963,7 @@ func TestMultiJoinPlacementSplitOrLongNonKeyPreservingMultiHopUsesPath3Edges(t *
 	}
 }
 
-func TestMultiJoinPlacementSplitOrLongNonKeyPreservingPath3FallsBackWhenUnindexed(t *testing.T) {
+func TestMultiJoinPlacementSplitOrLongNonKeyPreservingGenericPathFallsBackWhenUnindexed(t *testing.T) {
 	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
 	cases := []struct {
 		name              string
@@ -3018,10 +3018,10 @@ func TestMultiJoinPlacementSplitOrLongNonKeyPreservingPath3FallsBackWhenUnindexe
 				0,
 			)
 			if got := idx.joinRangePathEdge.Lookup(pathEdge, types.NewUint64(60)); len(got) != 0 {
-				t.Fatalf("partial path3 range placement = %v, want empty", got)
+				t.Fatalf("partial generic path range placement = %v, want empty", got)
 			}
 			if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
-				t.Fatalf("partial path3 endpoint local placement = %v, want empty", got)
+				t.Fatalf("partial generic path endpoint local placement = %v, want empty", got)
 			}
 
 			conditionEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 1, RHSJoinCol: 1, RHSFilterCol: 1}
@@ -3049,7 +3049,7 @@ func TestMultiJoinPlacementSplitOrLongNonKeyPreservingPath3FallsBackWhenUnindexe
 	}
 }
 
-func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingPath3PrunesMismatch(t *testing.T) {
+func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingGenericPathPrunesMismatch(t *testing.T) {
 	s := fourTableDualIndexedMultiJoinTestSchema()
 	idx := NewPruningIndexes()
 	pred := splitOrLongNonKeyPreservingMultiHopFilterMultiJoinPredicate()
@@ -3063,7 +3063,7 @@ func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingPath3PrunesMismatc
 	})
 	leftMismatch := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
 	if got := CollectCandidatesForTable(idx, 1, leftMismatch, committed, s); len(got) != 0 {
-		t.Fatalf("mismatched long non-key path3 left candidates = %v, want empty", got)
+		t.Fatalf("mismatched long non-key generic path left candidates = %v, want empty", got)
 	}
 
 	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
@@ -3073,13 +3073,13 @@ func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingPath3PrunesMismatc
 	})
 	got := CollectCandidatesForTable(idx, 1, leftMismatch, committed, s)
 	if len(got) != 1 || got[0] != hash {
-		t.Fatalf("matching long non-key path3 left candidates = %v, want [%v]", got, hash)
+		t.Fatalf("matching long non-key generic path left candidates = %v, want [%v]", got, hash)
 	}
 
 	localMatch := []types.ProductValue{{types.NewUint64(7), types.NewUint64(99)}}
 	got = CollectCandidatesForTable(idx, 1, localMatch, committed, s)
 	if len(got) != 1 || got[0] != hash {
-		t.Fatalf("local long non-key path3 left candidates = %v, want [%v]", got, hash)
+		t.Fatalf("local long non-key generic path left candidates = %v, want [%v]", got, hash)
 	}
 
 	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
@@ -3089,7 +3089,7 @@ func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingPath3PrunesMismatc
 	})
 	rightMismatch := []types.ProductValue{{types.NewUint64(40), types.NewUint64(40)}}
 	if got := CollectCandidatesForTable(idx, 4, rightMismatch, committed, s); len(got) != 0 {
-		t.Fatalf("mismatched long non-key path3 right candidates = %v, want empty", got)
+		t.Fatalf("mismatched long non-key generic path right candidates = %v, want empty", got)
 	}
 
 	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
@@ -3099,11 +3099,11 @@ func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingPath3PrunesMismatc
 	})
 	got = CollectCandidatesForTable(idx, 4, rightMismatch, committed, s)
 	if len(got) != 1 || got[0] != hash {
-		t.Fatalf("matching long non-key path3 right candidates = %v, want [%v]", got, hash)
+		t.Fatalf("matching long non-key generic path right candidates = %v, want [%v]", got, hash)
 	}
 }
 
-func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingPath3UsesDeltaRows(t *testing.T) {
+func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingGenericPathUsesDeltaRows(t *testing.T) {
 	s := fourTableDualIndexedMultiJoinTestSchema()
 	mgr := NewManager(s, s)
 	pred := splitOrLongNonKeyPreservingMultiHopFilterMultiJoinPredicate()
@@ -3132,7 +3132,7 @@ func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingPath3UsesDeltaRows
 		},
 	}
 	if got := mgr.collectCandidatesInto(noOverlap, committed, scratch); len(got) != 0 {
-		t.Fatalf("non-overlapping long non-key path3 candidates = %v, want empty", got)
+		t.Fatalf("non-overlapping long non-key generic path candidates = %v, want empty", got)
 	}
 
 	overlap := &store.Changeset{
@@ -3146,7 +3146,7 @@ func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingPath3UsesDeltaRows
 	}
 	got := mgr.collectCandidatesInto(overlap, committed, scratch)
 	if _, ok := got[hash]; !ok || len(got) != 1 {
-		t.Fatalf("overlapping long non-key path3 candidates = %v, want only %v", got, hash)
+		t.Fatalf("overlapping long non-key generic path candidates = %v, want only %v", got, hash)
 	}
 
 	deleteOverlap := &store.Changeset{
@@ -3160,7 +3160,7 @@ func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingPath3UsesDeltaRows
 	}
 	got = mgr.collectCandidatesInto(deleteOverlap, committed, scratch)
 	if _, ok := got[hash]; !ok || len(got) != 1 {
-		t.Fatalf("overlapping long non-key path3 delete candidates = %v, want only %v", got, hash)
+		t.Fatalf("overlapping long non-key generic path delete candidates = %v, want only %v", got, hash)
 	}
 }
 
