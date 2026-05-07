@@ -325,6 +325,31 @@ Acceptance criteria:
 - Every accepted live join has the columns needed to evaluate deltas.
 - Unregistering all subscriptions leaves no index, registry, or pruning state.
 
+Current status: complete for the v1 live-read shapes in
+`subscription-support-matrix.md`.
+
+- Raw subscribe rejects unindexed two-table and multi-way live joins during SQL
+  admission before executor registration; see
+  `TestHandleSubscribeSingle_UnindexedJoinRejectedAtCompileStage` and
+  `TestHandleSubscribeSingle_MultiWayJoinUnindexedJoinRejected`.
+- Declared live views use the richer SQL shape at compile time but still route
+  through `Manager.RegisterSet`, whose pre-registration `ValidatePredicate`
+  call requires each live join condition to have an index on at least one side;
+  `TestSubscribeViewUnindexedJoinRejectedBeforeRegistration` and
+  `TestProtocolDeclaredViewUnindexedJoinRejected` pin local/runtime and
+  protocol behavior.
+- Accepted direct joins track join columns in `deltaIndexColumns`; unregister
+  and disconnect remove registry, pruning, and delta-index references. Shared
+  join-edge refs stay live until the final overlapping subscription is removed;
+  see `TestUnregisterSetKeepsSharedJoinEdgeRefsUntilLastSubscription` and the
+  registration symmetry property.
+- Correctness fallback is allowed only after live admission succeeds. Direct
+  join initial/delta evaluation may scan the non-indexed side when the opposite
+  join column has the required index. Candidate pruning may fall back to table
+  candidates for shapes without a narrower safe edge. One-off reads use
+  `ValidateQueryPredicate` and may scan broader unindexed joins because they are
+  not live subscriptions.
+
 Recommended verification:
 
 ```bash
@@ -705,10 +730,9 @@ Exit criteria:
    initial rows?
 3. Are raw subscriptions permanently narrower than declared live views, or only
    narrower for v1?
-4. Where should scan fallback be allowed for live reads, if anywhere?
-5. What exact diagnostics should missing live-join indexes return?
-6. How much generated TypeScript live-view decoding is required before v1?
-7. Which subscription benchmarks should fail CI versus remain advisory?
+4. What exact diagnostics should missing live-join indexes return?
+5. How much generated TypeScript live-view decoding is required before v1?
+6. Which subscription benchmarks should fail CI versus remain advisory?
 
 ## Done So Far
 

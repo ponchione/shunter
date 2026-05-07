@@ -16,6 +16,23 @@ Legend:
 - `reject`: admission rejects the shape before executor registration.
 - `post-v1`: intentionally outside the v1 live-read contract.
 
+## Index Contract Notes
+
+- Live subscription joins require every direct or multi-way join condition to
+  have an index on at least one side before registration.
+- Raw `SubscribeSingle` and `SubscribeMulti` reject unindexed join SQL during
+  protocol admission. Declared live views can compile richer result shapes, but
+  local/runtime and protocol subscriptions still go through
+  `subscription.Manager.RegisterSet` and reject unindexed live joins before any
+  query state or pruning placement is registered.
+- Direct join initial/delta evaluation may scan the non-indexed side after the
+  live join has passed the one-sided index requirement. Candidate pruning may
+  use table fallback when no narrower safe edge exists. These are correctness
+  fallbacks, not permission to admit fully unindexed live joins.
+- One-off declared/raw reads are broader than live reads:
+  `ValidateQueryPredicate` allows unindexed joins because no live pruning state
+  is registered.
+
 ## Surface Matrix
 
 | Surface | Contract | Coverage owner refs |

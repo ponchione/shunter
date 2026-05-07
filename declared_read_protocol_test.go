@@ -61,6 +61,30 @@ func TestProtocolDeclaredViewSucceedsWithDeclarationPermission(t *testing.T) {
 	requireDeclaredReadAppliedRows(t, client, 31, 41, "messages", 1)
 }
 
+func TestProtocolDeclaredViewUnindexedJoinRejected(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, NewModule("protocol_unindexed_join_reads").
+		SchemaVersion(1).
+		TableDef(joinReadTableDef("t")).
+		TableDef(joinReadTableDef("s")).
+		View(ViewDeclaration{
+			Name:        "live_unindexed_t_rows",
+			SQL:         "SELECT t.* FROM t JOIN s ON t.u32 = s.u32",
+			Permissions: PermissionMetadata{Required: []string{"joins:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+
+	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "subscriber", "joins:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 32,
+		QueryID:   42,
+		Name:      "live_unindexed_t_rows",
+	})
+	requireDeclaredReadSubscriptionError(t, client, 32, 42, "join column has no index")
+	if active := rt.subscriptions.ActiveSubscriptionSets(); active != 0 {
+		t.Fatalf("ActiveSubscriptionSets = %d, want 0 after rejected protocol declared view", active)
+	}
+}
+
 func TestProtocolDeclaredReadsApplyVisibilityToInitialRowsAndDeltas(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).

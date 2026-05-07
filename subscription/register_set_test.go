@@ -696,6 +696,89 @@ func TestRegisterSetUnwindsPartialStateOnInitialQueryError(t *testing.T) {
 	}
 }
 
+func TestUnregisterSetKeepsSharedJoinEdgeRefsUntilLastSubscription(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+	}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{
+		1: types.KindUint64,
+		2: types.KindString,
+	}, 1)
+	view := buildMockCommitted(s, nil)
+	mgr := NewManager(s, s)
+	redJoin := Join{
+		Left: 1, Right: 2,
+		LeftCol: 0, RightCol: 1,
+		Filter: ColEq{Table: 2, Column: 2, Value: types.NewString("red")},
+	}
+	blueJoin := Join{
+		Left: 1, Right: 2,
+		LeftCol: 0, RightCol: 1,
+		Filter: ColEq{Table: 2, Column: 2, Value: types.NewString("blue")},
+	}
+
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{redJoin},
+	}, view); err != nil {
+		t.Fatalf("RegisterSet red join: %v", err)
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 11, Predicates: []Predicate{blueJoin},
+	}, view); err != nil {
+		t.Fatalf("RegisterSet blue join: %v", err)
+	}
+
+	edge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 2}
+	if got := mgr.indexes.JoinEdge.Lookup(edge, types.NewString("red")); len(got) != 1 {
+		t.Fatalf("red join-edge hashes = %v, want one", got)
+	}
+	if got := mgr.indexes.JoinEdge.Lookup(edge, types.NewString("blue")); len(got) != 1 {
+		t.Fatalf("blue join-edge hashes = %v, want one", got)
+	}
+	if refs := mgr.deltaIndexColumns[1][0]; refs != 2 {
+		t.Fatalf("delta index refs for left join column = %d, want 2", refs)
+	}
+	if refs := mgr.deltaIndexColumns[2][1]; refs != 2 {
+		t.Fatalf("delta index refs for right join column = %d, want 2", refs)
+	}
+
+	if _, err := mgr.UnregisterSet(types.ConnectionID{1}, 10, nil); err != nil {
+		t.Fatalf("UnregisterSet red join: %v", err)
+	}
+	if got := mgr.indexes.JoinEdge.Lookup(edge, types.NewString("red")); len(got) != 0 {
+		t.Fatalf("red join-edge hashes after unregister = %v, want empty", got)
+	}
+	if got := mgr.indexes.JoinEdge.Lookup(edge, types.NewString("blue")); len(got) != 1 {
+		t.Fatalf("blue join-edge hashes after unregister = %v, want one", got)
+	}
+	if edges := mgr.indexes.JoinEdge.EdgesForTable(1); len(edges) != 1 || edges[0] != edge {
+		t.Fatalf("shared join edge refs after one unregister = %v, want [%+v]", edges, edge)
+	}
+	if refs := mgr.deltaIndexColumns[1][0]; refs != 1 {
+		t.Fatalf("delta index refs for left join column after one unregister = %d, want 1", refs)
+	}
+	if refs := mgr.deltaIndexColumns[2][1]; refs != 1 {
+		t.Fatalf("delta index refs for right join column after one unregister = %d, want 1", refs)
+	}
+
+	if _, err := mgr.UnregisterSet(types.ConnectionID{1}, 11, nil); err != nil {
+		t.Fatalf("UnregisterSet blue join: %v", err)
+	}
+	if !pruningIndexesEmpty(mgr.indexes) {
+		t.Fatalf("pruning indexes after last unregister = %+v, want empty", mgr.indexes)
+	}
+	if len(mgr.deltaIndexColumns) != 0 {
+		t.Fatalf("deltaIndexColumns after last unregister = %+v, want empty", mgr.deltaIndexColumns)
+	}
+	if len(mgr.registry.byHash) != 0 || len(mgr.registry.bySub) != 0 || len(mgr.registry.byConn) != 0 {
+		t.Fatalf("registry after last unregister = %+v", mgr.registry)
+	}
+	if _, ok := mgr.querySets[types.ConnectionID{1}]; ok {
+		t.Fatalf("querySets after last unregister = %+v, want no connection bucket", mgr.querySets)
+	}
+}
+
 // TestDisconnectClientClearsQuerySets — DisconnectClient drops the
 // entire (ConnID, *) bucket.
 func TestDisconnectClientClearsQuerySets(t *testing.T) {

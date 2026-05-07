@@ -9,6 +9,7 @@ import (
 
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -439,6 +440,27 @@ func TestDeclaredViewJoinWhereColumnComparisonSubscribes(t *testing.T) {
 	}
 	if !rowsHaveUint64IDs(sub.InitialRows, 1, 3) {
 		t.Fatalf("initial rows = %#v, want t ids 1 and 3", sub.InitialRows)
+	}
+}
+
+func TestSubscribeViewUnindexedJoinRejectedBeforeRegistration(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, NewModule("live_unindexed_join_reads").
+		SchemaVersion(1).
+		TableDef(joinReadTableDef("t")).
+		TableDef(joinReadTableDef("s")).
+		View(ViewDeclaration{
+			Name:        "live_unindexed_t_rows",
+			SQL:         "SELECT t.* FROM t JOIN s ON t.u32 = s.u32",
+			Permissions: PermissionMetadata{Required: []string{"joins:subscribe"}},
+		}))
+	defer rt.Close()
+
+	_, err := rt.SubscribeView(context.Background(), "live_unindexed_t_rows", 32, WithDeclaredReadPermissions("joins:subscribe"))
+	if !errors.Is(err, subscription.ErrUnindexedJoin) {
+		t.Fatalf("SubscribeView err = %v, want ErrUnindexedJoin", err)
+	}
+	if active := rt.subscriptions.ActiveSubscriptionSets(); active != 0 {
+		t.Fatalf("ActiveSubscriptionSets = %d, want 0 after rejected declared view", active)
 	}
 }
 
