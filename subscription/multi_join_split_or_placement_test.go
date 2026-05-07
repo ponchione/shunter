@@ -247,6 +247,15 @@ func tenTableDualIndexedMultiJoinTestSchema() *fakeSchema {
 	return s
 }
 
+func linearDualIndexedMultiJoinTestSchema(tableCount int) *fakeSchema {
+	s := newFakeSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	for table := TableID(1); table <= TableID(tableCount); table++ {
+		s.addTable(table, cols, 0, 1)
+	}
+	return s
+}
+
 func mustJoinPathTraversalEdge(t *testing.T, tables []TableID, fromCols, toCols []ColID, rhsFilterCol ColID) joinPathTraversalEdge {
 	t.Helper()
 	edge, ok := newJoinPathTraversalEdge(tables, fromCols, toCols, rhsFilterCol)
@@ -254,6 +263,80 @@ func mustJoinPathTraversalEdge(t *testing.T, tables []TableID, fromCols, toCols 
 		t.Fatalf("invalid test path edge: tables=%v from=%v to=%v", tables, fromCols, toCols)
 	}
 	return edge
+}
+
+func splitOrLinearPathFilterMultiJoinPredicate(hops int) MultiJoin {
+	relations := make([]MultiJoinRelation, hops+1)
+	for i := range relations {
+		relations[i] = MultiJoinRelation{Table: TableID(i + 1), Alias: uint8(i)}
+	}
+	conditions := make([]MultiJoinCondition, hops)
+	for i := range conditions {
+		leftColumn := ColID(0)
+		if i == 0 {
+			leftColumn = 1
+		}
+		conditions[i] = MultiJoinCondition{
+			Left:  MultiJoinColumnRef{Relation: i, Table: TableID(i + 1), Column: leftColumn, Alias: uint8(i)},
+			Right: MultiJoinColumnRef{Relation: i + 1, Table: TableID(i + 2), Column: 1, Alias: uint8(i + 1)},
+		}
+	}
+	return MultiJoin{
+		Relations:         relations,
+		Conditions:        conditions,
+		ProjectedRelation: 0,
+		Filter: Or{
+			Left: ColEq{
+				Table:  1,
+				Column: 0,
+				Alias:  0,
+				Value:  types.NewUint64(7),
+			},
+			Right: ColRange{
+				Table:  TableID(hops + 1),
+				Column: 0,
+				Alias:  uint8(hops),
+				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper:  Bound{Unbounded: true},
+			},
+		},
+	}
+}
+
+func linearPathTables(hops int, reverse bool) []TableID {
+	tables := make([]TableID, hops+1)
+	for i := range tables {
+		if reverse {
+			tables[i] = TableID(hops + 1 - i)
+			continue
+		}
+		tables[i] = TableID(i + 1)
+	}
+	return tables
+}
+
+func linearPathForwardFromCols(hops int) []ColID {
+	cols := make([]ColID, hops)
+	if len(cols) > 0 {
+		cols[0] = 1
+	}
+	return cols
+}
+
+func repeatedPathCol(hops int, col ColID) []ColID {
+	cols := make([]ColID, hops)
+	for i := range cols {
+		cols[i] = col
+	}
+	return cols
+}
+
+func linearPathReverseToCols(hops int) []ColID {
+	cols := make([]ColID, hops)
+	if len(cols) > 0 {
+		cols[len(cols)-1] = 1
+	}
+	return cols
 }
 
 func splitOrFourHopFilterMultiJoinPredicate() MultiJoin {
@@ -2556,6 +2639,95 @@ func TestMultiJoinPlacementSplitOrNineHopUsesGenericPathEdges(t *testing.T) {
 		if got := idx.Table.Lookup(table); len(got) != 0 {
 			t.Fatalf("TableIndex[%d] = %v, want empty for covered nine-hop path", table, got)
 		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestMultiJoinPlacementSplitOrMaxHopUsesGenericPathEdges(t *testing.T) {
+	hops := joinPathTraversalMaxHops
+	s := linearDualIndexedMultiJoinTestSchema(hops + 1)
+	idx := NewPruningIndexes()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(hops)
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	leftEdge := mustJoinPathTraversalEdge(t,
+		linearPathTables(hops, false),
+		linearPathForwardFromCols(hops),
+		repeatedPathCol(hops, 1),
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(leftEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("max-hop generic path range edge placement = %v, want [%v]", got, hash)
+	}
+	rightEdge := mustJoinPathTraversalEdge(t,
+		linearPathTables(hops, true),
+		repeatedPathCol(hops, 1),
+		linearPathReverseToCols(hops),
+		0,
+	)
+	if got := idx.joinPathEdge.Lookup(rightEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("max-hop generic path value edge placement = %v, want [%v]", got, hash)
+	}
+	for table := TableID(1); table <= TableID(hops+1); table++ {
+		if got := idx.Table.Lookup(table); len(got) != 0 {
+			t.Fatalf("TableIndex[%d] = %v, want empty for covered max-hop path", table, got)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestMultiJoinPlacementSplitOrBeyondMaxHopFallsBackToExistenceEdge(t *testing.T) {
+	hops := joinPathTraversalMaxHops + 1
+	s := linearDualIndexedMultiJoinTestSchema(hops + 1)
+	idx := NewPruningIndexes()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(hops)
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	if _, ok := newJoinPathTraversalEdge(
+		linearPathTables(hops, false),
+		linearPathForwardFromCols(hops),
+		repeatedPathCol(hops, 1),
+		0,
+	); ok {
+		t.Fatalf("%d-hop traversal edge constructed beyond max %d", hops, joinPathTraversalMaxHops)
+	}
+	var tableOnePathEdges int
+	idx.joinPathEdge.ForEachEdge(1, func(joinPathTraversalEdge) {
+		tableOnePathEdges++
+	})
+	idx.joinRangePathEdge.ForEachEdge(1, func(joinPathTraversalEdge) {
+		tableOnePathEdges++
+	})
+	if tableOnePathEdges != 0 {
+		t.Fatalf("table 1 path traversal edges = %d, want none beyond max hop limit", tableOnePathEdges)
+	}
+
+	existenceEdge := JoinEdge{
+		LHSTable:     1,
+		RHSTable:     2,
+		LHSJoinCol:   1,
+		RHSJoinCol:   1,
+		RHSFilterCol: 1,
+	}
+	var got []QueryHash
+	idx.JoinEdge.ForEachExistenceHash(existenceEdge, func(h QueryHash) {
+		got = append(got, h)
+	})
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("beyond-max fallback existence edge = %v, want [%v]", got, hash)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex[1] = %v, want existence-edge fallback instead of table fallback", got)
 	}
 
 	removeSubscriptionForResolver(idx, pred, hash, s)

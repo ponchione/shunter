@@ -44,7 +44,7 @@ Legend:
 | Two-table remote range filter | supported | supported | `TestCollectCandidatesJoinRangeFilterEdgeUsesDeltaOppositeRows`, `TestCollectCandidatesJoinMixedOrRangeEdgePrunesMismatch` | done |
 | Cross join | supported for qualified table-shaped projections and qualified column-equality `WHERE`; unsupported raw shapes reject before registration | supported, including aggregate views | raw: `TestHandleSubscribeSingle_CrossJoinAdmissionMatrix`; declared: `TestSubscribeViewCrossJoinAggregateInitialRows`, `TestProtocolDeclaredViewCrossJoinSumAggregateSendsInitialRowsAndDeltas` | done |
 | Multi-way key-preserving join | supported when indexed and covered | supported | `TestDeclaredViewMultiWayJoinSubscribes`, `TestMultiJoinRegisterInitialRowsAndDeltas`, `TestProtocolDeclaredViewMultiWayJoinSendsDeltas` | done |
-| Multi-way non-key-preserving path | supported when indexed and within traversal limits | supported under same constraints | `TestJoinPathTraversalIndexAddLookup`, `TestJoinRangePathTraversalIndexAddLookup`, `TestCollectCandidatesMultiJoinAndWrappedSplitOrAllRemoteRangeBranchesUseSameTransactionRows` | partial: add matrix-linked upper-bound tests for `joinPathTraversalMaxHops` |
+| Multi-way non-key-preserving path | supported when indexed and within traversal limits | supported under same constraints | `TestJoinPathTraversalIndexAddLookup`, `TestJoinRangePathTraversalIndexAddLookup`, `TestMultiJoinPlacementSplitOrMaxHopUsesGenericPathEdges`, `TestMultiJoinPlacementSplitOrBeyondMaxHopFallsBackToExistenceEdge`, `TestCollectCandidatesMultiJoinAndWrappedSplitOrAllRemoteRangeBranchesUseSameTransactionRows` | done |
 | Repeated table aliases | supported when aliases are explicit and covered | supported | `TestEvalSelfEquiJoinSubscription`, `TestEvalSelfEquiJoinWithAliasedWhere`, `TestQueryHashSelfJoinFilterChildOrderCanonicalized`, `TestDeclaredViewMultiWayJoinAppliesVisibilityAfterPermissionSucceeds` | done |
 | Column equality filters | supported | supported | `TestMatchRowSideColEqColSameSide`, `TestMatchJoinPairColEqCol`, `TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAccepted` | done |
 | Projections | reject raw | supported over emitted relation | raw: `TestHandleSubscribeSingle_ShunterBareColumnProjectionRejected`; declared: `TestProtocolDeclaredViewColumnProjectionSendsProjectedInitialRowsAndDeltas` | done |
@@ -58,6 +58,4 @@ Legend:
 
 ## Missing Test Backlog
 
-- Add generic traversal upper-bound tests at `joinPathTraversalMaxHops` and
-  beyond-limit rejection/fallback tests.
 - Fill generated TypeScript live-read helper rows after the SDK runtime lands.
