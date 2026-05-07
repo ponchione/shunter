@@ -33,6 +33,42 @@ func TestRuntimeCreateSnapshotWritesCommittedHorizon(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreateSnapshotFaultKeepsRuntimeUsable(t *testing.T) {
+	rt := buildValidTestRuntime(t)
+	rt.state.SetCommittedTxID(7)
+	snapshotPath := filepath.Join(rt.dataDir, "7")
+	if err := os.MkdirAll(filepath.Dir(snapshotPath), 0o755); err != nil {
+		t.Fatalf("create snapshot parent: %v", err)
+	}
+	if err := os.WriteFile(snapshotPath, []byte("not a snapshot directory"), 0o644); err != nil {
+		t.Fatalf("create snapshot obstruction: %v", err)
+	}
+
+	_, err := rt.CreateSnapshot()
+	if !errors.Is(err, commitlog.ErrSnapshot) {
+		t.Fatalf("CreateSnapshot fault error = %v, want ErrSnapshot category", err)
+	}
+	var completionErr *commitlog.SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("CreateSnapshot fault error = %v, want SnapshotCompletionError", err)
+	}
+	if completionErr.Phase != "mkdir" || completionErr.Path != snapshotPath {
+		t.Fatalf("snapshot completion error = %+v, want mkdir on obstruction", completionErr)
+	}
+	runtimeAssertFileExists(t, snapshotPath)
+
+	if err := os.Remove(snapshotPath); err != nil {
+		t.Fatalf("remove snapshot obstruction: %v", err)
+	}
+	txID, err := rt.CreateSnapshot()
+	if err != nil {
+		t.Fatalf("CreateSnapshot after clearing fault returned error: %v", err)
+	}
+	if txID != 7 {
+		t.Fatalf("CreateSnapshot txID after clearing fault = %d, want 7", txID)
+	}
+}
+
 func TestRuntimeCompactCommitLogDeletesCoveredSegments(t *testing.T) {
 	rt := buildValidTestRuntime(t)
 	rt.state.SetCommittedTxID(2)
@@ -49,6 +85,40 @@ func TestRuntimeCompactCommitLogDeletesCoveredSegments(t *testing.T) {
 	}
 	runtimeAssertFileMissing(t, covered)
 	runtimeAssertFileExists(t, active)
+}
+
+func TestRuntimeCompactCommitLogRetriesAfterCoveredSegmentDeletedBeforeSidecar(t *testing.T) {
+	rt := buildValidTestRuntime(t)
+	rt.state.SetCommittedTxID(3)
+	snapshotTxID, err := rt.CreateSnapshot()
+	if err != nil {
+		t.Fatalf("CreateSnapshot returned error: %v", err)
+	}
+
+	covered := makeRuntimeCompactionSegment(t, rt.dataDir, 1, 1, 2, 3)
+	active := makeRuntimeCompactionSegment(t, rt.dataDir, 4, 4)
+	coveredIndex := filepath.Join(rt.dataDir, commitlog.OffsetIndexFileName(1))
+	activeIndex := filepath.Join(rt.dataDir, commitlog.OffsetIndexFileName(4))
+	for _, path := range []string{coveredIndex, activeIndex} {
+		idx, err := commitlog.CreateOffsetIndex(path, 4)
+		if err != nil {
+			t.Fatalf("CreateOffsetIndex(%s): %v", path, err)
+		}
+		if err := idx.Close(); err != nil {
+			t.Fatalf("Close offset index %s: %v", path, err)
+		}
+	}
+
+	if err := os.Remove(covered); err != nil {
+		t.Fatalf("remove covered segment before compaction retry: %v", err)
+	}
+	if err := rt.CompactCommitLog(snapshotTxID); err != nil {
+		t.Fatalf("CompactCommitLog retry returned error: %v", err)
+	}
+	runtimeAssertFileMissing(t, covered)
+	runtimeAssertFileMissing(t, coveredIndex)
+	runtimeAssertFileExists(t, active)
+	runtimeAssertFileExists(t, activeIndex)
 }
 
 func TestRuntimeCompactCommitLogRequiresCompletedSnapshot(t *testing.T) {

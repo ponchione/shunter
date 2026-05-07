@@ -196,7 +196,8 @@ Status: runbook, release checklist, clean-shutdown fresh-restore test,
 incompatible-contract restore test, migration hook success/failure tests, and
 build-vs-module version guardrail added; durable data-dir metadata and
 compatibility checks added; reducer commit durability-failure recovery covered;
-snapshot/compaction fault coverage and reference-app workflow remain.
+runtime snapshot/compaction fault coverage added; reference-app workflow
+remains.
 
 Tasks:
 
@@ -206,7 +207,6 @@ Tasks:
 - Define contract policy failure behavior in startup/release workflows.
 - Keep durable metadata current as app module and Shunter version semantics
   evolve.
-- Test crash during snapshot or compaction.
 - Add reference-app backup, restore, migration, and upgrade examples.
 
 Exit criteria:

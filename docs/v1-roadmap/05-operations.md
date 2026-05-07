@@ -90,11 +90,11 @@ Completed or partially complete:
   mismatches and app module version updates.
 - Add a reducer commit durability-failure recovery test proving an in-memory
   commit that fails before log append is not recovered after restart.
+- Add runtime API tests for snapshot creation faults and compaction retry after
+  a covered segment is deleted before sidecar cleanup.
 
 Remaining:
 
-- Add or update tests for:
-  - crash during snapshot/compaction
 - Ensure CLI and library helpers return actionable errors across the full
   operator workflow.
 - Add backup/restore/migration flow to the reference app.
