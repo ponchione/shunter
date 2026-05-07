@@ -6,6 +6,7 @@ export const SHUNTER_DEFAULT_SUBPROTOCOL = SHUNTER_SUBPROTOCOL_V1;
 export const SHUNTER_SUPPORTED_SUBPROTOCOLS = [SHUNTER_SUBPROTOCOL_V1] as const;
 export const SHUNTER_CLIENT_MESSAGE_CALL_REDUCER = 3 as const;
 export const SHUNTER_SERVER_MESSAGE_IDENTITY_TOKEN = 1 as const;
+export const SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE = 5 as const;
 export const SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE = 0 as const;
 export const SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY = 1 as const;
 
@@ -308,6 +309,13 @@ export type WebSocketFactory = (
   protocols: readonly ShunterSubprotocol[],
 ) => WebSocketLike;
 
+interface PendingReducerCall {
+  readonly name: string;
+  readonly cleanup?: () => void;
+  resolve(value: Uint8Array): void;
+  reject(error: ShunterError): void;
+}
+
 export interface ShunterClient<Protocol extends ProtocolMetadata = ProtocolMetadata> {
   readonly state: ConnectionState<Protocol>;
   connect(): Promise<ConnectionMetadata<Protocol>>;
@@ -332,6 +340,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   let resolveClose: (() => void) | undefined;
   let rejectConnect: ((error: ShunterError) => void) | undefined;
   let nextRequestId: RequestID = 1;
+  const pendingReducerCalls = new Map<RequestID, PendingReducerCall>();
   const listeners = new Set<ConnectionStateListener<Protocol>>();
   if (options.onStateChange !== undefined) {
     listeners.add(options.onStateChange);
@@ -361,6 +370,14 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     ws.removeEventListener("error", handlers.error);
   };
 
+  const rejectPendingReducerCalls = (error: ShunterError): void => {
+    for (const [requestId, pending] of pendingReducerCalls) {
+      pending.cleanup?.();
+      pendingReducerCalls.delete(requestId);
+      pending.reject(error);
+    }
+  };
+
   const finishClose = (): void => {
     socket = undefined;
     connectPromise = undefined;
@@ -382,6 +399,18 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     finishClose();
   };
 
+  const failConnected = (error: ShunterError): void => {
+    suppressSocketCloseTransition = true;
+    rejectPendingReducerCalls(error);
+    setState({ status: "failed", error });
+    try {
+      socket?.close(closeNormalCode, "protocol failure");
+    } catch {
+      // The connection is already failed; close is best-effort.
+    }
+    finishClose();
+  };
+
   const beginClose = (code = closeNormalCode, reason = ""): Promise<void> => {
     if (closePromise !== undefined) {
       return closePromise;
@@ -397,6 +426,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
     const closedError = new ShunterClosedClientError("Shunter client connection is closing.");
     rejectConnect?.(closedError);
+    rejectPendingReducerCalls(closedError);
     setState({ status: "closing" });
     const pendingClose = new Promise<void>((resolve) => {
       resolveClose = resolve;
@@ -420,6 +450,50 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     const requestId = nextRequestId;
     nextRequestId = nextRequestId === maxUint32 ? 1 : nextRequestId + 1;
     return requestId;
+  };
+
+  const settleReducerResponse = (update: TransactionUpdateMessage): void => {
+    const { requestId, name } = update.reducerCall;
+    const pending = pendingReducerCalls.get(requestId);
+    if (pending === undefined) {
+      return;
+    }
+    pending.cleanup?.();
+    pendingReducerCalls.delete(requestId);
+    if (name !== pending.name) {
+      const error = new ShunterProtocolError("Reducer response did not match the pending request.", {
+        details: { requestId, expectedName: pending.name, receivedName: name },
+      });
+      pending.reject(error);
+      failConnected(error);
+      return;
+    }
+    if (update.status.status === "failed") {
+      pending.reject(new ShunterValidationError(update.status.error || "Reducer call failed.", {
+        code: "reducer_failed",
+        details: update,
+      }));
+      return;
+    }
+    pending.resolve(update.rawFrame);
+  };
+
+  const handleConnectedMessage = (event: MessageEvent): void => {
+    let frame: Uint8Array;
+    try {
+      frame = frameBytes(event.data);
+    } catch (error) {
+      failConnected(isShunterError(error) ? error : toShunterError(error, "protocol", "Decode server frame failed"));
+      return;
+    }
+    if (frame[0] !== SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE) {
+      return;
+    }
+    try {
+      settleReducerResponse(decodeTransactionUpdateFrame(frame));
+    } catch (error) {
+      failConnected(isShunterError(error) ? error : toShunterError(error, "protocol", "Decode TransactionUpdate failed"));
+    }
   };
 
   return {
@@ -490,6 +564,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
             }
           },
           message: (event: MessageEvent): void => {
+            if (state.status === "connected") {
+              handleConnectedMessage(event);
+              return;
+            }
             if (state.status !== "connecting") {
               return;
             }
@@ -523,8 +601,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
                 details: { reason: event.reason, wasClean: event.wasClean },
               });
               setState({ status: "failed", error });
+              rejectPendingReducerCalls(error);
               reject(error);
             } else if (state.status !== "closed") {
+              rejectPendingReducerCalls(new ShunterClosedClientError("Shunter client connection closed.", {
+                code: String(event.code),
+                details: { reason: event.reason, wasClean: event.wasClean },
+              }));
               setState({ status: "closed" });
             }
             finishClose();
@@ -539,6 +622,19 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
               suppressSocketCloseTransition = true;
               try {
                 ws.close(closeNormalCode, "open failed");
+              } catch {
+                // Nothing useful can be recovered from a failed close here.
+              }
+              finishClose();
+            } else if (state.status === "connected") {
+              const error = new ShunterTransportError("WebSocket failed.", {
+                details: event,
+              });
+              suppressSocketCloseTransition = true;
+              rejectPendingReducerCalls(error);
+              setState({ status: "failed", error });
+              try {
+                ws.close(closeNormalCode, "transport failure");
               } catch {
                 // Nothing useful can be recovered from a failed close here.
               }
@@ -561,19 +657,54 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       if (options.signal?.aborted) {
         throw new ShunterClosedClientError("Reducer call aborted before sending.");
       }
-      if (state.status !== "connected" || socket === undefined) {
+      const activeSocket = socket;
+      if (state.status !== "connected" || activeSocket === undefined) {
         throw new ShunterClosedClientError("Cannot call a reducer before the Shunter client is connected.");
       }
       const request = encodeReducerCallRequest(name, args, {
         ...options,
         requestId: options.requestId ?? allocateRequestId(),
       });
-      try {
-        socket.send(request.frame);
-      } catch (error) {
-        throw toShunterError(error, "transport", "Reducer request send failed");
+      if (request.flags === SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE && pendingReducerCalls.has(request.requestId)) {
+        throw new ShunterValidationError("Reducer request ID is already in flight.", {
+          details: { requestId: request.requestId },
+        });
       }
-      return request.frame;
+      if (request.flags === SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY) {
+        try {
+          activeSocket.send(request.frame);
+        } catch (error) {
+          throw toShunterError(error, "transport", "Reducer request send failed");
+        }
+        return request.frame;
+      }
+      return new Promise<Uint8Array>((resolve, reject) => {
+        let cleanup: (() => void) | undefined;
+        if (options.signal !== undefined) {
+          const abort = (): void => {
+            pendingReducerCalls.delete(request.requestId);
+            cleanup?.();
+            reject(new ShunterClosedClientError("Reducer call aborted before a response was received."));
+          };
+          options.signal.addEventListener("abort", abort, { once: true });
+          cleanup = () => {
+            options.signal?.removeEventListener("abort", abort);
+          };
+        }
+        pendingReducerCalls.set(request.requestId, {
+          name,
+          cleanup,
+          resolve,
+          reject,
+        });
+        try {
+          activeSocket.send(request.frame);
+        } catch (error) {
+          pendingReducerCalls.delete(request.requestId);
+          cleanup?.();
+          reject(toShunterError(error, "transport", "Reducer request send failed"));
+        }
+      });
     },
     close(code = closeNormalCode, reason = ""): Promise<void> {
       return beginClose(code, reason);
@@ -658,6 +789,75 @@ export function decodeIdentityTokenFrame(data: unknown): IdentityTokenMessage {
   return { identity, token, connectionId };
 }
 
+export type TransactionUpdateStatus =
+  | { readonly status: "committed"; readonly updates: readonly RawSubscriptionUpdate[] }
+  | { readonly status: "failed"; readonly error: string };
+
+export interface RawSubscriptionUpdate {
+  readonly queryId: QueryID;
+  readonly tableName: string;
+  readonly inserts: Uint8Array;
+  readonly deletes: Uint8Array;
+}
+
+export interface ReducerCallInfo<Name extends string = string> {
+  readonly name: Name;
+  readonly reducerId: number;
+  readonly args: Uint8Array;
+  readonly requestId: RequestID;
+}
+
+export interface TransactionUpdateMessage<Name extends string = string> {
+  readonly status: TransactionUpdateStatus;
+  readonly timestamp: bigint;
+  readonly callerIdentity: Uint8Array;
+  readonly callerConnectionId: Uint8Array;
+  readonly reducerCall: ReducerCallInfo<Name>;
+  readonly totalHostExecutionDuration: bigint;
+  readonly rawFrame: Uint8Array;
+}
+
+export function decodeTransactionUpdateFrame(data: unknown): TransactionUpdateMessage {
+  const frame = frameBytes(data);
+  if (frame.length < 1 || frame[0] !== SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE) {
+    throw new ShunterProtocolError("Expected TransactionUpdate server message.");
+  }
+  let offset = 1;
+  const [status, statusOffset] = readTransactionUpdateStatus(frame, offset);
+  offset = statusOffset;
+  const [timestamp, timestampOffset] = readInt64LE(frame, offset, "TransactionUpdate timestamp");
+  offset = timestampOffset;
+  const [callerIdentity, identityOffset] = readFixedBytes(frame, offset, 32, "TransactionUpdate caller_identity");
+  offset = identityOffset;
+  const [callerConnectionId, connectionOffset] = readFixedBytes(
+    frame,
+    offset,
+    16,
+    "TransactionUpdate caller_connection_id",
+  );
+  offset = connectionOffset;
+  const [reducerCall, reducerOffset] = readReducerCallInfo(frame, offset);
+  offset = reducerOffset;
+  const [totalHostExecutionDuration, durationOffset] = readInt64LE(
+    frame,
+    offset,
+    "TransactionUpdate total_host_execution_duration",
+  );
+  offset = durationOffset;
+  if (offset !== frame.length) {
+    throw new ShunterProtocolError("Malformed TransactionUpdate: trailing bytes.");
+  }
+  return {
+    status,
+    timestamp,
+    callerIdentity,
+    callerConnectionId,
+    reducerCall,
+    totalHostExecutionDuration,
+    rawFrame: new Uint8Array(frame),
+  };
+}
+
 function frameBytes(data: unknown): Uint8Array {
   if (data instanceof Uint8Array) {
     return data;
@@ -677,6 +877,101 @@ function readUint32LE(frame: Uint8Array, offset: number, label: string): [number
   }
   const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
   return [view.getUint32(offset, true), offset + 4];
+}
+
+function readInt64LE(frame: Uint8Array, offset: number, label: string): [bigint, number] {
+  if (frame.length < offset + 8) {
+    throw new ShunterProtocolError(`Malformed frame: ${label} is truncated.`);
+  }
+  const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+  return [view.getBigInt64(offset, true), offset + 8];
+}
+
+function readFixedBytes(
+  frame: Uint8Array,
+  offset: number,
+  length: number,
+  label: string,
+): [Uint8Array, number] {
+  if (frame.length < offset + length) {
+    throw new ShunterProtocolError(`Malformed frame: ${label} is truncated.`);
+  }
+  return [frame.slice(offset, offset + length), offset + length];
+}
+
+function readBytes(frame: Uint8Array, offset: number, label: string): [Uint8Array, number] {
+  const [length, bytesOffset] = readUint32LE(frame, offset, `${label} length`);
+  if (frame.length < bytesOffset + length) {
+    throw new ShunterProtocolError(`Malformed frame: ${label} is truncated.`);
+  }
+  return [frame.slice(bytesOffset, bytesOffset + length), bytesOffset + length];
+}
+
+function readStringValue(frame: Uint8Array, offset: number, label: string): [string, number] {
+  const [raw, nextOffset] = readBytes(frame, offset, label);
+  try {
+    return [new TextDecoder("utf-8", { fatal: true }).decode(raw), nextOffset];
+  } catch (error) {
+    throw new ShunterProtocolError(`Malformed frame: ${label} is not valid UTF-8.`, { cause: error });
+  }
+}
+
+function readTransactionUpdateStatus(
+  frame: Uint8Array,
+  offset: number,
+): [TransactionUpdateStatus, number] {
+  if (frame.length < offset + 1) {
+    throw new ShunterProtocolError("Malformed frame: TransactionUpdate status tag is truncated.");
+  }
+  const tag = frame[offset];
+  offset += 1;
+  switch (tag) {
+    case 0: {
+      const [updates, nextOffset] = readRawSubscriptionUpdates(frame, offset);
+      return [{ status: "committed", updates }, nextOffset];
+    }
+    case 1: {
+      const [error, nextOffset] = readStringValue(frame, offset, "TransactionUpdate failure error");
+      return [{ status: "failed", error }, nextOffset];
+    }
+    default:
+      throw new ShunterProtocolError(`Malformed TransactionUpdate: unknown status tag ${tag}.`);
+  }
+}
+
+function readRawSubscriptionUpdates(
+  frame: Uint8Array,
+  offset: number,
+): [RawSubscriptionUpdate[], number] {
+  const [count, countOffset] = readUint32LE(frame, offset, "SubscriptionUpdate count");
+  offset = countOffset;
+  if (count > Math.floor((frame.length - offset) / 16)) {
+    throw new ShunterProtocolError("Malformed frame: SubscriptionUpdate count exceeds remaining bytes.");
+  }
+  const updates: RawSubscriptionUpdate[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const [queryId, queryOffset] = readUint32LE(frame, offset, "SubscriptionUpdate query_id");
+    offset = queryOffset;
+    const [tableName, tableOffset] = readStringValue(frame, offset, "SubscriptionUpdate table_name");
+    offset = tableOffset;
+    const [inserts, insertsOffset] = readBytes(frame, offset, "SubscriptionUpdate inserts");
+    offset = insertsOffset;
+    const [deletes, deletesOffset] = readBytes(frame, offset, "SubscriptionUpdate deletes");
+    offset = deletesOffset;
+    updates.push({ queryId, tableName, inserts, deletes });
+  }
+  return [updates, offset];
+}
+
+function readReducerCallInfo(frame: Uint8Array, offset: number): [ReducerCallInfo, number] {
+  const [name, nameOffset] = readStringValue(frame, offset, "ReducerCallInfo reducer_name");
+  offset = nameOffset;
+  const [reducerId, reducerOffset] = readUint32LE(frame, offset, "ReducerCallInfo reducer_id");
+  offset = reducerOffset;
+  const [args, argsOffset] = readBytes(frame, offset, "ReducerCallInfo args");
+  offset = argsOffset;
+  const [requestId, requestOffset] = readUint32LE(frame, offset, "ReducerCallInfo request_id");
+  return [{ name, reducerId, args, requestId }, requestOffset];
 }
 
 export type RequestID = number;

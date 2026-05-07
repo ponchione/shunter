@@ -82,6 +82,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   metadata.
 - Added raw TypeScript reducer request encoding and a connected-client
   `callReducer` send path for the v1 `CallReducerMsg` wire shape.
+- Added minimal TypeScript reducer response correlation for full-update
+  `callReducer` calls, resolving on committed `TransactionUpdate` frames and
+  rejecting on failed reducer updates.
 
 ## v0.1.0 - 2026-05-05
 

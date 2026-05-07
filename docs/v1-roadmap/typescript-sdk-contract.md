@@ -34,9 +34,10 @@ minimal `createShunterClient` WebSocket lifecycle shell with initial
 `IdentityToken` decoding, a managed subscription handle primitive, and typed
 runtime interfaces consumed by generated bindings. It also exposes raw
 `Uint8Array` reducer request encoding for Shunter v1 `CallReducerMsg` frames
-and a connected-client `callReducer` send path. Reducer response correlation,
-typed reducer argument/result encoding, query/view message plumbing, row
-decoding, reconnect policy, and local cache implementation remain open.
+and a connected-client `callReducer` send path with minimal full-update
+`TransactionUpdate` response correlation. Typed reducer argument/result
+encoding, query/view message plumbing, row decoding, reconnect policy, and
+local cache implementation remain open.
 
 ## Runtime API
 
@@ -89,11 +90,13 @@ helpers are considered v1-stable.
 
 Current foundation: the runtime can encode and send the raw-byte
 `CallReducerMsg` shape used by the Go protocol: reducer name, raw args bytes,
-request ID, and flags. `createShunterClient().callReducer(...)` currently sends
-that frame over an established WebSocket and resolves with the encoded request
-bytes only. It does not yet wait for or decode the matching `TransactionUpdate`
-response, so reducer success/failure/result semantics remain a required v1
-follow-up.
+request ID, and flags. Full-update
+`createShunterClient().callReducer(...)` calls wait for the matching heavy
+`TransactionUpdate`, resolve with that raw response frame on committed status,
+and reject with a structured validation error on failed status. Calls made with
+`NoSuccessNotify` resolve after send because the server may intentionally
+suppress committed success echoes for that flag. Typed argument/result codecs
+and a user-facing reducer result object remain required v1 follow-ups.
 
 Candidate v1 default:
 

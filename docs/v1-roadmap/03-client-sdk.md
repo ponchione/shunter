@@ -31,10 +31,10 @@ shell with initial `IdentityToken` decoding, a managed subscription handle
 primitive with idempotent unsubscribe, and typed interfaces for reducer calls,
 declared queries, declared views, and table subscriptions. It also has the
 first raw-byte reducer request encoder and connected WebSocket send path for
-the live v1 `CallReducerMsg` wire shape. It does not yet implement reducer
-response correlation, typed reducer argument/result encoding, query/view
-protocol plumbing, row decoding, auth refresh, local cache updates, or
-reconnect policy.
+the live v1 `CallReducerMsg` wire shape, plus minimal full-update
+`TransactionUpdate` correlation for reducer success/failure. It does not yet
+implement typed reducer argument/result encoding, query/view protocol plumbing,
+row decoding, auth refresh, local cache updates, or reconnect policy.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
 fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
@@ -120,14 +120,19 @@ Completed or partially complete:
 - Add raw-byte reducer request encoding for the live v1 `CallReducerMsg` wire
   shape and a connected-client `callReducer` send path that generated
   byte-level helpers can type against.
+- Decode the live v1 `TransactionUpdate` reducer response envelope enough for
+  full-update reducer calls to resolve on committed updates and reject on
+  failed updates. `NoSuccessNotify` calls remain send-ack only because committed
+  success responses are intentionally suppressible by that flag.
 
 Remaining:
 
 - Decide and implement typed reducer argument/result encoding conventions
   beyond the current raw `Uint8Array` request path.
-- Implement reducer response correlation/result decoding, declared-query,
-  declared-view, and table-subscription protocol message plumbing on top of the
-  WebSocket lifecycle shell.
+- Implement typed reducer result decoding beyond the current raw
+  `TransactionUpdate` frame result, plus declared-query, declared-view, and
+  table-subscription protocol message plumbing on top of the WebSocket
+  lifecycle shell.
 - Implement row decoding for declared query/view results and subscription
   updates.
 - Implement reconnect, auth refresh, resubscription, and cache behavior.

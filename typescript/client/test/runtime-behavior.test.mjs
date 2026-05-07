@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY,
   SHUNTER_CLIENT_MESSAGE_CALL_REDUCER,
+  SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE,
   SHUNTER_SUBPROTOCOL_V1,
   ShunterAuthError,
   ShunterClosedClientError,
@@ -13,6 +14,7 @@ import {
   createShunterClient,
   createSubscriptionHandle,
   decodeIdentityTokenFrame,
+  decodeTransactionUpdateFrame,
   encodeReducerCallRequest,
   selectShunterSubprotocol,
   shunterProtocol,
@@ -199,6 +201,35 @@ assert.throws(
   ShunterValidationError,
 );
 
+const committedUpdateFrame = bytesFromHex(
+  "050001000000040302010500000075736572730f0000000200000002000000010201000000030200000004050807060504030201202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf0400000073656e641413121102000000aabb242322213837363534333231",
+);
+const committedUpdate = decodeTransactionUpdateFrame(committedUpdateFrame);
+assert.equal(committedUpdateFrame[0], SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE);
+assert.equal(committedUpdate.status.status, "committed");
+assert.equal(committedUpdate.status.updates.length, 1);
+assert.equal(committedUpdate.status.updates[0].queryId, 0x01020304);
+assert.equal(committedUpdate.status.updates[0].tableName, "users");
+assert.deepEqual([...committedUpdate.status.updates[0].inserts.slice(0, 4)], [0x02, 0x00, 0x00, 0x00]);
+assert.equal(committedUpdate.timestamp, 0x0102030405060708n);
+assert.deepEqual([...committedUpdate.callerIdentity.slice(0, 3)], [0x20, 0x21, 0x22]);
+assert.deepEqual([...committedUpdate.callerConnectionId.slice(0, 3)], [0xa0, 0xa1, 0xa2]);
+assert.equal(committedUpdate.reducerCall.name, "send");
+assert.equal(committedUpdate.reducerCall.reducerId, 0x11121314);
+assert.deepEqual(committedUpdate.reducerCall.args, new Uint8Array([0xaa, 0xbb]));
+assert.equal(committedUpdate.reducerCall.requestId, 0x21222324);
+assert.equal(committedUpdate.totalHostExecutionDuration, 0x3132333435363738n);
+assert.deepEqual(committedUpdate.rawFrame, committedUpdateFrame);
+
+const failedUpdateFrame = bytesFromHex(
+  "050104000000626f6f6d18171615141312110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000073656e640000000000000000242322210000000000000000",
+);
+const failedUpdate = decodeTransactionUpdateFrame(failedUpdateFrame);
+assert.equal(failedUpdate.status.status, "failed");
+assert.equal(failedUpdate.status.error, "boom");
+assert.equal(failedUpdate.reducerCall.name, "send");
+assert.equal(failedUpdate.reducerCall.requestId, 0x21222324);
+
 const clientStates = [];
 const client = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe?existing=1",
@@ -223,13 +254,27 @@ assert.equal(metadata.identityToken, "minted-token");
 assert.deepEqual([...metadata.identity.slice(0, 3)], [1, 2, 3]);
 assert.deepEqual([...metadata.connectionId.slice(0, 3)], [0xa0, 0xa1, 0xa2]);
 assert.equal(client.state.status, "connected");
+const reducerResponse = client.callReducer("send", new Uint8Array([0xaa, 0xbb]), {
+  requestId: 0x21222324,
+});
+assert.equal(sockets[0].sent.length, 1);
+sockets[0].message(committedUpdateFrame);
+assert.deepEqual(await reducerResponse, committedUpdateFrame);
+
+const reducerFailure = client.callReducer("send", new Uint8Array(), {
+  requestId: 0x21222324,
+});
+assert.equal(sockets[0].sent.length, 2);
+sockets[0].message(failedUpdateFrame);
+await assert.rejects(reducerFailure, ShunterValidationError);
+
 const sentReducer = await client.callReducer("send", new Uint8Array([0xaa, 0xbb]), {
   requestId: 0x31323334,
   noSuccessNotify: true,
 });
 assert.deepEqual(sentReducer, encodedReducer.frame);
-assert.equal(sockets[0].sent.length, 1);
-assert.deepEqual(sockets[0].sent[0], encodedReducer.frame);
+assert.equal(sockets[0].sent.length, 3);
+assert.deepEqual(sockets[0].sent[2], encodedReducer.frame);
 await client.close();
 await client.close();
 await client.dispose();
