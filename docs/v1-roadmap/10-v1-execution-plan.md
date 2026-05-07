@@ -193,8 +193,9 @@ Exit criteria:
 Goal: operators have one documented path for data safety and upgrades.
 
 Status: runbook, release checklist, clean-shutdown fresh-restore test,
-incompatible-contract restore test, and migration hook success/failure tests
-added; crash/fault, version-metadata, and reference-app workflow remain.
+incompatible-contract restore test, migration hook success/failure tests, and
+build-vs-module version guardrail added; crash/fault, durable data-dir metadata,
+and reference-app workflow remain.
 
 Tasks:
 
@@ -205,7 +206,7 @@ Tasks:
 - Define durable metadata that distinguishes Shunter runtime version from app
   module version.
 - Test crash during reducer commit, crash during snapshot or compaction, and
-  version metadata compatibility.
+  durable data-dir version metadata compatibility.
 - Add reference-app backup, restore, migration, and upgrade examples.
 
 Exit criteria:

@@ -82,13 +82,15 @@ Completed or partially complete:
   contract without mutating the restored directory.
 - Add release checklist items for `VERSION`, `CHANGELOG.md`, git tag, and
   linker-stamped build metadata to the operations runbook.
+- Add a guardrail test that Shunter build metadata stays separate from
+  app-owned `Module.Version(...)` contract metadata.
 
 Remaining:
 
 - Add or update tests for:
   - crash during reducer commit
   - crash during snapshot/compaction
-  - version metadata compatibility
+  - durable data-dir version metadata compatibility
 - Ensure CLI and library helpers return actionable errors across the full
   operator workflow.
 - Add backup/restore/migration flow to the reference app.

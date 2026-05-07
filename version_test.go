@@ -70,6 +70,38 @@ func TestCurrentBuildInfoHonorsLinkerStyleOverrides(t *testing.T) {
 	}
 }
 
+func TestShunterBuildInfoAndModuleContractVersionsStaySeparate(t *testing.T) {
+	oldVersion := Version
+	oldCommit := Commit
+	oldDate := Date
+	Version = "v9.8.7"
+	Commit = "abc123"
+	Date = "2026-05-03T12:34:56Z"
+	defer func() {
+		Version = oldVersion
+		Commit = oldCommit
+		Date = oldDate
+	}()
+
+	rt, err := Build(validChatModule().Version("v1.2.3"), Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	defer rt.Close()
+
+	info := CurrentBuildInfo()
+	if info.Version != "v9.8.7" {
+		t.Fatalf("CurrentBuildInfo Version = %q, want Shunter build version", info.Version)
+	}
+	contract := rt.ExportContract()
+	if contract.Module.Version != "v1.2.3" {
+		t.Fatalf("contract module version = %q, want app module version", contract.Module.Version)
+	}
+	if contract.Module.Version == info.Version {
+		t.Fatalf("contract module version %q unexpectedly matches Shunter build version", contract.Module.Version)
+	}
+}
+
 func TestShunterModuleVersionIgnoresLocalReplacePlaceholder(t *testing.T) {
 	version := shunterModuleVersion(&debug.BuildInfo{
 		Deps: []*debug.Module{
