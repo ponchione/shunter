@@ -79,6 +79,7 @@ func buildProtocolOptions(cfg ProtocolConfig) (protocol.ProtocolOptions, error) 
 
 func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 	signingKey := append([]byte(nil), cfg.AuthSigningKey...)
+	issuers := append([]string(nil), cfg.AuthIssuers...)
 	audiences := append([]string(nil), cfg.AuthAudiences...)
 
 	switch cfg.AuthMode {
@@ -103,14 +104,14 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 		} else if len(audiences) > 0 && !stringSliceContains(audiences, audience) {
 			audiences = append(audiences, audience)
 		}
-		jwtCfg := &auth.JWTConfig{SigningKey: append([]byte(nil), signingKey...), Audiences: audiences, AuthMode: auth.AuthModeAnonymous}
+		jwtCfg := &auth.JWTConfig{SigningKey: append([]byte(nil), signingKey...), Issuers: issuers, Audiences: audiences, AuthMode: auth.AuthModeAnonymous}
 		mintCfg := &auth.MintConfig{Issuer: issuer, Audience: audience, SigningKey: append([]byte(nil), signingKey...), Expiry: cfg.AnonymousTokenTTL}
 		return jwtCfg, mintCfg, nil
 	case AuthModeStrict:
 		if len(signingKey) == 0 {
 			return nil, nil, ErrAuthSigningKeyRequired
 		}
-		return &auth.JWTConfig{SigningKey: signingKey, Audiences: audiences, AuthMode: auth.AuthModeStrict}, nil, nil
+		return &auth.JWTConfig{SigningKey: signingKey, Issuers: issuers, Audiences: audiences, AuthMode: auth.AuthModeStrict}, nil, nil
 	default:
 		return nil, nil, fmt.Errorf("auth mode is invalid")
 	}

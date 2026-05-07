@@ -110,6 +110,7 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 func copyConfig(cfg Config) Config {
 	out := cfg
 	out.AuthSigningKey = append([]byte(nil), cfg.AuthSigningKey...)
+	out.AuthIssuers = append([]string(nil), cfg.AuthIssuers...)
 	out.AuthAudiences = append([]string(nil), cfg.AuthAudiences...)
 	return out
 }

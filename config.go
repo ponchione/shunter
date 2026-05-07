@@ -25,6 +25,7 @@ type Config struct {
 	AuthMode                AuthMode
 
 	AuthSigningKey []byte
+	AuthIssuers    []string
 	AuthAudiences  []string
 
 	AnonymousTokenIssuer   string

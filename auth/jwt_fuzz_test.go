@@ -238,8 +238,8 @@ func jwtFuzzPermissions(reader *jwtFuzzSeedReader) (any, []string) {
 }
 
 func formatJWTValidationRuntimeConfig(cfg *JWTConfig, alg string, seedBytes int) string {
-	return fmt.Sprintf("auth=strict alg=%s audiences=%v seed_bytes<=%d signing_key_bytes=%d",
-		alg, cfg.Audiences, seedBytes, len(cfg.SigningKey))
+	return fmt.Sprintf("auth=strict alg=%s issuers=%v audiences=%v seed_bytes<=%d signing_key_bytes=%d",
+		alg, cfg.Issuers, cfg.Audiences, seedBytes, len(cfg.SigningKey))
 }
 
 func assertJWTClaimsEquivalent(t testing.TB, label string, got, want *Claims) {

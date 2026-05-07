@@ -131,10 +131,11 @@ func TestBuildAuthConfigStrictRequiresSigningKey(t *testing.T) {
 	}
 }
 
-func TestBuildAuthConfigStrictMapsAudiencesAndCopiesKey(t *testing.T) {
+func TestBuildAuthConfigStrictMapsIssuersAudiencesAndCopiesKey(t *testing.T) {
 	key := []byte("test-secret")
+	issuers := []string{"issuer"}
 	audiences := []string{"app"}
-	cfg := Config{AuthMode: AuthModeStrict, AuthSigningKey: key, AuthAudiences: audiences}
+	cfg := Config{AuthMode: AuthModeStrict, AuthSigningKey: key, AuthIssuers: issuers, AuthAudiences: audiences}
 	jwtCfg, mintCfg, err := buildAuthConfig(cfg)
 	if err != nil {
 		t.Fatalf("buildAuthConfig returned error: %v", err)
@@ -143,9 +144,13 @@ func TestBuildAuthConfigStrictMapsAudiencesAndCopiesKey(t *testing.T) {
 		t.Fatalf("unexpected strict config: jwt=%+v mint=%+v", jwtCfg, mintCfg)
 	}
 	key[0] = 'X'
+	issuers[0] = "mutated"
 	audiences[0] = "mutated"
 	if string(jwtCfg.SigningKey) == string(key) {
 		t.Fatal("signing key was not defensively copied")
+	}
+	if jwtCfg.Issuers[0] == issuers[0] {
+		t.Fatal("issuers were not defensively copied")
 	}
 	if jwtCfg.Audiences[0] == audiences[0] {
 		t.Fatal("audiences were not defensively copied")
@@ -154,11 +159,13 @@ func TestBuildAuthConfigStrictMapsAudiencesAndCopiesKey(t *testing.T) {
 
 func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	key := []byte("strict-runtime-secret")
+	issuers := []string{"issuer"}
 	audiences := []string{"app"}
 	cfg := Config{
 		DataDir:        t.TempDir(),
 		AuthMode:       AuthModeStrict,
 		AuthSigningKey: key,
+		AuthIssuers:    issuers,
 		AuthAudiences:  audiences,
 	}
 
@@ -168,6 +175,7 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	}
 
 	key[0] = 'X'
+	issuers[0] = "mutated"
 	audiences[0] = "mutated"
 
 	got := rt.Config()
@@ -177,8 +185,12 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	if len(got.AuthAudiences) != 1 || got.AuthAudiences[0] != "app" {
 		t.Fatalf("Config AuthAudiences = %#v, want original audience", got.AuthAudiences)
 	}
+	if len(got.AuthIssuers) != 1 || got.AuthIssuers[0] != "issuer" {
+		t.Fatalf("Config AuthIssuers = %#v, want original issuer", got.AuthIssuers)
+	}
 
 	got.AuthSigningKey[0] = 'Y'
+	got.AuthIssuers[0] = "changed"
 	got.AuthAudiences[0] = "changed"
 
 	again := rt.Config()
@@ -187,6 +199,9 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	}
 	if len(again.AuthAudiences) != 1 || again.AuthAudiences[0] != "app" {
 		t.Fatalf("second Config AuthAudiences = %#v, want detached original audience", again.AuthAudiences)
+	}
+	if len(again.AuthIssuers) != 1 || again.AuthIssuers[0] != "issuer" {
+		t.Fatalf("second Config AuthIssuers = %#v, want detached original issuer", again.AuthIssuers)
 	}
 }
 

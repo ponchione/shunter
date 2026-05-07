@@ -794,6 +794,7 @@ func TestRuntimeConfigObservabilityCopyKeepsOwnedSlicesDetached(t *testing.T) {
 	rt, err := Build(validChatModule(), Config{
 		DataDir:        t.TempDir(),
 		AuthSigningKey: []byte("01234567890123456789012345678901"),
+		AuthIssuers:    []string{"issuer-1"},
 		AuthAudiences:  []string{"aud-1"},
 		Observability: ObservabilityConfig{
 			Logger:       logger,
@@ -815,6 +816,7 @@ func TestRuntimeConfigObservabilityCopyKeepsOwnedSlicesDetached(t *testing.T) {
 
 	cfg := rt.Config()
 	cfg.AuthSigningKey[0] = 'x'
+	cfg.AuthIssuers[0] = "mutated"
 	cfg.AuthAudiences[0] = "mutated"
 
 	again := rt.Config()
@@ -823,6 +825,9 @@ func TestRuntimeConfigObservabilityCopyKeepsOwnedSlicesDetached(t *testing.T) {
 	}
 	if got := again.AuthAudiences[0]; got != "aud-1" {
 		t.Fatalf("AuthAudiences mutated through Config(): %q", got)
+	}
+	if got := again.AuthIssuers[0]; got != "issuer-1" {
+		t.Fatalf("AuthIssuers mutated through Config(): %q", got)
 	}
 	if again.Observability.Logger != logger {
 		t.Fatal("Config() did not preserve caller-supplied logger pointer")

@@ -5,6 +5,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 ## v0.1.1-dev
 
 - Current development line.
+- Added `Config.AuthIssuers` for strict JWT issuer allowlist validation.
 - Live subscription join deltas now avoid per-row committed table rescans when only the changed side's join column is indexed.
 - Live subscription initial join snapshots now choose the lower-cost indexed scan side, including filter-reduced candidate sets, when both join columns are indexed.
 - Live subscription initial join snapshots now use indexed required equality/range filters to skip unnecessary join probes.
@@ -21,6 +22,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Live subscription multi-way joins now use three-hop indexed path-edge pruning for covered remote value/range filters, including same-transaction middle and endpoint changes.
 - Live subscription multi-way joins now use four-hop indexed path-edge pruning for covered remote value/range filters, including same-transaction middle and endpoint changes.
 - Live subscription multi-way joins now use five-hop indexed path-edge pruning for covered remote value/range filters, including same-transaction middle and endpoint changes.
+- Live subscription multi-way joins now use six-hop indexed path-edge pruning for covered remote value/range filters, including same-transaction middle and endpoint changes.
 - Live subscription multi-way split-OR branches now use branch-local column-equality connectors to place remote value/range filter-edge pruning.
 - Live subscription multi-way split-OR column-equality branches now fall back instead of keeping partial existence-edge pruning when any branch lacks indexed coverage.
 - Live subscription multi-way joins now split OR filters with alias-local value/range branches on directly joined relation instances into local and filter-edge pruning placements.

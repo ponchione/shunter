@@ -41,6 +41,7 @@ Behavior:
 - `AuthSigningKey` is required when protocol serving is enabled.
 - Tokens are validated as HS256 JWTs.
 - `sub` and `iss` claims are required.
+- `iss` is checked when `AuthIssuers` is non-empty.
 - `aud` is checked only when `AuthAudiences` is non-empty.
 - `permissions` may be a string or string list and is copied into the caller
   principal and protocol connection.
@@ -50,8 +51,8 @@ Behavior:
   permission bypass by default.
 
 Current strict mode does not include asymmetric keys, JWKS/OIDC discovery,
-issuer allowlists, multi-key rotation caches, or app-provided claim mappers.
-Those remain production-auth roadmap decisions.
+multi-key rotation caches, or app-provided claim mappers. Those remain
+production-auth roadmap decisions.
 
 ## Principal And Identity
 
@@ -126,18 +127,18 @@ Before deploying strict auth:
 
 1. Set `AuthMode: shunter.AuthModeStrict`.
 2. Provide a strong `AuthSigningKey` from secret configuration.
-3. Configure `AuthAudiences` when tokens should be scoped to this app.
-4. Ensure issued tokens contain `iss`, `sub`, and any required `permissions`.
-5. Keep token TTL and refresh policy in the application or identity provider.
-6. Test reducer, declared-read, raw subscription, raw query, and visibility
+3. Configure `AuthIssuers` to the accepted token issuer values.
+4. Configure `AuthAudiences` when tokens should be scoped to this app.
+5. Ensure issued tokens contain `iss`, `sub`, and any required `permissions`.
+6. Keep token TTL and refresh policy in the application or identity provider.
+7. Test reducer, declared-read, raw subscription, raw query, and visibility
    behavior with allowed and denied callers.
-7. Document key replacement as a restart/deployment event.
+8. Document key replacement as a restart/deployment event.
 
 ## Unsupported In Current Strict Mode
 
 - asymmetric signing keys
 - JWKS or OIDC discovery
-- issuer allowlists
 - multiple active verification keys
 - automatic key rotation or cache refresh
 - app-provided claim-to-permission mappers

@@ -27,6 +27,7 @@ const (
 // algorithms can be added once external IdP integration is in scope.
 type JWTConfig struct {
 	SigningKey []byte
+	Issuers    []string // empty = skip issuer allowlist validation
 	Audiences  []string // empty = skip audience validation (SPEC-005 §4.1)
 	AuthMode   AuthMode
 }
@@ -71,6 +72,7 @@ func (c *Claims) Principal() types.AuthPrincipal {
 var (
 	ErrJWTInvalid             = errors.New("auth: JWT invalid")
 	ErrJWTMissingClaim        = errors.New("auth: JWT missing required claim")
+	ErrJWTIssuerMismatch      = errors.New("auth: JWT issuer not in configured list")
 	ErrJWTHexIdentityMismatch = errors.New("auth: hex_identity does not match derived identity")
 	ErrJWTAudienceMismatch    = errors.New("auth: JWT audience not in configured list")
 )
@@ -110,6 +112,9 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	iss, _ := mc["iss"].(string)
 	if iss == "" {
 		return nil, fmt.Errorf("%w: iss", ErrJWTMissingClaim)
+	}
+	if len(config.Issuers) > 0 && !slices.Contains(config.Issuers, iss) {
+		return nil, fmt.Errorf("%w: got %q, allowed %v", ErrJWTIssuerMismatch, iss, config.Issuers)
 	}
 	c.Subject = sub
 	c.Issuer = iss

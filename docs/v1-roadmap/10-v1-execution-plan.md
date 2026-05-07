@@ -162,15 +162,14 @@ Exit criteria:
 
 Goal: strict auth is safe to configure and clear to operate.
 
-Status: current dev/strict auth behavior documented; broader strict-auth
-decisions and reference-app example remain.
+Status: current dev/strict auth behavior documented and issuer allowlists
+implemented; broader strict-auth decisions and reference-app example remain.
 
 Tasks:
 
 - Decide whether v1 is HS256-only or whether asymmetric/JWKS/OIDC support is
   required before `v1.0.0`.
-- Decide issuer validation. Current code validates `iss` presence but has no
-  root issuer allowlist.
+- Keep `AuthIssuers` issuer allowlist behavior documented and tested.
 - Decide key replacement/rotation behavior and document operational procedure.
 - Decide whether permissions come only from the `permissions` claim or through
   an app-provided mapper.

@@ -90,6 +90,33 @@ func TestValidateJWTWithoutExpAccepted(t *testing.T) {
 	}
 }
 
+func TestValidateJWTIssuerAllowlistAccepted(t *testing.T) {
+	cfg := &JWTConfig{SigningKey: testKey, Issuers: []string{"https://issuer.example"}}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub": "alice",
+		"iss": "https://issuer.example",
+	})
+	claims, err := ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.Issuer != "https://issuer.example" {
+		t.Fatalf("Issuer = %q, want configured issuer", claims.Issuer)
+	}
+}
+
+func TestValidateJWTIssuerAllowlistRejected(t *testing.T) {
+	cfg := &JWTConfig{SigningKey: testKey, Issuers: []string{"https://issuer.example"}}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub": "alice",
+		"iss": "https://other.example",
+	})
+	_, err := ValidateJWT(s, cfg)
+	if !errors.Is(err, ErrJWTIssuerMismatch) {
+		t.Fatalf("error = %v, want ErrJWTIssuerMismatch", err)
+	}
+}
+
 func TestValidateJWTExpiredRejected(t *testing.T) {
 	cfg := &JWTConfig{SigningKey: testKey}
 	s := mintHS256(t, jwt.MapClaims{

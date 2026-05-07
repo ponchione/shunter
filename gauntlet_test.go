@@ -271,6 +271,7 @@ func TestRuntimeGauntletStrictAuthProtocolWorkload(t *testing.T) {
 		DataDir:        dataDir,
 		AuthMode:       shunter.AuthModeStrict,
 		AuthSigningKey: signingKey,
+		AuthIssuers:    []string{"gauntlet-issuer"},
 		AuthAudiences:  []string{"gauntlet"},
 	}
 	rt := buildGauntletRuntimeWithConfig(t, cfg, true)
@@ -283,6 +284,8 @@ func TestRuntimeGauntletStrictAuthProtocolWorkload(t *testing.T) {
 	assertGauntletProtocolDialRejected(t, url, nil, http.StatusUnauthorized, "strict op 0 no token")
 	badAudienceToken := mintGauntletStrictToken(t, signingKey, "gauntlet-issuer", "alice", "other")
 	assertGauntletProtocolDialRejected(t, url, gauntletBearerHeader(badAudienceToken), http.StatusUnauthorized, "strict op 1 wrong audience")
+	badIssuerToken := mintGauntletStrictToken(t, signingKey, "other-issuer", "alice", "gauntlet")
+	assertGauntletProtocolDialRejected(t, url, gauntletBearerHeader(badIssuerToken), http.StatusUnauthorized, "strict op 1 wrong issuer")
 
 	validToken := mintGauntletStrictToken(t, signingKey, "gauntlet-issuer", "alice", "gauntlet")
 	subscriber, subscriberIdentity := dialGauntletProtocolURLWithHeaders(t, url, gauntletBearerHeader(validToken), "strict op 2 subscriber dial")

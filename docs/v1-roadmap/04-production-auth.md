@@ -1,6 +1,6 @@
 # Production Auth
 
-Status: open, strict HS256 docs added; broader auth decisions remain
+Status: open, strict HS256 issuer/audience support landed; broader auth remains
 Owner: unassigned
 Scope: production-ready authentication, principal derivation, permission
 mapping, and operational auth documentation for Shunter v1.
@@ -35,8 +35,8 @@ Current code reality:
 - `AuthModeStrict` requires a non-empty signing key when protocol auth config is
   built.
 - JWT validation currently accepts HS256 signed tokens and optional audience
-  allowlists. It derives identity from `(iss, sub)` and carries optional
-  `permissions` claims into the caller principal.
+  and issuer allowlists. It derives identity from `(iss, sub)` and carries
+  optional `permissions` claims into the caller principal.
 - Dev mode can mint anonymous tokens with an ephemeral or configured signing
   key. This is still the zero-value convenience path.
 - There is no issuer allowlist, asymmetric key support, JWKS/OIDC discovery,
@@ -71,6 +71,7 @@ Completed or partially complete:
   permissions, and visibility filtering as one auth flow.
 - Add strict-mode config validation that fails protocol auth setup when signing
   config is incomplete.
+- Add root `AuthIssuers` and strict JWT issuer allowlist validation.
 - Document current dev/strict auth behavior, principal derivation, permission
   mapping, visibility-filter limits, key replacement, and production checklist
   in `docs/authentication.md`.
@@ -82,14 +83,12 @@ Remaining:
 
 - Decide whether HS256-only strict auth is sufficient for v1 or whether
   asymmetric/JWKS/OIDC support must land before release.
-- Decide whether strict auth needs issuer allowlists in root config.
 - Decide whether key replacement remains restart-based or gains runtime
   multi-key rotation.
 - Decide whether claim-to-permission mapping stays on the `permissions` claim
   or gains an app-provided mapper.
-- Add or confirm tests for invalid issuer, future token, expired token,
-  malformed token, wrong algorithm, missing permissions, and visibility-filtered
-  reads.
+- Add or confirm tests for future token, expired token, malformed token, wrong
+  algorithm, missing permissions, and visibility-filtered reads.
 - Add or confirm tests that verify auth is enforced consistently across:
   - WebSocket reducer calls
   - local `CallReducer`
