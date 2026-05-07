@@ -46,6 +46,7 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `export type ViewSubscriber = ShunterViewSubscriber;`)
 	assertContains(t, ts, `export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;`)
 	assertContains(t, ts, `export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;`)
+	assertContains(t, ts, `export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;`)
 	assertContains(t, ts, `export const tableReadPolicies = {`)
 	assertContains(t, ts, `messages: { access: "private", permissions: [] },`)
 	assertContains(t, ts, `export const queries = {`)
@@ -60,7 +61,7 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `export const viewSQL = {`)
 	assertContains(t, ts, `liveMessages: "SELECT * FROM messages",`)
 	assertContains(t, ts, `export type ExecutableViewName = (typeof views)[keyof typeof viewSQL];`)
-	assertContains(t, ts, `export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_messages");`)
 	assertNotContains(t, ts, `return runQuery("SELECT * FROM messages");`)
 	assertNotContains(t, ts, `return subscribeView("SELECT * FROM messages");`)
@@ -93,7 +94,7 @@ func TestGeneratorAcceptsModuleContractWithoutRuntime(t *testing.T) {
 	}
 
 	assertContains(t, string(out), `export interface MessagesRow {`)
-	assertContains(t, string(out), `export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>): Promise<() => void> {`)
+	assertContains(t, string(out), `export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>): Promise<SubscriptionUnsubscribe> {`)
 }
 
 func TestTypeScriptGeneratorMapsUUIDColumns(t *testing.T) {
@@ -231,7 +232,7 @@ func TestTypeScriptGeneratorExportsJoinWhereColumnComparisonDeclaredViewSQL(t *t
 
 	assertContains(t, ts, `liveMatchingMessages: "live_matching_messages",`)
 	assertContains(t, ts, `liveMatchingMessages: "SELECT messages.* FROM messages JOIN s ON messages.id = s.u32 WHERE messages.id = s.id",`)
-	assertContains(t, ts, `export function subscribeLiveMatchingMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveMatchingMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_matching_messages");`)
 }
 
@@ -250,7 +251,7 @@ func TestTypeScriptGeneratorExportsProjectedDeclaredViewSQL(t *testing.T) {
 
 	assertContains(t, ts, `liveMessageBodies: "live_message_bodies",`)
 	assertContains(t, ts, `liveMessageBodies: "SELECT body AS text FROM messages",`)
-	assertContains(t, ts, `export function subscribeLiveMessageBodies(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveMessageBodies(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_message_bodies");`)
 }
 
@@ -269,7 +270,7 @@ func TestTypeScriptGeneratorExportsOrderedDeclaredViewSQL(t *testing.T) {
 
 	assertContains(t, ts, `liveOrderedMessages: "live_ordered_messages",`)
 	assertContains(t, ts, `liveOrderedMessages: "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC",`)
-	assertContains(t, ts, `export function subscribeLiveOrderedMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveOrderedMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_ordered_messages");`)
 }
 
@@ -288,7 +289,7 @@ func TestTypeScriptGeneratorExportsLimitedDeclaredViewSQL(t *testing.T) {
 
 	assertContains(t, ts, `liveLimitedMessages: "live_limited_messages",`)
 	assertContains(t, ts, `liveLimitedMessages: "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC LIMIT 2",`)
-	assertContains(t, ts, `export function subscribeLiveLimitedMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveLimitedMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_limited_messages");`)
 }
 
@@ -307,7 +308,7 @@ func TestTypeScriptGeneratorExportsOffsetDeclaredViewSQL(t *testing.T) {
 
 	assertContains(t, ts, `liveOffsetMessages: "live_offset_messages",`)
 	assertContains(t, ts, `liveOffsetMessages: "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC LIMIT 2 OFFSET 1",`)
-	assertContains(t, ts, `export function subscribeLiveOffsetMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveOffsetMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_offset_messages");`)
 }
 
@@ -326,7 +327,7 @@ func TestTypeScriptGeneratorExportsAggregateDeclaredViewSQL(t *testing.T) {
 
 	assertContains(t, ts, `liveMessageCount: "live_message_count",`)
 	assertContains(t, ts, `liveMessageCount: "SELECT COUNT(*) AS n FROM messages",`)
-	assertContains(t, ts, `export function subscribeLiveMessageCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveMessageCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_message_count");`)
 }
 
@@ -360,27 +361,27 @@ func TestTypeScriptGeneratorExportsJoinAggregateDeclaredViewSQL(t *testing.T) {
 
 	assertContains(t, ts, `liveSelfJoinCount: "live_self_join_count",`)
 	assertContains(t, ts, `liveSelfJoinCount: "SELECT COUNT(*) AS n FROM messages AS a JOIN messages AS b ON a.id = b.id",`)
-	assertContains(t, ts, `export function subscribeLiveSelfJoinCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveSelfJoinCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_self_join_count");`)
 	assertContains(t, ts, `liveSelfJoinDistinctBodies: "live_self_join_distinct_bodies",`)
 	assertContains(t, ts, `liveSelfJoinDistinctBodies: "SELECT COUNT(DISTINCT a.body) AS n FROM messages AS a JOIN messages AS b ON a.id = b.id",`)
-	assertContains(t, ts, `export function subscribeLiveSelfJoinDistinctBodies(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveSelfJoinDistinctBodies(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_self_join_distinct_bodies");`)
 	assertContains(t, ts, `liveSelfJoinTotal: "live_self_join_total",`)
 	assertContains(t, ts, `liveSelfJoinTotal: "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b ON a.id = b.id",`)
-	assertContains(t, ts, `export function subscribeLiveSelfJoinTotal(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveSelfJoinTotal(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_self_join_total");`)
 	assertContains(t, ts, `liveSelfCrossJoinCount: "live_self_cross_join_count",`)
 	assertContains(t, ts, `liveSelfCrossJoinCount: "SELECT COUNT(*) AS n FROM messages AS a JOIN messages AS b",`)
-	assertContains(t, ts, `export function subscribeLiveSelfCrossJoinCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveSelfCrossJoinCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_self_cross_join_count");`)
 	assertContains(t, ts, `liveSelfCrossJoinTotal: "live_self_cross_join_total",`)
 	assertContains(t, ts, `liveSelfCrossJoinTotal: "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b",`)
-	assertContains(t, ts, `export function subscribeLiveSelfCrossJoinTotal(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveSelfCrossJoinTotal(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_self_cross_join_total");`)
 	assertContains(t, ts, `liveSelfMultiJoinTotal: "live_self_multi_join_total",`)
 	assertContains(t, ts, `liveSelfMultiJoinTotal: "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b ON a.id = b.id JOIN messages AS c ON b.id = c.id",`)
-	assertContains(t, ts, `export function subscribeLiveSelfMultiJoinTotal(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveSelfMultiJoinTotal(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_self_multi_join_total");`)
 }
 
@@ -399,7 +400,7 @@ func TestTypeScriptGeneratorExportsCountDistinctAggregateDeclaredViewSQL(t *test
 
 	assertContains(t, ts, `liveDistinctMessageBodies: "live_distinct_message_bodies",`)
 	assertContains(t, ts, `liveDistinctMessageBodies: "SELECT COUNT(DISTINCT body) AS n FROM messages",`)
-	assertContains(t, ts, `export function subscribeLiveDistinctMessageBodies(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveDistinctMessageBodies(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_distinct_message_bodies");`)
 }
 
@@ -418,7 +419,7 @@ func TestTypeScriptGeneratorExportsSumAggregateDeclaredViewSQL(t *testing.T) {
 
 	assertContains(t, ts, `liveMessageTotal: "live_message_total",`)
 	assertContains(t, ts, `liveMessageTotal: "SELECT SUM(id) AS total FROM messages",`)
-	assertContains(t, ts, `export function subscribeLiveMessageTotal(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveMessageTotal(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_message_total");`)
 }
 
@@ -826,8 +827,8 @@ func TestTypeScriptGeneratorAvoidsTableViewSubscribeHelperNameCollisions(t *test
 	}
 	ts := string(out)
 
-	assertContains(t, ts, `export function subscribeLiveMessages(subscribeTable: TableSubscriber<LiveMessagesRow>): Promise<() => void> {`)
-	assertContains(t, ts, `export function subscribeLiveMessages2(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveMessages(subscribeTable: TableSubscriber<LiveMessagesRow>): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, ts, `export function subscribeLiveMessages2(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 }
 
 func TestTypeScriptGeneratorDisambiguatesReducerHelperNameCollisions(t *testing.T) {
@@ -933,10 +934,10 @@ func TestTypeScriptGeneratorDisambiguatesFallbackAndReservedTableIdentifiers(t *
 	assertContains(t, ts, `"_": _2Row;`)
 	assertContains(t, ts, `"class": ClassRow;`)
 	assertContains(t, ts, `"class!": Class2Row;`)
-	assertContains(t, ts, `export function subscribe_(subscribeTable: TableSubscriber<_Row>): Promise<() => void> {`)
-	assertContains(t, ts, `export function subscribe_2(subscribeTable: TableSubscriber<_2Row>): Promise<() => void> {`)
-	assertContains(t, ts, `export function subscribeClass(subscribeTable: TableSubscriber<ClassRow>): Promise<() => void> {`)
-	assertContains(t, ts, `export function subscribeClass2(subscribeTable: TableSubscriber<Class2Row>): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribe_(subscribeTable: TableSubscriber<_Row>): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, ts, `export function subscribe_2(subscribeTable: TableSubscriber<_2Row>): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, ts, `export function subscribeClass(subscribeTable: TableSubscriber<ClassRow>): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, ts, `export function subscribeClass2(subscribeTable: TableSubscriber<Class2Row>): Promise<SubscriptionUnsubscribe> {`)
 }
 
 func TestTypeScriptGeneratorDisambiguatesRowFieldIdentifierCollisions(t *testing.T) {
@@ -975,7 +976,7 @@ func TestTypeScriptGeneratorDeclaredHelpersUseNamedCallbacksNotSQL(t *testing.T)
 	assertContains(t, ts, `export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;`)
 	assertContains(t, ts, `export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
 	assertContains(t, ts, `return runDeclaredQuery("recent_messages");`)
-	assertContains(t, ts, `export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_messages");`)
 	assertNotContains(t, ts, `return runDeclaredQuery("SELECT * FROM messages");`)
 	assertNotContains(t, ts, `return subscribeDeclaredView("SELECT * FROM messages");`)
@@ -1002,9 +1003,9 @@ func TestTypeScriptGeneratorDisambiguatesDeclaredReadHelperNameCollisions(t *tes
 	assertContains(t, ts, `return runDeclaredQuery("recent-messages");`)
 	assertContains(t, ts, `liveMessages: "live_messages",`)
 	assertContains(t, ts, `liveMessages2: "live messages",`)
-	assertContains(t, ts, `export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live_messages");`)
-	assertContains(t, ts, `export function subscribeLiveMessages2(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveMessages2(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("live messages");`)
 }
 
@@ -1035,9 +1036,9 @@ func TestTypeScriptGeneratorDisambiguatesDeclaredReadFallbackAndReservedIdentifi
 	assertContains(t, ts, `return runDeclaredQuery("_");`)
 	assertContains(t, ts, `export function queryClass_(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
 	assertContains(t, ts, `return runDeclaredQuery("class");`)
-	assertContains(t, ts, `export function subscribe_(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribe_(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("???");`)
-	assertContains(t, ts, `export function subscribeDefault_(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeDefault_(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `return subscribeDeclaredView("default");`)
 }
 

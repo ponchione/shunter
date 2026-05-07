@@ -36,6 +36,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	b.WriteString("export type ViewSubscriber = ShunterViewSubscriber;\n")
 	b.WriteString("export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;\n")
 	b.WriteString("export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;\n")
+	b.WriteString("export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;\n")
 	b.WriteString("export type TableRow<Name extends TableName> = TableRows[Name];\n")
 	b.WriteString("export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;\n")
 	b.WriteString("export type UUID = string;\n")
@@ -77,7 +78,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	for i, table := range contract.Schema.Tables {
 		rowType := tableTypes[i].identifier + "Row"
 		functionName := uniqueTypeScriptIdentifier("subscribe"+tableTypes[i].identifier, topLevelValueNames)
-		fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>): Promise<() => void> {\n", functionName, rowType)
+		fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>): Promise<SubscriptionUnsubscribe> {\n", functionName, rowType)
 		fmt.Fprintf(&b, "  return subscribeTable(%s);\n", strconv.Quote(table.Name))
 		b.WriteString("}\n\n")
 	}
@@ -133,7 +134,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	b.WriteString("export type ExecutableViewName = (typeof views)[keyof typeof viewSQL];\n\n")
 	for _, view := range executableViews {
 		functionName := uniqueTypeScriptIdentifier("subscribe"+upperFirst(view.identifier), topLevelValueNames)
-		fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {\n", functionName)
+		fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {\n", functionName)
 		fmt.Fprintf(&b, "  return subscribeDeclaredView(%s);\n", strconv.Quote(view.name))
 		b.WriteString("}\n\n")
 	}
@@ -173,6 +174,7 @@ func writeTypeScriptRuntimeImports(b *bytes.Buffer) {
 	b.WriteString("  ProtocolMetadata as ShunterProtocolMetadata,\n")
 	b.WriteString("  QueryRunner as ShunterQueryRunner,\n")
 	b.WriteString("  ReducerCaller as ShunterReducerCaller,\n")
+	b.WriteString("  SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,\n")
 	b.WriteString("  TableSubscriber as ShunterTableSubscriber,\n")
 	b.WriteString("  ViewSubscriber as ShunterViewSubscriber,\n")
 	b.WriteString("} from \"@shunter/client\";\n\n")

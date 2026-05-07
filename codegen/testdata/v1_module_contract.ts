@@ -8,6 +8,7 @@ import type {
   ProtocolMetadata as ShunterProtocolMetadata,
   QueryRunner as ShunterQueryRunner,
   ReducerCaller as ShunterReducerCaller,
+  SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,
   TableSubscriber as ShunterTableSubscriber,
   ViewSubscriber as ShunterViewSubscriber,
 } from "@shunter/client";
@@ -26,6 +27,7 @@ export type QueryRunner = ShunterQueryRunner<Uint8Array>;
 export type ViewSubscriber = ShunterViewSubscriber;
 export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;
 export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;
+export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;
 export type TableRow<Name extends TableName> = TableRows[Name];
 export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;
 export type UUID = string;
@@ -76,15 +78,15 @@ export const visibilityFilters = {
   ownMessages: { sql: "SELECT * FROM messages WHERE sender = :sender", returnTable: "messages", returnTableId: 0, usesCallerIdentity: true },
 } as const;
 
-export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>): Promise<() => void> {
+export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>): Promise<SubscriptionUnsubscribe> {
   return subscribeTable("messages");
 }
 
-export function subscribeSysClients(subscribeTable: TableSubscriber<SysClientsRow>): Promise<() => void> {
+export function subscribeSysClients(subscribeTable: TableSubscriber<SysClientsRow>): Promise<SubscriptionUnsubscribe> {
   return subscribeTable("sys_clients");
 }
 
-export function subscribeSysScheduled(subscribeTable: TableSubscriber<SysScheduledRow>): Promise<() => void> {
+export function subscribeSysScheduled(subscribeTable: TableSubscriber<SysScheduledRow>): Promise<SubscriptionUnsubscribe> {
   return subscribeTable("sys_scheduled");
 }
 
@@ -134,11 +136,11 @@ export const viewSQL = {
 
 export type ExecutableViewName = (typeof views)[keyof typeof viewSQL];
 
-export function subscribeLiveMessageProjection(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {
+export function subscribeLiveMessageProjection(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {
   return subscribeDeclaredView("live_message_projection");
 }
 
-export function subscribeLiveMessageCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {
+export function subscribeLiveMessageCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {
   return subscribeDeclaredView("live_message_count");
 }
 

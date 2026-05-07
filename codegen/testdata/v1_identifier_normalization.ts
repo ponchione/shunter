@@ -8,6 +8,7 @@ import type {
   ProtocolMetadata as ShunterProtocolMetadata,
   QueryRunner as ShunterQueryRunner,
   ReducerCaller as ShunterReducerCaller,
+  SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,
   TableSubscriber as ShunterTableSubscriber,
   ViewSubscriber as ShunterViewSubscriber,
 } from "@shunter/client";
@@ -26,6 +27,7 @@ export type QueryRunner = ShunterQueryRunner<Uint8Array>;
 export type ViewSubscriber = ShunterViewSubscriber;
 export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;
 export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;
+export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;
 export type TableRow<Name extends TableName> = TableRows[Name];
 export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;
 export type UUID = string;
@@ -89,23 +91,23 @@ export const visibilityFilters = {
   class_: { sql: "SELECT * FROM messages WHERE body = 'reserved'", returnTable: "messages", returnTableId: 0, usesCallerIdentity: false },
 } as const;
 
-export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>): Promise<() => void> {
+export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>): Promise<SubscriptionUnsubscribe> {
   return subscribeTable("messages");
 }
 
-export function subscribe_(subscribeTable: TableSubscriber<_Row>): Promise<() => void> {
+export function subscribe_(subscribeTable: TableSubscriber<_Row>): Promise<SubscriptionUnsubscribe> {
   return subscribeTable("!!!");
 }
 
-export function subscribe_1Table(subscribeTable: TableSubscriber<_1TableRow>): Promise<() => void> {
+export function subscribe_1Table(subscribeTable: TableSubscriber<_1TableRow>): Promise<SubscriptionUnsubscribe> {
   return subscribeTable("1-table");
 }
 
-export function subscribeClass(subscribeTable: TableSubscriber<ClassRow>): Promise<() => void> {
+export function subscribeClass(subscribeTable: TableSubscriber<ClassRow>): Promise<SubscriptionUnsubscribe> {
   return subscribeTable("class");
 }
 
-export function subscribeClass2(subscribeTable: TableSubscriber<Class2Row>): Promise<() => void> {
+export function subscribeClass2(subscribeTable: TableSubscriber<Class2Row>): Promise<SubscriptionUnsubscribe> {
   return subscribeTable("class!");
 }
 
@@ -187,15 +189,15 @@ export const viewSQL = {
 
 export type ExecutableViewName = (typeof views)[keyof typeof viewSQL];
 
-export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {
+export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {
   return subscribeDeclaredView("live_messages");
 }
 
-export function subscribeLiveMessages2(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {
+export function subscribeLiveMessages2(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {
   return subscribeDeclaredView("live messages");
 }
 
-export function subscribeDefault_(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {
+export function subscribeDefault_(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {
   return subscribeDeclaredView("default");
 }
 

@@ -7,6 +7,7 @@ import {
 import type {
   ConnectionState,
   ProtocolMetadata,
+  RuntimeBindings,
   ShunterErrorKind,
   SubscriptionHandle,
 } from "../src/index";
@@ -14,14 +15,21 @@ import {
   callCreateMessage,
   queryRecentMessages,
   shunterProtocol as generatedProtocol,
+  subscribeLiveMessageCount,
   subscribeLiveMessageProjection,
   subscribeMessages,
 } from "../../../codegen/testdata/v1_module_contract";
 import type {
   DeclaredQueryRunner,
   DeclaredViewSubscriber,
+  ExecutableQueryName,
+  ExecutableViewName,
   MessagesRow,
   ReducerCaller,
+  ReducerName,
+  SubscriptionUnsubscribe,
+  TableName,
+  TableRows,
   TableSubscriber,
 } from "../../../codegen/testdata/v1_module_contract";
 
@@ -64,8 +72,26 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const queryBytes: Uint8Array = await queryRecentMessages(declaredQueryRunner);
 
   const declaredViewSubscriber: DeclaredViewSubscriber = async (_name) => () => {};
-  const unsubscribeView = await subscribeLiveMessageProjection(declaredViewSubscriber);
-  unsubscribeView();
+  const unsubscribeView: SubscriptionUnsubscribe =
+    await subscribeLiveMessageProjection(declaredViewSubscriber);
+  await unsubscribeView();
+
+  const runtimeTableSubscriber: TableSubscriber = async () => () => {};
+  const runtimeBindings: RuntimeBindings<
+    TableName,
+    TableRows,
+    ReducerName,
+    ExecutableQueryName,
+    ExecutableViewName
+  > = {
+    callReducer: reducerCaller,
+    runDeclaredQuery: declaredQueryRunner,
+    subscribeDeclaredView: declaredViewSubscriber,
+    subscribeTable: runtimeTableSubscriber,
+  };
+  const unsubscribeFromBindings: SubscriptionUnsubscribe =
+    await subscribeLiveMessageCount(runtimeBindings.subscribeDeclaredView);
+  await unsubscribeFromBindings();
 
   const tableSubscriber: TableSubscriber<MessagesRow> = async (table, onRows) => {
     onRows?.([
@@ -79,8 +105,8 @@ async function exerciseGeneratedBindings(): Promise<void> {
     ]);
     return () => {};
   };
-  const unsubscribeTable = await subscribeMessages(tableSubscriber);
-  unsubscribeTable();
+  const unsubscribeTable: SubscriptionUnsubscribe = await subscribeMessages(tableSubscriber);
+  await unsubscribeTable();
 
   void reducerBytes;
   void queryBytes;

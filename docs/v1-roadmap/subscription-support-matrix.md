@@ -24,7 +24,7 @@ Legend:
 | Raw `SubscribeMulti` | Same SQL contract as `SubscribeSingle`, applied atomically to every query string in the batch. One invalid query rejects the batch before registration. | `TestHandleSubscribeMultiSuccess`, `TestHandleSubscribeMulti_UnknownTable`, `TestHandleSubscribeMulti_ShunterCompileErrorIncludesExecutingSqlSuffix`, `TestHandleSubscribeMulti_AggregateRejectedAtomically` |
 | Declared live views | Named live-read surface. Allows table-shaped reads, joins, projections over the emitted relation, single-table ordered/limited initial snapshots, and the supported aggregate subset. Post-commit delivery remains row deltas or aggregate replacement rows as tested. | `declared_read_test.go`, `declared_read_protocol_test.go`, `subscription/projection.go`, `subscription/aggregate.go` |
 | Local/runtime subscription APIs | `Runtime.SubscribeView` uses declared view metadata and declaration permissions, returning initial rows and columns for local callers. There is no local ad hoc raw subscription SQL API for v1. | `TestSubscribeViewJoinAggregateCountInitialRows`, `TestSubscribeViewOrderByReturnsOrderedInitialRows`, `TestSubscribeViewOverPrivateBaseTableUsesDeclarationPermission` |
-| Generated TypeScript live-read helpers | Not landed. SDK helpers should target declared live views and this matrix once the runtime exists. | missing |
+| Generated TypeScript live-read helpers | Generated helpers target declared live views by name, import the shared `@shunter/client` runtime types, and return the runtime `SubscriptionUnsubscribe` type. Raw SQL remains outside the generated helper path. | `TestGeneratorAcceptsCanonicalContractJSON`, `TestV1CompatibilityTypeScriptDeclaredReadResultShapeSurface`, `typescript/client/test/generated-runtime-usage.ts` |
 
 ## Query Shape Matrix
 
@@ -58,4 +58,5 @@ Legend:
 
 ## Missing Test Backlog
 
-- Fill generated TypeScript live-read helper rows after the SDK runtime lands.
+No subscription support matrix gaps are currently tracked. Add rows here when
+new live-read surfaces or unsupported-shape diagnostics are identified.
