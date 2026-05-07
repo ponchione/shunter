@@ -71,9 +71,8 @@ Tasks:
   stable shapes evolve.
 - Keep contract JSON golden coverage current as stable `ModuleContract` fields
   evolve.
-- Add or confirm negative tests for unsupported SQL classes listed in
-  `09-sql-read-scope.md`; mutation-statement protocol admission is now covered
-  for one-off raw SQL and raw subscriptions.
+- Keep negative tests current for unsupported SQL classes listed in
+  `09-sql-read-scope.md`.
 - Keep the completed `contractdiff` and `contractworkflow` policy behavior
   aligned with the final v1 compatibility rules as contract fields evolve.
 
@@ -94,6 +93,9 @@ Completed in this phase:
 - Contract JSON golden coverage now has an explicit key-coverage guard for every
   stable `ModuleContract` field and nested metadata object, including nullable
   column JSON metadata.
+- Unsupported SQL negative coverage now spans every explicit v1 non-goal class
+  in `09-sql-read-scope.md` at parser admission plus OneOff and SubscribeSingle
+  protocol admission.
 
 Exit criteria:
 

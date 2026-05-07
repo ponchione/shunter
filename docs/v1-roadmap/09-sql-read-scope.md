@@ -1,6 +1,6 @@
 # SQL And Read Scope
 
-Status: open, matrix exists and needs final coverage
+Status: active, explicit non-goal negative coverage complete
 Owner: unassigned
 Scope: the amount of SQL and declared-read behavior Shunter actually needs for
 v1.
@@ -182,6 +182,8 @@ Completed or partially complete:
   aggregate, order, limit, and offset behavior.
 - Add protocol admission coverage that rejects SQL mutation statements
   (`INSERT`, `UPDATE`, and `DELETE`) on one-off raw SQL and raw subscriptions.
+- Add parser and protocol admission coverage that rejects every explicit v1 SQL
+  non-goal listed above on one-off raw SQL and raw subscriptions.
 
 Remaining:
 
@@ -189,7 +191,8 @@ Remaining:
   the final matrix.
 - Add or confirm runtime tests that prove auth and visibility are applied before
   query evaluation and live delivery.
-- Add or confirm protocol tests for unsupported SQL errors.
+- Keep unsupported SQL diagnostics useful and client-visible as parser and
+  admission behavior changes.
 - Add or confirm contract/codegen tests for declared query and declared view
   result shapes.
 - Add performance tests for expensive supported shapes.
