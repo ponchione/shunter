@@ -263,6 +263,23 @@ Acceptance criteria:
   incremental results to baseline evaluation.
 - Candidate pruning may over-include, but emitted deltas match baseline.
 
+Current status: complete for the query shapes marked supported in
+`subscription-support-matrix.md`.
+
+- Single-table predicates are covered by direct delta tests and the single-table
+  IVM invariant property.
+- Two-table joins and cross joins are covered for left/right changes,
+  same-transaction changes, post-commit deletes, no-op changes, projection
+  shape, bag multiplicity, and fresh-evaluation differential checks.
+- Multi-way joins are covered for every changed relation position, including
+  projected-relation, intermediate-relation, and RHS changes; aggregate
+  replacement rows have the same endpoint/intermediate coverage.
+- Non-key-preserving path traversal joins are covered for same-transaction
+  inserted and deleted paths, including inserted/deleted intermediate rows with
+  committed endpoints.
+- Declared live-view projection and aggregate row shapes are pinned through
+  manager and protocol-visible declared-read tests.
+
 Recommended verification:
 
 ```bash
