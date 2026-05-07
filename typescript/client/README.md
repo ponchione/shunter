@@ -40,11 +40,12 @@ module-scoped decoded-query/table-decoder aliases over these runtime surfaces.
 `subscribeDeclaredView()` and `subscribeTable()` also accept `returnHandle:
 true` to resolve with a managed subscription handle wired to the same
 server-acknowledged unsubscribe path. Table handles expose raw row bytes from
-the initial snapshot; declared-view handles are lifecycle-only until
-schema-aware view row decoding lands. Table subscriptions can accept `decodeRow`
-to invoke decoded `onRows`/`onInitialRows` and `onUpdate` callbacks from split
-RowList row bytes while keeping raw callbacks unchanged. It does not implement
-typed reducer argument/result encoding,
+the initial snapshot by default, or decoded initial rows when `decodeRow` is
+supplied; declared-view handles are lifecycle-only until schema-aware view row
+decoding lands. Table subscriptions can accept `decodeRow` to invoke decoded
+`onRows`/`onInitialRows` and `onUpdate` callbacks from split RowList row bytes
+while keeping raw callbacks unchanged. It does not implement typed reducer
+argument/result encoding,
 schema-aware declared query/view row decoding, subscription cache behavior, or
 reconnect policy yet.
 
@@ -85,7 +86,8 @@ Table subscriptions can also pass `decodeRow` when the caller already has a
 schema-aware row decoder; the runtime will call the table `onRows`/
 `onInitialRows` callbacks for accepted initial rows and `onUpdate` for RowList
 insert/delete deltas. Generated table subscription helpers pass through those
-callbacks and options.
+callbacks and options. When `returnHandle: true` is also set, the returned
+table handle starts with decoded initial rows.
 Declared query consumers that want decoded rows can call
 `decodeDeclaredQueryResult()` with table-specific decoders; consumers that need
 raw RowList bytes can keep using `decodeRawDeclaredQueryResult()`.

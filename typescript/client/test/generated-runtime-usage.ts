@@ -35,6 +35,7 @@ import type {
   ReducerCallResult,
   DeclaredViewHandleSubscriber,
   DecodedDeclaredQueryResult,
+  DecodedTableHandleSubscriber,
   DeclaredQueryDecodeOptions,
   DeclaredQueryRowDecoder,
   RowDecoder,
@@ -130,6 +131,8 @@ async function exerciseGeneratedBindings(): Promise<void> {
     client.subscribeDeclaredView;
   const generatedClientTableSubscriber: TableSubscriber = client.subscribeTable;
   const generatedClientTableHandleSubscriber: TableHandleSubscriber<TableName> =
+    client.subscribeTable;
+  const generatedClientDecodedTableHandleSubscriber: DecodedTableHandleSubscriber =
     client.subscribeTable;
   const encodedRequest: EncodedReducerCallRequest<ReducerName> =
     encodeReducerCallRequest(reducers.createMessage, new Uint8Array([1, 2, 3]), {
@@ -346,6 +349,12 @@ async function exerciseGeneratedBindings(): Promise<void> {
       returnHandle: true,
     });
   await tableHandleFromClient.unsubscribe();
+  const decodedTableHandleFromClient: SubscriptionHandle<MessagesRow> =
+    await generatedClientDecodedTableHandleSubscriber("messages", undefined, {
+      returnHandle: true,
+      decodeRow: messageRowDecoder,
+    });
+  await decodedTableHandleFromClient.unsubscribe();
 
   const tableSubscriber: TableSubscriber<MessagesRow> = async (table, onRows) => {
     onRows?.([

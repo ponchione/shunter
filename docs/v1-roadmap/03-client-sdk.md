@@ -67,12 +67,13 @@ optional row callbacks and subscription options so caller-supplied row decoders
 can be used without dropping to the runtime API.
 Declared-view and table subscriptions can opt into managed subscription handles
 with `returnHandle: true`; those handles use the same server-acknowledged
-unsubscribe path, and table handles expose raw initial row bytes. Table
-subscriptions can now also accept a caller-supplied row decoder for decoded
-initial-row and update callbacks while preserving the raw callback path. It
-does not yet implement typed reducer argument/result encoding, generated
-schema-aware declared query/view row decoding, subscription cache behavior,
-auth refresh, or reconnect policy.
+unsubscribe path. Table handles expose raw initial row bytes by default, or
+decoded initial rows when `decodeRow` is supplied with `returnHandle: true`.
+Table subscriptions can now also accept a caller-supplied row decoder for
+decoded initial-row and update callbacks while preserving the raw callback
+path. It does not yet implement typed reducer argument/result encoding,
+generated schema-aware declared query/view row decoding, subscription cache
+behavior, auth refresh, or reconnect policy.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
 fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
@@ -216,6 +217,9 @@ Completed or partially complete:
   aliases, declared-query decode option/result aliases, `queryXResult(...)`
   decode wrappers, and optional row-callback/options pass-throughs on generated
   table subscription helpers.
+- Populate table subscription handles with decoded initial rows when callers
+  pass both `returnHandle: true` and `decodeRow`, while preserving raw
+  initial-row handles when no decoder is provided.
 
 Remaining:
 
@@ -225,7 +229,8 @@ Remaining:
   `TransactionUpdate` frame result, generated schema-aware declared-query/view
   row decoders, and subscription cache behavior on top of the WebSocket
   lifecycle shell.
-- Implement managed cache/update behavior for decoded table/query/view rows.
+- Implement managed cache/update behavior for decoded table/query/view rows;
+  decoded table handles currently receive only the accepted initial snapshot.
 - Implement reconnect, auth refresh, resubscription, and cache behavior.
 - Add client tests for:
   - connection state transitions

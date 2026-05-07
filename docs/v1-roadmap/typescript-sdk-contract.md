@@ -73,7 +73,8 @@ declared queries.
 `subscribeDeclaredView()` and `subscribeTable()` can also opt into
 `returnHandle: true`, resolving with a managed subscription handle backed by the
 same server-acknowledged unsubscribe path. Table handles expose raw initial row
-bytes; declared-view handles currently expose lifecycle state only.
+bytes by default, or decoded initial rows when `decodeRow` is supplied;
+declared-view handles currently expose lifecycle state only.
 `subscribeTable()` also accepts a caller-supplied `decodeRow` hook that decodes
 raw RowList row bytes for `onRows`/`onInitialRows` and RowList insert/delete
 updates for `onUpdate`, leaving raw callbacks unchanged. Generated table
@@ -237,9 +238,10 @@ bytes on the decoded message envelopes. It does not resolve the unsubscribe
 helper until `UnsubscribeSingleApplied` or a matching `SubscriptionError`. It
 can also resolve with a `SubscriptionHandle` when callers pass
 `returnHandle: true`; the handle starts active with the raw initial row byte
-slices and closes after the acknowledged unsubscribe. It does not yet generate
-schema-aware row decoders, update local cache state, or apply typed row deltas
-to managed handles.
+slices, or decoded initial rows when `decodeRow` is provided, and closes after
+the acknowledged unsubscribe. It does not yet generate schema-aware row
+decoders, update local cache state, or apply typed row deltas to managed
+handles.
 
 Subscription handles must provide:
 

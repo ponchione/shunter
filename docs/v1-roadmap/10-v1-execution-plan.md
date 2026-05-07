@@ -198,8 +198,9 @@ and decoded declared-query result aliases/wrappers; the runtime now has
 explicit reducer argument encoder conventions; generated table subscription
 helpers pass through caller-supplied row decoders for decoded initial-row and
 update callbacks; declared-query results can now be decoded through
-caller-supplied table decoders. Schema-aware generated row/reducer codecs,
-cache behavior, and reconnect behavior remain.
+caller-supplied table decoders; table handles can now hold decoded initial rows
+when requested. Schema-aware generated row/reducer codecs, cache behavior, and
+reconnect behavior remain.
 
 Tasks:
 

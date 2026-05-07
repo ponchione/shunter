@@ -119,6 +119,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   table row decoders while preserving raw declared-query result helpers.
 - Generated TypeScript table and declared-query helpers now expose/pass through
   row decoder option surfaces for decoded table rows and query results.
+- TypeScript table subscription handles now hold decoded initial rows when
+  callers pass both `returnHandle: true` and a row decoder.
 - Generated TypeScript reducer helpers now include full-update result-envelope
   wrappers alongside the existing raw byte helpers.
 - The TypeScript runtime now defines explicit reducer argument encoder helpers
