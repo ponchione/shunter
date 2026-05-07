@@ -1161,48 +1161,6 @@ func mutateSplitJoinOrPlacements(idx *PruningIndexes, placements splitJoinOrPlac
 	for _, placement := range placements.rangePathTraversalEdges {
 		mutateJoinRangePathTraversalEdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
 	}
-	for _, placement := range placements.pathEdges {
-		mutateJoinPathEdgePlacement(idx, placement.edge, placement.value, hash, add)
-	}
-	for _, placement := range placements.rangePathEdges {
-		mutateJoinRangePathEdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
-	}
-	for _, placement := range placements.path3Edges {
-		mutateJoinPath3EdgePlacement(idx, placement.edge, placement.value, hash, add)
-	}
-	for _, placement := range placements.rangePath3Edges {
-		mutateJoinRangePath3EdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
-	}
-	for _, placement := range placements.path4Edges {
-		mutateJoinPath4EdgePlacement(idx, placement.edge, placement.value, hash, add)
-	}
-	for _, placement := range placements.rangePath4Edges {
-		mutateJoinRangePath4EdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
-	}
-	for _, placement := range placements.path5Edges {
-		mutateJoinPath5EdgePlacement(idx, placement.edge, placement.value, hash, add)
-	}
-	for _, placement := range placements.rangePath5Edges {
-		mutateJoinRangePath5EdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
-	}
-	for _, placement := range placements.path6Edges {
-		mutateJoinPath6EdgePlacement(idx, placement.edge, placement.value, hash, add)
-	}
-	for _, placement := range placements.rangePath6Edges {
-		mutateJoinRangePath6EdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
-	}
-	for _, placement := range placements.path7Edges {
-		mutateJoinPath7EdgePlacement(idx, placement.edge, placement.value, hash, add)
-	}
-	for _, placement := range placements.rangePath7Edges {
-		mutateJoinRangePath7EdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
-	}
-	for _, placement := range placements.path8Edges {
-		mutateJoinPath8EdgePlacement(idx, placement.edge, placement.value, hash, add)
-	}
-	for _, placement := range placements.rangePath8Edges {
-		mutateJoinRangePath8EdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
-	}
 	for _, placement := range placements.existenceEdges {
 		mutateJoinExistencePlacement(idx, placement.edge, hash, add)
 	}
@@ -1671,83 +1629,6 @@ type joinRangePathTraversalEdgePlacement struct {
 	upper Bound
 }
 
-type joinPathEdgePlacement struct {
-	edge  JoinPathEdge
-	value Value
-}
-
-type joinRangePathEdgePlacement struct {
-	edge  JoinPathEdge
-	lower Bound
-	upper Bound
-}
-
-type joinPath3EdgePlacement struct {
-	edge  JoinPath3Edge
-	value Value
-}
-
-type joinRangePath3EdgePlacement struct {
-	edge  JoinPath3Edge
-	lower Bound
-	upper Bound
-}
-
-type joinPath4EdgePlacement struct {
-	edge  JoinPath4Edge
-	value Value
-}
-
-type joinRangePath4EdgePlacement struct {
-	edge  JoinPath4Edge
-	lower Bound
-	upper Bound
-}
-
-type joinPath5EdgePlacement struct {
-	edge  JoinPath5Edge
-	value Value
-}
-
-type joinRangePath5EdgePlacement struct {
-	edge  JoinPath5Edge
-	lower Bound
-	upper Bound
-}
-
-type joinPath6EdgePlacement struct {
-	edge  JoinPath6Edge
-	value Value
-}
-
-type joinRangePath6EdgePlacement struct {
-	edge  JoinPath6Edge
-	lower Bound
-	upper Bound
-}
-
-type joinPath7EdgePlacement struct {
-	edge  JoinPath7Edge
-	value Value
-}
-
-type joinRangePath7EdgePlacement struct {
-	edge  JoinPath7Edge
-	lower Bound
-	upper Bound
-}
-
-type joinPath8EdgePlacement struct {
-	edge  JoinPath8Edge
-	value Value
-}
-
-type joinRangePath8EdgePlacement struct {
-	edge  JoinPath8Edge
-	lower Bound
-	upper Bound
-}
-
 type joinExistenceEdgePlacement struct {
 	edge JoinEdge
 }
@@ -1759,20 +1640,6 @@ type splitJoinOrPlacements struct {
 	rangeEdges              []joinRangeEdgePlacement
 	pathTraversalEdges      []joinPathTraversalEdgePlacement
 	rangePathTraversalEdges []joinRangePathTraversalEdgePlacement
-	pathEdges               []joinPathEdgePlacement
-	rangePathEdges          []joinRangePathEdgePlacement
-	path3Edges              []joinPath3EdgePlacement
-	rangePath3Edges         []joinRangePath3EdgePlacement
-	path4Edges              []joinPath4EdgePlacement
-	rangePath4Edges         []joinRangePath4EdgePlacement
-	path5Edges              []joinPath5EdgePlacement
-	rangePath5Edges         []joinRangePath5EdgePlacement
-	path6Edges              []joinPath6EdgePlacement
-	rangePath6Edges         []joinRangePath6EdgePlacement
-	path7Edges              []joinPath7EdgePlacement
-	rangePath7Edges         []joinRangePath7EdgePlacement
-	path8Edges              []joinPath8EdgePlacement
-	rangePath8Edges         []joinRangePath8EdgePlacement
 	existenceEdges          []joinExistenceEdgePlacement
 }
 
@@ -1823,7 +1690,10 @@ func (s joinPlacementSide) otherJoinColumnIndexed(resolver IndexResolver) bool {
 }
 
 func (p splitJoinOrPlacements) hasAny() bool {
-	return len(p.eqs) > 0 || len(p.ranges) > 0 || len(p.edges) > 0 || len(p.rangeEdges) > 0 || len(p.pathTraversalEdges) > 0 || len(p.rangePathTraversalEdges) > 0 || len(p.pathEdges) > 0 || len(p.rangePathEdges) > 0 || len(p.path3Edges) > 0 || len(p.rangePath3Edges) > 0 || len(p.path4Edges) > 0 || len(p.rangePath4Edges) > 0 || len(p.path5Edges) > 0 || len(p.rangePath5Edges) > 0 || len(p.path6Edges) > 0 || len(p.rangePath6Edges) > 0 || len(p.path7Edges) > 0 || len(p.rangePath7Edges) > 0 || len(p.path8Edges) > 0 || len(p.rangePath8Edges) > 0 || len(p.existenceEdges) > 0
+	return len(p.eqs) > 0 || len(p.ranges) > 0 ||
+		len(p.edges) > 0 || len(p.rangeEdges) > 0 ||
+		len(p.pathTraversalEdges) > 0 || len(p.rangePathTraversalEdges) > 0 ||
+		len(p.existenceEdges) > 0
 }
 
 func (p *splitJoinOrPlacements) append(other splitJoinOrPlacements) {
@@ -1833,20 +1703,6 @@ func (p *splitJoinOrPlacements) append(other splitJoinOrPlacements) {
 	p.rangeEdges = append(p.rangeEdges, other.rangeEdges...)
 	p.pathTraversalEdges = append(p.pathTraversalEdges, other.pathTraversalEdges...)
 	p.rangePathTraversalEdges = append(p.rangePathTraversalEdges, other.rangePathTraversalEdges...)
-	p.pathEdges = append(p.pathEdges, other.pathEdges...)
-	p.rangePathEdges = append(p.rangePathEdges, other.rangePathEdges...)
-	p.path3Edges = append(p.path3Edges, other.path3Edges...)
-	p.rangePath3Edges = append(p.rangePath3Edges, other.rangePath3Edges...)
-	p.path4Edges = append(p.path4Edges, other.path4Edges...)
-	p.rangePath4Edges = append(p.rangePath4Edges, other.rangePath4Edges...)
-	p.path5Edges = append(p.path5Edges, other.path5Edges...)
-	p.rangePath5Edges = append(p.rangePath5Edges, other.rangePath5Edges...)
-	p.path6Edges = append(p.path6Edges, other.path6Edges...)
-	p.rangePath6Edges = append(p.rangePath6Edges, other.rangePath6Edges...)
-	p.path7Edges = append(p.path7Edges, other.path7Edges...)
-	p.rangePath7Edges = append(p.rangePath7Edges, other.rangePath7Edges...)
-	p.path8Edges = append(p.path8Edges, other.path8Edges...)
-	p.rangePath8Edges = append(p.rangePath8Edges, other.rangePath8Edges...)
 	p.existenceEdges = append(p.existenceEdges, other.existenceEdges...)
 }
 
@@ -2070,7 +1926,9 @@ func splitJoinOrBranchPlacements(
 }
 
 func splitJoinOrHasRemotePlacement(p splitJoinOrPlacements) bool {
-	return len(p.edges) > 0 || len(p.rangeEdges) > 0 || len(p.pathEdges) > 0 || len(p.rangePathEdges) > 0 || len(p.path3Edges) > 0 || len(p.rangePath3Edges) > 0 || len(p.path4Edges) > 0 || len(p.rangePath4Edges) > 0 || len(p.path5Edges) > 0 || len(p.rangePath5Edges) > 0 || len(p.path6Edges) > 0 || len(p.rangePath6Edges) > 0 || len(p.path7Edges) > 0 || len(p.rangePath7Edges) > 0 || len(p.path8Edges) > 0 || len(p.rangePath8Edges) > 0 || len(p.existenceEdges) > 0
+	return len(p.edges) > 0 || len(p.rangeEdges) > 0 ||
+		len(p.pathTraversalEdges) > 0 || len(p.rangePathTraversalEdges) > 0 ||
+		len(p.existenceEdges) > 0
 }
 
 func splitJoinOrColumnEqualityExistencePlacement(p ColEqCol, side joinPlacementSide, resolver IndexResolver) (joinExistenceEdgePlacement, bool) {
