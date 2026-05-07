@@ -96,6 +96,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added raw TypeScript subscription update callback plumbing for accepted
   declared-view/table subscriptions, including `TransactionUpdateLight`
   decoding.
+- TypeScript declared-view/table unsubscribe promises now settle on matching
+  unsubscribe acknowledgements or subscription errors instead of resolving
+  immediately after send.
 
 ## v0.1.0 - 2026-05-05
 

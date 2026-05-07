@@ -46,10 +46,11 @@ correlates `SubscribeSingleApplied` and `SubscriptionError` responses, and
 returns an idempotent unsubscribe function that sends `UnsubscribeSingle`.
 Accepted subscriptions are registered for raw callback delivery from initial
 subscribe responses, caller-bound committed `TransactionUpdate` frames, and
-`TransactionUpdateLight` frames. Typed reducer argument/result encoding,
-declared query/view/table row decoding, typed row callbacks, subscription cache
-behavior, unsubscribe acknowledgement handling, reconnect policy, and local
-cache implementation remain open.
+`TransactionUpdateLight` frames. Unsubscribe promises wait for matching
+`UnsubscribeSingleApplied`/`UnsubscribeMultiApplied` or `SubscriptionError`
+frames. Typed reducer argument/result encoding, declared query/view/table row
+decoding, typed row callbacks, subscription cache behavior, reconnect policy,
+and local cache implementation remain open.
 
 ## Runtime API
 
@@ -163,8 +164,9 @@ structured validation error. On acceptance, the method returns an idempotent
 unsubscribe function that sends `UnsubscribeMulti` for the accepted query ID.
 The runtime can route raw `SubscriptionUpdate` bytes to `onRawUpdate` callbacks
 from the initial response and later delta frames. The unsubscribe helper does
-not yet wait for `UnsubscribeMultiApplied`, update local cache state, decode
-initial rows, or apply typed row deltas.
+not resolve until `UnsubscribeMultiApplied` or a matching `SubscriptionError`.
+It does not yet update local cache state, decode initial rows, or apply typed
+row deltas.
 
 Current table foundation: the runtime can encode a raw `SubscribeSingle` query
 string and `createShunterClient().subscribeTable(...)` builds a quoted
@@ -173,8 +175,9 @@ whole-table `SELECT * FROM "<table>"` query. The method waits for the matching
 responses, and returns an idempotent unsubscribe function that sends
 `UnsubscribeSingle`. The runtime can route the accepted raw row-list bytes to a
 table-only `onRawRows` callback and raw delta bytes to `onRawUpdate`. It does
-not yet decode the initial row list, call the typed table row callback, wait
-for `UnsubscribeSingleApplied`, update local cache state, or apply typed row
+not resolve the unsubscribe helper until `UnsubscribeSingleApplied` or a
+matching `SubscriptionError`. It does not yet decode the initial row list, call
+the typed table row callback, update local cache state, or apply typed row
 deltas.
 
 Subscription handles must provide:

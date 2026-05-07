@@ -66,10 +66,10 @@ Several original roadmap gaps now have partial implementation:
   primitive, raw reducer request/response handling, and raw declared-query
   request/response handling. It now also has raw declared-view subscribe
   acceptance/error correlation, raw table subscription acceptance/error
-  correlation, unsubscribe send paths, and raw subscription update callbacks,
-  but typed reducer codecs, declared query/view/table row decoding,
-  subscription cache behavior, reconnect behavior, and canary wiring are not
-  complete.
+  correlation, unsubscribe acknowledgement correlation, and raw subscription
+  update callbacks, but typed reducer codecs, declared query/view/table row
+  decoding, subscription cache behavior, reconnect behavior, and canary wiring
+  are not complete.
 - A release-candidate app workload exists in tests. The maintained v1
   canary/reference app is the external `opsboard-canary` repository; do not add
   a duplicate in-repo task-board app.

@@ -40,10 +40,11 @@ and `SubscriptionError` correlation, and an idempotent unsubscribe send path for
 `SubscribeSingleApplied` and `SubscriptionError` correlation, and an idempotent
 unsubscribe send path for `UnsubscribeSingle`. Accepted subscriptions are now
 registered for raw `TransactionUpdate` and `TransactionUpdateLight` callback
-delivery. It does not yet implement typed reducer argument/result encoding,
-typed declared query/view/table row decoding, typed row callbacks,
-subscription cache behavior, auth refresh, unsubscribe acknowledgement
-handling, or reconnect policy.
+delivery, and unsubscribe promises wait for the matching
+`UnsubscribeSingleApplied`/`UnsubscribeMultiApplied` or `SubscriptionError`.
+It does not yet implement typed reducer argument/result encoding, typed
+declared query/view/table row decoding, typed row callbacks, subscription cache
+behavior, auth refresh, or reconnect policy.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
 fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
@@ -148,6 +149,9 @@ Completed or partially complete:
   declared-view/table subscriptions for raw update callbacks from initial
   subscribe responses, caller-bound `TransactionUpdate` commits, and
   `TransactionUpdateLight` deltas.
+- Correlate `UnsubscribeSingleApplied`, `UnsubscribeMultiApplied`, and
+  matching `SubscriptionError` frames so idempotent unsubscribe promises settle
+  on server acknowledgement instead of resolving immediately after send.
 
 Remaining:
 
@@ -155,9 +159,8 @@ Remaining:
   beyond the current raw `Uint8Array` request path.
 - Implement typed reducer result decoding beyond the current raw
   `TransactionUpdate` frame result, declared-query row decoding, declared
-  view/table typed row callback delivery, subscription cache behavior, and
-  unsubscribe acknowledgement semantics on top of the WebSocket lifecycle
-  shell.
+  view/table typed row callback delivery, and subscription cache behavior on
+  top of the WebSocket lifecycle shell.
 - Implement row decoding for declared query/view/table results and
   subscription updates.
 - Implement reconnect, auth refresh, resubscription, and cache behavior.

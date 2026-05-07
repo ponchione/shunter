@@ -14,6 +14,7 @@ import {
   SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE,
   SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE_LIGHT,
   SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_SINGLE_APPLIED,
+  SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_MULTI_APPLIED,
   SHUNTER_SUBPROTOCOL_V1,
   ShunterAuthError,
   ShunterClosedClientError,
@@ -32,6 +33,7 @@ import {
   decodeTransactionUpdateLightFrame,
   decodeTransactionUpdateFrame,
   decodeUnsubscribeSingleAppliedFrame,
+  decodeUnsubscribeMultiAppliedFrame,
   encodeDeclaredQueryRequest,
   encodeDeclaredViewSubscriptionRequest,
   encodeReducerCallRequest,
@@ -371,6 +373,19 @@ assert.equal(subscribeApplied.totalHostExecutionDurationMicros, 0x51525354555657
 assert.equal(subscribeApplied.updates.length, 1);
 assert.equal(subscribeApplied.updates[0].tableName, "users");
 
+const unsubscribeMultiAppliedFrame = bytesFromHex(
+  "0a7473727188878685848382819493929101000000040302010500000075736572730f000000020000000200000001020100000003020000000405",
+);
+const unsubscribeMultiApplied = decodeUnsubscribeMultiAppliedFrame(unsubscribeMultiAppliedFrame);
+assert.equal(unsubscribeMultiAppliedFrame[0], SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_MULTI_APPLIED);
+assert.equal(unsubscribeMultiApplied.requestId, 0x71727374);
+assert.equal(unsubscribeMultiApplied.queryId, 0x91929394);
+assert.equal(unsubscribeMultiApplied.updates.length, 1);
+
+const unsubscribeDeclaredViewAppliedFrame = bytesFromHex(
+  "0a0100000000000000000000006463626100000000",
+);
+
 const subscriptionErrorFrame = bytesFromHex(
   "0408070605040302010144434241015453525101646362610600000064656e696564",
 );
@@ -466,13 +481,19 @@ assert.equal(declaredViewRawUpdates[0].queryId, 0x01020304);
 sockets[0].message(lightUpdateFrame);
 assert.equal(declaredViewRawUpdates.length, 2);
 assert.equal(declaredViewRawUpdates[1].tableName, "users");
-await unsubscribeDeclaredView();
-await unsubscribeDeclaredView();
+const unsubscribeDeclaredViewResult = unsubscribeDeclaredView();
+assert.equal(unsubscribeDeclaredView(), unsubscribeDeclaredViewResult);
 assert.equal(sockets[0].sent.length, 7);
 assert.deepEqual(
   sockets[0].sent[6],
   encodeUnsubscribeMultiRequest(0x61626364, { requestId: 1 }).frame,
 );
+sockets[0].message(lightUpdateFrame);
+assert.equal(declaredViewRawUpdates.length, 3);
+sockets[0].message(unsubscribeDeclaredViewAppliedFrame);
+await unsubscribeDeclaredViewResult;
+sockets[0].message(lightUpdateFrame);
+assert.equal(declaredViewRawUpdates.length, 3);
 
 const deniedViewSubscription = client.subscribeDeclaredView("live_users", {
   requestId: 0x41424344,
@@ -486,6 +507,9 @@ const tableRawRows = [];
 const tableRawUpdates = [];
 const tableLightUpdateFrame = bytesFromHex(
   "083433323101000000141312110500000075736572730f000000020000000200000001020100000003020000000405",
+);
+const unsubscribeTableAppliedFrame = bytesFromHex(
+  "030200000000000000000000001413121100",
 );
 const tableSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x01020304,
@@ -508,15 +532,19 @@ assert.equal(tableRawRows[0].tableName, "users");
 sockets[0].message(tableLightUpdateFrame);
 assert.equal(tableRawUpdates.length, 1);
 assert.equal(tableRawUpdates[0].queryId, 0x11121314);
-await unsubscribeTable();
-await unsubscribeTable();
+const unsubscribeTableResult = unsubscribeTable();
+assert.equal(unsubscribeTable(), unsubscribeTableResult);
 assert.equal(sockets[0].sent.length, 10);
 assert.deepEqual(
   sockets[0].sent[9],
   encodeUnsubscribeSingleRequest(0x11121314, { requestId: 2 }).frame,
 );
 sockets[0].message(tableLightUpdateFrame);
-assert.equal(tableRawUpdates.length, 1);
+assert.equal(tableRawUpdates.length, 2);
+sockets[0].message(unsubscribeTableAppliedFrame);
+await unsubscribeTableResult;
+sockets[0].message(tableLightUpdateFrame);
+assert.equal(tableRawUpdates.length, 2);
 
 const deniedTableSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x41424344,
@@ -525,6 +553,28 @@ const deniedTableSubscription = client.subscribeTable("users", undefined, {
 assert.equal(sockets[0].sent.length, 11);
 sockets[0].message(subscriptionErrorFrame);
 await assert.rejects(deniedTableSubscription, ShunterValidationError);
+
+const unsubscribeErrorSubscribeAppliedFrame = bytesFromHex(
+  "020403020100000000000000003433323105000000757365727300000000",
+);
+const unsubscribeErrorFrame = bytesFromHex(
+  "04000000000000000001030000000134333231000600000064656e696564",
+);
+const unsubscribeErrorSubscription = client.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x31323334,
+});
+assert.equal(sockets[0].sent.length, 12);
+sockets[0].message(unsubscribeErrorSubscribeAppliedFrame);
+const unsubscribeWithError = await unsubscribeErrorSubscription;
+const unsubscribeErrorResult = unsubscribeWithError();
+assert.equal(sockets[0].sent.length, 13);
+assert.deepEqual(
+  sockets[0].sent[12],
+  encodeUnsubscribeSingleRequest(0x31323334, { requestId: 3 }).frame,
+);
+sockets[0].message(unsubscribeErrorFrame);
+await assert.rejects(unsubscribeErrorResult, ShunterValidationError);
 
 await client.close();
 await client.close();

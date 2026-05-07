@@ -190,7 +190,7 @@ minimal WebSocket lifecycle shell, initial IdentityToken decoding, and raw-byte
 reducer, declared-query, and declared-view subscribe request/response
 foundations added; raw table subscription request/response foundation added;
 raw subscription update callback plumbing added; typed row decoding/cache
-behavior, unsubscribe acknowledgement handling, and reconnect behavior remain.
+behavior and reconnect behavior remain.
 
 Tasks:
 
@@ -202,9 +202,10 @@ Tasks:
   raw `Uint8Array` request path.
 - Build typed reducer result decoding, declared query/view/table row decoding,
   subscription cache behavior, typed row callback delivery, and unsubscribe
-  acknowledgement semantics on top of the minimal WebSocket lifecycle shell.
+  acknowledgement integration with managed handles on top of the minimal
+  WebSocket lifecycle shell.
 - Wire the managed subscription handle primitive into real server subscribe and
-  unsubscribe responses beyond the current raw unsubscribe send path.
+  unsubscribe responses beyond the current raw callback and ack paths.
 - Add tests for connection transitions, auth failure, reducer/query/view
   success and failure, initial snapshots, deltas, unsubscribe, reconnect, and
   mismatch handling.
