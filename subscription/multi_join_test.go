@@ -547,7 +547,7 @@ func TestCollectCandidatesMultiJoinRequiredRemoteFilterPathEdgesUseSameTransacti
 		},
 	}
 	got := make(map[QueryHash]struct{})
-	collectJoinPathFilterDeltaCandidates(idx, 1, leftRows, rejected, nil, nil, func(h QueryHash) {
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, leftRows, rejected, nil, nil, func(h QueryHash) {
 		got[h] = struct{}{}
 	})
 	if len(got) != 0 {
@@ -561,7 +561,7 @@ func TestCollectCandidatesMultiJoinRequiredRemoteFilterPathEdgesUseSameTransacti
 			3: {Inserts: []types.ProductValue{{types.NewUint64(100), types.NewUint64(30)}}},
 		},
 	}
-	collectJoinPathFilterDeltaCandidates(idx, 1, leftRows, allChangedOverlap, nil, nil, func(h QueryHash) {
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, leftRows, allChangedOverlap, nil, nil, func(h QueryHash) {
 		got[h] = struct{}{}
 	})
 	if _, ok := got[hash]; !ok || len(got) != 1 {
@@ -576,7 +576,7 @@ func TestCollectCandidatesMultiJoinRequiredRemoteFilterPathEdgesUseSameTransacti
 		},
 	}
 	clear(got)
-	collectJoinPathFilterDeltaCandidates(idx, 1, leftRows, deleteOverlap, nil, nil, func(h QueryHash) {
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, leftRows, deleteOverlap, nil, nil, func(h QueryHash) {
 		got[h] = struct{}{}
 	})
 	if _, ok := got[hash]; !ok || len(got) != 1 {
@@ -593,7 +593,7 @@ func TestCollectCandidatesMultiJoinRequiredRemoteFilterPathEdgesUseSameTransacti
 		},
 	}
 	clear(got)
-	collectJoinPathFilterDeltaCandidates(idx, 1, leftRows, rhsChangedOverlap, midCommitted, s, func(h QueryHash) {
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, leftRows, rhsChangedOverlap, midCommitted, s, func(h QueryHash) {
 		got[h] = struct{}{}
 	})
 	if _, ok := got[hash]; !ok || len(got) != 1 {
@@ -610,7 +610,7 @@ func TestCollectCandidatesMultiJoinRequiredRemoteFilterPathEdgesUseSameTransacti
 		},
 	}
 	clear(got)
-	collectJoinPathFilterDeltaCandidates(idx, 1, leftRows, midChangedOverlap, rhsCommitted, s, func(h QueryHash) {
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, leftRows, midChangedOverlap, rhsCommitted, s, func(h QueryHash) {
 		got[h] = struct{}{}
 	})
 	if _, ok := got[hash]; !ok || len(got) != 1 {

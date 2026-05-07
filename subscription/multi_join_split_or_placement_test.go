@@ -240,6 +240,22 @@ func nineTableDualIndexedMultiJoinTestSchema() *fakeSchema {
 	return s
 }
 
+func tenTableDualIndexedMultiJoinTestSchema() *fakeSchema {
+	s := nineTableDualIndexedMultiJoinTestSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(10, cols, 0, 1)
+	return s
+}
+
+func mustJoinPathTraversalEdge(t *testing.T, tables []TableID, fromCols, toCols []ColID, rhsFilterCol ColID) joinPathTraversalEdge {
+	t.Helper()
+	edge, ok := newJoinPathTraversalEdge(tables, fromCols, toCols, rhsFilterCol)
+	if !ok {
+		t.Fatalf("invalid test path edge: tables=%v from=%v to=%v", tables, fromCols, toCols)
+	}
+	return edge
+}
+
 func splitOrFourHopFilterMultiJoinPredicate() MultiJoin {
 	return MultiJoin{
 		Relations: []MultiJoinRelation{
@@ -513,6 +529,44 @@ func splitOrEightHopFilterMultiJoinPredicate() MultiJoin {
 				Table:  9,
 				Column: 0,
 				Alias:  8,
+				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper:  Bound{Unbounded: true},
+			},
+		},
+	}
+}
+
+func splitOrNineHopFilterMultiJoinPredicate() MultiJoin {
+	relations := make([]MultiJoinRelation, 10)
+	for i := range relations {
+		relations[i] = MultiJoinRelation{Table: TableID(i + 1), Alias: uint8(i)}
+	}
+	conditions := make([]MultiJoinCondition, 9)
+	conditions[0] = MultiJoinCondition{
+		Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
+		Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
+	}
+	for i := 1; i < len(conditions); i++ {
+		conditions[i] = MultiJoinCondition{
+			Left:  MultiJoinColumnRef{Relation: i, Table: TableID(i + 1), Column: 0, Alias: uint8(i)},
+			Right: MultiJoinColumnRef{Relation: i + 1, Table: TableID(i + 2), Column: 1, Alias: uint8(i + 1)},
+		}
+	}
+	return MultiJoin{
+		Relations:         relations,
+		Conditions:        conditions,
+		ProjectedRelation: 0,
+		Filter: Or{
+			Left: ColEq{
+				Table:  1,
+				Column: 0,
+				Alias:  0,
+				Value:  types.NewUint64(7),
+			},
+			Right: ColRange{
+				Table:  10,
+				Column: 0,
+				Alias:  9,
 				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
 				Upper:  Bound{Unbounded: true},
 			},
@@ -1566,7 +1620,7 @@ func TestCollectCandidatesMultiJoinSplitOrThreeHopPathEdgesUseSameTransactionRow
 			4: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(40)}}},
 		},
 	}
-	collectJoinPath3FilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
 	if len(candidates) != 0 {
 		t.Fatalf("rejected same-tx three-hop path candidates = %v, want empty", candidates)
 	}
@@ -1580,7 +1634,7 @@ func TestCollectCandidatesMultiJoinSplitOrThreeHopPathEdgesUseSameTransactionRow
 		},
 	}
 	clear(candidates)
-	collectJoinPath3FilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("all-changed same-tx three-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -1594,7 +1648,7 @@ func TestCollectCandidatesMultiJoinSplitOrThreeHopPathEdgesUseSameTransactionRow
 		},
 	}
 	clear(candidates)
-	collectJoinPath3FilterDeltaCandidates(idx, 1, changed, deleteOverlap, nil, nil, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, deleteOverlap, nil, nil, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("delete same-tx three-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -1610,7 +1664,7 @@ func TestCollectCandidatesMultiJoinSplitOrThreeHopPathEdgesUseSameTransactionRow
 		3: {{types.NewUint64(40), types.NewUint64(30)}},
 	})
 	clear(candidates)
-	collectJoinPath3FilterDeltaCandidates(idx, 1, changed, rhsChanged, midCommitted, s, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, rhsChanged, midCommitted, s, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("rhs-changed same-tx three-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -1626,7 +1680,7 @@ func TestCollectCandidatesMultiJoinSplitOrThreeHopPathEdgesUseSameTransactionRow
 		4: {{types.NewUint64(60), types.NewUint64(40)}},
 	})
 	clear(candidates)
-	collectJoinPath3FilterDeltaCandidates(idx, 1, changed, mid2Changed, outerCommitted, s, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, mid2Changed, outerCommitted, s, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("mid2-changed same-tx three-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -1642,7 +1696,7 @@ func TestCollectCandidatesMultiJoinSplitOrThreeHopPathEdgesUseSameTransactionRow
 		4: {{types.NewUint64(60), types.NewUint64(40)}},
 	})
 	clear(candidates)
-	collectJoinPath3FilterDeltaCandidates(idx, 1, changed, mid1Changed, tailCommitted, s, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, mid1Changed, tailCommitted, s, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("mid1-changed same-tx three-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -1747,7 +1801,7 @@ func TestCollectCandidatesMultiJoinSplitOrFourHopPathEdgesUseSameTransactionRows
 			5: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(50)}}},
 		},
 	}
-	collectJoinPath4FilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
 	if len(candidates) != 0 {
 		t.Fatalf("rejected same-tx four-hop path candidates = %v, want empty", candidates)
 	}
@@ -1762,7 +1816,7 @@ func TestCollectCandidatesMultiJoinSplitOrFourHopPathEdgesUseSameTransactionRows
 		},
 	}
 	clear(candidates)
-	collectJoinPath4FilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("all-changed same-tx four-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -1779,7 +1833,7 @@ func TestCollectCandidatesMultiJoinSplitOrFourHopPathEdgesUseSameTransactionRows
 		4: {{types.NewUint64(50), types.NewUint64(40)}},
 	})
 	clear(candidates)
-	collectJoinPath4FilterDeltaCandidates(idx, 1, changed, rhsChanged, midsCommitted, s, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, rhsChanged, midsCommitted, s, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("rhs-changed same-tx four-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -1892,7 +1946,7 @@ func TestCollectCandidatesMultiJoinSplitOrFiveHopPathEdgesUseSameTransactionRows
 			6: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(70)}}},
 		},
 	}
-	collectJoinPath5FilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
 	if len(candidates) != 0 {
 		t.Fatalf("rejected same-tx five-hop path candidates = %v, want empty", candidates)
 	}
@@ -1908,7 +1962,7 @@ func TestCollectCandidatesMultiJoinSplitOrFiveHopPathEdgesUseSameTransactionRows
 		},
 	}
 	clear(candidates)
-	collectJoinPath5FilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("all-changed same-tx five-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -1926,7 +1980,7 @@ func TestCollectCandidatesMultiJoinSplitOrFiveHopPathEdgesUseSameTransactionRows
 		5: {{types.NewUint64(70), types.NewUint64(50)}},
 	})
 	clear(candidates)
-	collectJoinPath5FilterDeltaCandidates(idx, 1, changed, rhsChanged, midsCommitted, s, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, rhsChanged, midsCommitted, s, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("rhs-changed same-tx five-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -1944,7 +1998,7 @@ func TestCollectCandidatesMultiJoinSplitOrFiveHopPathEdgesUseSameTransactionRows
 		6: {{types.NewUint64(60), types.NewUint64(70)}},
 	})
 	clear(candidates)
-	collectJoinPath5FilterDeltaCandidates(idx, 1, changed, firstMidChanged, tailCommitted, s, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, firstMidChanged, tailCommitted, s, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("first-mid changed same-tx five-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -2063,7 +2117,7 @@ func TestCollectCandidatesMultiJoinSplitOrSixHopPathEdgesUseSameTransactionRows(
 			7: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(80)}}},
 		},
 	}
-	collectJoinPath6FilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
 	if len(candidates) != 0 {
 		t.Fatalf("rejected same-tx six-hop path candidates = %v, want empty", candidates)
 	}
@@ -2080,7 +2134,7 @@ func TestCollectCandidatesMultiJoinSplitOrSixHopPathEdgesUseSameTransactionRows(
 		},
 	}
 	clear(candidates)
-	collectJoinPath6FilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("all-changed same-tx six-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -2099,7 +2153,7 @@ func TestCollectCandidatesMultiJoinSplitOrSixHopPathEdgesUseSameTransactionRows(
 		6: {{types.NewUint64(80), types.NewUint64(70)}},
 	})
 	clear(candidates)
-	collectJoinPath6FilterDeltaCandidates(idx, 1, changed, rhsChanged, midsCommitted, s, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, rhsChanged, midsCommitted, s, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("rhs-changed same-tx six-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -2118,7 +2172,7 @@ func TestCollectCandidatesMultiJoinSplitOrSixHopPathEdgesUseSameTransactionRows(
 		7: {{types.NewUint64(60), types.NewUint64(80)}},
 	})
 	clear(candidates)
-	collectJoinPath6FilterDeltaCandidates(idx, 1, changed, firstMidChanged, tailCommitted, s, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, firstMidChanged, tailCommitted, s, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("first-mid changed same-tx six-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -2243,7 +2297,7 @@ func TestCollectCandidatesMultiJoinSplitOrSevenHopPathEdgesUseSameTransactionRow
 			8: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(90)}}},
 		},
 	}
-	collectJoinPath7FilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
 	if len(candidates) != 0 {
 		t.Fatalf("rejected same-tx seven-hop path candidates = %v, want empty", candidates)
 	}
@@ -2261,7 +2315,7 @@ func TestCollectCandidatesMultiJoinSplitOrSevenHopPathEdgesUseSameTransactionRow
 		},
 	}
 	clear(candidates)
-	collectJoinPath7FilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("all-changed same-tx seven-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -2281,7 +2335,7 @@ func TestCollectCandidatesMultiJoinSplitOrSevenHopPathEdgesUseSameTransactionRow
 		7: {{types.NewUint64(90), types.NewUint64(80)}},
 	})
 	clear(candidates)
-	collectJoinPath7FilterDeltaCandidates(idx, 1, changed, rhsChanged, midsCommitted, s, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, rhsChanged, midsCommitted, s, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("rhs-changed same-tx seven-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -2301,7 +2355,7 @@ func TestCollectCandidatesMultiJoinSplitOrSevenHopPathEdgesUseSameTransactionRow
 		8: {{types.NewUint64(60), types.NewUint64(90)}},
 	})
 	clear(candidates)
-	collectJoinPath7FilterDeltaCandidates(idx, 1, changed, firstMidChanged, tailCommitted, s, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, firstMidChanged, tailCommitted, s, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("first-mid changed same-tx seven-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -2327,6 +2381,15 @@ func TestMultiJoinPlacementSplitOrEightHopUsesPath8Edges(t *testing.T) {
 	}
 	if got := idx.JoinRangePath8Edge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("eight-hop path range edge placement = %v, want [%v]", got, hash)
+	}
+	leftTraversalEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3, 4, 5, 6, 7, 8, 9},
+		[]ColID{1, 0, 0, 0, 0, 0, 0, 0},
+		[]ColID{1, 1, 1, 1, 1, 1, 1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(leftTraversalEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("generic eight-hop path range edge placement = %v, want [%v]", got, hash)
 	}
 	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("eight-hop endpoint local placement = %v, want [%v]", got, hash)
@@ -2432,7 +2495,7 @@ func TestCollectCandidatesMultiJoinSplitOrEightHopPathEdgesUseSameTransactionRow
 			9: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(100)}}},
 		},
 	}
-	collectJoinPath8FilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
 	if len(candidates) != 0 {
 		t.Fatalf("rejected same-tx eight-hop path candidates = %v, want empty", candidates)
 	}
@@ -2451,7 +2514,7 @@ func TestCollectCandidatesMultiJoinSplitOrEightHopPathEdgesUseSameTransactionRow
 		},
 	}
 	clear(candidates)
-	collectJoinPath8FilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("all-changed same-tx eight-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -2472,7 +2535,7 @@ func TestCollectCandidatesMultiJoinSplitOrEightHopPathEdgesUseSameTransactionRow
 		8: {{types.NewUint64(100), types.NewUint64(90)}},
 	})
 	clear(candidates)
-	collectJoinPath8FilterDeltaCandidates(idx, 1, changed, rhsChanged, midsCommitted, s, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, rhsChanged, midsCommitted, s, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("rhs-changed same-tx eight-hop path candidates = %v, want only %v", candidates, hash)
 	}
@@ -2493,9 +2556,160 @@ func TestCollectCandidatesMultiJoinSplitOrEightHopPathEdgesUseSameTransactionRow
 		9: {{types.NewUint64(60), types.NewUint64(100)}},
 	})
 	clear(candidates)
-	collectJoinPath8FilterDeltaCandidates(idx, 1, changed, firstMidChanged, tailCommitted, s, add)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, firstMidChanged, tailCommitted, s, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("first-mid changed same-tx eight-hop path candidates = %v, want only %v", candidates, hash)
+	}
+}
+
+func TestMultiJoinPlacementSplitOrNineHopUsesGenericPathEdges(t *testing.T) {
+	s := tenTableDualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrNineHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	leftEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+		[]ColID{1, 0, 0, 0, 0, 0, 0, 0, 0},
+		[]ColID{1, 1, 1, 1, 1, 1, 1, 1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(leftEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("nine-hop generic path range edge placement = %v, want [%v]", got, hash)
+	}
+	rightEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{10, 9, 8, 7, 6, 5, 4, 3, 2, 1},
+		[]ColID{1, 1, 1, 1, 1, 1, 1, 1, 1},
+		[]ColID{0, 0, 0, 0, 0, 0, 0, 0, 1},
+		0,
+	)
+	if got := idx.joinPathEdge.Lookup(rightEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("nine-hop generic path value edge placement = %v, want [%v]", got, hash)
+	}
+	for table := TableID(1); table <= 10; table++ {
+		if got := idx.Table.Lookup(table); len(got) != 0 {
+			t.Fatalf("TableIndex[%d] = %v, want empty for covered nine-hop path", table, got)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrNineHopPathEdgesUseCommittedRows(t *testing.T) {
+	s := tenTableDualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrNineHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2:  {{types.NewUint64(30), types.NewUint64(20)}},
+		3:  {{types.NewUint64(40), types.NewUint64(30)}},
+		4:  {{types.NewUint64(50), types.NewUint64(40)}},
+		5:  {{types.NewUint64(70), types.NewUint64(50)}},
+		6:  {{types.NewUint64(80), types.NewUint64(70)}},
+		7:  {{types.NewUint64(90), types.NewUint64(80)}},
+		8:  {{types.NewUint64(100), types.NewUint64(90)}},
+		9:  {{types.NewUint64(110), types.NewUint64(100)}},
+		10: {{types.NewUint64(40), types.NewUint64(110)}},
+	})
+	if got := CollectCandidatesForTable(idx, 1, changed, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched nine-hop path candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2:  {{types.NewUint64(30), types.NewUint64(20)}},
+		3:  {{types.NewUint64(40), types.NewUint64(30)}},
+		4:  {{types.NewUint64(50), types.NewUint64(40)}},
+		5:  {{types.NewUint64(70), types.NewUint64(50)}},
+		6:  {{types.NewUint64(80), types.NewUint64(70)}},
+		7:  {{types.NewUint64(90), types.NewUint64(80)}},
+		8:  {{types.NewUint64(100), types.NewUint64(90)}},
+		9:  {{types.NewUint64(110), types.NewUint64(100)}},
+		10: {{types.NewUint64(60), types.NewUint64(110)}},
+	})
+	got := CollectCandidatesForTable(idx, 1, changed, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("matching nine-hop path candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrNineHopPathEdgesUseSameTransactionRows(t *testing.T) {
+	s := tenTableDualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrNineHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+	candidates := make(map[QueryHash]struct{})
+	add := func(h QueryHash) {
+		candidates[h] = struct{}{}
+	}
+
+	rejected := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			2:  {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3:  {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(30)}}},
+			4:  {Inserts: []types.ProductValue{{types.NewUint64(50), types.NewUint64(40)}}},
+			5:  {Inserts: []types.ProductValue{{types.NewUint64(70), types.NewUint64(50)}}},
+			6:  {Inserts: []types.ProductValue{{types.NewUint64(80), types.NewUint64(70)}}},
+			7:  {Inserts: []types.ProductValue{{types.NewUint64(90), types.NewUint64(80)}}},
+			8:  {Inserts: []types.ProductValue{{types.NewUint64(100), types.NewUint64(90)}}},
+			9:  {Inserts: []types.ProductValue{{types.NewUint64(110), types.NewUint64(100)}}},
+			10: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(110)}}},
+		},
+	}
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
+	if len(candidates) != 0 {
+		t.Fatalf("rejected same-tx nine-hop path candidates = %v, want empty", candidates)
+	}
+
+	allChangedOverlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			2:  {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3:  {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(30)}}},
+			4:  {Inserts: []types.ProductValue{{types.NewUint64(50), types.NewUint64(40)}}},
+			5:  {Inserts: []types.ProductValue{{types.NewUint64(70), types.NewUint64(50)}}},
+			6:  {Inserts: []types.ProductValue{{types.NewUint64(80), types.NewUint64(70)}}},
+			7:  {Inserts: []types.ProductValue{{types.NewUint64(90), types.NewUint64(80)}}},
+			8:  {Inserts: []types.ProductValue{{types.NewUint64(100), types.NewUint64(90)}}},
+			9:  {Inserts: []types.ProductValue{{types.NewUint64(110), types.NewUint64(100)}}},
+			10: {Inserts: []types.ProductValue{{types.NewUint64(60), types.NewUint64(110)}}},
+		},
+	}
+	clear(candidates)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("all-changed same-tx nine-hop path candidates = %v, want only %v", candidates, hash)
+	}
+
+	firstMidChanged := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+		},
+	}
+	tailCommitted := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		3:  {{types.NewUint64(40), types.NewUint64(30)}},
+		4:  {{types.NewUint64(50), types.NewUint64(40)}},
+		5:  {{types.NewUint64(70), types.NewUint64(50)}},
+		6:  {{types.NewUint64(80), types.NewUint64(70)}},
+		7:  {{types.NewUint64(90), types.NewUint64(80)}},
+		8:  {{types.NewUint64(100), types.NewUint64(90)}},
+		9:  {{types.NewUint64(110), types.NewUint64(100)}},
+		10: {{types.NewUint64(60), types.NewUint64(110)}},
+	})
+	clear(candidates)
+	collectJoinPathTraversalFilterDeltaCandidates(idx, 1, changed, firstMidChanged, tailCommitted, s, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("first-mid changed same-tx nine-hop path candidates = %v, want only %v", candidates, hash)
 	}
 }
 
