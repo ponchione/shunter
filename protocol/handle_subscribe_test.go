@@ -2732,6 +2732,67 @@ func TestCompileRawSubscribeAdmissionPlanRecordsPerQueryState(t *testing.T) {
 	}
 }
 
+func TestCompileRawSubscribeAdmissionPlanRecordsIndexedJoinGraph(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	tID, _, ok := eng.Registry().TableByName("t")
+	if !ok {
+		t.Fatal("schema missing table t")
+	}
+	sID, _, ok := eng.Registry().TableByName("s")
+	if !ok {
+		t.Fatal("schema missing table s")
+	}
+
+	plan, failedSQL, err := compileRawSubscribeAdmissionPlan(
+		[]string{"SELECT t.* FROM t JOIN s ON t.u32 = s.u32"},
+		registrySchemaLookup{reg: eng.Registry()},
+		types.CallerContext{},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("compileRawSubscribeAdmissionPlan returned error for %q: %v", failedSQL, err)
+	}
+	if len(plan.queries) != 1 {
+		t.Fatalf("len(plan.queries) = %d, want 1", len(plan.queries))
+	}
+	query := plan.queries[0]
+	if len(query.relations) != 2 {
+		t.Fatalf("len(relations) = %d, want 2", len(query.relations))
+	}
+	if query.relations[0] != (rawSubscribeAdmissionRelation{relation: 0, table: tID}) ||
+		query.relations[1] != (rawSubscribeAdmissionRelation{relation: 1, table: sID}) {
+		t.Fatalf("relations = %+v, want t then s relation instances", query.relations)
+	}
+	if len(query.joinConditions) != 1 {
+		t.Fatalf("len(joinConditions) = %d, want 1", len(query.joinConditions))
+	}
+	condition := query.joinConditions[0]
+	wantLeft := rawSubscribeAdmissionColumnRef{relation: 0, table: tID, column: 1, indexed: true}
+	wantRight := rawSubscribeAdmissionColumnRef{relation: 1, table: sID, column: 1, indexed: false}
+	if condition.left != wantLeft || condition.right != wantRight {
+		t.Fatalf("join condition = %+v, want %+v = %+v", condition, wantLeft, wantRight)
+	}
+}
+
 func TestHandleSubscribeMultiSuccess(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockSubExecutor{}
