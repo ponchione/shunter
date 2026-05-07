@@ -1188,6 +1188,125 @@ func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAndLiteralFilterAccep
 	}
 }
 
+func TestHandleSubscribeSingle_CrossJoinAdmissionMatrix(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_orders_product_id", Columns: []string{"product_id"}}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "enabled", Type: schema.KindBool},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	_, orders, ok := eng.Registry().TableByName("Orders")
+	if !ok {
+		t.Fatal("Orders table missing from registry")
+	}
+	_, inventory, ok := eng.Registry().TableByName("Inventory")
+	if !ok {
+		t.Fatal("Inventory table missing from registry")
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	cases := []struct {
+		name          string
+		sqlText       string
+		wantPredicate string
+		wantError     string
+	}{
+		{
+			name:          "qualified_projection_without_where",
+			sqlText:       "SELECT o.* FROM Orders o JOIN Inventory product",
+			wantPredicate: "CrossJoin",
+		},
+		{
+			name:          "qualified_column_equality_where",
+			sqlText:       "SELECT o.* FROM Orders o JOIN Inventory product WHERE o.product_id = product.id",
+			wantPredicate: "Join",
+		},
+		{
+			name:      "unqualified_star_projection_rejected",
+			sqlText:   "SELECT * FROM Orders o JOIN Inventory product",
+			wantError: "SELECT * is not supported for joins",
+		},
+		{
+			name:      "literal_only_where_rejected",
+			sqlText:   "SELECT o.* FROM Orders o JOIN Inventory product WHERE product.enabled = TRUE",
+			wantError: "cross join WHERE only supports qualified column equality",
+		},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			executor := &mockSubExecutor{}
+			msg := &SubscribeSingleMsg{
+				RequestID:   uint32(300 + i),
+				QueryID:     uint32(400 + i),
+				QueryString: tc.sqlText,
+			}
+
+			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+			if tc.wantError != "" {
+				tag, decoded := drainServerMsgEventually(t, conn)
+				if tag != TagSubscriptionError {
+					t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+				}
+				se := decoded.(SubscriptionError)
+				requireOptionalUint32(t, se.RequestID, msg.RequestID, "RequestID")
+				requireOptionalUint32(t, se.QueryID, msg.QueryID, "QueryID")
+				want := tc.wantError + ", executing: `" + tc.sqlText + "`"
+				if se.Error != want {
+					t.Fatalf("Error = %q, want %q", se.Error, want)
+				}
+				if req := executor.getRegisterSetReq(); req != nil {
+					t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection", req)
+				}
+				return
+			}
+
+			requireNoSubscribeFrame(t, conn)
+			req := executor.getRegisterSetReq()
+			if req == nil || len(req.Predicates) != 1 {
+				t.Fatalf("RegisterSubscriptionSet request = %+v, want one predicate", req)
+			}
+			switch tc.wantPredicate {
+			case "CrossJoin":
+				pred, ok := req.Predicates[0].(subscription.CrossJoin)
+				if !ok {
+					t.Fatalf("predicate = %T, want subscription.CrossJoin", req.Predicates[0])
+				}
+				if pred.Left != orders.ID || pred.Right != inventory.ID || pred.ProjectRight {
+					t.Fatalf("cross join predicate = %+v, want Orders -> Inventory projecting left", pred)
+				}
+			case "Join":
+				pred, ok := req.Predicates[0].(subscription.Join)
+				if !ok {
+					t.Fatalf("predicate = %T, want subscription.Join", req.Predicates[0])
+				}
+				if pred.Left != orders.ID || pred.Right != inventory.ID ||
+					pred.LeftCol != 1 || pred.RightCol != 0 || pred.ProjectRight || pred.Filter != nil {
+					t.Fatalf("join predicate = %+v, want Orders.product_id = Inventory.id projecting left with no filter", pred)
+				}
+			default:
+				t.Fatalf("unknown wantPredicate %q", tc.wantPredicate)
+			}
+		})
+	}
+}
+
 // TestHandleSubscribeSingle_JoinCountAggregateOnCrossJoinWhereStillRejected
 // pins subscribe rejection for cross-join WHERE plus COUNT.
 func TestHandleSubscribeSingle_JoinCountAggregateOnCrossJoinWhereStillRejected(t *testing.T) {

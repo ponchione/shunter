@@ -42,7 +42,7 @@ Legend:
 | Two-table indexed join | supported when a join column is indexed | supported | `TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAccepted`, `TestRegisterJoinBootstrapFallsBackToLeftIndex`, `TestEvalJoinSubscription`, `TestProtocolDeclaredViewMultiWayJoinSendsDeltas` | done |
 | Two-table remote value filter | supported | supported | `TestCollectCandidatesJoinValueFilterEdgeUsesDeltaOppositeRows`, `TestPlaceJoinWithOppositeSideMixedOrFilterAddsValueAndRangeEdges` | done |
 | Two-table remote range filter | supported | supported | `TestCollectCandidatesJoinRangeFilterEdgeUsesDeltaOppositeRows`, `TestCollectCandidatesJoinMixedOrRangeEdgePrunesMismatch` | done |
-| Cross join | supported for table-shaped qualified projections; unsupported predicate forms reject before registration | supported, including aggregate views | raw: `TestHandleSubscribeSingle_CrossJoinProjection`, `TestHandleSubscribeSingle_CrossJoinWhereFalseStillRejected`; declared: `TestSubscribeViewCrossJoinAggregateInitialRows`, `TestProtocolDeclaredViewCrossJoinSumAggregateSendsInitialRowsAndDeltas` | partial: raw cross-join acceptance rules need one consolidated admission section |
+| Cross join | supported for qualified table-shaped projections and qualified column-equality `WHERE`; unsupported raw shapes reject before registration | supported, including aggregate views | raw: `TestHandleSubscribeSingle_CrossJoinAdmissionMatrix`; declared: `TestSubscribeViewCrossJoinAggregateInitialRows`, `TestProtocolDeclaredViewCrossJoinSumAggregateSendsInitialRowsAndDeltas` | done |
 | Multi-way key-preserving join | supported when indexed and covered | supported | `TestDeclaredViewMultiWayJoinSubscribes`, `TestMultiJoinRegisterInitialRowsAndDeltas`, `TestProtocolDeclaredViewMultiWayJoinSendsDeltas` | done |
 | Multi-way non-key-preserving path | supported when indexed and within traversal limits | supported under same constraints | `TestJoinPathTraversalIndexAddLookup`, `TestJoinRangePathTraversalIndexAddLookup`, `TestCollectCandidatesMultiJoinAndWrappedSplitOrAllRemoteRangeBranchesUseSameTransactionRows` | partial: add matrix-linked upper-bound tests for `joinPathTraversalMaxHops` |
 | Repeated table aliases | supported when aliases are explicit and covered | supported | `TestEvalSelfEquiJoinSubscription`, `TestEvalSelfEquiJoinWithAliasedWhere`, `TestQueryHashSelfJoinFilterChildOrderCanonicalized`, `TestDeclaredViewMultiWayJoinAppliesVisibilityAfterPermissionSucceeds` | done |
@@ -58,9 +58,6 @@ Legend:
 
 ## Missing Test Backlog
 
-- Consolidate raw cross-join admission tests into one named table that separates
-  accepted table-shaped column-equality joins from rejected unconstrained cross
-  joins.
 - Add generic traversal upper-bound tests at `joinPathTraversalMaxHops` and
   beyond-limit rejection/fallback tests.
 - Fill generated TypeScript live-read helper rows after the SDK runtime lands.
