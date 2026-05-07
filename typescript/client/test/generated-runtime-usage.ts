@@ -5,6 +5,7 @@ import {
   encodeReducerCallRequest,
   encodeSubscribeSingleRequest,
   encodeTableSubscriptionRequest,
+  decodeRowList,
   ShunterAuthError,
   ShunterProtocolMismatchError,
   createShunterClient,
@@ -18,6 +19,7 @@ import type {
   EncodedSubscribeSingleRequest,
   EncodedTableSubscriptionRequest,
   ProtocolMetadata,
+  RawRowList,
   RawSubscriptionUpdate,
   RuntimeBindings,
   ShunterErrorKind,
@@ -121,10 +123,17 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const encodedTableFrame: Uint8Array = encodedTableRequest.frame;
   const rawUpdateHandler = (update: RawSubscriptionUpdate): void => {
     const rawInserts: Uint8Array = update.inserts;
+    const insertedRows: RawRowList = decodeRowList(rawInserts);
+    const insertedRowCount: number = insertedRows.rows.length;
+    void insertedRowCount;
     void rawInserts;
   };
   const rawRowsHandler = (message: SubscribeSingleAppliedMessage): void => {
     const rawRows: Uint8Array = message.rows;
+    const rowBytes: readonly Uint8Array[] = message.rowBytes;
+    const decodedRows: RawRowList = decodeRowList(rawRows);
+    void rowBytes;
+    void decodedRows;
     void rawRows;
   };
 

@@ -1555,6 +1555,7 @@ export function decodeTransactionUpdateLightFrame(data: unknown): TransactionUpd
 export interface OneOffQueryTable {
   readonly tableName: string;
   readonly rows: Uint8Array;
+  readonly rowBytes: readonly Uint8Array[];
 }
 
 export interface OneOffQueryResponseMessage {
@@ -1595,12 +1596,45 @@ export function decodeOneOffQueryResponseFrame(data: unknown): OneOffQueryRespon
   };
 }
 
+export interface RawRowList {
+  readonly rows: readonly Uint8Array[];
+  readonly rawBytes: Uint8Array;
+}
+
+export function decodeRowList(data: unknown): RawRowList {
+  const rowList = binaryBytes(data, "encoded RowList");
+  let offset = 0;
+  const [count, countOffset] = readUint32LE(rowList, offset, "RowList row count");
+  offset = countOffset;
+  if (count > Math.floor((rowList.length - offset) / 4)) {
+    throw new ShunterProtocolError("Malformed RowList: row count exceeds remaining bytes.");
+  }
+  const rows: Uint8Array[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const [row, rowOffset] = readBytes(rowList, offset, `RowList row ${i}`);
+    offset = rowOffset;
+    rows.push(row);
+  }
+  if (offset !== rowList.length) {
+    throw new ShunterProtocolError("Malformed RowList: trailing bytes.");
+  }
+  return {
+    rows,
+    rawBytes: new Uint8Array(rowList),
+  };
+}
+
+function decodeEnvelopeRowList(rows: Uint8Array): readonly Uint8Array[] {
+  return rows.length === 0 ? [] : decodeRowList(rows).rows;
+}
+
 export interface SubscribeSingleAppliedMessage {
   readonly requestId: RequestID;
   readonly totalHostExecutionDurationMicros: bigint;
   readonly queryId: QueryID;
   readonly tableName: string;
   readonly rows: Uint8Array;
+  readonly rowBytes: readonly Uint8Array[];
   readonly rawFrame: Uint8Array;
 }
 
@@ -1610,6 +1644,7 @@ export interface UnsubscribeSingleAppliedMessage {
   readonly queryId: QueryID;
   readonly hasRows: boolean;
   readonly rows?: Uint8Array;
+  readonly rowBytes?: readonly Uint8Array[];
   readonly rawFrame: Uint8Array;
 }
 
@@ -1650,6 +1685,7 @@ export function decodeSubscribeSingleAppliedFrame(data: unknown): SubscribeSingl
   offset = tableOffset;
   const [rows, rowsOffset] = readBytes(frame, offset, "SubscribeSingleApplied rows");
   offset = rowsOffset;
+  const rowBytes = decodeEnvelopeRowList(rows);
   if (offset !== frame.length) {
     throw new ShunterProtocolError("Malformed SubscribeSingleApplied: trailing bytes.");
   }
@@ -1659,6 +1695,7 @@ export function decodeSubscribeSingleAppliedFrame(data: unknown): SubscribeSingl
     queryId,
     tableName,
     rows,
+    rowBytes,
     rawFrame: new Uint8Array(frame),
   };
 }
@@ -1682,9 +1719,11 @@ export function decodeUnsubscribeSingleAppliedFrame(data: unknown): UnsubscribeS
   const [hasRows, rowsTagOffset] = readBooleanTag(frame, offset, "UnsubscribeSingleApplied has_rows");
   offset = rowsTagOffset;
   let rows: Uint8Array | undefined;
+  let rowBytes: readonly Uint8Array[] | undefined;
   if (hasRows) {
     const [decodedRows, rowsOffset] = readBytes(frame, offset, "UnsubscribeSingleApplied rows");
     rows = decodedRows;
+    rowBytes = decodeEnvelopeRowList(decodedRows);
     offset = rowsOffset;
   }
   if (offset !== frame.length) {
@@ -1696,6 +1735,7 @@ export function decodeUnsubscribeSingleAppliedFrame(data: unknown): UnsubscribeS
     queryId,
     hasRows,
     ...(rows === undefined ? {} : { rows }),
+    ...(rowBytes === undefined ? {} : { rowBytes }),
     rawFrame: new Uint8Array(frame),
   };
 }
@@ -1749,7 +1789,7 @@ export function decodeSubscriptionErrorFrame(data: unknown): SubscriptionErrorMe
   };
 }
 
-function frameBytes(data: unknown): Uint8Array {
+function binaryBytes(data: unknown, label: string): Uint8Array {
   if (data instanceof Uint8Array) {
     return data;
   }
@@ -1759,7 +1799,11 @@ function frameBytes(data: unknown): Uint8Array {
   if (ArrayBuffer.isView(data)) {
     return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   }
-  throw new ShunterProtocolError("Expected binary WebSocket frame.");
+  throw new ShunterProtocolError(`Expected ${label}.`);
+}
+
+function frameBytes(data: unknown): Uint8Array {
+  return binaryBytes(data, "binary WebSocket frame");
 }
 
 function readUint32LE(frame: Uint8Array, offset: number, label: string): [number, number] {
@@ -1939,7 +1983,7 @@ function readOneOffQueryTables(frame: Uint8Array, offset: number): [OneOffQueryT
     offset = tableOffset;
     const [rows, rowsOffset] = readBytes(frame, offset, "OneOffQueryResponse rows");
     offset = rowsOffset;
-    tables.push({ tableName, rows });
+    tables.push({ tableName, rows, rowBytes: decodeEnvelopeRowList(rows) });
   }
   return [tables, offset];
 }

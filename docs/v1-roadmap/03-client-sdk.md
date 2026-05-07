@@ -42,9 +42,12 @@ unsubscribe send path for `UnsubscribeSingle`. Accepted subscriptions are now
 registered for raw `TransactionUpdate` and `TransactionUpdateLight` callback
 delivery, and unsubscribe promises wait for the matching
 `UnsubscribeSingleApplied`/`UnsubscribeMultiApplied` or `SubscriptionError`.
-It does not yet implement typed reducer argument/result encoding, typed
-declared query/view/table row decoding, typed row callbacks, subscription cache
-behavior, auth refresh, or reconnect policy.
+It also has a raw RowList decoder for the live server row-batch payload shape,
+with decoded raw per-row byte arrays on one-off query table results, table
+initial rows, and optional table unsubscribe rows. It does not yet implement
+typed reducer argument/result encoding, schema-aware declared query/view/table
+row decoding, typed row callbacks, subscription cache behavior, auth refresh,
+or reconnect policy.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
 fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
@@ -152,16 +155,20 @@ Completed or partially complete:
 - Correlate `UnsubscribeSingleApplied`, `UnsubscribeMultiApplied`, and
   matching `SubscriptionError` frames so idempotent unsubscribe promises settle
   on server acknowledgement instead of resolving immediately after send.
+- Add a raw RowList decoder for Shunter's live
+  `[row_count][row_len,row_data...]` payload shape and expose raw per-row byte
+  arrays on decoded one-off query table results, table initial rows, and
+  optional table unsubscribe rows.
 
 Remaining:
 
 - Decide and implement typed reducer argument/result encoding conventions
   beyond the current raw `Uint8Array` request path.
 - Implement typed reducer result decoding beyond the current raw
-  `TransactionUpdate` frame result, declared-query row decoding, declared
-  view/table typed row callback delivery, and subscription cache behavior on
-  top of the WebSocket lifecycle shell.
-- Implement row decoding for declared query/view/table results and
+  `TransactionUpdate` frame result, schema-aware declared-query row decoding,
+  declared view/table typed row callback delivery, and subscription cache
+  behavior on top of the WebSocket lifecycle shell.
+- Implement schema-aware row decoding for declared query/view/table results and
   subscription updates.
 - Implement reconnect, auth refresh, resubscription, and cache behavior.
 - Add client tests for:

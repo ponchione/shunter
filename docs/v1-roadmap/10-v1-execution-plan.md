@@ -189,8 +189,8 @@ compatibility helpers, generated import goldens, subscription handle primitive,
 minimal WebSocket lifecycle shell, initial IdentityToken decoding, and raw-byte
 reducer, declared-query, and declared-view subscribe request/response
 foundations added; raw table subscription request/response foundation added;
-raw subscription update callback plumbing added; typed row decoding/cache
-behavior and reconnect behavior remain.
+raw subscription update callback plumbing and raw RowList splitting added;
+schema-aware typed row decoding/cache behavior and reconnect behavior remain.
 
 Tasks:
 
@@ -200,17 +200,17 @@ Tasks:
   target before generating more helpers.
 - Decide typed reducer argument/result encoding conventions beyond the current
   raw `Uint8Array` request path.
-- Build typed reducer result decoding, declared query/view/table row decoding,
-  subscription cache behavior, typed row callback delivery, and unsubscribe
-  acknowledgement integration with managed handles on top of the minimal
-  WebSocket lifecycle shell.
+- Build typed reducer result decoding, schema-aware declared query/view/table
+  row decoding, subscription cache behavior, typed row callback delivery, and
+  unsubscribe acknowledgement integration with managed handles on top of the
+  minimal WebSocket lifecycle shell.
 - Wire the managed subscription handle primitive into real server subscribe and
   unsubscribe responses beyond the current raw callback and ack paths.
 - Add tests for connection transitions, auth failure, reducer/query/view
   success and failure, initial snapshots, deltas, unsubscribe, reconnect, and
   mismatch handling.
-- Implement row decoding and local cache primitives for declared query/view and
-  table subscription results.
+- Implement schema-aware row decoding and local cache primitives for declared
+  query/view and table subscription results.
 - Wire the external canary app client through the SDK only.
 
 Exit criteria:

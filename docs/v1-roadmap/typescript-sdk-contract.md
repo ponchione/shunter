@@ -48,9 +48,12 @@ Accepted subscriptions are registered for raw callback delivery from initial
 subscribe responses, caller-bound committed `TransactionUpdate` frames, and
 `TransactionUpdateLight` frames. Unsubscribe promises wait for matching
 `UnsubscribeSingleApplied`/`UnsubscribeMultiApplied` or `SubscriptionError`
-frames. Typed reducer argument/result encoding, declared query/view/table row
-decoding, typed row callbacks, subscription cache behavior, reconnect policy,
-and local cache implementation remain open.
+frames. The runtime also exposes `decodeRowList()` for the live RowList
+payload shape and includes raw per-row byte arrays on decoded one-off query
+tables, table initial rows, and optional table unsubscribe rows. Typed reducer
+argument/result encoding, schema-aware declared query/view/table row decoding,
+typed row callbacks, subscription cache behavior, reconnect policy, and local
+cache implementation remain open.
 
 ## Runtime API
 
@@ -138,8 +141,9 @@ Current foundation: the runtime can encode the named `DeclaredQueryMsg` shape
 used by the Go protocol and `createShunterClient().runDeclaredQuery(...)` waits
 for a matching `OneOffQueryResponse`. Successful responses resolve with the raw
 response frame; server error responses reject with a structured validation
-error. Typed row decoding and table/view metadata extraction remain required v1
-follow-ups.
+error. Decoded `OneOffQueryResponse` helpers split RowList payloads into raw
+per-row bytes, but typed row decoding and table/view metadata extraction remain
+required v1 follow-ups.
 
 Query calls should return:
 
@@ -167,6 +171,9 @@ from the initial response and later delta frames. The unsubscribe helper does
 not resolve until `UnsubscribeMultiApplied` or a matching `SubscriptionError`.
 It does not yet update local cache state, decode initial rows, or apply typed
 row deltas.
+Raw update callback consumers can call `decodeRowList()` on live insert/delete
+payloads when they need per-row byte slices before generated schema codecs
+exist.
 
 Current table foundation: the runtime can encode a raw `SubscribeSingle` query
 string and `createShunterClient().subscribeTable(...)` builds a quoted
@@ -174,11 +181,12 @@ whole-table `SELECT * FROM "<table>"` query. The method waits for the matching
 `SubscribeSingleApplied` response, rejects matching `SubscriptionError`
 responses, and returns an idempotent unsubscribe function that sends
 `UnsubscribeSingle`. The runtime can route the accepted raw row-list bytes to a
-table-only `onRawRows` callback and raw delta bytes to `onRawUpdate`. It does
-not resolve the unsubscribe helper until `UnsubscribeSingleApplied` or a
-matching `SubscriptionError`. It does not yet decode the initial row list, call
-the typed table row callback, update local cache state, or apply typed row
-deltas.
+table-only `onRawRows` callback and raw delta bytes to `onRawUpdate`. It also
+splits table initial and optional unsubscribe RowList payloads into raw per-row
+bytes on the decoded message envelopes. It does not resolve the unsubscribe
+helper until `UnsubscribeSingleApplied` or a matching `SubscriptionError`. It
+does not yet call the typed table row callback, perform schema-aware row
+decoding, update local cache state, or apply typed row deltas.
 
 Subscription handles must provide:
 

@@ -27,6 +27,7 @@ import {
   createSubscriptionHandle,
   decodeIdentityTokenFrame,
   decodeOneOffQueryResponseFrame,
+  decodeRowList,
   decodeSubscribeSingleAppliedFrame,
   decodeSubscribeMultiAppliedFrame,
   decodeSubscriptionErrorFrame,
@@ -287,6 +288,14 @@ assert.equal(committedUpdate.status.updates.length, 1);
 assert.equal(committedUpdate.status.updates[0].queryId, 0x01020304);
 assert.equal(committedUpdate.status.updates[0].tableName, "users");
 assert.deepEqual([...committedUpdate.status.updates[0].inserts.slice(0, 4)], [0x02, 0x00, 0x00, 0x00]);
+assert.deepEqual(
+  committedUpdate.status.updates[0].inserts,
+  decodeRowList(committedUpdate.status.updates[0].inserts).rawBytes,
+);
+assert.deepEqual(
+  decodeRowList(committedUpdate.status.updates[0].inserts).rows.map((row) => [...row]),
+  [[1, 2], [3]],
+);
 assert.equal(committedUpdate.timestamp, 0x0102030405060708n);
 assert.deepEqual([...committedUpdate.callerIdentity.slice(0, 3)], [0x20, 0x21, 0x22]);
 assert.deepEqual([...committedUpdate.callerConnectionId.slice(0, 3)], [0xa0, 0xa1, 0xa2]);
@@ -315,6 +324,10 @@ assert.equal(lightUpdate.requestId, 0x31323334);
 assert.equal(lightUpdate.updates.length, 1);
 assert.equal(lightUpdate.updates[0].queryId, 0x01020304);
 assert.equal(lightUpdate.updates[0].tableName, "users");
+assert.deepEqual(
+  decodeRowList(lightUpdate.updates[0].inserts).rows.map((row) => [...row]),
+  [[1, 2], [3]],
+);
 
 const oneOffSuccessFrame = bytesFromHex(
   "0602000000010200010000000500000075736572730f0000000200000002000000010201000000031817161514131211",
@@ -326,6 +339,7 @@ assert.equal(oneOffSuccess.error, undefined);
 assert.equal(oneOffSuccess.tables.length, 1);
 assert.equal(oneOffSuccess.tables[0].tableName, "users");
 assert.deepEqual([...oneOffSuccess.tables[0].rows.slice(0, 4)], [0x02, 0x00, 0x00, 0x00]);
+assert.deepEqual(oneOffSuccess.tables[0].rowBytes.map((row) => [...row]), [[1, 2], [3]]);
 assert.equal(oneOffSuccess.totalHostExecutionDuration, 0x1112131415161718n);
 
 const oneOffErrorFrame = bytesFromHex(
@@ -345,6 +359,7 @@ assert.equal(subscribeSingleApplied.requestId, 0x01020304);
 assert.equal(subscribeSingleApplied.queryId, 0x11121314);
 assert.equal(subscribeSingleApplied.tableName, "users");
 assert.deepEqual([...subscribeSingleApplied.rows.slice(0, 4)], [0x02, 0x00, 0x00, 0x00]);
+assert.deepEqual(subscribeSingleApplied.rowBytes.map((row) => [...row]), [[1, 2], [3]]);
 
 const unsubscribeSingleAppliedFrame = bytesFromHex(
   "0324232221181716151413121134333231010f000000020000000200000001020100000003",
@@ -355,12 +370,20 @@ assert.equal(unsubscribeSingleApplied.requestId, 0x21222324);
 assert.equal(unsubscribeSingleApplied.queryId, 0x31323334);
 assert.equal(unsubscribeSingleApplied.hasRows, true);
 assert.deepEqual([...unsubscribeSingleApplied.rows.slice(0, 4)], [0x02, 0x00, 0x00, 0x00]);
+assert.deepEqual(unsubscribeSingleApplied.rowBytes.map((row) => [...row]), [[1, 2], [3]]);
 
 const unsubscribeSingleAppliedWithoutRows = decodeUnsubscribeSingleAppliedFrame(
   bytesFromHex("032423222118171615141312113433323100"),
 );
 assert.equal(unsubscribeSingleAppliedWithoutRows.hasRows, false);
 assert.equal(unsubscribeSingleAppliedWithoutRows.rows, undefined);
+assert.equal(unsubscribeSingleAppliedWithoutRows.rowBytes, undefined);
+
+assert.deepEqual(decodeRowList(bytesFromHex("00000000")).rows, []);
+assert.throws(
+  () => decodeRowList(bytesFromHex("02000000020000000102")),
+  ShunterProtocolError,
+);
 
 const subscribeAppliedFrame = bytesFromHex(
   "094443424158575655545352516463626101000000040302010500000075736572730f000000020000000200000001020100000003020000000405",
@@ -557,6 +580,7 @@ await assert.rejects(deniedTableSubscription, ShunterValidationError);
 const unsubscribeErrorSubscribeAppliedFrame = bytesFromHex(
   "020403020100000000000000003433323105000000757365727300000000",
 );
+assert.deepEqual(decodeSubscribeSingleAppliedFrame(unsubscribeErrorSubscribeAppliedFrame).rowBytes, []);
 const unsubscribeErrorFrame = bytesFromHex(
   "04000000000000000001030000000134333231000600000064656e696564",
 );
