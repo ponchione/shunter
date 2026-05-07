@@ -82,9 +82,11 @@ subscription helpers pass through optional row callbacks and subscription
 options, and expose module-scoped table decoder aliases. The runtime now also
 includes a schema-aware BSATN product row decoder, and generated bindings emit
 per-table row decoder functions plus a `tableRowDecoders` map that generated
-whole-table subscription helpers use by default. Typed reducer argument/result
-encoding, generated declared query/view projection row decoding, subscription
-cache behavior, reconnect policy, and local cache implementation remain open.
+whole-table subscription helpers use by default. Managed table subscription
+handles now apply RowList insert/delete deltas using raw row bytes as local row
+identity. Typed reducer argument/result encoding, generated declared query/view
+projection row decoding, declared-query/view cache behavior, reconnect policy,
+and broader local cache implementation remain open.
 
 ## Runtime API
 
@@ -245,8 +247,10 @@ slices, or decoded initial rows when `decodeRow` is provided, and closes after
 the acknowledged unsubscribe. Generated table helpers now default `decodeRow`
 to the generated table decoder for that table, so whole-table subscriptions
 receive typed row callbacks and typed handle initial rows without handwritten
-decoders. It does not yet update local cache state or apply typed row deltas
-to managed handles.
+decoders. Managed table handles keep a row-byte-keyed cache and apply RowList
+insert/delete updates from later delta frames, preserving raw callbacks and
+typed `onUpdate` delivery. Broader cache primitives and declared-view cache
+updates remain open.
 
 Subscription handles must provide:
 

@@ -362,6 +362,7 @@ interface ActiveSubscription {
   readonly onUpdate?: (update: SubscriptionUpdate<unknown>) => void;
   readonly decodeRow?: RowDecoder<unknown>;
   readonly handle?: ManagedSubscriptionHandle<unknown>;
+  readonly rowCache?: Map<string, unknown[]>;
 }
 
 interface PendingUnsubscribe {
@@ -660,6 +661,73 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     });
   };
 
+  const cacheRow = (rowCache: Map<string, unknown[]>, rowBytes: Uint8Array, row: unknown): void => {
+    const key = bytesKey(rowBytes);
+    const bucket = rowCache.get(key);
+    if (bucket === undefined) {
+      rowCache.set(key, [row]);
+      return;
+    }
+    bucket.push(row);
+  };
+
+  const deleteCachedRow = (rowCache: Map<string, unknown[]>, rowBytes: Uint8Array): void => {
+    const key = bytesKey(rowBytes);
+    const bucket = rowCache.get(key);
+    if (bucket === undefined) {
+      return;
+    }
+    bucket.shift();
+    if (bucket.length === 0) {
+      rowCache.delete(key);
+    }
+  };
+
+  const cachedRows = (rowCache: Map<string, unknown[]>): unknown[] => [...rowCache.values()].flat();
+
+  const replaceCachedRows = (
+    active: ActiveSubscription,
+    rowBytes: readonly Uint8Array[],
+    rows: readonly unknown[],
+  ): void => {
+    if (active.rowCache === undefined) {
+      return;
+    }
+    active.rowCache.clear();
+    for (let i = 0; i < rowBytes.length; i += 1) {
+      cacheRow(active.rowCache, rowBytes[i], rows[i]);
+    }
+    active.handle?.replaceRows(cachedRows(active.rowCache));
+  };
+
+  const applyCachedUpdate = (
+    active: ActiveSubscription,
+    update: RawSubscriptionUpdate,
+    inserts: readonly unknown[] | undefined,
+    label: string,
+  ): void => {
+    if (active.rowCache === undefined || active.handle === undefined) {
+      return;
+    }
+    if (update.insertRowBytes === undefined || update.deleteRowBytes === undefined) {
+      throw new ShunterProtocolError(`${label} rows were not encoded as a RowList.`);
+    }
+    for (const rowBytes of update.deleteRowBytes) {
+      deleteCachedRow(active.rowCache, rowBytes);
+    }
+    if (active.decodeRow === undefined) {
+      for (const rowBytes of update.insertRowBytes) {
+        cacheRow(active.rowCache, rowBytes, new Uint8Array(rowBytes));
+      }
+    } else {
+      const decodedInserts = inserts ?? decodeSubscriptionRows(update.insertRowBytes, active.decodeRow, `${label} insert`);
+      for (let i = 0; i < update.insertRowBytes.length; i += 1) {
+        cacheRow(active.rowCache, update.insertRowBytes[i], decodedInserts[i]);
+      }
+    }
+    active.handle.replaceRows(cachedRows(active.rowCache));
+  };
+
   const registerActiveSubscription = (
     active: ActiveSubscription,
     aliases: Iterable<QueryID> = [active.queryId],
@@ -698,15 +766,26 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         }
       }
       if (active.onUpdate !== undefined && active.decodeRow !== undefined) {
+        let inserts: readonly unknown[] | undefined;
+        let deletes: readonly unknown[] | undefined;
         try {
+          inserts = decodeSubscriptionRows(update.insertRowBytes, active.decodeRow, `${label} insert`);
+          deletes = decodeSubscriptionRows(update.deleteRowBytes, active.decodeRow, `${label} delete`);
           active.onUpdate({
             queryId: update.queryId,
             tableName: update.tableName,
-            inserts: decodeSubscriptionRows(update.insertRowBytes, active.decodeRow, `${label} insert`),
-            deletes: decodeSubscriptionRows(update.deleteRowBytes, active.decodeRow, `${label} delete`),
+            inserts,
+            deletes,
           });
+          applyCachedUpdate(active, update, inserts, label);
         } catch (error) {
           return toShunterError(error, "validation", `${label} subscription update callback failed`);
+        }
+      } else {
+        try {
+          applyCachedUpdate(active, update, undefined, label);
+        } catch (error) {
+          return toShunterError(error, "validation", `${label} subscription cache update failed`);
         }
       }
     }
@@ -873,7 +952,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       }));
       return;
     }
-    registerActiveSubscription({
+    const active: ActiveSubscription = {
       kind: pending.kind,
       target: pending.target,
       queryId: response.queryId,
@@ -882,7 +961,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       onUpdate: pending.onUpdate,
       decodeRow: pending.decodeRow,
       handle: pending.handle,
-    });
+      rowCache: pending.handle === undefined ? undefined : new Map<string, unknown[]>(),
+    };
+    registerActiveSubscription(active);
     if (pending.onRawRows !== undefined) {
       try {
         pending.onRawRows({
@@ -903,7 +984,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     if (pending.decodeRow !== undefined) {
       try {
         const rows = decodeSubscriptionRows(response.rowBytes, pending.decodeRow, "SubscribeSingleApplied initial");
-        pending.handle?.replaceRows(rows);
+        replaceCachedRows(active, response.rowBytes, rows);
         pending.onRows?.(rows);
         pending.onInitialRows?.(rows);
       } catch (error) {
@@ -916,7 +997,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         return;
       }
     } else {
-      pending.handle?.replaceRows(cloneRowBytes(response.rowBytes));
+      replaceCachedRows(active, response.rowBytes, cloneRowBytes(response.rowBytes));
     }
     cleanupPendingSubscription(pending);
     pending.resolve(pending.handle ?? tableSubscriptionUnsubscribe(response.queryId));
@@ -3004,7 +3085,10 @@ export function createSubscriptionHandle<Row = unknown>(
       if (state.status === "closed") {
         throw new ShunterClosedClientError("Cannot replace rows on a closed subscription.");
       }
-      setState({ status: "active", rows: [...rows] });
+      setState({
+        status: state.status === "unsubscribing" ? "unsubscribing" : "active",
+        rows: [...rows],
+      });
     },
     close(error?: ShunterError): void {
       finish(error === undefined ? { reason: "closed" } : { reason: "error", error });

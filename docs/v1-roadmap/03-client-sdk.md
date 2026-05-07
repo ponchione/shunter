@@ -76,7 +76,7 @@ generated TypeScript bindings emit per-table row decoders plus a
 `tableRowDecoders` map. Generated table subscription helpers use those
 decoders by default while still allowing callers to override `decodeRow`.
 It does not yet implement typed reducer argument/result encoding, generated
-declared-query/view projection row decoding, subscription cache update
+declared-query/view projection row decoding, declared-query/view cache
 behavior, auth refresh, or reconnect policy.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
@@ -229,6 +229,9 @@ Completed or partially complete:
   per-table row decoder functions plus a `tableRowDecoders` map. Generated
   table subscription helpers now default to those decoders for whole-table
   subscription rows and managed table handles.
+- Apply RowList insert/delete deltas to managed table subscription handles
+  using raw row bytes as the local identity, preserving raw callbacks and
+  decoded update callbacks.
 
 Remaining:
 
@@ -236,10 +239,10 @@ Remaining:
   explicit encoder hooks and raw `Uint8Array` request path.
 - Implement typed reducer result decoding beyond the current raw
   `TransactionUpdate` frame result, generated declared-query/view projection
-  row decoders, and subscription cache behavior on top of the WebSocket
+  row decoders, and declared-query/view cache behavior on top of the WebSocket
   lifecycle shell.
-- Implement managed cache/update behavior for decoded table/query/view rows;
-  decoded table handles currently receive only the accepted initial snapshot.
+- Expand managed cache/update behavior beyond table subscription handles to
+  declared-query/view rows once projection schemas are exported.
 - Implement reconnect, auth refresh, resubscription, and cache behavior.
 - Add client tests for:
   - connection state transitions

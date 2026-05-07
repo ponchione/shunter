@@ -200,9 +200,11 @@ helpers pass through caller-supplied row decoders for decoded initial-row and
 update callbacks; declared-query results can now be decoded through
 caller-supplied table decoders; table handles can now hold decoded initial rows
 when requested; generated bindings now emit schema-aware table row decoders and
-use them by default for generated whole-table subscription helpers.
+use them by default for generated whole-table subscription helpers; managed
+table handles now apply RowList insert/delete deltas using raw row bytes as
+local row identity.
 Schema-aware reducer codecs, declared-query/view projection row decoding,
-cache behavior, and reconnect behavior remain.
+declared-query/view cache behavior, and reconnect behavior remain.
 
 Tasks:
 
@@ -213,12 +215,12 @@ Tasks:
 - Generate schema-aware typed reducer argument/result codecs beyond the current
   explicit encoder hooks and raw `Uint8Array` request path.
 - Build typed reducer result decoding, declared query/view projection row
-  decoding, subscription cache behavior, typed row callback delivery, and
+  decoding, declared-query/view cache behavior, typed row callback delivery, and
   unsubscribe acknowledgement integration with managed handles on top of the
   minimal WebSocket lifecycle shell.
-- Expand the current managed subscription handle integration beyond raw table
-  initial rows and declared-view lifecycle state once schema-aware row decoding
-  and cache behavior exist.
+- Expand the current managed subscription handle integration beyond table
+  subscription rows and declared-view lifecycle state once projection schemas
+  exist.
 - Add tests for connection transitions, auth failure, reducer/query/view
   success and failure, initial snapshots, deltas, unsubscribe, reconnect, and
   mismatch handling.

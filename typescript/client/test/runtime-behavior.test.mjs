@@ -838,6 +838,9 @@ assert.deepEqual(declaredViewHandle.state, { status: "closed" });
 const unsubscribeTableHandleAppliedFrame = bytesFromHex(
   "030500000000000000000000001413121100",
 );
+const tableHandleCacheUpdateFrame = bytesFromHex(
+  "083433323101000000141312110500000075736572730a000000010000000200000004050a00000001000000020000000102",
+);
 const tableHandleSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x01020304,
   queryId: 0x11121314,
@@ -856,6 +859,9 @@ const tableHandle = await tableHandleSubscription;
 assert.equal(tableHandle.queryId, 0x11121314);
 assert.equal(tableHandle.state.status, "active");
 assert.deepEqual(tableHandle.state.rows.map((row) => [...row]), [[1, 2], [3]]);
+sockets[0].message(tableHandleCacheUpdateFrame);
+assert.equal(tableHandle.state.status, "active");
+assert.deepEqual(tableHandle.state.rows.map((row) => [...row]), [[3], [4, 5]]);
 const unsubscribeTableHandle = tableHandle.unsubscribe();
 void tableHandle.unsubscribe();
 assert.equal(sockets[0].sent.length, 17);
@@ -882,6 +888,8 @@ sockets[0].message(subscribeSingleAppliedFrame);
 const decodedTableHandle = await decodedTableHandleSubscription;
 assert.equal(decodedTableHandle.queryId, 0x11121314);
 assert.deepEqual(decodedTableHandle.state, { status: "active", rows: ["1-2", "3"] });
+sockets[0].message(tableHandleCacheUpdateFrame);
+assert.deepEqual(decodedTableHandle.state, { status: "active", rows: ["3", "4-5"] });
 const unsubscribeDecodedTableHandle = decodedTableHandle.unsubscribe();
 assert.equal(sockets[0].sent.length, 19);
 assert.deepEqual(

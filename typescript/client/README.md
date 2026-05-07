@@ -47,9 +47,11 @@ decoding lands. Table subscriptions can accept `decodeRow` to invoke decoded
 while keeping raw callbacks unchanged. The runtime also exports
 `decodeBsatnProduct()` for schema-aware row decoding, and generated bindings
 emit per-table row decoder functions plus a `tableRowDecoders` map that
-generated table subscription helpers use by default. It does not implement
+generated table subscription helpers use by default. Managed table handles
+apply RowList insert/delete updates using raw row bytes as local identity. It
+does not implement
 typed reducer argument/result encoding, declared query/view projection row
-decoding, subscription cache behavior, or reconnect policy yet.
+decoding, declared-query/view cache behavior, or reconnect policy yet.
 
 The lifecycle shell offers Shunter's v1 subprotocol, appends a configured token
 as the server-supported `token` query parameter, tracks `idle`/`connecting`/
@@ -91,7 +93,9 @@ insert/delete deltas. Generated table subscription helpers pass through those
 callbacks and options. When `returnHandle: true` is also set, the returned
 table handle starts with decoded initial rows. Generated bindings now provide
 table row decoders for exported table schemas and default generated table
-subscription helpers to those decoders.
+subscription helpers to those decoders. Managed table handles keep their row
+sets current when later transaction updates include RowList insert/delete row
+bytes.
 Declared query consumers that want decoded rows can call
 `decodeDeclaredQueryResult()` with table-specific decoders; consumers that need
 raw RowList bytes can keep using `decodeRawDeclaredQueryResult()`.
