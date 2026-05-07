@@ -27,11 +27,11 @@ imports for the shared SDK surface.
 That is necessary but not sufficient for v1. The runtime package currently
 defines protocol constants, protocol compatibility helpers, connection state
 types, structured errors, a minimal `createShunterClient` WebSocket lifecycle
-shell, a managed subscription handle primitive with idempotent unsubscribe, and
-typed interfaces for reducer calls, declared queries, declared views, and table
-subscriptions. It does not yet implement reducer/query/view protocol message
-plumbing, reducer argument encoding, row decoding, auth refresh, local cache
-updates, reconnect policy, or identity-token decoding.
+shell with initial `IdentityToken` decoding, a managed subscription handle
+primitive with idempotent unsubscribe, and typed interfaces for reducer calls,
+declared queries, declared views, and table subscriptions. It does not yet
+implement reducer/query/view protocol message plumbing, reducer argument
+encoding, row decoding, auth refresh, local cache updates, or reconnect policy.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
 fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
@@ -111,13 +111,15 @@ Completed or partially complete:
 - Add a minimal `createShunterClient` lifecycle shell with token resolution,
   Shunter subprotocol negotiation, injected WebSocket construction, state-change
   callbacks, `connect()`, `close()`, and idempotent `dispose()`.
+- Decode the initial server `IdentityToken` frame and resolve `connect()` with
+  identity token, identity bytes, connection ID bytes, and negotiated
+  subprotocol metadata.
 
 Remaining:
 
 - Decide and implement reducer argument/result encoding conventions.
 - Implement reducer, declared-query, declared-view, and table-subscription
   protocol message plumbing on top of the WebSocket lifecycle shell.
-- Decode the initial server `IdentityToken` frame into connection metadata.
 - Implement row decoding for declared query/view results and subscription
   updates.
 - Implement reconnect, auth refresh, resubscription, and cache behavior.

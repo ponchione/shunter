@@ -4,6 +4,7 @@ export const SHUNTER_CURRENT_PROTOCOL_VERSION = SHUNTER_PROTOCOL_V1;
 export const SHUNTER_SUBPROTOCOL_V1 = "v1.bsatn.shunter" as const;
 export const SHUNTER_DEFAULT_SUBPROTOCOL = SHUNTER_SUBPROTOCOL_V1;
 export const SHUNTER_SUPPORTED_SUBPROTOCOLS = [SHUNTER_SUBPROTOCOL_V1] as const;
+export const SHUNTER_SERVER_MESSAGE_IDENTITY_TOKEN = 1 as const;
 
 export type ShunterSubprotocol = typeof SHUNTER_SUBPROTOCOL_V1;
 
@@ -246,6 +247,12 @@ export interface ConnectionMetadata<Protocol extends ProtocolMetadata = Protocol
   readonly contract?: GeneratedContractMetadata;
 }
 
+export interface IdentityTokenMessage {
+  readonly identity: Uint8Array;
+  readonly token: string;
+  readonly connectionId: Uint8Array;
+}
+
 export type ConnectionState<Protocol extends ProtocolMetadata = ProtocolMetadata> =
   | { readonly status: "idle" }
   | { readonly status: "connecting"; readonly attempt: number }
@@ -280,9 +287,11 @@ export interface WebSocketLike {
   readonly protocol: string;
   binaryType?: BinaryType;
   addEventListener(type: "open", listener: (event: Event) => void): void;
+  addEventListener(type: "message", listener: (event: MessageEvent) => void): void;
   addEventListener(type: "close", listener: (event: CloseEvent) => void): void;
   addEventListener(type: "error", listener: (event: Event) => void): void;
   removeEventListener(type: "open", listener: (event: Event) => void): void;
+  removeEventListener(type: "message", listener: (event: MessageEvent) => void): void;
   removeEventListener(type: "close", listener: (event: CloseEvent) => void): void;
   removeEventListener(type: "error", listener: (event: Event) => void): void;
   close(code?: number, reason?: string): void;
@@ -332,11 +341,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     ws: WebSocketLike,
     handlers: {
       open: (event: Event) => void;
+      message: (event: MessageEvent) => void;
       close: (event: CloseEvent) => void;
       error: (event: Event) => void;
     },
   ): void => {
     ws.removeEventListener("open", handlers.open);
+    ws.removeEventListener("message", handlers.message);
     ws.removeEventListener("close", handlers.close);
     ws.removeEventListener("error", handlers.error);
   };
@@ -449,14 +460,32 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         socket = ws;
         suppressSocketCloseTransition = false;
         ws.binaryType = "arraybuffer";
+        let selectedSubprotocol: string | undefined;
         const handlers = {
           open: (): void => {
             try {
-              const selectedSubprotocol = ws.protocol || offeredSubprotocol;
+              selectedSubprotocol = ws.protocol || offeredSubprotocol;
               assertProtocolCompatible(options.protocol, selectedSubprotocol);
+            } catch (error) {
+              failConnecting(
+                isShunterError(error)
+                  ? error
+                  : toShunterError(error, "protocol", "Protocol negotiation failed"),
+              );
+            }
+          },
+          message: (event: MessageEvent): void => {
+            if (state.status !== "connecting") {
+              return;
+            }
+            try {
+              const identityToken = decodeIdentityTokenFrame(event.data);
               const metadata: ConnectionMetadata<Protocol> = {
                 protocol: options.protocol,
-                subprotocol: selectedSubprotocol,
+                subprotocol: selectedSubprotocol ?? ws.protocol ?? offeredSubprotocol,
+                identityToken: identityToken.token,
+                identity: identityToken.identity,
+                connectionId: identityToken.connectionId,
               };
               setState({ status: "connected", metadata });
               resolve(metadata);
@@ -464,7 +493,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
               failConnecting(
                 isShunterError(error)
                   ? error
-                  : toShunterError(error, "protocol", "Protocol negotiation failed"),
+                  : toShunterError(error, "protocol", "Decode IdentityToken failed"),
               );
             }
           },
@@ -503,6 +532,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           },
         };
         ws.addEventListener("open", handlers.open);
+        ws.addEventListener("message", handlers.message);
         ws.addEventListener("close", handlers.close);
         ws.addEventListener("error", handlers.error);
       });
@@ -556,6 +586,61 @@ function createWebSocket(
     throw new ShunterTransportError("No WebSocket implementation is available.");
   }
   return new WebSocket(url, [...protocols]);
+}
+
+export function decodeIdentityTokenFrame(data: unknown): IdentityTokenMessage {
+  const frame = frameBytes(data);
+  if (frame.length < 1 || frame[0] !== SHUNTER_SERVER_MESSAGE_IDENTITY_TOKEN) {
+    throw new ShunterProtocolError("Expected IdentityToken as the first server message.");
+  }
+  let offset = 1;
+  if (frame.length < offset + 32) {
+    throw new ShunterProtocolError("Malformed IdentityToken: identity field is truncated.");
+  }
+  const identity = frame.slice(offset, offset + 32);
+  offset += 32;
+  const [tokenLength, tokenOffset] = readUint32LE(frame, offset, "IdentityToken token length");
+  offset = tokenOffset;
+  if (frame.length < offset + tokenLength) {
+    throw new ShunterProtocolError("Malformed IdentityToken: token field is truncated.");
+  }
+  let token: string;
+  try {
+    token = new TextDecoder("utf-8", { fatal: true }).decode(frame.slice(offset, offset + tokenLength));
+  } catch (error) {
+    throw new ShunterProtocolError("Malformed IdentityToken: token is not valid UTF-8.", { cause: error });
+  }
+  offset += tokenLength;
+  if (frame.length < offset + 16) {
+    throw new ShunterProtocolError("Malformed IdentityToken: connection_id field is truncated.");
+  }
+  const connectionId = frame.slice(offset, offset + 16);
+  offset += 16;
+  if (offset !== frame.length) {
+    throw new ShunterProtocolError("Malformed IdentityToken: trailing bytes.");
+  }
+  return { identity, token, connectionId };
+}
+
+function frameBytes(data: unknown): Uint8Array {
+  if (data instanceof Uint8Array) {
+    return data;
+  }
+  if (data instanceof ArrayBuffer) {
+    return new Uint8Array(data);
+  }
+  if (ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  }
+  throw new ShunterProtocolError("Expected binary WebSocket frame.");
+}
+
+function readUint32LE(frame: Uint8Array, offset: number, label: string): [number, number] {
+  if (frame.length < offset + 4) {
+    throw new ShunterProtocolError(`Malformed frame: ${label} is truncated.`);
+  }
+  const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+  return [view.getUint32(offset, true), offset + 4];
 }
 
 export type RequestID = number;

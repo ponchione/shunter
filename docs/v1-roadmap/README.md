@@ -62,9 +62,9 @@ Several original roadmap gaps now have partial implementation:
   are not complete.
 - TypeScript codegen exists. A minimal in-repo TypeScript runtime foundation
   exists at `typescript/client`, including protocol compatibility helpers and a
-  WebSocket lifecycle shell plus subscription handle primitive, but protocol
-  message plumbing, typed row decoding, reconnect/cache behavior, and canary
-  wiring are not complete.
+  WebSocket lifecycle shell with IdentityToken decoding plus subscription handle
+  primitive, but reducer/query/view protocol message plumbing, typed row
+  decoding, reconnect/cache behavior, and canary wiring are not complete.
 - A release-candidate app workload exists in tests. The maintained v1
   canary/reference app is the external `opsboard-canary` repository; do not add
   a duplicate in-repo task-board app.
