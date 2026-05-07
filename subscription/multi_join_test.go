@@ -239,9 +239,8 @@ func sumMultiJoinRIDAggregate() *Aggregate {
 	}
 }
 
-func multiJoinCommitted(includeExtraR bool) *mockCommitted {
-	s := multiJoinTestSchema()
-	contents := map[TableID][]types.ProductValue{
+func multiJoinBaseContents() map[TableID][]types.ProductValue {
+	return map[TableID][]types.ProductValue{
 		1: {
 			{types.NewUint64(1), types.NewUint64(10)},
 			{types.NewUint64(2), types.NewUint64(20)},
@@ -258,6 +257,11 @@ func multiJoinCommitted(includeExtraR bool) *mockCommitted {
 			{types.NewUint64(300), types.NewUint64(20)},
 		},
 	}
+}
+
+func multiJoinCommitted(includeExtraR bool) *mockCommitted {
+	s := multiJoinTestSchema()
+	contents := multiJoinBaseContents()
 	if includeExtraR {
 		contents[3] = append(contents[3], types.ProductValue{types.NewUint64(301), types.NewUint64(20)})
 	}
@@ -368,6 +372,103 @@ func TestMultiJoinRegisterInitialRowsAndDeltas(t *testing.T) {
 	deleteUpdate := requireSingleFanoutUpdate(t, deleteMsg, connID)
 	if !productRowsHaveUint64IDs(deleteUpdate.Deletes, 2, 2, 3, 3) || len(deleteUpdate.Inserts) != 0 {
 		t.Fatalf("delete delta inserts/deletes = %v/%v, want no inserts and delete ids 2,2,3,3", deleteUpdate.Inserts, deleteUpdate.Deletes)
+	}
+}
+
+func TestMultiJoinDeltaMatchesFreshEvaluationForIntermediateRelation(t *testing.T) {
+	s := multiJoinTestSchema()
+	pred := multiJoinTestPredicate()
+	deletedMiddle := types.ProductValue{types.NewUint64(21), types.NewUint64(20)}
+	insertedMiddle := types.ProductValue{types.NewUint64(23), types.NewUint64(20)}
+	unmatchedMiddle := types.ProductValue{types.NewUint64(24), types.NewUint64(30)}
+
+	tests := []struct {
+		name        string
+		after       map[TableID][]types.ProductValue
+		changeset   *store.Changeset
+		wantInserts []uint64
+		wantDeletes []uint64
+	}{
+		{
+			name: "insert",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[2] = append(rows[2], insertedMiddle)
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 1,
+				Tables: map[TableID]*store.TableChangeset{
+					2: {Inserts: []types.ProductValue{insertedMiddle}},
+				},
+			},
+			wantInserts: []uint64{2, 3},
+		},
+		{
+			name: "delete",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[2] = []types.ProductValue{
+					{types.NewUint64(10), types.NewUint64(10)},
+					{types.NewUint64(22), types.NewUint64(20)},
+				}
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 2,
+				Tables: map[TableID]*store.TableChangeset{
+					2: {Deletes: []types.ProductValue{deletedMiddle}},
+				},
+			},
+			wantDeletes: []uint64{2, 3},
+		},
+		{
+			name: "same-key-replace",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[2] = []types.ProductValue{
+					{types.NewUint64(10), types.NewUint64(10)},
+					{types.NewUint64(22), types.NewUint64(20)},
+					insertedMiddle,
+				}
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 3,
+				Tables: map[TableID]*store.TableChangeset{
+					2: {
+						Inserts: []types.ProductValue{insertedMiddle},
+						Deletes: []types.ProductValue{deletedMiddle},
+					},
+				},
+			},
+		},
+		{
+			name: "unmatched-insert",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[2] = append(rows[2], unmatchedMiddle)
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 4,
+				Tables: map[TableID]*store.TableChangeset{
+					2: {Inserts: []types.ProductValue{unmatchedMiddle}},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			delta := requireMultiJoinIncrementalMatchesFresh(t, s, pred, buildMockCommitted(s, multiJoinBaseContents()), buildMockCommitted(s, tt.after), tt.changeset)
+			if !productRowsHaveUint64IDs(delta.inserts, tt.wantInserts...) {
+				t.Fatalf("insert ids = %v, want %v", delta.inserts, tt.wantInserts)
+			}
+			if !productRowsHaveUint64IDs(delta.deletes, tt.wantDeletes...) {
+				t.Fatalf("delete ids = %v, want %v", delta.deletes, tt.wantDeletes)
+			}
+		})
 	}
 }
 
@@ -1506,6 +1607,58 @@ func requireSingleFanoutUpdate(t *testing.T, msg FanOutMessage, connID types.Con
 		t.Fatalf("fanout[%x] = %v, want one update", connID[:4], msg.Fanout)
 	}
 	return updates[0]
+}
+
+func requireMultiJoinIncrementalMatchesFresh(t *testing.T, s *fakeSchema, pred MultiJoin, before, after *mockCommitted, cs *store.Changeset) deltaBag {
+	t.Helper()
+	connID := types.ConnectionID{14}
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    140,
+		Predicates: []Predicate{pred},
+	}, before)
+	if err != nil {
+		t.Fatalf("RegisterSet before: %v", err)
+	}
+	initialRows := rowsFromUpdates(res.Update)
+
+	mgr.EvalAndBroadcast(types.TxID(cs.TxID), cs, after, PostCommitMeta{})
+	msg := <-inbox
+	var delta deltaBag
+	for _, update := range msg.Fanout[connID] {
+		delta.inserts = append(delta.inserts, update.Inserts...)
+		delta.deletes = append(delta.deletes, update.Deletes...)
+	}
+	incremental := applyDelta(initialRows, delta.inserts, delta.deletes)
+	freshRows := multiJoinFreshRows(t, s, pred, after)
+	if !bagEqual(incremental, freshRows) {
+		t.Fatalf("incremental rows = %v, want fresh rows %v (delta inserts=%v deletes=%v)", incremental, freshRows, delta.inserts, delta.deletes)
+	}
+	return delta
+}
+
+func multiJoinFreshRows(t *testing.T, s *fakeSchema, pred MultiJoin, view *mockCommitted) []types.ProductValue {
+	t.Helper()
+	mgr := NewManager(s, s)
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{15},
+		QueryID:    150,
+		Predicates: []Predicate{pred},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet fresh: %v", err)
+	}
+	return rowsFromUpdates(res.Update)
+}
+
+func rowsFromUpdates(updates []SubscriptionUpdate) []types.ProductValue {
+	var rows []types.ProductValue
+	for _, update := range updates {
+		rows = append(rows, update.Inserts...)
+	}
+	return rows
 }
 
 func productRowsHaveUint64IDs(rows []types.ProductValue, ids ...uint64) bool {
