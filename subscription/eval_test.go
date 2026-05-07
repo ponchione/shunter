@@ -716,6 +716,103 @@ func TestEvalJoinSubscriptionProjectsRight(t *testing.T) {
 	}
 }
 
+func TestEvalJoinSubscriptionSameTransactionBothSides(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	left := types.ProductValue{types.NewUint64(7), types.NewString("left")}
+	right := types.ProductValue{types.NewUint64(70), types.NewUint64(7)}
+	pred := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 1}
+
+	tests := []struct {
+		name        string
+		before      map[TableID][]types.ProductValue
+		after       map[TableID][]types.ProductValue
+		changeset   *store.Changeset
+		wantInserts []types.ProductValue
+		wantDeletes []types.ProductValue
+	}{
+		{
+			name: "matching-inserts",
+			before: map[TableID][]types.ProductValue{
+				1: nil,
+				2: nil,
+			},
+			after: map[TableID][]types.ProductValue{
+				1: {left},
+				2: {right},
+			},
+			changeset: &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+				1: {TableID: 1, Inserts: []types.ProductValue{left}},
+				2: {TableID: 2, Inserts: []types.ProductValue{right}},
+			}},
+			wantInserts: []types.ProductValue{left},
+		},
+		{
+			name: "matching-deletes",
+			before: map[TableID][]types.ProductValue{
+				1: {left},
+				2: {right},
+			},
+			after: map[TableID][]types.ProductValue{
+				1: nil,
+				2: nil,
+			},
+			changeset: &store.Changeset{TxID: 2, Tables: map[schema.TableID]*store.TableChangeset{
+				1: {TableID: 1, Deletes: []types.ProductValue{left}},
+				2: {TableID: 2, Deletes: []types.ProductValue{right}},
+			}},
+			wantDeletes: []types.ProductValue{left},
+		},
+		{
+			name: "nonmatching-inserts",
+			before: map[TableID][]types.ProductValue{
+				1: nil,
+				2: nil,
+			},
+			after: map[TableID][]types.ProductValue{
+				1: {left},
+				2: {{types.NewUint64(80), types.NewUint64(8)}},
+			},
+			changeset: &store.Changeset{TxID: 3, Tables: map[schema.TableID]*store.TableChangeset{
+				1: {TableID: 1, Inserts: []types.ProductValue{left}},
+				2: {TableID: 2, Inserts: []types.ProductValue{{types.NewUint64(80), types.NewUint64(8)}}},
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := buildMockCommitted(s, tt.before)
+			after := buildMockCommitted(s, tt.after)
+			connID := types.ConnectionID{1}
+			inbox := make(chan FanOutMessage, 1)
+			mgr := NewManager(s, s, WithFanOutInbox(inbox))
+			if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+				ConnID:     connID,
+				QueryID:    31,
+				Predicates: []Predicate{pred},
+			}, before); err != nil {
+				t.Fatalf("RegisterSet = %v", err)
+			}
+			mgr.EvalAndBroadcast(types.TxID(tt.changeset.TxID), tt.changeset, after, PostCommitMeta{})
+			msg := <-inbox
+			updates := msg.Fanout[connID]
+			if len(tt.wantInserts) == 0 && len(tt.wantDeletes) == 0 {
+				if len(updates) != 0 {
+					t.Fatalf("updates = %v, want none", updates)
+				}
+				return
+			}
+			if len(updates) != 1 {
+				t.Fatalf("update count = %d (%v), want 1", len(updates), updates)
+			}
+			requireProductRowsEqual(t, updates[0].Inserts, tt.wantInserts)
+			requireProductRowsEqual(t, updates[0].Deletes, tt.wantDeletes)
+		})
+	}
+}
+
 func TestEvalJoinSubscriptionPreservesProjectedLeftDeltaOrder(t *testing.T) {
 	want := []types.ProductValue{
 		{types.NewUint64(1), types.NewUint64(7)},
