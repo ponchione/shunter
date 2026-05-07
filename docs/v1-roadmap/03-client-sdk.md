@@ -29,9 +29,12 @@ defines protocol constants, protocol compatibility helpers, connection state
 types, structured errors, a minimal `createShunterClient` WebSocket lifecycle
 shell with initial `IdentityToken` decoding, a managed subscription handle
 primitive with idempotent unsubscribe, and typed interfaces for reducer calls,
-declared queries, declared views, and table subscriptions. It does not yet
-implement reducer/query/view protocol message plumbing, reducer argument
-encoding, row decoding, auth refresh, local cache updates, or reconnect policy.
+declared queries, declared views, and table subscriptions. It also has the
+first raw-byte reducer request encoder and connected WebSocket send path for
+the live v1 `CallReducerMsg` wire shape. It does not yet implement reducer
+response correlation, typed reducer argument/result encoding, query/view
+protocol plumbing, row decoding, auth refresh, local cache updates, or
+reconnect policy.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
 fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
@@ -114,12 +117,17 @@ Completed or partially complete:
 - Decode the initial server `IdentityToken` frame and resolve `connect()` with
   identity token, identity bytes, connection ID bytes, and negotiated
   subprotocol metadata.
+- Add raw-byte reducer request encoding for the live v1 `CallReducerMsg` wire
+  shape and a connected-client `callReducer` send path that generated
+  byte-level helpers can type against.
 
 Remaining:
 
-- Decide and implement reducer argument/result encoding conventions.
-- Implement reducer, declared-query, declared-view, and table-subscription
-  protocol message plumbing on top of the WebSocket lifecycle shell.
+- Decide and implement typed reducer argument/result encoding conventions
+  beyond the current raw `Uint8Array` request path.
+- Implement reducer response correlation/result decoding, declared-query,
+  declared-view, and table-subscription protocol message plumbing on top of the
+  WebSocket lifecycle shell.
 - Implement row decoding for declared query/view results and subscription
   updates.
 - Implement reconnect, auth refresh, resubscription, and cache behavior.

@@ -80,6 +80,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added TypeScript decoding for the initial server `IdentityToken` frame so
   `createShunterClient().connect()` resolves with identity and connection ID
   metadata.
+- Added raw TypeScript reducer request encoding and a connected-client
+  `callReducer` send path for the v1 `CallReducerMsg` wire shape.
 
 ## v0.1.0 - 2026-05-05
 

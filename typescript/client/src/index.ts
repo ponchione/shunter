@@ -4,7 +4,10 @@ export const SHUNTER_CURRENT_PROTOCOL_VERSION = SHUNTER_PROTOCOL_V1;
 export const SHUNTER_SUBPROTOCOL_V1 = "v1.bsatn.shunter" as const;
 export const SHUNTER_DEFAULT_SUBPROTOCOL = SHUNTER_SUBPROTOCOL_V1;
 export const SHUNTER_SUPPORTED_SUBPROTOCOLS = [SHUNTER_SUBPROTOCOL_V1] as const;
+export const SHUNTER_CLIENT_MESSAGE_CALL_REDUCER = 3 as const;
 export const SHUNTER_SERVER_MESSAGE_IDENTITY_TOKEN = 1 as const;
+export const SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE = 0 as const;
+export const SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY = 1 as const;
 
 export type ShunterSubprotocol = typeof SHUNTER_SUBPROTOCOL_V1;
 
@@ -294,8 +297,11 @@ export interface WebSocketLike {
   removeEventListener(type: "message", listener: (event: MessageEvent) => void): void;
   removeEventListener(type: "close", listener: (event: CloseEvent) => void): void;
   removeEventListener(type: "error", listener: (event: Event) => void): void;
+  send(data: WebSocketSendData): void;
   close(code?: number, reason?: string): void;
 }
+
+export type WebSocketSendData = string | ArrayBufferLike | ArrayBufferView | Blob;
 
 export type WebSocketFactory = (
   url: string,
@@ -305,12 +311,14 @@ export type WebSocketFactory = (
 export interface ShunterClient<Protocol extends ProtocolMetadata = ProtocolMetadata> {
   readonly state: ConnectionState<Protocol>;
   connect(): Promise<ConnectionMetadata<Protocol>>;
+  callReducer: ReducerCaller<string, Uint8Array, Uint8Array>;
   close(code?: number, reason?: string): Promise<void>;
   dispose(): Promise<void>;
   onStateChange(listener: ConnectionStateListener<Protocol>): () => void;
 }
 
 const closeNormalCode = 1000;
+const maxUint32 = 0xffffffff;
 
 export function createShunterClient<Protocol extends ProtocolMetadata>(
   options: RuntimeClientOptions<Protocol>,
@@ -323,6 +331,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   let suppressSocketCloseTransition = false;
   let resolveClose: (() => void) | undefined;
   let rejectConnect: ((error: ShunterError) => void) | undefined;
+  let nextRequestId: RequestID = 1;
   const listeners = new Set<ConnectionStateListener<Protocol>>();
   if (options.onStateChange !== undefined) {
     listeners.add(options.onStateChange);
@@ -405,6 +414,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       finishClose();
     }
     return pendingClose;
+  };
+
+  const allocateRequestId = (): RequestID => {
+    const requestId = nextRequestId;
+    nextRequestId = nextRequestId === maxUint32 ? 1 : nextRequestId + 1;
+    return requestId;
   };
 
   return {
@@ -539,6 +554,27 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
 
       return connectPromise;
     },
+    async callReducer(name: string, args: Uint8Array, options: ReducerCallOptions = {}): Promise<Uint8Array> {
+      if (disposed) {
+        throw new ShunterClosedClientError("Cannot call a reducer on a disposed Shunter client.");
+      }
+      if (options.signal?.aborted) {
+        throw new ShunterClosedClientError("Reducer call aborted before sending.");
+      }
+      if (state.status !== "connected" || socket === undefined) {
+        throw new ShunterClosedClientError("Cannot call a reducer before the Shunter client is connected.");
+      }
+      const request = encodeReducerCallRequest(name, args, {
+        ...options,
+        requestId: options.requestId ?? allocateRequestId(),
+      });
+      try {
+        socket.send(request.frame);
+      } catch (error) {
+        throw toShunterError(error, "transport", "Reducer request send failed");
+      }
+      return request.frame;
+    },
     close(code = closeNormalCode, reason = ""): Promise<void> {
       return beginClose(code, reason);
     },
@@ -653,6 +689,18 @@ export interface ReducerCallOptions {
   readonly signal?: AbortSignal;
 }
 
+export type ReducerCallFlags =
+  | typeof SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE
+  | typeof SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY;
+
+export interface EncodedReducerCallRequest<Name extends string = string> {
+  readonly name: Name;
+  readonly args: Uint8Array;
+  readonly requestId: RequestID;
+  readonly flags: ReducerCallFlags;
+  readonly frame: Uint8Array;
+}
+
 export interface ReducerCallResult<Name extends string = string, Result = Uint8Array> {
   readonly name: Name;
   readonly requestId: RequestID;
@@ -668,6 +716,84 @@ export type ReducerCaller<
   Args = Uint8Array,
   Result = Uint8Array,
 > = (name: Name, args: Args, options?: ReducerCallOptions) => Promise<Result>;
+
+export function encodeReducerCallRequest<Name extends string>(
+  name: Name,
+  args: Uint8Array,
+  options: ReducerCallOptions = {},
+): EncodedReducerCallRequest<Name> {
+  const requestId = options.requestId ?? 0;
+  assertUint32(requestId, "Reducer request ID");
+  const flags = reducerCallFlags(options);
+  const reducerName = utf8Bytes(name, "Reducer name");
+  const frameLength =
+    1 +
+    4 + reducerName.length +
+    4 + args.length +
+    4 +
+    1;
+  const frame = new Uint8Array(frameLength);
+  let offset = 0;
+  frame[offset] = SHUNTER_CLIENT_MESSAGE_CALL_REDUCER;
+  offset += 1;
+  offset = writeUint32LE(frame, offset, reducerName.length);
+  frame.set(reducerName, offset);
+  offset += reducerName.length;
+  offset = writeUint32LE(frame, offset, args.length);
+  frame.set(args, offset);
+  offset += args.length;
+  offset = writeUint32LE(frame, offset, requestId);
+  frame[offset] = flags;
+  return {
+    name,
+    args: new Uint8Array(args),
+    requestId,
+    flags,
+    frame,
+  };
+}
+
+function reducerCallFlags(options: ReducerCallOptions): ReducerCallFlags {
+  return options.noSuccessNotify === true
+    ? SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY
+    : SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE;
+}
+
+function assertUint32(value: number, label: string): void {
+  if (!Number.isInteger(value) || value < 0 || value > maxUint32) {
+    throw new ShunterValidationError(`${label} must be an unsigned 32-bit integer.`);
+  }
+}
+
+function utf8Bytes(value: string, label: string): Uint8Array {
+  if (!isWellFormedUTF16(value)) {
+    throw new ShunterValidationError(`${label} must be valid UTF-8.`);
+  }
+  return new TextEncoder().encode(value);
+}
+
+function isWellFormedUTF16(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (!Number.isInteger(next) || next < 0xdc00 || next > 0xdfff) {
+        return false;
+      }
+      i += 1;
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function writeUint32LE(frame: Uint8Array, offset: number, value: number): number {
+  new DataView(frame.buffer, frame.byteOffset, frame.byteLength).setUint32(offset, value, true);
+  return offset + 4;
+}
 
 export interface RawQueryOptions {
   readonly requestId?: RequestID;

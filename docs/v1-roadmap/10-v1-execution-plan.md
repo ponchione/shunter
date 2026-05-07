@@ -186,8 +186,8 @@ Goal: a normal TypeScript app should not write protocol handlers by hand.
 
 Status: package location decided; runtime type foundation, protocol
 compatibility helpers, generated import goldens, subscription handle primitive,
-minimal WebSocket lifecycle shell, and initial IdentityToken decoding added;
-protocol message runtime remains.
+minimal WebSocket lifecycle shell, initial IdentityToken decoding, and raw-byte
+reducer request send path added; protocol response plumbing remains.
 
 Tasks:
 
@@ -195,10 +195,11 @@ Tasks:
   a release-packaging decision explicitly moves it.
 - Keep `docs/v1-roadmap/typescript-sdk-contract.md` current as the runtime API
   target before generating more helpers.
-- Decide reducer argument encoding conventions. The Go runtime still accepts raw
-  bytes, and generated helpers remain byte-level until this is resolved.
-- Build reducer/query/view/table-subscription protocol message plumbing on top
-  of the minimal WebSocket lifecycle shell.
+- Decide typed reducer argument/result encoding conventions beyond the current
+  raw `Uint8Array` request path.
+- Build reducer response correlation/result decoding plus
+  query/view/table-subscription protocol message plumbing on top of the minimal
+  WebSocket lifecycle shell.
 - Wire the managed subscription handle primitive into real server subscribe and
   unsubscribe responses.
 - Add tests for connection transitions, auth failure, reducer/query/view

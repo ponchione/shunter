@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
 import {
+  SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY,
+  SHUNTER_CLIENT_MESSAGE_CALL_REDUCER,
   SHUNTER_SUBPROTOCOL_V1,
   ShunterAuthError,
   ShunterClosedClientError,
   ShunterProtocolError,
   ShunterProtocolMismatchError,
+  ShunterValidationError,
   assertProtocolCompatible,
   checkProtocolCompatibility,
   createShunterClient,
   createSubscriptionHandle,
   decodeIdentityTokenFrame,
+  encodeReducerCallRequest,
   selectShunterSubprotocol,
   shunterProtocol,
 } from "../.tmp_runtime_test/src/index.js";
@@ -84,6 +88,7 @@ class FakeWebSocket {
     this.protocol = protocols[0] ?? "";
     this.binaryType = "blob";
     this.closeCalls = [];
+    this.sent = [];
     this.listeners = new Map();
   }
 
@@ -100,6 +105,10 @@ class FakeWebSocket {
   close(code = 1000, reason = "") {
     this.closeCalls.push({ code, reason });
     this.dispatch("close", { code, reason, wasClean: true });
+  }
+
+  send(data) {
+    this.sent.push(data);
   }
 
   open(protocol = this.protocol) {
@@ -158,6 +167,38 @@ assert.throws(
   ShunterProtocolError,
 );
 
+function bytesFromHex(hex) {
+  return Uint8Array.from(hex.match(/../g).map((byte) => Number.parseInt(byte, 16)));
+}
+
+const encodedReducer = encodeReducerCallRequest("send", new Uint8Array([0xaa, 0xbb]), {
+  requestId: 0x31323334,
+  noSuccessNotify: true,
+});
+assert.equal(encodedReducer.name, "send");
+assert.equal(encodedReducer.requestId, 0x31323334);
+assert.equal(encodedReducer.flags, SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY);
+assert.equal(encodedReducer.frame[0], SHUNTER_CLIENT_MESSAGE_CALL_REDUCER);
+assert.deepEqual(
+  encodedReducer.frame,
+  bytesFromHex("030400000073656e6402000000aabb3433323101"),
+);
+
+assert.deepEqual(
+  encodeReducerCallRequest("ping", new Uint8Array(), { requestId: 1 }).frame,
+  bytesFromHex("030400000070696e67000000000100000000"),
+);
+
+assert.throws(
+  () => encodeReducerCallRequest("send", new Uint8Array(), { requestId: 0x1_0000_0000 }),
+  ShunterValidationError,
+);
+
+assert.throws(
+  () => encodeReducerCallRequest("\ud800", new Uint8Array(), { requestId: 1 }),
+  ShunterValidationError,
+);
+
 const clientStates = [];
 const client = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe?existing=1",
@@ -182,11 +223,22 @@ assert.equal(metadata.identityToken, "minted-token");
 assert.deepEqual([...metadata.identity.slice(0, 3)], [1, 2, 3]);
 assert.deepEqual([...metadata.connectionId.slice(0, 3)], [0xa0, 0xa1, 0xa2]);
 assert.equal(client.state.status, "connected");
+const sentReducer = await client.callReducer("send", new Uint8Array([0xaa, 0xbb]), {
+  requestId: 0x31323334,
+  noSuccessNotify: true,
+});
+assert.deepEqual(sentReducer, encodedReducer.frame);
+assert.equal(sockets[0].sent.length, 1);
+assert.deepEqual(sockets[0].sent[0], encodedReducer.frame);
 await client.close();
 await client.close();
 await client.dispose();
 assert.equal(sockets[0].closeCalls.length, 1);
 assert.deepEqual(clientStates, ["connecting", "connected", "closing", "closed"]);
+await assert.rejects(
+  client.callReducer("send", new Uint8Array(), { requestId: 1 }),
+  ShunterClosedClientError,
+);
 
 const tokenFailureClient = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe",

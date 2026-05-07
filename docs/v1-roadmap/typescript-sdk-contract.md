@@ -32,9 +32,11 @@ Current foundation scope: `@shunter/client` exposes protocol constants,
 protocol compatibility helpers, connection state types, structured errors, a
 minimal `createShunterClient` WebSocket lifecycle shell with initial
 `IdentityToken` decoding, a managed subscription handle primitive, and typed
-runtime interfaces consumed by generated bindings. Reducer/query/view message
-plumbing, reducer argument encoding, row decoding, reconnect policy, and local
-cache implementation remain open.
+runtime interfaces consumed by generated bindings. It also exposes raw
+`Uint8Array` reducer request encoding for Shunter v1 `CallReducerMsg` frames
+and a connected-client `callReducer` send path. Reducer response correlation,
+typed reducer argument/result encoding, query/view message plumbing, row
+decoding, reconnect policy, and local cache implementation remain open.
 
 ## Runtime API
 
@@ -84,6 +86,14 @@ generated helpers.
 Open decision: reducer argument/result encoding. The Go runtime boundary is raw
 bytes. The SDK needs a documented app-facing convention before generated
 helpers are considered v1-stable.
+
+Current foundation: the runtime can encode and send the raw-byte
+`CallReducerMsg` shape used by the Go protocol: reducer name, raw args bytes,
+request ID, and flags. `createShunterClient().callReducer(...)` currently sends
+that frame over an established WebSocket and resolves with the encoded request
+bytes only. It does not yet wait for or decode the matching `TransactionUpdate`
+response, so reducer success/failure/result semantics remain a required v1
+follow-up.
 
 Candidate v1 default:
 
