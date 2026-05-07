@@ -196,8 +196,8 @@ Status: runbook, release checklist, clean-shutdown fresh-restore test,
 incompatible-contract restore test, migration hook success/failure tests, and
 build-vs-module version guardrail added; durable data-dir metadata and
 compatibility checks added; reducer commit durability-failure recovery covered;
-runtime snapshot/compaction fault coverage added; reference-app workflow
-remains.
+runtime snapshot/compaction fault coverage added; restore helper/CLI source
+errors clarified; reference-app workflow remains.
 
 Tasks:
 

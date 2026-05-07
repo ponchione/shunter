@@ -236,6 +236,28 @@ func TestRestoreDataDirRejectsNonEmptyDestinationWithoutMutation(t *testing.T) {
 	assertDataDirFileBytes(t, filepath.Join(restoreDir, "existing"), original)
 }
 
+func TestRestoreDataDirErrorsNameBackupSource(t *testing.T) {
+	dir := t.TempDir()
+	restoreDir := filepath.Join(dir, "restore")
+	missingBackup := filepath.Join(dir, "missing-backup")
+
+	err := RestoreDataDir(missingBackup, restoreDir)
+	if err == nil {
+		t.Fatal("RestoreDataDir returned nil for missing backup")
+	}
+	assertErrorContains(t, err, "read backup "+missingBackup)
+	if strings.Contains(err.Error(), "source data dir") {
+		t.Fatalf("RestoreDataDir error = %q, should name backup source", err)
+	}
+
+	backupFile := writeDataDirTestBytes(t, dir, "backup-file", []byte("not a backup directory"))
+	err = RestoreDataDir(backupFile, restoreDir)
+	if err == nil {
+		t.Fatal("RestoreDataDir returned nil for file backup")
+	}
+	assertErrorContains(t, err, "backup "+backupFile+" is not a directory")
+}
+
 func TestDataDirHelpersRejectUnsafePaths(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := filepath.Join(dir, "data")

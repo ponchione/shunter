@@ -26,7 +26,7 @@ func BackupDataDir(dataDir, outputPath string) error {
 	if err != nil {
 		return err
 	}
-	return copyOfflineDataDir(src, dst, false)
+	return copyOfflineDataDir(src, dst, "source data dir", "copy", false)
 }
 
 // RestoreDataDir copies a complete offline DataDir backup into dataDir.
@@ -45,7 +45,7 @@ func RestoreDataDir(backupPath, dataDir string) error {
 	if err != nil {
 		return err
 	}
-	return copyOfflineDataDir(src, dst, true)
+	return copyOfflineDataDir(src, dst, "backup", "restore", true)
 }
 
 func cleanRequiredPath(label, path string) (string, error) {
@@ -56,16 +56,16 @@ func cleanRequiredPath(label, path string) (string, error) {
 	return filepath.Clean(trimmed), nil
 }
 
-func copyOfflineDataDir(src, dst string, allowEmptyDestination bool) error {
+func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestination bool) error {
 	srcInfo, err := os.Lstat(src)
 	if err != nil {
-		return fmt.Errorf("read source data dir %s: %w", src, err)
+		return fmt.Errorf("read %s %s: %w", sourceLabel, src, err)
 	}
 	if srcInfo.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("source data dir %s is a symlink; refusing to copy", src)
+		return fmt.Errorf("%s %s is a symlink; refusing to %s", sourceLabel, src, action)
 	}
 	if !srcInfo.IsDir() {
-		return fmt.Errorf("source data dir %s is not a directory", src)
+		return fmt.Errorf("%s %s is not a directory", sourceLabel, src)
 	}
 	if err := rejectNestedCopy(src, dst); err != nil {
 		return err

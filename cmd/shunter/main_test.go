@@ -178,6 +178,45 @@ func TestRestoreRejectsNonEmptyDestinationWithoutMutation(t *testing.T) {
 	assertFileBytes(t, filepath.Join(restoreDir, "existing"), original)
 }
 
+func TestRestoreCommandErrorsNameBackupSource(t *testing.T) {
+	dir := t.TempDir()
+	restoreDir := filepath.Join(dir, "restore")
+	missingBackup := filepath.Join(dir, "missing-backup")
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"restore",
+		"--backup", missingBackup,
+		"--data-dir", restoreDir,
+	})
+	if code != 1 {
+		t.Fatalf("restore missing backup exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("restore missing backup stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "read backup "+missingBackup)
+	if strings.Contains(stderr.String(), "source data dir") {
+		t.Fatalf("restore missing backup stderr = %s, should name backup source", stderr.String())
+	}
+
+	backupFile := writeCLIBytes(t, dir, "backup-file", []byte("not a backup directory"))
+	stdout.Reset()
+	stderr.Reset()
+	code = run(&stdout, &stderr, []string{
+		"restore",
+		"--backup", backupFile,
+		"--data-dir", restoreDir,
+	})
+	if code != 1 {
+		t.Fatalf("restore file backup exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("restore file backup stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "backup "+backupFile+" is not a directory")
+}
+
 func TestBackupRestoreRejectBlankPathsBeforeFileIO(t *testing.T) {
 	dir := t.TempDir()
 	nearby := filepath.Join(dir, "nearby")

@@ -92,11 +92,11 @@ Completed or partially complete:
   commit that fails before log append is not recovered after restart.
 - Add runtime API tests for snapshot creation faults and compaction retry after
   a covered segment is deleted before sidecar cleanup.
+- Ensure restore helper and CLI errors identify the backup source instead of
+  generic source data-dir wording.
 
 Remaining:
 
-- Ensure CLI and library helpers return actionable errors across the full
-  operator workflow.
 - Add backup/restore/migration flow to the reference app.
 
 ## Verification
