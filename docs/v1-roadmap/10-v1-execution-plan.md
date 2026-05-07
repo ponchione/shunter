@@ -142,8 +142,8 @@ normal app-author and operator workflow.
 Target: the external `opsboard-canary` repository. Do not add a duplicate
 in-repo task-board app for v1.
 
-Status: external canary exists and covers most app-author/runtime workflows;
-backup/restore, one migration path, SDK wiring, and release gating remain.
+Status: external canary exists and covers app-author, runtime, and offline
+operations workflows; SDK wiring and release gating remain.
 
 Tasks:
 
@@ -154,11 +154,9 @@ Tasks:
 - Keep coverage for 5-8 varied tables, private and public read policies,
   sender-based visibility, reducers with validation and permissions, declared
   queries, declared live views, raw SQL escape-hatch use, subscriptions,
-  restart, rollback, contract export, and generated TypeScript fixtures.
-- Fix canary dependency hygiene so it runs cleanly against a sibling Shunter
-  checkout.
-- Add canary black-box tests for backup/restore and one app-owned migration
-  path.
+  restart, rollback, offline backup/restore, one app-owned migration path,
+  contract export, and generated TypeScript fixtures.
+- Keep canary dependency hygiene working against a sibling Shunter checkout.
 - Wire the canary client through the v1 TypeScript SDK once the SDK shape is
   available.
 - Add canary commands to the release qualification checklist once stable.
@@ -169,6 +167,8 @@ Exit criteria:
 - It uses only public APIs for normal operation.
 - It fails loudly when contract/codegen/auth/subscription/recovery ergonomics
   regress.
+- It proves the offline backup/restore/migration loop through black-box
+  workflow coverage.
 
 Verification:
 
@@ -260,7 +260,7 @@ Tasks:
 - Define contract policy failure behavior in startup/release workflows.
 - Keep durable metadata current as app module and Shunter version semantics
   evolve.
-- Add external canary backup, restore, migration, and upgrade examples.
+- Keep external canary backup, restore, migration, and upgrade examples current.
 
 Exit criteria:
 

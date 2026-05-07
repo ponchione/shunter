@@ -1,6 +1,6 @@
 # Reference Application
 
-Status: open, external canary app exists; operational gaps remain
+Status: open, external canary app exists; SDK and release gating remain
 Owner: unassigned
 Scope: one maintained external canary/reference application that proves the
 normal Shunter v1 developer and operator workflows.
@@ -26,7 +26,8 @@ new app inside this repository. It defines an operations-board domain with
 public Shunter imports only, strict auth, varied read policies, sender-based
 visibility filters, reducers, declared queries, declared live views, raw SQL
 escape-hatch coverage, subscriptions, restart and rollback workflows,
-contract export, and committed TypeScript generated artifacts.
+offline backup/restore, an app-owned migration path, contract export, and
+committed TypeScript generated artifacts.
 
 Do not add a duplicate in-repo task-board app for v1. The previous in-repo
 task-board contract is retained only as a retired planning note:
@@ -68,20 +69,18 @@ Completed or partially complete:
   tables, sender visibility, reducers, declared queries/views, raw SQL,
   subscriptions, restart, rollback, contract export, and generated TypeScript
   fixture checks.
+- Fix canary-repository dependency hygiene so its public-package workflow runs
+  cleanly against the sibling Shunter checkout.
+- Add a black-box offline backup/restore workflow to the canary app.
+- Add one app-owned offline migration hook and command to the canary app.
 
 Remaining:
 
-- Fix canary-repository dependency hygiene so its public-package workflow runs
-  cleanly against the sibling Shunter checkout.
-- Add the missing backup/restore workflow to the canary app.
-- Add one app-owned migration path to the canary app.
 - Replace handwritten protocol-client helpers with the v1 TypeScript runtime
   SDK after that SDK exists.
 - Add a release qualification step that runs the canary against the intended
   Shunter commit or tag.
-- Keep canary docs showing the normal app-author loop: define schema, add
-  reducer, add query/view, export contract, generate client, run app, migrate
-  data, and backup/restore.
+- Keep canary docs current as the normal app-author and operator loop evolves.
 
 ## Verification
 

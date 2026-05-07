@@ -1,7 +1,7 @@
 # Operations, Backup, Restore, And Migrations
 
 Status: open, runbook and release checklist added; external canary
-backup/restore/migration flow remains
+backup/restore/migration flow added
 Owner: unassigned
 Scope: operator-facing workflows for data durability, backup/restore,
 compaction, schema compatibility, migrations, and upgrades.
@@ -94,10 +94,15 @@ Completed or partially complete:
   a covered segment is deleted before sidecar cleanup.
 - Ensure restore helper and CLI errors identify the backup source instead of
   generic source data-dir wording.
+- Add an external canary workflow that backs up a stopped runtime, restores into
+  a fresh data directory, runs an app-owned offline migration hook, verifies
+  migration idempotence, and reads restored data through strict-auth protocol
+  clients.
 
 Remaining:
 
-- Add backup/restore/migration flow to the external canary app.
+- Add the external canary operations command to release qualification once the
+  release gate is pinned to a Shunter commit or tag.
 
 ## Verification
 
