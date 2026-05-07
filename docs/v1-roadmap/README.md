@@ -45,6 +45,9 @@ decision that can be reviewed independently.
   Shunter actually needs for v1.
 - [10-v1-execution-plan.md](10-v1-execution-plan.md) - ordered execution plan
   for finishing the remaining v1 workstreams.
+- [11-subscription-parity.md](11-subscription-parity.md) - subscription
+  capability-parity roadmap for live-read planning, pruning, deltas, protocol,
+  and tests.
 
 ## Current Reality Check
 
