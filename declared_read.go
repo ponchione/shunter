@@ -163,22 +163,10 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 	if err != nil {
 		return DeclaredViewSubscription{}, err
 	}
+	plan := newDeclaredViewAdmissionPlan(entry, compiled, callOpts.caller)
 	responseCh := make(chan declaredViewRegisterResponse, 1)
 	cmd := executor.RegisterSubscriptionSetCmd{
-		Request: subscription.SubscriptionSetRegisterRequest{
-			Context:                 ctx,
-			ConnID:                  callOpts.caller.ConnectionID,
-			QueryID:                 queryID,
-			RequestID:               callOpts.requestID,
-			Predicates:              []subscription.Predicate{compiled.Predicate()},
-			ProjectionColumns:       [][]subscription.ProjectionColumn{compiled.SubscriptionProjection()},
-			Aggregates:              []*subscription.Aggregate{compiled.SubscriptionAggregate()},
-			OrderByColumns:          [][]subscription.OrderByColumn{compiled.SubscriptionOrderBy()},
-			Limits:                  []*uint64{compiled.SubscriptionLimit()},
-			Offsets:                 []*uint64{compiled.SubscriptionOffset()},
-			PredicateHashIdentities: []*types.Identity{compiled.PredicateHashIdentity(callOpts.caller.Identity)},
-			SQLText:                 entry.SQL,
-		},
+		Request: plan.subscriptionSetRegisterRequest(ctx, callOpts.caller.ConnectionID, queryID, callOpts.requestID),
 		Reply: func(result subscription.SubscriptionSetRegisterResult, err error) {
 			responseCh <- declaredViewRegisterResponse{result: result, err: err}
 		},
@@ -195,8 +183,8 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 			Name:        entry.Name,
 			QueryID:     queryID,
 			RequestID:   callOpts.requestID,
-			TableName:   declaredViewTableName(compiled, response.result.Update),
-			Columns:     declaredViewColumns(compiled, response.result.Update, r.registry),
+			TableName:   declaredViewTableName(plan, response.result.Update),
+			Columns:     declaredViewColumns(plan, response.result.Update, r.registry),
 			InitialRows: collectDeclaredInitialRows(response.result.Update),
 		}, nil
 	case <-ctx.Done():
@@ -207,6 +195,55 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 type declaredViewRegisterResponse struct {
 	result subscription.SubscriptionSetRegisterResult
 	err    error
+}
+
+type declaredViewAdmissionPlan struct {
+	name                  string
+	sqlText               string
+	tableName             string
+	predicate             subscription.Predicate
+	projection            []subscription.ProjectionColumn
+	aggregate             *subscription.Aggregate
+	orderBy               []subscription.OrderByColumn
+	limit                 *uint64
+	offset                *uint64
+	predicateHashIdentity *types.Identity
+	referencedTables      []schema.TableID
+	usesCallerIdentity    bool
+}
+
+func newDeclaredViewAdmissionPlan(entry declaredReadEntry, compiled protocol.CompiledSQLQuery, caller types.CallerContext) declaredViewAdmissionPlan {
+	return declaredViewAdmissionPlan{
+		name:                  entry.Name,
+		sqlText:               entry.SQL,
+		tableName:             compiled.TableName(),
+		predicate:             compiled.Predicate(),
+		projection:            compiled.SubscriptionProjection(),
+		aggregate:             compiled.SubscriptionAggregate(),
+		orderBy:               compiled.SubscriptionOrderBy(),
+		limit:                 compiled.SubscriptionLimit(),
+		offset:                compiled.SubscriptionOffset(),
+		predicateHashIdentity: compiled.PredicateHashIdentity(caller.Identity),
+		referencedTables:      compiled.ReferencedTables(),
+		usesCallerIdentity:    compiled.UsesCallerIdentity(),
+	}
+}
+
+func (p declaredViewAdmissionPlan) subscriptionSetRegisterRequest(ctx context.Context, connID types.ConnectionID, queryID, requestID uint32) subscription.SubscriptionSetRegisterRequest {
+	return subscription.SubscriptionSetRegisterRequest{
+		Context:                 ctx,
+		ConnID:                  connID,
+		QueryID:                 queryID,
+		RequestID:               requestID,
+		Predicates:              []subscription.Predicate{p.predicate},
+		ProjectionColumns:       [][]subscription.ProjectionColumn{p.projection},
+		Aggregates:              []*subscription.Aggregate{p.aggregate},
+		OrderByColumns:          [][]subscription.OrderByColumn{p.orderBy},
+		Limits:                  []*uint64{p.limit},
+		Offsets:                 []*uint64{p.offset},
+		PredicateHashIdentities: []*types.Identity{p.predicateHashIdentity},
+		SQLText:                 p.sqlText,
+	}
 }
 
 func (r *Runtime) applyDeclaredReadOptions(opts []DeclaredReadOption) declaredReadOptions {
@@ -265,13 +302,13 @@ func validationOptionsForDeclaredRead(kind declaredReadKind) protocol.SQLQueryVa
 	return protocol.SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true}
 }
 
-func declaredViewTableName(compiled protocol.CompiledSQLQuery, updates []subscription.SubscriptionUpdate) string {
+func declaredViewTableName(plan declaredViewAdmissionPlan, updates []subscription.SubscriptionUpdate) string {
 	for _, update := range updates {
 		if update.TableName != "" {
 			return update.TableName
 		}
 	}
-	return compiled.TableName()
+	return plan.tableName
 }
 
 func collectDeclaredInitialRows(updates []subscription.SubscriptionUpdate) []types.ProductValue {
@@ -282,24 +319,24 @@ func collectDeclaredInitialRows(updates []subscription.SubscriptionUpdate) []typ
 	return types.CopyProductValues(rows)
 }
 
-func declaredViewColumns(compiled protocol.CompiledSQLQuery, updates []subscription.SubscriptionUpdate, sl schema.SchemaLookup) []schema.ColumnSchema {
+func declaredViewColumns(plan declaredViewAdmissionPlan, updates []subscription.SubscriptionUpdate, sl schema.SchemaLookup) []schema.ColumnSchema {
 	for _, update := range updates {
 		if len(update.Columns) != 0 {
 			return copyColumnSchemas(update.Columns)
 		}
 	}
-	if projection := compiled.SubscriptionProjection(); len(projection) != 0 {
-		columns := make([]schema.ColumnSchema, len(projection))
-		for i, col := range projection {
+	if len(plan.projection) != 0 {
+		columns := make([]schema.ColumnSchema, len(plan.projection))
+		for i, col := range plan.projection {
 			columns[i] = col.Schema
 		}
 		return columns
 	}
-	if aggregate := compiled.SubscriptionAggregate(); aggregate != nil {
-		return []schema.ColumnSchema{aggregate.ResultColumn}
+	if plan.aggregate != nil {
+		return []schema.ColumnSchema{plan.aggregate.ResultColumn}
 	}
 	if sl != nil {
-		if _, ts, ok := sl.TableByName(compiled.TableName()); ok && ts != nil {
+		if _, ts, ok := sl.TableByName(plan.tableName); ok && ts != nil {
 			return copyColumnSchemas(ts.Columns)
 		}
 	}

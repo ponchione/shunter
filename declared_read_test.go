@@ -79,6 +79,78 @@ func TestBuildCreatesDeclaredReadCatalogEntries(t *testing.T) {
 	}
 }
 
+func TestDeclaredViewAdmissionPlanCarriesSubscriptionRegistrationState(t *testing.T) {
+	const sqlText = "SELECT id, body AS text FROM messages WHERE body = :sender ORDER BY text DESC LIMIT 2 OFFSET 1"
+	rt, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name:        "live_visible_ranks",
+			SQL:         sqlText,
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	entry, ok := rt.readCatalog.lookup("live_visible_ranks")
+	if !ok {
+		t.Fatal("declared view catalog entry missing")
+	}
+	caller := types.CallerContext{Identity: types.Identity{1, 2, 3}, ConnectionID: types.ConnectionID{99}}
+	compiled, err := rt.executableDeclaredRead(entry, caller)
+	if err != nil {
+		t.Fatalf("executableDeclaredRead: %v", err)
+	}
+
+	plan := newDeclaredViewAdmissionPlan(entry, compiled, caller)
+	if plan.name != "live_visible_ranks" || plan.sqlText != sqlText || plan.tableName != "messages" {
+		t.Fatalf("plan identity = name %q sql %q table %q", plan.name, plan.sqlText, plan.tableName)
+	}
+	if plan.predicate == nil {
+		t.Fatal("plan predicate = nil")
+	}
+	if len(plan.projection) != 2 {
+		t.Fatalf("len(plan.projection) = %d, want 2", len(plan.projection))
+	}
+	if len(plan.orderBy) != 1 {
+		t.Fatalf("len(plan.orderBy) = %d, want 1", len(plan.orderBy))
+	}
+	if plan.limit == nil || *plan.limit != 2 {
+		t.Fatalf("plan.limit = %v, want 2", plan.limit)
+	}
+	if plan.offset == nil || *plan.offset != 1 {
+		t.Fatalf("plan.offset = %v, want 1", plan.offset)
+	}
+	if !plan.usesCallerIdentity {
+		t.Fatal("plan.usesCallerIdentity = false, want true")
+	}
+	if plan.predicateHashIdentity == nil || *plan.predicateHashIdentity != caller.Identity {
+		t.Fatalf("plan.predicateHashIdentity = %v, want caller identity", plan.predicateHashIdentity)
+	}
+	assertTableIDs(t, plan.referencedTables, []schema.TableID{0}, "plan referenced tables")
+
+	req := plan.subscriptionSetRegisterRequest(context.Background(), caller.ConnectionID, 44, 55)
+	if req.ConnID != caller.ConnectionID || req.QueryID != 44 || req.RequestID != 55 || req.SQLText != sqlText {
+		t.Fatalf("register request identity = conn %x query %d request %d sql %q", req.ConnID, req.QueryID, req.RequestID, req.SQLText)
+	}
+	if len(req.Predicates) != 1 || req.Predicates[0] == nil {
+		t.Fatalf("request predicates = %#v, want one predicate", req.Predicates)
+	}
+	if len(req.ProjectionColumns) != 1 || len(req.ProjectionColumns[0]) != 2 {
+		t.Fatalf("request projection columns = %#v, want one two-column projection", req.ProjectionColumns)
+	}
+	if len(req.OrderByColumns) != 1 || len(req.OrderByColumns[0]) != 1 {
+		t.Fatalf("request order by columns = %#v, want one order-by term", req.OrderByColumns)
+	}
+	if len(req.Limits) != 1 || req.Limits[0] == nil || *req.Limits[0] != 2 {
+		t.Fatalf("request limits = %#v, want 2", req.Limits)
+	}
+	if len(req.Offsets) != 1 || req.Offsets[0] == nil || *req.Offsets[0] != 1 {
+		t.Fatalf("request offsets = %#v, want 1", req.Offsets)
+	}
+	if len(req.PredicateHashIdentities) != 1 || req.PredicateHashIdentities[0] == nil || *req.PredicateHashIdentities[0] != caller.Identity {
+		t.Fatalf("request predicate hash identities = %#v, want caller identity", req.PredicateHashIdentities)
+	}
+}
+
 func TestDeclaredReadCatalogEntriesAreDetachedFromDescriptionsAndContracts(t *testing.T) {
 	rt, err := Build(validChatModule().
 		Query(QueryDeclaration{
