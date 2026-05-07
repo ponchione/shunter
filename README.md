@@ -110,7 +110,8 @@ early or intentionally narrow:
 - there is no maintained hello-world command or tutorial flow
 - client bindings and code generation exist, but onboarding material around
   them is still limited
-- SQL support is scoped to the current query and subscription paths
+- SQL support is scoped to the v1 read-surface matrix; Shunter does not promise
+  broad SQL database compatibility
 - protocol, recovery, subscription, and reducer semantics are still being
   hardened through focused tests and debt reconciliation
 - public API stability should be expected to evolve while the hosted-runtime
@@ -167,19 +168,19 @@ and the narrow spec section for the surface being touched.
 Run the full Go test suite:
 
 ```bash
-go test ./...
+rtk go test ./...
 ```
 
 Run Go vet:
 
 ```bash
-go vet ./...
+rtk go vet ./...
 ```
 
 Run pinned static analysis:
 
 ```bash
-go tool staticcheck ./...
+rtk go tool staticcheck ./...
 ```
 
 Staticcheck is expected to pass. Treat failures as real cleanup findings unless

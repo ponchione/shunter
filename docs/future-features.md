@@ -62,15 +62,18 @@ Open direction:
 - keep module-specific operations in app-owned binaries until Shunter has a
   real module loading boundary
 
-## Query And Declared Reads
+## Post-v1 Query And Declared Reads
 
-This is the next major capability track.
+This is the post-v1 capability track for read features beyond the compatibility
+matrix. The v1 SQL/read contract remains the bounded surface in
+`docs/v1-compatibility.md`; entries here are not a promise of broad SQL
+database compatibility.
 
 Direction:
 
-- Make one-off reads richer first.
-- Keep declared query support aligned with one-off reads once the execution path
-  is proven.
+- Grow one-off reads first when a real app needs more read expressiveness.
+- Keep declared query support aligned with one-off reads after any expansion is
+  proven.
 - Grow live views/subscriptions more carefully because incremental deltas over
   joins and richer aggregates carry higher correctness risk.
 

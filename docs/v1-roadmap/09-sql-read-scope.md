@@ -1,6 +1,6 @@
 # SQL And Read Scope
 
-Status: active, parser/planner matrix, diagnostics, and declared-read shape coverage complete
+Status: done for Phase 1 read-surface closure
 Owner: unassigned
 Scope: the amount of SQL and declared-read behavior Shunter actually needs for
 v1.
@@ -207,11 +207,17 @@ Completed or partially complete:
 - Add parser/planner coverage that representative supported read-matrix shapes
   build successfully and every explicit v1 SQL non-goal preserves
   `ErrUnsupportedSQL` classification at the queryplan boundary.
+- Add performance benchmark coverage for expensive supported read shapes:
+  declared query execution, declared live-view initial rows, raw subscription
+  protocol admission, one-off join/aggregate reads, and deterministic
+  small/medium/large multi-way live-join table-shaped and aggregate deltas.
+- Audit app-facing SQL/read docs so broad or future SQL wording is either
+  labeled as post-v1 expansion or points to the v1 read-surface matrix.
 
 Remaining:
 
-- Add performance tests for expensive supported shapes.
-- Remove or label docs that imply broader SQL support than the code guarantees.
+- None for Phase 1 read-surface closure. Keep matrix, benchmarks, and docs
+  current as later roadmap phases change read behavior.
 
 ## Verification
 

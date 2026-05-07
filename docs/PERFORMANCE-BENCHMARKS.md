@@ -35,17 +35,17 @@ Current benchmark coverage:
 | Commitlog snapshot creation | `BenchmarkCreateSnapshotLarge` | covered for snapshot latency/allocation |
 | Reducer write path | `BenchmarkExecutorReducerCommitRoundTrip` | partial; needs throughput fixtures |
 | Scheduler scans | `BenchmarkSchedulerScanEnqueue` | covered for enqueue scan hot path |
-| One-off SQL | `BenchmarkExecuteCompiledSQLQueryCommonPaths` | partial; needs join and declared-query fixtures |
+| One-off SQL | `BenchmarkExecuteCompiledSQLQueryCommonPaths`, `BenchmarkExecuteCompiledSQLQueryJoinReadShapes` | covered for common single-table, join, multi-way aggregate, projection, ordering, and limit paths |
+| Declared reads | `BenchmarkDeclaredReadRuntimeSurfaces` | covered for local declared query execution and declared live-view initial rows, including projection/order/limit and aggregate shapes |
+| Raw subscription protocol admission | `BenchmarkHandleSubscribeSingleAdmissionReadShapes` | covered for single-table, two-table join, and multi-way join SubscribeSingle admission |
 | Subscription equality and lifecycle | `BenchmarkEvalEqualitySubs1K`, `BenchmarkEvalEqualitySubs10K`, `BenchmarkRegisterUnregister` | covered for core hot paths |
-| Subscription initial snapshots and fanout | `BenchmarkRegisterSetInitialQueryAllRows`, `BenchmarkProjectedRowsBeforeLargeBags`, `BenchmarkFanOut1KClientsSameQuery` | partial; needs protocol and declared-view coverage |
-| Subscription joins and candidate pruning | `BenchmarkJoinFragmentEval`, `BenchmarkDeltaIndexConstruction`, `BenchmarkCandidateCollection` | partial; needs multi-way live-join fixtures |
+| Subscription initial snapshots and fanout | `BenchmarkRegisterSetInitialQueryAllRows`, `BenchmarkProjectedRowsBeforeLargeBags`, `BenchmarkFanOut1KClientsSameQuery` | partial; needs varied-query fanout and memory-profile coverage |
+| Subscription joins and candidate pruning | `BenchmarkJoinFragmentEval`, `BenchmarkMultiWayLiveJoinEvalSizes`, `BenchmarkDeltaIndexConstruction`, `BenchmarkCandidateCollection` | covered for two-table joins plus deterministic small/medium/large multi-way live joins with table-shaped and aggregate deltas |
 
 Known benchmark gaps for v1 envelopes:
 
-- declared queries and declared live views
-- raw subscription end-to-end protocol workloads
-- multi-way live joins with deterministic small/medium/large fixtures
 - commitlog replay, snapshot recovery, and restore latency
+- WebSocket network-level subscription workloads beyond handler admission
 - fanout with varied query shapes across many clients
 - reference-app workload and backup/restore workflow
 - memory profiles for large joins and initial snapshots

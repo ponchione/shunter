@@ -230,6 +230,77 @@ func BenchmarkJoinFragmentEval(b *testing.B) {
 	}
 }
 
+func BenchmarkMultiWayLiveJoinEvalSizes(b *testing.B) {
+	for _, size := range []int{32, 128, 512} {
+		b.Run(fmt.Sprintf("rows_%d/table_shape", size), func(b *testing.B) {
+			benchmarkMultiWayLiveJoinEval(b, size, nil)
+		})
+		b.Run(fmt.Sprintf("rows_%d/count", size), func(b *testing.B) {
+			benchmarkMultiWayLiveJoinEval(b, size, countStarAggregate())
+		})
+	}
+}
+
+func benchmarkMultiWayLiveJoinEval(b *testing.B, size int, aggregate *Aggregate) {
+	s := multiJoinTestSchema()
+	inbox := make(chan FanOutMessage, 1024)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := multiJoinTestPredicate()
+	before := benchmarkMultiJoinCommitted(size, false)
+	connID := types.ConnectionID{9}
+	req := SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    90,
+		Predicates: []Predicate{pred},
+	}
+	if aggregate != nil {
+		req.Aggregates = []*Aggregate{aggregate}
+	}
+	if _, err := mgr.RegisterSet(req, before); err != nil {
+		b.Fatalf("RegisterSet: %v", err)
+	}
+	drainBenchmarkInbox(b, inbox)
+
+	changed := types.ProductValue{types.NewUint64(uint64(size + 1000)), types.NewUint64(uint64(size/2 + 1))}
+	cs := &store.Changeset{
+		TxID: 1,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			3: {TableID: 3, TableName: "t3", Inserts: []types.ProductValue{changed}},
+		},
+	}
+	after := benchmarkMultiJoinCommitted(size, true)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		mgr.EvalAndBroadcast(types.TxID(uint64(i+2)), cs, after, PostCommitMeta{})
+	}
+}
+
+func benchmarkMultiJoinCommitted(size int, includeChanged bool) *mockCommitted {
+	s := multiJoinTestSchema()
+	tRows := make([]types.ProductValue, size)
+	sRows := make([]types.ProductValue, size)
+	rRows := make([]types.ProductValue, size, size+1)
+	for i := 0; i < size; i++ {
+		key := types.NewUint64(uint64(i + 1))
+		tRows[i] = types.ProductValue{types.NewUint64(uint64(i + 1)), key}
+		sRows[i] = types.ProductValue{types.NewUint64(uint64(i + 1001)), key}
+		rRows[i] = types.ProductValue{types.NewUint64(uint64(i + 2001)), key}
+	}
+	if includeChanged {
+		rRows = append(rRows, types.ProductValue{
+			types.NewUint64(uint64(size + 1000)),
+			types.NewUint64(uint64(size/2 + 1)),
+		})
+	}
+	return buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: tRows,
+		2: sRows,
+		3: rRows,
+	})
+}
+
 func BenchmarkDeltaIndexConstruction(b *testing.B) {
 	// 100 rows × 5 indexed columns.
 	rows := make([]types.ProductValue, 100)

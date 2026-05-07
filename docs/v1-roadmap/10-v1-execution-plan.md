@@ -112,6 +112,13 @@ Completed in this phase:
   live-view projection, and live-view aggregate shapes through executable SQL
   and read-model metadata. Generated TypeScript declared-read helpers remain
   byte-level until the TypeScript client runtime adds typed decoding.
+- Read-surface performance coverage now benchmarks declared query execution,
+  declared live-view initial rows, raw subscription protocol admission,
+  one-off SQL join/aggregate reads, and deterministic multi-way live-join
+  table-shaped plus aggregate deltas.
+- App-facing SQL/read documentation has been audited so broader query wording is
+  either labeled as post-v1 expansion or points back to the v1 compatibility
+  matrix.
 
 Exit criteria:
 
