@@ -88,11 +88,12 @@ Completed or partially complete:
   app-owned `Module.Version(...)` contract metadata.
 - Add durable data-dir metadata and compatibility tests for module-name
   mismatches and app module version updates.
+- Add a reducer commit durability-failure recovery test proving an in-memory
+  commit that fails before log append is not recovered after restart.
 
 Remaining:
 
 - Add or update tests for:
-  - crash during reducer commit
   - crash during snapshot/compaction
 - Ensure CLI and library helpers return actionable errors across the full
   operator workflow.

@@ -195,7 +195,8 @@ Goal: operators have one documented path for data safety and upgrades.
 Status: runbook, release checklist, clean-shutdown fresh-restore test,
 incompatible-contract restore test, migration hook success/failure tests, and
 build-vs-module version guardrail added; durable data-dir metadata and
-compatibility checks added; crash/fault and reference-app workflow remain.
+compatibility checks added; reducer commit durability-failure recovery covered;
+snapshot/compaction fault coverage and reference-app workflow remain.
 
 Tasks:
 
@@ -205,7 +206,7 @@ Tasks:
 - Define contract policy failure behavior in startup/release workflows.
 - Keep durable metadata current as app module and Shunter version semantics
   evolve.
-- Test crash during reducer commit and crash during snapshot or compaction.
+- Test crash during snapshot or compaction.
 - Add reference-app backup, restore, migration, and upgrade examples.
 
 Exit criteria:

@@ -86,6 +86,55 @@ func TestBackupAndRestoreCleanShutdownRuntimeRecoversState(t *testing.T) {
 	assertDataDirRestoredMessageBodies(t, restored, []string{"before-backup"})
 }
 
+func TestReducerCommitDurabilityFailureBeforeAppendDoesNotRecoverCommit(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+
+	rt, err := Build(dataDirBackupTestModule(), Config{DataDir: dataDir})
+	if err != nil {
+		t.Fatalf("Build runtime: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start runtime: %v", err)
+	}
+	rt.mu.Lock()
+	durability := rt.durability
+	rt.mu.Unlock()
+	if durability == nil {
+		t.Fatal("runtime durability worker is nil")
+	}
+	if _, err := durability.Close(); err != nil {
+		t.Fatalf("close durability worker before reducer commit: %v", err)
+	}
+
+	res, err := rt.CallReducer(context.Background(), "insert_message", []byte("lost-before-append"))
+	if err != nil {
+		t.Fatalf("CallReducer admission error: %v", err)
+	}
+	if res.Status != StatusFailedInternal {
+		t.Fatalf("status = %v, err = %v, want failed internal", res.Status, res.Error)
+	}
+	if res.Error == nil {
+		t.Fatal("CallReducer result error is nil, want post-commit failure")
+	}
+	assertErrorContains(t, res.Error, "post-commit panic")
+	assertErrorContains(t, res.Error, "enqueue after close")
+	assertDataDirRuntimeStateMessageBodies(t, rt, []string{"lost-before-append"})
+
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close runtime after durability failure: %v", err)
+	}
+	recovered, err := Build(dataDirBackupTestModule(), Config{DataDir: dataDir})
+	if err != nil {
+		t.Fatalf("Build recovered runtime: %v", err)
+	}
+	if err := recovered.Start(context.Background()); err != nil {
+		t.Fatalf("Start recovered runtime: %v", err)
+	}
+	defer recovered.Close()
+	assertDataDirRestoredMessageBodies(t, recovered, nil)
+}
+
 func TestRestoreWithIncompatibleContractFailsBuildWithoutMutation(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := filepath.Join(dir, "data")
@@ -298,6 +347,24 @@ func assertDataDirRestoredMessageBodies(t *testing.T, rt *Runtime, want []string
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("restored message bodies = %#v, want %#v", got, want)
+		}
+	}
+}
+
+func assertDataDirRuntimeStateMessageBodies(t *testing.T, rt *Runtime, want []string) {
+	t.Helper()
+	snapshot := rt.state.Snapshot()
+	defer snapshot.Close()
+	var got []string
+	for _, row := range snapshot.TableScan(schema.TableID(0)) {
+		got = append(got, row[1].AsString())
+	}
+	if len(got) != len(want) {
+		t.Fatalf("runtime state message bodies = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("runtime state message bodies = %#v, want %#v", got, want)
 		}
 	}
 }
