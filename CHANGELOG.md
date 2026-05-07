@@ -24,6 +24,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Live subscription multi-way joins now use four-hop indexed path-edge pruning for covered remote value/range filters, including same-transaction middle and endpoint changes.
 - Live subscription multi-way joins now use five-hop indexed path-edge pruning for covered remote value/range filters, including same-transaction middle and endpoint changes.
 - Live subscription multi-way joins now use six-hop indexed path-edge pruning for covered remote value/range filters, including same-transaction middle and endpoint changes.
+- Live subscription multi-way joins now use seven-hop indexed path-edge pruning for covered remote value/range filters, including same-transaction middle and endpoint changes.
 - Live subscription multi-way split-OR branches now use branch-local column-equality connectors to place remote value/range filter-edge pruning.
 - Live subscription multi-way split-OR column-equality branches now fall back instead of keeping partial existence-edge pruning when any branch lacks indexed coverage.
 - Live subscription multi-way joins now split OR filters with alias-local value/range branches on directly joined relation instances into local and filter-edge pruning placements.
