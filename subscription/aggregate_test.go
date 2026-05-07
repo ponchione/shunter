@@ -537,6 +537,84 @@ func TestEvalJoinColumnAggregatesEmitChanges(t *testing.T) {
 	requireAggregateDelta(t, second[28], 201, 401, "SUM(s.id)")
 }
 
+func TestEvalJoinColumnAggregatesEmitDeletesAndSuppressUnchanged(t *testing.T) {
+	s := joinCountAggregateSchema()
+	inbox := make(chan FanOutMessage, 2)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	connID := types.ConnectionID{1}
+	pred := Join{
+		Left: joinLHS, Right: joinRHS,
+		LeftCol: joinLHSCol, RightCol: joinRHSCol,
+	}
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewString("b")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+			{types.NewUint64(101), types.NewUint64(1)},
+			{types.NewUint64(200), types.NewUint64(2)},
+		},
+	})
+	for _, req := range []struct {
+		queryID   uint32
+		aggregate *Aggregate
+	}{
+		{126, countJoinRHSIDAggregate()},
+		{127, countDistinctJoinLHSIDAggregate()},
+		{128, sumJoinRHSIDAggregate()},
+	} {
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID:     connID,
+			QueryID:    req.queryID,
+			Predicates: []Predicate{pred},
+			Aggregates: []*Aggregate{req.aggregate},
+		}, before); err != nil {
+			t.Fatalf("RegisterSet join aggregate queryID=%d: %v", req.queryID, err)
+		}
+	}
+
+	afterRightDelete := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewString("b")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+			{types.NewUint64(200), types.NewUint64(2)},
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), joinChangeset(
+		joinLHS, nil, nil,
+		joinRHS, nil, []types.ProductValue{{types.NewUint64(101), types.NewUint64(1)}},
+	), afterRightDelete, PostCommitMeta{})
+	first := aggregateUpdatesByQueryID((<-inbox).Fanout[connID])
+	requireAggregateDelta(t, first[126], 3, 2, "COUNT(s.id)")
+	requireAggregateDelta(t, first[128], 401, 300, "SUM(s.id)")
+	if _, ok := first[127]; ok {
+		t.Fatalf("COUNT(DISTINCT t.id) changed on duplicate joined left id delete: %+v", first[127])
+	}
+
+	afterLeftDelete := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {
+			{types.NewUint64(1), types.NewString("a")},
+		},
+		joinRHS: {
+			{types.NewUint64(100), types.NewUint64(1)},
+			{types.NewUint64(200), types.NewUint64(2)},
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(2), joinChangeset(
+		joinLHS, nil, []types.ProductValue{{types.NewUint64(2), types.NewString("b")}},
+		joinRHS, nil, nil,
+	), afterLeftDelete, PostCommitMeta{})
+	second := aggregateUpdatesByQueryID((<-inbox).Fanout[connID])
+	requireAggregateDelta(t, second[126], 2, 1, "COUNT(s.id)")
+	requireAggregateDelta(t, second[127], 2, 1, "COUNT(DISTINCT t.id)")
+	requireAggregateDelta(t, second[128], 300, 100, "SUM(s.id)")
+}
+
 func TestEvalCrossJoinAggregatesEmitChanges(t *testing.T) {
 	s := joinCountAggregateSchema()
 	inbox := make(chan FanOutMessage, 2)
