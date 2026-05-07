@@ -187,8 +187,8 @@ Goal: a normal TypeScript app should not write protocol handlers by hand.
 Status: package location decided; runtime type foundation, protocol
 compatibility helpers, generated import goldens, subscription handle primitive,
 minimal WebSocket lifecycle shell, initial IdentityToken decoding, and raw-byte
-reducer request/response foundation added; query/view/subscription protocol
-runtime remains.
+reducer and declared-query request/response foundations added;
+view/subscription protocol runtime remains.
 
 Tasks:
 
@@ -198,8 +198,9 @@ Tasks:
   target before generating more helpers.
 - Decide typed reducer argument/result encoding conventions beyond the current
   raw `Uint8Array` request path.
-- Build typed reducer result decoding plus query/view/table-subscription
-  protocol message plumbing on top of the minimal WebSocket lifecycle shell.
+- Build typed reducer result decoding, declared-query row decoding, and
+  declared-view/table-subscription protocol message plumbing on top of the
+  minimal WebSocket lifecycle shell.
 - Wire the managed subscription handle primitive into real server subscribe and
   unsubscribe responses.
 - Add tests for connection transitions, auth failure, reducer/query/view

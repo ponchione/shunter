@@ -1,5 +1,6 @@
 import {
   SHUNTER_SUBPROTOCOL_V1,
+  encodeDeclaredQueryRequest,
   encodeReducerCallRequest,
   ShunterAuthError,
   ShunterProtocolMismatchError,
@@ -8,6 +9,7 @@ import {
 } from "../src/index";
 import type {
   ConnectionState,
+  EncodedDeclaredQueryRequest,
   EncodedReducerCallRequest,
   ProtocolMetadata,
   RuntimeBindings,
@@ -80,11 +82,15 @@ const client = createShunterClient({
 
 async function exerciseGeneratedBindings(): Promise<void> {
   const generatedClientReducerCaller: ReducerCaller = client.callReducer;
+  const generatedClientDeclaredQueryRunner: DeclaredQueryRunner = client.runDeclaredQuery;
   const encodedRequest: EncodedReducerCallRequest<ReducerName> =
     encodeReducerCallRequest(reducers.createMessage, new Uint8Array([1, 2, 3]), {
       requestId: 9,
     });
   const encodedFrame: Uint8Array = encodedRequest.frame;
+  const encodedQueryRequest: EncodedDeclaredQueryRequest<ExecutableQueryName> =
+    encodeDeclaredQueryRequest("recent_messages", { requestId: 10 });
+  const encodedQueryFrame: Uint8Array = encodedQueryRequest.frame;
 
   const reducerCaller: ReducerCaller = async (_name, args) => args;
   const reducerBytes: Uint8Array = await callCreateMessage(
@@ -110,7 +116,7 @@ async function exerciseGeneratedBindings(): Promise<void> {
     ExecutableViewName
   > = {
     callReducer: generatedClientReducerCaller,
-    runDeclaredQuery: declaredQueryRunner,
+    runDeclaredQuery: generatedClientDeclaredQueryRunner,
     subscribeDeclaredView: declaredViewSubscriber,
     subscribeTable: runtimeTableSubscriber,
   };
@@ -135,6 +141,7 @@ async function exerciseGeneratedBindings(): Promise<void> {
 
   void reducerBytes;
   void encodedFrame;
+  void encodedQueryFrame;
   void queryBytes;
 }
 

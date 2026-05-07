@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import {
   SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY,
   SHUNTER_CLIENT_MESSAGE_CALL_REDUCER,
+  SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY,
+  SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE,
   SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE,
   SHUNTER_SUBPROTOCOL_V1,
   ShunterAuthError,
@@ -14,7 +16,9 @@ import {
   createShunterClient,
   createSubscriptionHandle,
   decodeIdentityTokenFrame,
+  decodeOneOffQueryResponseFrame,
   decodeTransactionUpdateFrame,
+  encodeDeclaredQueryRequest,
   encodeReducerCallRequest,
   selectShunterSubprotocol,
   shunterProtocol,
@@ -201,6 +205,17 @@ assert.throws(
   ShunterValidationError,
 );
 
+const encodedDeclaredQuery = encodeDeclaredQueryRequest("recent_users", {
+  messageId: new Uint8Array([0x09, 0x08]),
+});
+assert.equal(encodedDeclaredQuery.name, "recent_users");
+assert.deepEqual(encodedDeclaredQuery.messageId, new Uint8Array([0x09, 0x08]));
+assert.equal(encodedDeclaredQuery.frame[0], SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY);
+assert.deepEqual(
+  encodedDeclaredQuery.frame,
+  bytesFromHex("070200000009080c000000726563656e745f7573657273"),
+);
+
 const committedUpdateFrame = bytesFromHex(
   "050001000000040302010500000075736572730f0000000200000002000000010201000000030200000004050807060504030201202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf0400000073656e641413121102000000aabb242322213837363534333231",
 );
@@ -229,6 +244,26 @@ assert.equal(failedUpdate.status.status, "failed");
 assert.equal(failedUpdate.status.error, "boom");
 assert.equal(failedUpdate.reducerCall.name, "send");
 assert.equal(failedUpdate.reducerCall.requestId, 0x21222324);
+
+const oneOffSuccessFrame = bytesFromHex(
+  "0602000000010200010000000500000075736572730f0000000200000002000000010201000000031817161514131211",
+);
+const oneOffSuccess = decodeOneOffQueryResponseFrame(oneOffSuccessFrame);
+assert.equal(oneOffSuccessFrame[0], SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE);
+assert.deepEqual(oneOffSuccess.messageId, new Uint8Array([0x01, 0x02]));
+assert.equal(oneOffSuccess.error, undefined);
+assert.equal(oneOffSuccess.tables.length, 1);
+assert.equal(oneOffSuccess.tables[0].tableName, "users");
+assert.deepEqual([...oneOffSuccess.tables[0].rows.slice(0, 4)], [0x02, 0x00, 0x00, 0x00]);
+assert.equal(oneOffSuccess.totalHostExecutionDuration, 0x1112131415161718n);
+
+const oneOffErrorFrame = bytesFromHex(
+  "060200000003040109000000626164207175657279000000002827262524232221",
+);
+const oneOffError = decodeOneOffQueryResponseFrame(oneOffErrorFrame);
+assert.deepEqual(oneOffError.messageId, new Uint8Array([0x03, 0x04]));
+assert.equal(oneOffError.error, "bad query");
+assert.equal(oneOffError.tables.length, 0);
 
 const clientStates = [];
 const client = createShunterClient({
@@ -275,6 +310,25 @@ const sentReducer = await client.callReducer("send", new Uint8Array([0xaa, 0xbb]
 assert.deepEqual(sentReducer, encodedReducer.frame);
 assert.equal(sockets[0].sent.length, 3);
 assert.deepEqual(sockets[0].sent[2], encodedReducer.frame);
+
+const declaredQueryResponse = client.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x01, 0x02]),
+});
+assert.equal(sockets[0].sent.length, 4);
+assert.deepEqual(
+  sockets[0].sent[3],
+  encodeDeclaredQueryRequest("recent_users", { messageId: new Uint8Array([0x01, 0x02]) }).frame,
+);
+sockets[0].message(oneOffSuccessFrame);
+assert.deepEqual(await declaredQueryResponse, oneOffSuccessFrame);
+
+const declaredQueryFailure = client.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x03, 0x04]),
+});
+assert.equal(sockets[0].sent.length, 5);
+sockets[0].message(oneOffErrorFrame);
+await assert.rejects(declaredQueryFailure, ShunterValidationError);
+
 await client.close();
 await client.close();
 await client.dispose();

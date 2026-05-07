@@ -85,6 +85,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added minimal TypeScript reducer response correlation for full-update
   `callReducer` calls, resolving on committed `TransactionUpdate` frames and
   rejecting on failed reducer updates.
+- Added raw TypeScript declared-query request encoding and
+  `OneOffQueryResponse` correlation for byte-level generated query helpers.
 
 ## v0.1.0 - 2026-05-05
 

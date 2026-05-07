@@ -5,7 +5,9 @@ export const SHUNTER_SUBPROTOCOL_V1 = "v1.bsatn.shunter" as const;
 export const SHUNTER_DEFAULT_SUBPROTOCOL = SHUNTER_SUBPROTOCOL_V1;
 export const SHUNTER_SUPPORTED_SUBPROTOCOLS = [SHUNTER_SUBPROTOCOL_V1] as const;
 export const SHUNTER_CLIENT_MESSAGE_CALL_REDUCER = 3 as const;
+export const SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY = 7 as const;
 export const SHUNTER_SERVER_MESSAGE_IDENTITY_TOKEN = 1 as const;
+export const SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE = 6 as const;
 export const SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE = 5 as const;
 export const SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE = 0 as const;
 export const SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY = 1 as const;
@@ -316,10 +318,18 @@ interface PendingReducerCall {
   reject(error: ShunterError): void;
 }
 
+interface PendingDeclaredQuery {
+  readonly name: string;
+  readonly cleanup?: () => void;
+  resolve(value: Uint8Array): void;
+  reject(error: ShunterError): void;
+}
+
 export interface ShunterClient<Protocol extends ProtocolMetadata = ProtocolMetadata> {
   readonly state: ConnectionState<Protocol>;
   connect(): Promise<ConnectionMetadata<Protocol>>;
   callReducer: ReducerCaller<string, Uint8Array, Uint8Array>;
+  runDeclaredQuery: DeclaredQueryRunner<string, Uint8Array>;
   close(code?: number, reason?: string): Promise<void>;
   dispose(): Promise<void>;
   onStateChange(listener: ConnectionStateListener<Protocol>): () => void;
@@ -341,6 +351,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   let rejectConnect: ((error: ShunterError) => void) | undefined;
   let nextRequestId: RequestID = 1;
   const pendingReducerCalls = new Map<RequestID, PendingReducerCall>();
+  const pendingDeclaredQueries = new Map<string, PendingDeclaredQuery>();
   const listeners = new Set<ConnectionStateListener<Protocol>>();
   if (options.onStateChange !== undefined) {
     listeners.add(options.onStateChange);
@@ -378,6 +389,19 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
   };
 
+  const rejectPendingDeclaredQueries = (error: ShunterError): void => {
+    for (const [messageKey, pending] of pendingDeclaredQueries) {
+      pending.cleanup?.();
+      pendingDeclaredQueries.delete(messageKey);
+      pending.reject(error);
+    }
+  };
+
+  const rejectPendingOperations = (error: ShunterError): void => {
+    rejectPendingReducerCalls(error);
+    rejectPendingDeclaredQueries(error);
+  };
+
   const finishClose = (): void => {
     socket = undefined;
     connectPromise = undefined;
@@ -401,7 +425,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
 
   const failConnected = (error: ShunterError): void => {
     suppressSocketCloseTransition = true;
-    rejectPendingReducerCalls(error);
+    rejectPendingOperations(error);
     setState({ status: "failed", error });
     try {
       socket?.close(closeNormalCode, "protocol failure");
@@ -426,7 +450,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
     const closedError = new ShunterClosedClientError("Shunter client connection is closing.");
     rejectConnect?.(closedError);
-    rejectPendingReducerCalls(closedError);
+    rejectPendingOperations(closedError);
     setState({ status: "closing" });
     const pendingClose = new Promise<void>((resolve) => {
       resolveClose = resolve;
@@ -478,6 +502,24 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     pending.resolve(update.rawFrame);
   };
 
+  const settleDeclaredQueryResponse = (response: OneOffQueryResponseMessage): void => {
+    const messageKey = bytesKey(response.messageId);
+    const pending = pendingDeclaredQueries.get(messageKey);
+    if (pending === undefined) {
+      return;
+    }
+    pending.cleanup?.();
+    pendingDeclaredQueries.delete(messageKey);
+    if (response.error !== undefined) {
+      pending.reject(new ShunterValidationError(response.error || "Declared query failed.", {
+        code: "declared_query_failed",
+        details: { name: pending.name, response },
+      }));
+      return;
+    }
+    pending.resolve(response.rawFrame);
+  };
+
   const handleConnectedMessage = (event: MessageEvent): void => {
     let frame: Uint8Array;
     try {
@@ -486,13 +528,19 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       failConnected(isShunterError(error) ? error : toShunterError(error, "protocol", "Decode server frame failed"));
       return;
     }
-    if (frame[0] !== SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE) {
-      return;
-    }
     try {
-      settleReducerResponse(decodeTransactionUpdateFrame(frame));
+      switch (frame[0]) {
+        case SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE:
+          settleReducerResponse(decodeTransactionUpdateFrame(frame));
+          return;
+        case SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE:
+          settleDeclaredQueryResponse(decodeOneOffQueryResponseFrame(frame));
+          return;
+        default:
+          return;
+      }
     } catch (error) {
-      failConnected(isShunterError(error) ? error : toShunterError(error, "protocol", "Decode TransactionUpdate failed"));
+      failConnected(isShunterError(error) ? error : toShunterError(error, "protocol", "Decode server response failed"));
     }
   };
 
@@ -601,10 +649,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
                 details: { reason: event.reason, wasClean: event.wasClean },
               });
               setState({ status: "failed", error });
-              rejectPendingReducerCalls(error);
+              rejectPendingOperations(error);
               reject(error);
             } else if (state.status !== "closed") {
-              rejectPendingReducerCalls(new ShunterClosedClientError("Shunter client connection closed.", {
+              rejectPendingOperations(new ShunterClosedClientError("Shunter client connection closed.", {
                 code: String(event.code),
                 details: { reason: event.reason, wasClean: event.wasClean },
               }));
@@ -631,7 +679,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
                 details: event,
               });
               suppressSocketCloseTransition = true;
-              rejectPendingReducerCalls(error);
+              rejectPendingOperations(error);
               setState({ status: "failed", error });
               try {
                 ws.close(closeNormalCode, "transport failure");
@@ -703,6 +751,55 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           pendingReducerCalls.delete(request.requestId);
           cleanup?.();
           reject(toShunterError(error, "transport", "Reducer request send failed"));
+        }
+      });
+    },
+    async runDeclaredQuery(name: string, options: DeclaredQueryOptions = {}): Promise<Uint8Array> {
+      if (disposed) {
+        throw new ShunterClosedClientError("Cannot run a declared query on a disposed Shunter client.");
+      }
+      if (options.signal?.aborted) {
+        throw new ShunterClosedClientError("Declared query aborted before sending.");
+      }
+      const activeSocket = socket;
+      if (state.status !== "connected" || activeSocket === undefined) {
+        throw new ShunterClosedClientError("Cannot run a declared query before the Shunter client is connected.");
+      }
+      const request = encodeDeclaredQueryRequest(name, {
+        ...options,
+        requestId: options.messageId === undefined ? options.requestId ?? allocateRequestId() : options.requestId,
+      });
+      const messageKey = bytesKey(request.messageId);
+      if (pendingDeclaredQueries.has(messageKey)) {
+        throw new ShunterValidationError("Declared query message ID is already in flight.", {
+          details: { name, messageId: request.messageId },
+        });
+      }
+      return new Promise<Uint8Array>((resolve, reject) => {
+        let cleanup: (() => void) | undefined;
+        if (options.signal !== undefined) {
+          const abort = (): void => {
+            pendingDeclaredQueries.delete(messageKey);
+            cleanup?.();
+            reject(new ShunterClosedClientError("Declared query aborted before a response was received."));
+          };
+          options.signal.addEventListener("abort", abort, { once: true });
+          cleanup = () => {
+            options.signal?.removeEventListener("abort", abort);
+          };
+        }
+        pendingDeclaredQueries.set(messageKey, {
+          name,
+          cleanup,
+          resolve,
+          reject,
+        });
+        try {
+          activeSocket.send(request.frame);
+        } catch (error) {
+          pendingDeclaredQueries.delete(messageKey);
+          cleanup?.();
+          reject(toShunterError(error, "transport", "Declared query request send failed"));
         }
       });
     },
@@ -858,6 +955,49 @@ export function decodeTransactionUpdateFrame(data: unknown): TransactionUpdateMe
   };
 }
 
+export interface OneOffQueryTable {
+  readonly tableName: string;
+  readonly rows: Uint8Array;
+}
+
+export interface OneOffQueryResponseMessage {
+  readonly messageId: Uint8Array;
+  readonly error?: string;
+  readonly tables: readonly OneOffQueryTable[];
+  readonly totalHostExecutionDuration: bigint;
+  readonly rawFrame: Uint8Array;
+}
+
+export function decodeOneOffQueryResponseFrame(data: unknown): OneOffQueryResponseMessage {
+  const frame = frameBytes(data);
+  if (frame.length < 1 || frame[0] !== SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE) {
+    throw new ShunterProtocolError("Expected OneOffQueryResponse server message.");
+  }
+  let offset = 1;
+  const [messageId, messageOffset] = readBytes(frame, offset, "OneOffQueryResponse message_id");
+  offset = messageOffset;
+  const [error, errorOffset] = readOptionalStringValue(frame, offset, "OneOffQueryResponse error");
+  offset = errorOffset;
+  const [tables, tablesOffset] = readOneOffQueryTables(frame, offset);
+  offset = tablesOffset;
+  const [totalHostExecutionDuration, durationOffset] = readInt64LE(
+    frame,
+    offset,
+    "OneOffQueryResponse total_host_execution_duration",
+  );
+  offset = durationOffset;
+  if (offset !== frame.length) {
+    throw new ShunterProtocolError("Malformed OneOffQueryResponse: trailing bytes.");
+  }
+  return {
+    messageId,
+    ...(error === undefined ? {} : { error }),
+    tables,
+    totalHostExecutionDuration,
+    rawFrame: new Uint8Array(frame),
+  };
+}
+
 function frameBytes(data: unknown): Uint8Array {
   if (data instanceof Uint8Array) {
     return data;
@@ -913,6 +1053,26 @@ function readStringValue(frame: Uint8Array, offset: number, label: string): [str
     return [new TextDecoder("utf-8", { fatal: true }).decode(raw), nextOffset];
   } catch (error) {
     throw new ShunterProtocolError(`Malformed frame: ${label} is not valid UTF-8.`, { cause: error });
+  }
+}
+
+function readOptionalStringValue(
+  frame: Uint8Array,
+  offset: number,
+  label: string,
+): [string | undefined, number] {
+  if (frame.length < offset + 1) {
+    throw new ShunterProtocolError(`Malformed frame: ${label} option tag is truncated.`);
+  }
+  const tag = frame[offset];
+  offset += 1;
+  switch (tag) {
+    case 0:
+      return [undefined, offset];
+    case 1:
+      return readStringValue(frame, offset, label);
+    default:
+      throw new ShunterProtocolError(`Malformed frame: ${label} option tag ${tag}.`);
   }
 }
 
@@ -972,6 +1132,27 @@ function readReducerCallInfo(frame: Uint8Array, offset: number): [ReducerCallInf
   offset = argsOffset;
   const [requestId, requestOffset] = readUint32LE(frame, offset, "ReducerCallInfo request_id");
   return [{ name, reducerId, args, requestId }, requestOffset];
+}
+
+function readOneOffQueryTables(frame: Uint8Array, offset: number): [OneOffQueryTable[], number] {
+  const [count, countOffset] = readUint32LE(frame, offset, "OneOffQueryResponse table count");
+  offset = countOffset;
+  if (count > Math.floor((frame.length - offset) / 8)) {
+    throw new ShunterProtocolError("Malformed frame: OneOffQueryResponse table count exceeds remaining bytes.");
+  }
+  const tables: OneOffQueryTable[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const [tableName, tableOffset] = readStringValue(frame, offset, "OneOffQueryResponse table_name");
+    offset = tableOffset;
+    const [rows, rowsOffset] = readBytes(frame, offset, "OneOffQueryResponse rows");
+    offset = rowsOffset;
+    tables.push({ tableName, rows });
+  }
+  return [tables, offset];
+}
+
+function bytesKey(bytes: Uint8Array): string {
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export type RequestID = number;
@@ -1102,7 +1283,15 @@ export type QueryRunner<Result = Uint8Array> = (
 
 export interface DeclaredQueryOptions {
   readonly requestId?: RequestID;
+  readonly messageId?: Uint8Array;
   readonly signal?: AbortSignal;
+}
+
+export interface EncodedDeclaredQueryRequest<Name extends string = string> {
+  readonly name: Name;
+  readonly requestId?: RequestID;
+  readonly messageId: Uint8Array;
+  readonly frame: Uint8Array;
 }
 
 export interface DeclaredQueryResult<Name extends string = string, Rows = Uint8Array> {
@@ -1116,6 +1305,46 @@ export type DeclaredQueryRunner<
   Name extends string = string,
   Result = Uint8Array,
 > = (name: Name, options?: DeclaredQueryOptions) => Promise<Result>;
+
+export function encodeDeclaredQueryRequest<Name extends string>(
+  name: Name,
+  options: DeclaredQueryOptions = {},
+): EncodedDeclaredQueryRequest<Name> {
+  const requestId = options.requestId;
+  if (requestId !== undefined) {
+    assertUint32(requestId, "Declared query request ID");
+  }
+  const messageId = options.messageId === undefined
+    ? requestIdMessageId(requestId ?? 0)
+    : new Uint8Array(options.messageId);
+  const queryName = utf8Bytes(name, "Declared query name");
+  const frameLength =
+    1 +
+    4 + messageId.length +
+    4 + queryName.length;
+  const frame = new Uint8Array(frameLength);
+  let offset = 0;
+  frame[offset] = SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY;
+  offset += 1;
+  offset = writeUint32LE(frame, offset, messageId.length);
+  frame.set(messageId, offset);
+  offset += messageId.length;
+  offset = writeUint32LE(frame, offset, queryName.length);
+  frame.set(queryName, offset);
+  return {
+    name,
+    ...(requestId === undefined ? {} : { requestId }),
+    messageId,
+    frame,
+  };
+}
+
+function requestIdMessageId(requestId: RequestID): Uint8Array {
+  assertUint32(requestId, "Declared query request ID");
+  const messageId = new Uint8Array(4);
+  writeUint32LE(messageId, 0, requestId);
+  return messageId;
+}
 
 export interface SubscriptionClosed {
   readonly reason: "unsubscribed" | "closed" | "error";

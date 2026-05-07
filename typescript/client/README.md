@@ -8,9 +8,11 @@ helpers, state and error types, a minimal `createShunterClient` WebSocket
 lifecycle shell with initial `IdentityToken` decoding, a managed subscription
 handle primitive, typed runtime interfaces, and raw reducer request encoding
 plus connected WebSocket sending for the v1 `CallReducerMsg` shape and minimal
-full-update `TransactionUpdate` response correlation. It does not implement
-typed reducer argument/result encoding, query/view protocol messages, reconnect
-policy, row decoding, or cache behavior yet.
+full-update `TransactionUpdate` response correlation. It also includes raw
+declared-query request encoding and `OneOffQueryResponse` correlation. It does
+not implement typed reducer argument/result encoding, declared-query row
+decoding, view/subscription protocol messages, reconnect policy, or cache
+behavior yet.
 
 The lifecycle shell offers Shunter's v1 subprotocol, appends a configured token
 as the server-supported `token` query parameter, tracks `idle`/`connecting`/
@@ -21,6 +23,8 @@ Full-update `callReducer()` calls currently resolve with the raw
 `TransactionUpdate` response frame on committed status and reject on failed
 status. `NoSuccessNotify` calls resolve after send because successful server
 echoes may be suppressed.
+`runDeclaredQuery()` currently resolves with the raw `OneOffQueryResponse`
+frame on success and rejects on response errors.
 
 Generated module bindings should import types from `@shunter/client` and keep
 module-specific table, reducer, query, and view names in the generated file.

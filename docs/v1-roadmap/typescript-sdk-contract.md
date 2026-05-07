@@ -35,8 +35,10 @@ minimal `createShunterClient` WebSocket lifecycle shell with initial
 runtime interfaces consumed by generated bindings. It also exposes raw
 `Uint8Array` reducer request encoding for Shunter v1 `CallReducerMsg` frames
 and a connected-client `callReducer` send path with minimal full-update
-`TransactionUpdate` response correlation. Typed reducer argument/result
-encoding, query/view message plumbing, row decoding, reconnect policy, and
+`TransactionUpdate` response correlation. It also exposes raw declared-query
+request encoding for v1 `DeclaredQueryMsg` frames and correlates
+`OneOffQueryResponse` frames. Typed reducer argument/result encoding, declared
+query row decoding, view/subscription message plumbing, reconnect policy, and
 local cache implementation remain open.
 
 ## Runtime API
@@ -120,6 +122,13 @@ Reducer call result:
 Generated bindings should expose typed declared query helpers by executable
 query name. Metadata-only declarations should be generated as metadata but not
 as callable helpers.
+
+Current foundation: the runtime can encode the named `DeclaredQueryMsg` shape
+used by the Go protocol and `createShunterClient().runDeclaredQuery(...)` waits
+for a matching `OneOffQueryResponse`. Successful responses resolve with the raw
+response frame; server error responses reject with a structured validation
+error. Typed row decoding and table/view metadata extraction remain required v1
+follow-ups.
 
 Query calls should return:
 
