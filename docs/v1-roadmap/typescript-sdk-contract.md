@@ -166,9 +166,9 @@ Generated bindings should expose:
 - module contract format/version metadata
 - runtime protocol metadata needed for negotiation
 
-Identifier normalization and collision suffixes remain a v1 compatibility
-decision. Until decided, apps should treat exported categories and string
-metadata as stable, not the exact generated helper spelling.
+Identifier normalization and collision suffixes are stable for v1 generated
+codegen output. The SDK should consume generated names as emitted and should
+not re-normalize contract strings independently.
 
 ## Test Matrix
 

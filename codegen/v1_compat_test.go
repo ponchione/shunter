@@ -130,6 +130,26 @@ func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
 	}
 }
 
+func TestV1CompatibilityTypeScriptIdentifierNormalizationAndCollisions(t *testing.T) {
+	out, err := Generate(codegenIdentifierCollisionFixture(), Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+	for _, want := range []string{
+		`export interface LiveMessagesRow {`,
+		`bodyText: string;`,
+		`class_: string;`,
+		`_1Count: bigint;`,
+		`sendMessage2: "send-message",`,
+		`Default: "default",`,
+		`recentMessages2: "recent-messages",`,
+		`liveMessages2: "live messages",`,
+	} {
+		assertContains(t, ts, want)
+	}
+}
+
 func TestV1CompatibilityTypeScriptCoversCurrentValueKindMappings(t *testing.T) {
 	columns := []struct {
 		name  string

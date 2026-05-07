@@ -131,6 +131,12 @@ helpers includes:
 - permissions and read-model metadata
 - type mappings for the current exported Shunter value kinds
 
+Generated identifier normalization and collision suffixes are stable for v1
+codegen output. Names are emitted as TypeScript-safe identifiers by splitting
+on non-letter and non-digit separators, applying the category's camel or Pascal
+case style, prefixing leading digits with `_`, suffixing reserved words with
+`_`, and appending numeric collision suffixes in contract order.
+
 Out of scope for v1 codegen:
 
 - a maintained npm package or full client runtime
@@ -201,8 +207,5 @@ implementation details even when importable.
 
 Open decisions before cutting `v1.0.0`:
 
-- Decide whether exact generated TypeScript identifier normalization and
-  collision suffixes are compatibility commitments, or whether only the
-  exported contract categories are stable.
 - Add or confirm protocol, contract JSON, and TypeScript golden coverage for
   every stable payload shape in this document.

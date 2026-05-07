@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	shunter "github.com/ponchione/shunter"
@@ -119,26 +118,4 @@ func codegenFuzzLabel(data []byte, maxBytes int) string {
 		return fmt.Sprintf("seed_len=%d seed=%x codegen_config=max_bytes=%d", len(data), data, maxBytes)
 	}
 	return fmt.Sprintf("seed_len=%d seed_prefix=%x codegen_config=max_bytes=%d", len(data), data[:80], maxBytes)
-}
-
-func TestCodegenIdentifierCollisionFuzzSeedExercisesSanitization(t *testing.T) {
-	out, err := Generate(codegenIdentifierCollisionFixture(), Options{Language: LanguageTypeScript})
-	if err != nil {
-		t.Fatalf("Generate returned error: %v", err)
-	}
-	ts := string(out)
-	for _, want := range []string{
-		`export interface LiveMessagesRow {`,
-		`bodyText: string;`,
-		`class_: string;`,
-		`_1Count: bigint;`,
-		`sendMessage2: "send-message",`,
-		`Default: "default",`,
-		`recentMessages2: "recent-messages",`,
-		`liveMessages2: "live messages",`,
-	} {
-		if !strings.Contains(ts, want) {
-			t.Fatalf("generated TypeScript missing %q:\n%s", want, ts)
-		}
-	}
 }

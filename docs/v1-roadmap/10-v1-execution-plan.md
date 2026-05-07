@@ -63,8 +63,8 @@ Tasks:
   ops, migration, declared-read, and health additions.
 - Keep `Host` preview/advanced for v1 unless a separate compatibility decision
   graduates it.
-- Decide whether generated TypeScript identifier normalization and collision
-  suffixes are compatibility commitments.
+- Keep generated TypeScript identifier normalization and collision suffixes as
+  v1 codegen compatibility commitments.
 - Keep lower-level package compatibility limited to the stable subsets in
   `docs/v1-compatibility.md`.
 - Add or confirm golden coverage for every stable protocol payload,

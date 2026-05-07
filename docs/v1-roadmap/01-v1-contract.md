@@ -50,6 +50,8 @@ runtime/tool version metadata.
 Current v1 decisions now settled in `docs/v1-compatibility.md`: `Host` remains
 preview/advanced for v1, and no importable lower-level package beyond the
 stable subsets listed in the matrix receives a normal Go compatibility promise.
+Generated TypeScript identifier normalization and collision suffixes are also
+stable v1 codegen output.
 
 Code reality as of this roadmap cleanup:
 
@@ -105,8 +107,8 @@ Remaining:
   stable payload shape in the matrix.
 - Ensure `contractdiff` treats stable-field changes consistently with the final
   v1 compatibility policy.
-- Resolve the remaining TypeScript identifier normalization compatibility
-  decision before cutting `v1.0.0`.
+- Keep generated TypeScript identifier normalization compatibility tests current
+  when codegen naming changes.
 
 ## Verification
 
