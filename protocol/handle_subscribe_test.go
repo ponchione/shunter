@@ -2646,6 +2646,33 @@ func TestHandleSubscribeSingle_UnindexedJoinRejectedAtCompileStage(t *testing.T)
 
 // --- handleSubscribeMulti tests ---
 
+func TestCompileRawSubscribeAdmissionPlanRejectsInvalidBatchWithoutPartialPlan(t *testing.T) {
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+	const badSQL = "SELECT COUNT(*) AS n FROM users"
+
+	plan, failedSQL, err := compileRawSubscribeAdmissionPlan(
+		[]string{"SELECT * FROM users", badSQL},
+		sl,
+		types.CallerContext{},
+		nil,
+	)
+
+	if err == nil {
+		t.Fatal("compileRawSubscribeAdmissionPlan returned nil error, want aggregate rejection")
+	}
+	if failedSQL != badSQL {
+		t.Fatalf("failedSQL = %q, want %q", failedSQL, badSQL)
+	}
+	if !strings.Contains(err.Error(), "Column projections are not supported in subscriptions") {
+		t.Fatalf("err = %v, want subscription return-type rejection", err)
+	}
+	if len(plan.predicates) != 0 || len(plan.predicateHashIdentities) != 0 {
+		t.Fatalf("plan = %+v, want no partial predicates after rejection", plan)
+	}
+}
+
 func TestHandleSubscribeMultiSuccess(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockSubExecutor{}

@@ -30,6 +30,35 @@ func handleSubscribeSingleWithVisibility(
 	handleSubscribeSetWithVisibility(ctx, conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantSingle, []string{msg.QueryString}, msg.QueryString, executor, sl, visibilityFilters)
 }
 
+type rawSubscribeAdmissionPlan struct {
+	predicates              []any
+	predicateHashIdentities []*types.Identity
+}
+
+func compileRawSubscribeAdmissionPlan(
+	queryStrings []string,
+	sl SchemaLookup,
+	caller types.CallerContext,
+	visibilityFilters []VisibilityFilter,
+) (rawSubscribeAdmissionPlan, string, error) {
+	plan := rawSubscribeAdmissionPlan{
+		predicates:              make([]any, 0, len(queryStrings)),
+		predicateHashIdentities: make([]*types.Identity, 0, len(queryStrings)),
+	}
+	for _, qs := range queryStrings {
+		compiled, err := CompileSQLQueryStringWithVisibility(qs, sl, &caller.Identity, SQLQueryValidationOptions{
+			AllowLimit:      false,
+			AllowProjection: false,
+		}, visibilityFilters, caller.AllowAllPermissions)
+		if err != nil {
+			return rawSubscribeAdmissionPlan{}, qs, err
+		}
+		plan.predicates = append(plan.predicates, compiled.Predicate())
+		plan.predicateHashIdentities = append(plan.predicateHashIdentities, compiled.PredicateHashIdentity(caller.Identity))
+	}
+	return plan, "", nil
+}
+
 func handleSubscribeSetWithVisibility(
 	ctx context.Context,
 	conn *Conn,
@@ -44,20 +73,11 @@ func handleSubscribeSetWithVisibility(
 	receipt := time.Now()
 	readSL := authorizedSchemaLookupForConn(sl, conn)
 	caller := readCallerContext(conn)
-	preds := make([]any, 0, len(queryStrings))
-	hashIdentities := make([]*types.Identity, 0, len(queryStrings))
-	for _, qs := range queryStrings {
-		compiled, err := CompileSQLQueryStringWithVisibility(qs, readSL, &caller.Identity, SQLQueryValidationOptions{
-			AllowLimit:      false,
-			AllowProjection: false,
-		}, visibilityFilters, caller.AllowAllPermissions)
-		if err != nil {
-			sendSubscribeCompileError(conn, receipt, requestID, queryID, err, qs)
-			recordProtocolMessage(conn.Observer, protocolSubscribeMetricKind(variant), "validation_error")
-			return
-		}
-		preds = append(preds, compiled.Predicate())
-		hashIdentities = append(hashIdentities, compiled.PredicateHashIdentity(caller.Identity))
+	plan, failedSQL, err := compileRawSubscribeAdmissionPlan(queryStrings, readSL, caller, visibilityFilters)
+	if err != nil {
+		sendSubscribeCompileError(conn, receipt, requestID, queryID, err, failedSQL)
+		recordProtocolMessage(conn.Observer, protocolSubscribeMetricKind(variant), "validation_error")
+		return
 	}
 
 	if submitErr := executor.RegisterSubscriptionSet(ctx, RegisterSubscriptionSetRequest{
@@ -65,8 +85,8 @@ func handleSubscribeSetWithVisibility(
 		QueryID:                 queryID,
 		RequestID:               requestID,
 		Variant:                 variant,
-		Predicates:              preds,
-		PredicateHashIdentities: hashIdentities,
+		Predicates:              plan.predicates,
+		PredicateHashIdentities: plan.predicateHashIdentities,
 		Reply:                   makeSubscribeSetReply(conn, requestID, queryID, variant),
 		Receipt:                 receipt,
 		SQLText:                 sqlText,
