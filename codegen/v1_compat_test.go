@@ -82,8 +82,11 @@ func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
 	ts := string(data)
 
 	for _, want := range []string{
+		`import type {`,
+		`ProtocolMetadata as ShunterProtocolMetadata,`,
 		`export const shunterProtocol = {`,
 		`defaultSubprotocol: "v1.bsatn.shunter",`,
+		`} as const satisfies ShunterProtocolMetadata;`,
 		`export interface MessagesRow {`,
 		`id: bigint;`,
 		`sender: string;`,
@@ -139,11 +142,11 @@ func TestV1CompatibilityTypeScriptDeclaredReadResultShapeSurface(t *testing.T) {
 	ts := string(data)
 
 	for _, want := range []string{
-		`export type DeclaredQueryRunner = (name: ExecutableQueryName) => Promise<Uint8Array>;`,
+		`export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;`,
 		`recentMessages: "SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25",`,
 		`export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`,
 		`return runDeclaredQuery("recent_messages");`,
-		`export type DeclaredViewSubscriber = (name: ExecutableViewName) => Promise<() => void>;`,
+		`export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;`,
 		`liveMessageProjection: "SELECT id, body AS text FROM messages",`,
 		`liveMessageCount: "SELECT COUNT(*) AS n FROM messages",`,
 		`export function subscribeLiveMessageProjection(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`,

@@ -27,16 +27,17 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 		fmt.Fprintf(&b, "// Module: %s %s\n", typeScriptLineCommentText(contract.Module.Name), typeScriptLineCommentText(contract.Module.Version))
 	}
 	b.WriteString("\n")
+	writeTypeScriptRuntimeImports(&b)
 	if err := writeTypeScriptProtocolMetadata(&b); err != nil {
 		return nil, err
 	}
-	b.WriteString("export type ReducerCaller = (name: ReducerName, args: Uint8Array) => Promise<Uint8Array>;\n")
-	b.WriteString("export type QueryRunner = (sql: string) => Promise<Uint8Array>;\n")
-	b.WriteString("export type ViewSubscriber = (sql: string) => Promise<() => void>;\n")
-	b.WriteString("export type DeclaredQueryRunner = (name: ExecutableQueryName) => Promise<Uint8Array>;\n")
-	b.WriteString("export type DeclaredViewSubscriber = (name: ExecutableViewName) => Promise<() => void>;\n")
+	b.WriteString("export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;\n")
+	b.WriteString("export type QueryRunner = ShunterQueryRunner<Uint8Array>;\n")
+	b.WriteString("export type ViewSubscriber = ShunterViewSubscriber;\n")
+	b.WriteString("export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;\n")
+	b.WriteString("export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;\n")
 	b.WriteString("export type TableRow<Name extends TableName> = TableRows[Name];\n")
-	b.WriteString("export type TableSubscriber<Row = never> = <Name extends TableName>(table: Name, onRows?: (rows: ([Row] extends [never] ? TableRow<Name> : Row)[]) => void) => Promise<() => void>;\n")
+	b.WriteString("export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;\n")
 	b.WriteString("export type UUID = string;\n")
 	b.WriteString("\n")
 
@@ -165,6 +166,18 @@ func typeScriptTopLevelValueNames() map[string]int {
 	return seen
 }
 
+func writeTypeScriptRuntimeImports(b *bytes.Buffer) {
+	b.WriteString("import type {\n")
+	b.WriteString("  DeclaredQueryRunner as ShunterDeclaredQueryRunner,\n")
+	b.WriteString("  DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,\n")
+	b.WriteString("  ProtocolMetadata as ShunterProtocolMetadata,\n")
+	b.WriteString("  QueryRunner as ShunterQueryRunner,\n")
+	b.WriteString("  ReducerCaller as ShunterReducerCaller,\n")
+	b.WriteString("  TableSubscriber as ShunterTableSubscriber,\n")
+	b.WriteString("  ViewSubscriber as ShunterViewSubscriber,\n")
+	b.WriteString("} from \"@shunter/client\";\n\n")
+}
+
 func writeTypeScriptProtocolMetadata(b *bytes.Buffer) error {
 	defaultSubprotocol, ok := protocol.SubprotocolForVersion(protocol.CurrentProtocolVersion)
 	if !ok {
@@ -175,7 +188,7 @@ func writeTypeScriptProtocolMetadata(b *bytes.Buffer) error {
 	fmt.Fprintf(b, "  currentVersion: %d,\n", protocol.CurrentProtocolVersion)
 	fmt.Fprintf(b, "  defaultSubprotocol: %s,\n", strconv.Quote(defaultSubprotocol))
 	fmt.Fprintf(b, "  supportedSubprotocols: %s,\n", typeScriptStringArray(protocol.SupportedSubprotocols()))
-	b.WriteString("} as const;\n\n")
+	b.WriteString("} as const satisfies ShunterProtocolMetadata;\n\n")
 	b.WriteString("export type ShunterSubprotocol = (typeof shunterProtocol.supportedSubprotocols)[number];\n\n")
 	return nil
 }

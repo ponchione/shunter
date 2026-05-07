@@ -60,8 +60,9 @@ Several original roadmap gaps now have partial implementation:
 - Runtime gauntlet, recovery, storage-fault, fuzz, and benchmark coverage exist,
   but the release qualification command set and published performance envelopes
   are not complete.
-- TypeScript codegen exists. A maintained TypeScript client runtime/package does
-  not.
+- TypeScript codegen exists. A minimal in-repo TypeScript runtime foundation
+  exists at `typescript/client`, but the WebSocket runtime, typed row decoding,
+  reconnect/cache behavior, and canary wiring are not complete.
 - A release-candidate app workload exists in tests. The maintained v1
   canary/reference app is the external `opsboard-canary` repository; do not add
   a duplicate in-repo task-board app.

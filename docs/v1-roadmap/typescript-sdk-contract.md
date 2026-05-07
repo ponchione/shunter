@@ -1,6 +1,6 @@
 # TypeScript SDK Contract
 
-Status: proposed SDK contract
+Status: proposed SDK contract; foundation package started
 Scope: plain TypeScript runtime API and generated binding shape for Shunter v1
 apps.
 
@@ -19,10 +19,20 @@ Preferred v1 shape:
 - generated per-module bindings that import the runtime
 - generated contract metadata committed by apps or produced during app builds
 
+Package-location decision: the v1 runtime package lives in this repo at
+`typescript/client` as `@shunter/client`, so Go codegen goldens and TypeScript
+typechecks can evolve together.
+
 The runtime package should own protocol connection lifecycle, auth token
 handling, reducer/query/view request plumbing, subscription handles, reconnect
 policy, local cache primitives, and structured errors. Generated bindings should
 own module-specific names and types.
+
+Current foundation scope: `@shunter/client` exposes protocol constants,
+connection state types, structured errors, subscription handle types, and typed
+runtime interfaces consumed by generated bindings. The WebSocket client factory,
+reducer argument encoding, row decoding, reconnect policy, and local cache
+implementation remain open.
 
 ## Runtime API
 

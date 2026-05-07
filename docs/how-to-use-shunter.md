@@ -542,6 +542,8 @@ codegen metadata.
 Generated TypeScript includes row interfaces, a `TableRows` table-name-to-row
 map, table subscription helper functions, executable declared-read name unions,
 SQL maps, byte-level declared-read helper functions, and protocol metadata.
+Generated bindings import shared SDK runtime types from `@shunter/client`;
+current helpers remain byte-level until the SDK runtime owns row decoding.
 Typed decoding for declared query/view result rows belongs to the TypeScript
 client runtime track.
 

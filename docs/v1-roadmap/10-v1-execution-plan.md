@@ -184,22 +184,26 @@ typecheck/test command after the SDK-backed client package exists.
 
 Goal: a normal TypeScript app should not write protocol handlers by hand.
 
-Status: proposed SDK contract written; runtime package and tests remain.
+Status: package location decided; runtime type foundation and generated import
+goldens added; behavioral runtime remains.
 
 Tasks:
 
-- Decide package location. Preferred default unless contradicted by repo
-  constraints: keep a small runtime package in-repo beside generated fixtures so
-  Go codegen and TypeScript tests evolve together.
+- Keep the v1 package location as `typescript/client` (`@shunter/client`) unless
+  a release-packaging decision explicitly moves it.
 - Keep `docs/v1-roadmap/typescript-sdk-contract.md` current as the runtime API
   target before generating more helpers.
 - Decide reducer argument encoding conventions. The Go runtime still accepts raw
-  bytes, so generated helpers need a stable app-facing encoding story.
+  bytes, and generated helpers remain byte-level until this is resolved.
+- Implement the actual WebSocket connection runtime for browser and Node
+  clients.
 - Implement subscription handles with idempotent unsubscribe.
 - Implement protocol version/subprotocol mismatch errors.
 - Add tests for connection transitions, auth failure, reducer/query/view
   success and failure, initial snapshots, deltas, unsubscribe, reconnect, and
   mismatch handling.
+- Implement row decoding and local cache primitives for declared query/view and
+  table subscription results.
 - Wire the external canary app client through the SDK only.
 
 Exit criteria:

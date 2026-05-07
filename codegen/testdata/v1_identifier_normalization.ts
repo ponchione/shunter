@@ -2,22 +2,32 @@
 // Source contract: shunter.module_contract v1
 // Module: chat v1.2.3
 
+import type {
+  DeclaredQueryRunner as ShunterDeclaredQueryRunner,
+  DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,
+  ProtocolMetadata as ShunterProtocolMetadata,
+  QueryRunner as ShunterQueryRunner,
+  ReducerCaller as ShunterReducerCaller,
+  TableSubscriber as ShunterTableSubscriber,
+  ViewSubscriber as ShunterViewSubscriber,
+} from "@shunter/client";
+
 export const shunterProtocol = {
   minSupportedVersion: 1,
   currentVersion: 1,
   defaultSubprotocol: "v1.bsatn.shunter",
   supportedSubprotocols: ["v1.bsatn.shunter"],
-} as const;
+} as const satisfies ShunterProtocolMetadata;
 
 export type ShunterSubprotocol = (typeof shunterProtocol.supportedSubprotocols)[number];
 
-export type ReducerCaller = (name: ReducerName, args: Uint8Array) => Promise<Uint8Array>;
-export type QueryRunner = (sql: string) => Promise<Uint8Array>;
-export type ViewSubscriber = (sql: string) => Promise<() => void>;
-export type DeclaredQueryRunner = (name: ExecutableQueryName) => Promise<Uint8Array>;
-export type DeclaredViewSubscriber = (name: ExecutableViewName) => Promise<() => void>;
+export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;
+export type QueryRunner = ShunterQueryRunner<Uint8Array>;
+export type ViewSubscriber = ShunterViewSubscriber;
+export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;
+export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;
 export type TableRow<Name extends TableName> = TableRows[Name];
-export type TableSubscriber<Row = never> = <Name extends TableName>(table: Name, onRows?: (rows: ([Row] extends [never] ? TableRow<Name> : Row)[]) => void) => Promise<() => void>;
+export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;
 export type UUID = string;
 
 export interface MessagesRow {

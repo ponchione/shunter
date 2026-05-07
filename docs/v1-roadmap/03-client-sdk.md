@@ -1,6 +1,6 @@
 # TypeScript Client SDK
 
-Status: open, SDK contract drafted; implementation not started
+Status: open, SDK contract drafted; runtime foundation started
 Owner: unassigned
 Scope: production-credible TypeScript client and generated bindings for Shunter
 v1 applications.
@@ -17,16 +17,19 @@ top of it.
 
 ## Current State
 
-Shunter has contract export and TypeScript codegen. Generated TypeScript
-currently includes protocol metadata, row interfaces, table maps, reducer and
-declared-read constants/helpers, permission metadata, read-model metadata, and
-value-kind mappings.
+Shunter has contract export, TypeScript codegen, and a minimal checked-in
+runtime foundation at `typescript/client` published in-repo as
+`@shunter/client`. Generated TypeScript currently includes protocol metadata,
+row interfaces, table maps, reducer and declared-read constants/helpers,
+permission metadata, read-model metadata, value-kind mappings, and runtime type
+imports for the shared SDK surface.
 
-That is necessary but not sufficient for v1. There is no `package.json`, no
-maintained npm/runtime package, and no browser or Node client in the repo.
-Generated definitions alone do not solve connection lifecycle, subscription
-handles, auth refresh, local cache updates, reconnect policy, or protocol
-version mismatch behavior.
+That is necessary but not sufficient for v1. The runtime package currently
+defines protocol constants, connection state types, structured errors, and
+typed interfaces for reducer calls, declared queries, declared views, and table
+subscriptions. It does not yet implement the browser or Node WebSocket client,
+reducer argument encoding, row decoding, auth refresh, local cache updates,
+reconnect policy, or protocol version mismatch behavior.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
 fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
@@ -68,9 +71,9 @@ Current target: [`typescript-sdk-contract.md`](typescript-sdk-contract.md)
 
 ## Decisions To Make
 
-1. Decide whether the SDK lives inside this repo, a sibling package, or generated
-   output plus a small runtime library. Until this is decided, the only stable
-   TypeScript surface is contract generation.
+1. Package location is decided for v1: keep the small runtime package in this
+   repo at `typescript/client` as `@shunter/client`, and have generated
+   per-module bindings import shared runtime types from it.
 2. Decide how reducer argument encoding is represented. The current Go reducer
    boundary uses raw bytes, so v1 needs either typed adapter conventions or
    generated helpers that make the byte boundary invisible to normal clients.
@@ -91,11 +94,23 @@ Completed or partially complete:
   missing piece is a runtime package, not more standalone type definitions.
 - Define the proposed client runtime API in
   `typescript-sdk-contract.md`.
+- Add the initial checked-in `typescript/client` runtime foundation with
+  protocol constants, connection state and structured error types, subscription
+  handle types, and typed reducer/query/view/table runtime interfaces.
+- Update generated TypeScript goldens so generated bindings import and use
+  `@shunter/client` runtime types while preserving current byte-level helper
+  behavior.
+- Add a TypeScript typecheck fixture proving generated TypeScript can import
+  and use the runtime type surface.
 
 Remaining:
 
-- Audit current `codegen` output against the proposed SDK contract.
-- Add generated fixtures for representative module contracts.
+- Decide and implement reducer argument/result encoding conventions.
+- Implement the actual browser/Node WebSocket connection runtime.
+- Implement protocol version/subprotocol mismatch handling in the runtime.
+- Implement row decoding for declared query/view results and subscription
+  updates.
+- Implement reconnect, auth refresh, resubscription, and cache behavior.
 - Add client tests for:
   - connection state transitions
   - reducer success/failure
@@ -114,10 +129,11 @@ Use the repo's Go verification for generator changes:
 
 ```bash
 rtk go test ./...
+rtk npm --prefix typescript/client run typecheck
 ```
 
-Add the appropriate TypeScript typecheck/test command once the client package
-exists, and record it in this document and the package README.
+The TypeScript command currently typechecks the runtime foundation and generated
+golden fixture usage. Broaden it once runtime behavior tests exist.
 
 ## Done Criteria
 

@@ -69,6 +69,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added generic auth principals on reducer caller context, populated from validated protocol JWT claims and local call options without changing Shunter identity semantics.
 - Protocol reducer failure strings now label app reducer errors, app panics,
   permission denials, and Shunter runtime failures.
+- Added the initial `@shunter/client` TypeScript runtime foundation in
+  `typescript/client` and updated generated TypeScript bindings to import its
+  shared runtime types.
 
 ## v0.1.0 - 2026-05-05
 

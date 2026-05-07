@@ -14,6 +14,11 @@ func TestGeneratedTypeScriptPinsRuntimeProtocolMetadata(t *testing.T) {
 	}
 	ts := string(out)
 
+	assertContains(t, ts, `import type {`)
+	assertContains(t, ts, `ProtocolMetadata as ShunterProtocolMetadata,`)
+	assertContains(t, ts, `ReducerCaller as ShunterReducerCaller,`)
+	assertContains(t, ts, `} from "@shunter/client";`)
+
 	defaultSubprotocol, ok := protocol.SubprotocolForVersion(protocol.CurrentProtocolVersion)
 	if !ok {
 		t.Fatalf("current protocol version %s has no subprotocol", protocol.CurrentProtocolVersion)
@@ -24,5 +29,6 @@ func TestGeneratedTypeScriptPinsRuntimeProtocolMetadata(t *testing.T) {
 	assertContains(t, ts, fmt.Sprintf("currentVersion: %d,", protocol.CurrentProtocolVersion))
 	assertContains(t, ts, fmt.Sprintf("defaultSubprotocol: %q,", defaultSubprotocol))
 	assertContains(t, ts, fmt.Sprintf("supportedSubprotocols: %s,", typeScriptStringArray(protocol.SupportedSubprotocols())))
+	assertContains(t, ts, `} as const satisfies ShunterProtocolMetadata;`)
 	assertContains(t, ts, `export type ShunterSubprotocol = (typeof shunterProtocol.supportedSubprotocols)[number];`)
 }
