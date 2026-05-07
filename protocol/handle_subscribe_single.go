@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -31,8 +33,31 @@ func handleSubscribeSingleWithVisibility(
 }
 
 type rawSubscribeAdmissionPlan struct {
-	predicates              []any
-	predicateHashIdentities []*types.Identity
+	queries []rawSubscribeAdmissionPlanQuery
+}
+
+type rawSubscribeAdmissionPlanQuery struct {
+	sqlText               string
+	predicate             subscription.Predicate
+	predicateHashIdentity *types.Identity
+	usesCallerIdentity    bool
+	referencedTables      []schema.TableID
+}
+
+func (p rawSubscribeAdmissionPlan) predicates() []any {
+	out := make([]any, len(p.queries))
+	for i, query := range p.queries {
+		out[i] = query.predicate
+	}
+	return out
+}
+
+func (p rawSubscribeAdmissionPlan) predicateHashIdentities() []*types.Identity {
+	out := make([]*types.Identity, len(p.queries))
+	for i, query := range p.queries {
+		out[i] = query.predicateHashIdentity
+	}
+	return out
 }
 
 func compileRawSubscribeAdmissionPlan(
@@ -42,8 +67,7 @@ func compileRawSubscribeAdmissionPlan(
 	visibilityFilters []VisibilityFilter,
 ) (rawSubscribeAdmissionPlan, string, error) {
 	plan := rawSubscribeAdmissionPlan{
-		predicates:              make([]any, 0, len(queryStrings)),
-		predicateHashIdentities: make([]*types.Identity, 0, len(queryStrings)),
+		queries: make([]rawSubscribeAdmissionPlanQuery, 0, len(queryStrings)),
 	}
 	for _, qs := range queryStrings {
 		compiled, err := CompileSQLQueryStringWithVisibility(qs, sl, &caller.Identity, SQLQueryValidationOptions{
@@ -53,8 +77,13 @@ func compileRawSubscribeAdmissionPlan(
 		if err != nil {
 			return rawSubscribeAdmissionPlan{}, qs, err
 		}
-		plan.predicates = append(plan.predicates, compiled.Predicate())
-		plan.predicateHashIdentities = append(plan.predicateHashIdentities, compiled.PredicateHashIdentity(caller.Identity))
+		plan.queries = append(plan.queries, rawSubscribeAdmissionPlanQuery{
+			sqlText:               qs,
+			predicate:             compiled.Predicate(),
+			predicateHashIdentity: compiled.PredicateHashIdentity(caller.Identity),
+			usesCallerIdentity:    compiled.UsesCallerIdentity(),
+			referencedTables:      compiled.ReferencedTables(),
+		})
 	}
 	return plan, "", nil
 }
@@ -85,8 +114,8 @@ func handleSubscribeSetWithVisibility(
 		QueryID:                 queryID,
 		RequestID:               requestID,
 		Variant:                 variant,
-		Predicates:              plan.predicates,
-		PredicateHashIdentities: plan.predicateHashIdentities,
+		Predicates:              plan.predicates(),
+		PredicateHashIdentities: plan.predicateHashIdentities(),
 		Reply:                   makeSubscribeSetReply(conn, requestID, queryID, variant),
 		Receipt:                 receipt,
 		SQLText:                 sqlText,

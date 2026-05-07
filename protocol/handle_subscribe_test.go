@@ -2668,8 +2668,61 @@ func TestCompileRawSubscribeAdmissionPlanRejectsInvalidBatchWithoutPartialPlan(t
 	if !strings.Contains(err.Error(), "Column projections are not supported in subscriptions") {
 		t.Fatalf("err = %v, want subscription return-type rejection", err)
 	}
-	if len(plan.predicates) != 0 || len(plan.predicateHashIdentities) != 0 {
+	if len(plan.queries) != 0 {
 		t.Fatalf("plan = %+v, want no partial predicates after rejection", plan)
+	}
+}
+
+func TestCompileRawSubscribeAdmissionPlanRecordsPerQueryState(t *testing.T) {
+	caller := types.CallerContext{Identity: types.Identity{1, 3, 5, 7}}
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "identity", Type: schema.KindBytes},
+	)
+	queryStrings := []string{
+		"SELECT * FROM users WHERE id = 7",
+		"SELECT * FROM users WHERE identity = :sender",
+	}
+
+	plan, failedSQL, err := compileRawSubscribeAdmissionPlan(queryStrings, sl, caller, nil)
+	if err != nil {
+		t.Fatalf("compileRawSubscribeAdmissionPlan returned error for %q: %v", failedSQL, err)
+	}
+	if failedSQL != "" {
+		t.Fatalf("failedSQL = %q, want empty success marker", failedSQL)
+	}
+	if len(plan.queries) != 2 {
+		t.Fatalf("len(plan.queries) = %d, want 2", len(plan.queries))
+	}
+	for i, query := range plan.queries {
+		if query.sqlText != queryStrings[i] {
+			t.Fatalf("query[%d].sqlText = %q, want %q", i, query.sqlText, queryStrings[i])
+		}
+		if len(query.referencedTables) != 1 || query.referencedTables[0] != 1 {
+			t.Fatalf("query[%d].referencedTables = %v, want [1]", i, query.referencedTables)
+		}
+		if query.predicate == nil {
+			t.Fatalf("query[%d].predicate = nil, want compiled predicate", i)
+		}
+	}
+	if plan.queries[0].usesCallerIdentity {
+		t.Fatal("literal predicate usesCallerIdentity = true, want false")
+	}
+	if plan.queries[0].predicateHashIdentity != nil {
+		t.Fatalf("literal predicate hash identity = %x, want nil", *plan.queries[0].predicateHashIdentity)
+	}
+	if !plan.queries[1].usesCallerIdentity {
+		t.Fatal(":sender predicate usesCallerIdentity = false, want true")
+	}
+	if plan.queries[1].predicateHashIdentity == nil || *plan.queries[1].predicateHashIdentity != caller.Identity {
+		t.Fatalf(":sender predicate hash identity = %v, want caller identity", plan.queries[1].predicateHashIdentity)
+	}
+	if got := plan.predicates(); len(got) != 2 || got[0] == nil || got[1] == nil {
+		t.Fatalf("plan.predicates() = %#v, want two predicates", got)
+	}
+	hashIdentities := plan.predicateHashIdentities()
+	if len(hashIdentities) != 2 || hashIdentities[0] != nil || hashIdentities[1] == nil || *hashIdentities[1] != caller.Identity {
+		t.Fatalf("plan.predicateHashIdentities() = %v, want nil then caller identity", hashIdentities)
 	}
 }
 
