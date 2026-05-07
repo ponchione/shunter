@@ -266,6 +266,9 @@ rtk go run ./cmd/shunter restore --backup ./backups/chat-2026-05-04 --data-dir .
 
 Restore refuses to merge into a non-empty destination.
 
+For the operator-facing startup, shutdown, backup, restore, migration, upgrade,
+and release checklist, see `docs/operations.md`.
+
 ## Call Reducers Locally
 
 Use `CallReducer` when your process wants to invoke a reducer without going
@@ -510,6 +513,8 @@ Before relying on a Shunter-backed app:
 - Close the runtime during shutdown.
 - Export and review `shunter.contract.json` when changing app-facing tables,
   reducers, queries, views, permissions, or visibility filters.
+- Follow `docs/operations.md` for offline backup/restore, migration, upgrade,
+  and release workflows.
 - Run targeted package tests for changed app code and Shunter integration
   tests that cover reducer, read, protocol, and recovery paths.
 - Check `InspectRuntimeHealth(rt)`, `InspectHostHealth(host)`, or diagnostics

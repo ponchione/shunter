@@ -24,6 +24,8 @@ Do not read broad specs by default.
 - `docs/how-to-use-shunter.md` — app-author guide for embedding Shunter,
   declaring modules, running a runtime, serving protocol traffic, and exporting
   contracts.
+- `docs/operations.md` — operator runbook for `DataDir` lifecycle,
+  backup/restore, migrations, upgrades, and release checklist.
 - `docs/shunter-design-decisions.md` — consolidated current Shunter design
   decisions that code and tests still cite.
 - `docs/v1-compatibility.md` — initial v1 support matrix for root APIs,

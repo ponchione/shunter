@@ -1,6 +1,6 @@
 # Operations, Backup, Restore, And Migrations
 
-Status: open, operational primitives landed
+Status: open, runbook added; tests and reference app remain
 Owner: unassigned
 Scope: operator-facing workflows for data durability, backup/restore,
 compaction, schema compatibility, migrations, and upgrades.
@@ -69,12 +69,14 @@ Completed or partially complete:
 - Add backup/restore CLI commands and helper tests.
 - Add app-author guidance for offline backup/restore, data-dir compatibility
   checks, migration hooks, contract plans, and release metadata stamping.
+- Add an operator runbook under `docs/operations.md` covering `DataDir`
+  lifecycle, offline backup/restore, migrations, upgrades, and release
+  checklist.
 - Add tests for backup/restore helper refusal cases, migration hook success and
   failure, and basic snapshot/compaction behavior.
 
 Remaining:
 
-- Write a focused operator runbook under `docs/`.
 - Add or update tests for:
   - backup from clean shutdown
   - restore into fresh data dir

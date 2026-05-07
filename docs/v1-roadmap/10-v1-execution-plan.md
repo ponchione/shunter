@@ -186,9 +186,11 @@ Exit criteria:
 
 Goal: operators have one documented path for data safety and upgrades.
 
+Status: runbook added; failure-path tests and reference-app workflow remain.
+
 Tasks:
 
-- Write `docs/operations.md` or equivalent focused runbook.
+- Keep `docs/operations.md` current as the focused operator runbook.
 - Confirm offline-only backup for v1 or design an online backup path.
 - Define snapshot retention and compaction ownership.
 - Define contract policy failure behavior in startup/release workflows.
