@@ -212,6 +212,13 @@ func fiveTableDualIndexedMultiJoinTestSchema() *fakeSchema {
 	return s
 }
 
+func sixTableDualIndexedMultiJoinTestSchema() *fakeSchema {
+	s := fiveTableDualIndexedMultiJoinTestSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(6, cols, 0, 1)
+	return s
+}
+
 func splitOrFourHopFilterMultiJoinPredicate() MultiJoin {
 	return MultiJoin{
 		Relations: []MultiJoinRelation{
@@ -251,6 +258,57 @@ func splitOrFourHopFilterMultiJoinPredicate() MultiJoin {
 				Table:  5,
 				Column: 0,
 				Alias:  4,
+				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper:  Bound{Unbounded: true},
+			},
+		},
+	}
+}
+
+func splitOrFiveHopFilterMultiJoinPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 2, Alias: 1},
+			{Table: 3, Alias: 2},
+			{Table: 4, Alias: 3},
+			{Table: 5, Alias: 4},
+			{Table: 6, Alias: 5},
+		},
+		Conditions: []MultiJoinCondition{
+			{
+				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
+				Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 1, Table: 2, Column: 0, Alias: 1},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 2, Table: 3, Column: 0, Alias: 2},
+				Right: MultiJoinColumnRef{Relation: 3, Table: 4, Column: 1, Alias: 3},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 3, Table: 4, Column: 0, Alias: 3},
+				Right: MultiJoinColumnRef{Relation: 4, Table: 5, Column: 1, Alias: 4},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 4, Table: 5, Column: 0, Alias: 4},
+				Right: MultiJoinColumnRef{Relation: 5, Table: 6, Column: 1, Alias: 5},
+			},
+		},
+		ProjectedRelation: 0,
+		Filter: Or{
+			Left: ColEq{
+				Table:  1,
+				Column: 0,
+				Alias:  0,
+				Value:  types.NewUint64(7),
+			},
+			Right: ColRange{
+				Table:  6,
+				Column: 0,
+				Alias:  5,
 				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
 				Upper:  Bound{Unbounded: true},
 			},
@@ -1520,6 +1578,171 @@ func TestCollectCandidatesMultiJoinSplitOrFourHopPathEdgesUseSameTransactionRows
 	collectJoinPath4FilterDeltaCandidates(idx, 1, changed, rhsChanged, midsCommitted, s, add)
 	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
 		t.Fatalf("rhs-changed same-tx four-hop path candidates = %v, want only %v", candidates, hash)
+	}
+}
+
+func TestMultiJoinPlacementSplitOrFiveHopUsesPath5Edges(t *testing.T) {
+	s := sixTableDualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrFiveHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+
+	leftPathEdge := JoinPath5Edge{
+		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, Mid3Table: 4, Mid4Table: 5, RHSTable: 6,
+		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
+		Mid2FirstCol: 1, Mid2SecondCol: 0,
+		Mid3FirstCol: 1, Mid3SecondCol: 0,
+		Mid4FirstCol: 1, Mid4SecondCol: 0,
+		RHSJoinCol: 1, RHSFilterCol: 0,
+	}
+	if got := idx.JoinRangePath5Edge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("five-hop path range edge placement = %v, want [%v]", got, hash)
+	}
+	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("five-hop endpoint local placement = %v, want [%v]", got, hash)
+	}
+	rightPathEdge := JoinPath5Edge{
+		LHSTable: 6, Mid1Table: 5, Mid2Table: 4, Mid3Table: 3, Mid4Table: 2, RHSTable: 1,
+		LHSJoinCol: 1, Mid1FirstCol: 0, Mid1SecondCol: 1,
+		Mid2FirstCol: 0, Mid2SecondCol: 1,
+		Mid3FirstCol: 0, Mid3SecondCol: 1,
+		Mid4FirstCol: 0, Mid4SecondCol: 1,
+		RHSJoinCol: 1, RHSFilterCol: 0,
+	}
+	if got := idx.JoinPath5Edge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("five-hop path value edge placement = %v, want [%v]", got, hash)
+	}
+	shortPathEdge := JoinPath4Edge{
+		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, Mid3Table: 4, RHSTable: 6,
+		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
+		Mid2FirstCol: 1, Mid2SecondCol: 0,
+		Mid3FirstCol: 1, Mid3SecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
+	}
+	if got := idx.JoinRangePath4Edge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
+		t.Fatalf("four-hop path edge placement = %v, want empty for five-hop path", got)
+	}
+	for _, table := range []TableID{1, 2, 3, 4, 5, 6} {
+		if got := idx.Table.Lookup(table); len(got) != 0 {
+			t.Fatalf("TableIndex[%d] = %v, want empty for covered five-hop path", table, got)
+		}
+	}
+
+	removeSubscriptionForResolver(idx, pred, hash, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes after remove = %+v, want empty", idx)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrFiveHopPathEdgesUseCommittedRows(t *testing.T) {
+	s := sixTableDualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrFiveHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(30)}},
+		4: {{types.NewUint64(50), types.NewUint64(40)}},
+		5: {{types.NewUint64(70), types.NewUint64(50)}},
+		6: {{types.NewUint64(40), types.NewUint64(70)}},
+	})
+	if got := CollectCandidatesForTable(idx, 1, changed, committed, s); len(got) != 0 {
+		t.Fatalf("mismatched five-hop path candidates = %v, want empty", got)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(30)}},
+		4: {{types.NewUint64(50), types.NewUint64(40)}},
+		5: {{types.NewUint64(70), types.NewUint64(50)}},
+		6: {{types.NewUint64(60), types.NewUint64(70)}},
+	})
+	got := CollectCandidatesForTable(idx, 1, changed, committed, s)
+	if len(got) != 1 || got[0] != hash {
+		t.Fatalf("matching five-hop path candidates = %v, want [%v]", got, hash)
+	}
+}
+
+func TestCollectCandidatesMultiJoinSplitOrFiveHopPathEdgesUseSameTransactionRows(t *testing.T) {
+	s := sixTableDualIndexedMultiJoinTestSchema()
+	idx := NewPruningIndexes()
+	pred := splitOrFiveHopFilterMultiJoinPredicate()
+	hash := ComputeQueryHash(pred, nil)
+	placeSubscriptionForResolver(idx, pred, hash, s)
+	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
+	candidates := make(map[QueryHash]struct{})
+	add := func(h QueryHash) {
+		candidates[h] = struct{}{}
+	}
+
+	rejected := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(30)}}},
+			4: {Inserts: []types.ProductValue{{types.NewUint64(50), types.NewUint64(40)}}},
+			5: {Inserts: []types.ProductValue{{types.NewUint64(70), types.NewUint64(50)}}},
+			6: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(70)}}},
+		},
+	}
+	collectJoinPath5FilterDeltaCandidates(idx, 1, changed, rejected, nil, nil, add)
+	if len(candidates) != 0 {
+		t.Fatalf("rejected same-tx five-hop path candidates = %v, want empty", candidates)
+	}
+
+	allChangedOverlap := &store.Changeset{
+		TxID: 2,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+			3: {Inserts: []types.ProductValue{{types.NewUint64(40), types.NewUint64(30)}}},
+			4: {Inserts: []types.ProductValue{{types.NewUint64(50), types.NewUint64(40)}}},
+			5: {Inserts: []types.ProductValue{{types.NewUint64(70), types.NewUint64(50)}}},
+			6: {Inserts: []types.ProductValue{{types.NewUint64(60), types.NewUint64(70)}}},
+		},
+	}
+	clear(candidates)
+	collectJoinPath5FilterDeltaCandidates(idx, 1, changed, allChangedOverlap, nil, nil, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("all-changed same-tx five-hop path candidates = %v, want only %v", candidates, hash)
+	}
+
+	rhsChanged := &store.Changeset{
+		TxID: 3,
+		Tables: map[TableID]*store.TableChangeset{
+			6: {Inserts: []types.ProductValue{{types.NewUint64(60), types.NewUint64(70)}}},
+		},
+	}
+	midsCommitted := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(30), types.NewUint64(20)}},
+		3: {{types.NewUint64(40), types.NewUint64(30)}},
+		4: {{types.NewUint64(50), types.NewUint64(40)}},
+		5: {{types.NewUint64(70), types.NewUint64(50)}},
+	})
+	clear(candidates)
+	collectJoinPath5FilterDeltaCandidates(idx, 1, changed, rhsChanged, midsCommitted, s, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("rhs-changed same-tx five-hop path candidates = %v, want only %v", candidates, hash)
+	}
+
+	firstMidChanged := &store.Changeset{
+		TxID: 4,
+		Tables: map[TableID]*store.TableChangeset{
+			2: {Inserts: []types.ProductValue{{types.NewUint64(30), types.NewUint64(20)}}},
+		},
+	}
+	tailCommitted := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		3: {{types.NewUint64(40), types.NewUint64(30)}},
+		4: {{types.NewUint64(50), types.NewUint64(40)}},
+		5: {{types.NewUint64(70), types.NewUint64(50)}},
+		6: {{types.NewUint64(60), types.NewUint64(70)}},
+	})
+	clear(candidates)
+	collectJoinPath5FilterDeltaCandidates(idx, 1, changed, firstMidChanged, tailCommitted, s, add)
+	if _, ok := candidates[hash]; !ok || len(candidates) != 1 {
+		t.Fatalf("first-mid changed same-tx five-hop path candidates = %v, want only %v", candidates, hash)
 	}
 }
 
