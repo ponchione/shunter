@@ -988,6 +988,127 @@ func TestEvalJoinSubscriptionRightInsertWhenOnlyRightJoinColumnIndexed(t *testin
 	}
 }
 
+func TestEvalJoinDeltaMatchesFreshEvaluation(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 0, 1)
+
+	leftA := types.ProductValue{types.NewUint64(1), types.NewUint64(7)}
+	leftB := types.ProductValue{types.NewUint64(2), types.NewUint64(8)}
+	rightA := types.ProductValue{types.NewUint64(10), types.NewUint64(7)}
+	filteredRight := types.ProductValue{types.NewUint64(99), types.NewUint64(8)}
+	base := func() map[TableID][]types.ProductValue {
+		return map[TableID][]types.ProductValue{
+			1: {leftA, leftB},
+			2: {rightA, filteredRight},
+		}
+	}
+	pred := Join{
+		Left: 1, Right: 2, LeftCol: 1, RightCol: 1,
+		Filter: ColNe{Table: 2, Column: 0, Value: types.NewUint64(99)},
+	}
+
+	leftInsert := types.ProductValue{types.NewUint64(3), types.NewUint64(7)}
+	rightInsert := types.ProductValue{types.NewUint64(11), types.NewUint64(7)}
+	sameTxLeft := types.ProductValue{types.NewUint64(4), types.NewUint64(9)}
+	sameTxRight := types.ProductValue{types.NewUint64(12), types.NewUint64(9)}
+	filteredInsert := types.ProductValue{types.NewUint64(99), types.NewUint64(7)}
+
+	tests := []struct {
+		name        string
+		before      map[TableID][]types.ProductValue
+		after       map[TableID][]types.ProductValue
+		changeset   *store.Changeset
+		wantInserts []uint64
+		wantDeletes []uint64
+	}{
+		{
+			name:   "changed-left-against-committed-right",
+			before: base(),
+			after: map[TableID][]types.ProductValue{
+				1: {leftA, leftB, leftInsert},
+				2: {rightA, filteredRight},
+			},
+			changeset: &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+				1: {TableID: 1, Inserts: []types.ProductValue{leftInsert}},
+			}},
+			wantInserts: []uint64{3},
+		},
+		{
+			name:   "changed-right-against-committed-left",
+			before: base(),
+			after: map[TableID][]types.ProductValue{
+				1: {leftA, leftB},
+				2: {rightA, filteredRight, rightInsert},
+			},
+			changeset: &store.Changeset{TxID: 2, Tables: map[schema.TableID]*store.TableChangeset{
+				2: {TableID: 2, Inserts: []types.ProductValue{rightInsert}},
+			}},
+			wantInserts: []uint64{1},
+		},
+		{
+			name:   "same-transaction-changed-rows-on-both-sides",
+			before: base(),
+			after: map[TableID][]types.ProductValue{
+				1: {leftA, leftB, sameTxLeft},
+				2: {rightA, filteredRight, sameTxRight},
+			},
+			changeset: &store.Changeset{TxID: 3, Tables: map[schema.TableID]*store.TableChangeset{
+				1: {TableID: 1, Inserts: []types.ProductValue{sameTxLeft}},
+				2: {TableID: 2, Inserts: []types.ProductValue{sameTxRight}},
+			}},
+			wantInserts: []uint64{4},
+		},
+		{
+			name:   "left-delete-against-post-commit-right",
+			before: base(),
+			after: map[TableID][]types.ProductValue{
+				1: {leftB},
+				2: {rightA, filteredRight},
+			},
+			changeset: &store.Changeset{TxID: 4, Tables: map[schema.TableID]*store.TableChangeset{
+				1: {TableID: 1, Deletes: []types.ProductValue{leftA}},
+			}},
+			wantDeletes: []uint64{1},
+		},
+		{
+			name:   "right-delete-against-post-commit-left",
+			before: base(),
+			after: map[TableID][]types.ProductValue{
+				1: {leftA, leftB},
+				2: {filteredRight},
+			},
+			changeset: &store.Changeset{TxID: 5, Tables: map[schema.TableID]*store.TableChangeset{
+				2: {TableID: 2, Deletes: []types.ProductValue{rightA}},
+			}},
+			wantDeletes: []uint64{1},
+		},
+		{
+			name:   "filtered-change-emits-no-spurious-delta",
+			before: base(),
+			after: map[TableID][]types.ProductValue{
+				1: {leftA, leftB},
+				2: {rightA, filteredRight, filteredInsert},
+			},
+			changeset: &store.Changeset{TxID: 6, Tables: map[schema.TableID]*store.TableChangeset{
+				2: {TableID: 2, Inserts: []types.ProductValue{filteredInsert}},
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			delta := requirePredicateIncrementalMatchesFresh(t, s, pred, buildMockCommitted(s, tt.before), buildMockCommitted(s, tt.after), tt.changeset)
+			if !productRowsHaveUint64IDs(delta.inserts, tt.wantInserts...) {
+				t.Fatalf("insert ids = %v, want %v", delta.inserts, tt.wantInserts)
+			}
+			if !productRowsHaveUint64IDs(delta.deletes, tt.wantDeletes...) {
+				t.Fatalf("delete ids = %v, want %v", delta.deletes, tt.wantDeletes)
+			}
+		})
+	}
+}
+
 func TestEvalJoinOppositeSideOrFilterCandidateThroughSecondBranch(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString})
@@ -2124,6 +2245,161 @@ func TestEvalFilteredCrossJoinSameTransactionBothSides(t *testing.T) {
 			requireProductRowsEqual(t, updates[0].Deletes, tt.wantDeletes)
 		})
 	}
+}
+
+func TestEvalCrossJoinDeltaMatchesFreshEvaluation(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	pred := CrossJoin{Left: 1, Right: 2}
+	leftA := types.ProductValue{types.NewUint64(1)}
+	leftB := types.ProductValue{types.NewUint64(2)}
+	rightA := types.ProductValue{types.NewUint64(10)}
+	rightB := types.ProductValue{types.NewUint64(11)}
+	base := func() map[TableID][]types.ProductValue {
+		return map[TableID][]types.ProductValue{
+			1: {leftA, leftB},
+			2: {rightA, rightB},
+		}
+	}
+
+	leftInsert := types.ProductValue{types.NewUint64(3)}
+	rightInsert := types.ProductValue{types.NewUint64(12)}
+	sameTxLeft := types.ProductValue{types.NewUint64(7)}
+	sameTxRight := types.ProductValue{types.NewUint64(70)}
+	noPartnerLeft := types.ProductValue{types.NewUint64(9)}
+
+	tests := []struct {
+		name        string
+		before      map[TableID][]types.ProductValue
+		after       map[TableID][]types.ProductValue
+		changeset   *store.Changeset
+		wantInserts []uint64
+		wantDeletes []uint64
+	}{
+		{
+			name:   "projected-side-insert",
+			before: base(),
+			after: map[TableID][]types.ProductValue{
+				1: {leftA, leftB, leftInsert},
+				2: {rightA, rightB},
+			},
+			changeset: &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+				1: {TableID: 1, Inserts: []types.ProductValue{leftInsert}},
+			}},
+			wantInserts: []uint64{3, 3},
+		},
+		{
+			name:   "other-side-insert",
+			before: base(),
+			after: map[TableID][]types.ProductValue{
+				1: {leftA, leftB},
+				2: {rightA, rightB, rightInsert},
+			},
+			changeset: &store.Changeset{TxID: 2, Tables: map[schema.TableID]*store.TableChangeset{
+				2: {TableID: 2, Inserts: []types.ProductValue{rightInsert}},
+			}},
+			wantInserts: []uint64{1, 2},
+		},
+		{
+			name:   "other-side-delete",
+			before: base(),
+			after: map[TableID][]types.ProductValue{
+				1: {leftA, leftB},
+				2: {rightA},
+			},
+			changeset: &store.Changeset{TxID: 3, Tables: map[schema.TableID]*store.TableChangeset{
+				2: {TableID: 2, Deletes: []types.ProductValue{rightB}},
+			}},
+			wantDeletes: []uint64{1, 2},
+		},
+		{
+			name: "same-transaction-both-sides",
+			before: map[TableID][]types.ProductValue{
+				1: nil,
+				2: nil,
+			},
+			after: map[TableID][]types.ProductValue{
+				1: {sameTxLeft},
+				2: {sameTxRight},
+			},
+			changeset: &store.Changeset{TxID: 4, Tables: map[schema.TableID]*store.TableChangeset{
+				1: {TableID: 1, Inserts: []types.ProductValue{sameTxLeft}},
+				2: {TableID: 2, Inserts: []types.ProductValue{sameTxRight}},
+			}},
+			wantInserts: []uint64{7},
+		},
+		{
+			name: "no-partner-emits-no-spurious-delta",
+			before: map[TableID][]types.ProductValue{
+				1: nil,
+				2: nil,
+			},
+			after: map[TableID][]types.ProductValue{
+				1: {noPartnerLeft},
+				2: nil,
+			},
+			changeset: &store.Changeset{TxID: 5, Tables: map[schema.TableID]*store.TableChangeset{
+				1: {TableID: 1, Inserts: []types.ProductValue{noPartnerLeft}},
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			delta := requirePredicateIncrementalMatchesFresh(t, s, pred, buildMockCommitted(s, tt.before), buildMockCommitted(s, tt.after), tt.changeset)
+			if !productRowsHaveUint64IDs(delta.inserts, tt.wantInserts...) {
+				t.Fatalf("insert ids = %v, want %v", delta.inserts, tt.wantInserts)
+			}
+			if !productRowsHaveUint64IDs(delta.deletes, tt.wantDeletes...) {
+				t.Fatalf("delete ids = %v, want %v", delta.deletes, tt.wantDeletes)
+			}
+		})
+	}
+}
+
+func requirePredicateIncrementalMatchesFresh(t *testing.T, s *fakeSchema, pred Predicate, before, after *mockCommitted, cs *store.Changeset) deltaBag {
+	t.Helper()
+	connID := types.ConnectionID{31}
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    310,
+		Predicates: []Predicate{pred},
+	}, before)
+	if err != nil {
+		t.Fatalf("RegisterSet before: %v", err)
+	}
+	initialRows := rowsFromUpdates(res.Update)
+
+	mgr.EvalAndBroadcast(types.TxID(cs.TxID), cs, after, PostCommitMeta{})
+	msg := <-inbox
+	var delta deltaBag
+	for _, update := range msg.Fanout[connID] {
+		delta.inserts = append(delta.inserts, update.Inserts...)
+		delta.deletes = append(delta.deletes, update.Deletes...)
+	}
+	incremental := applyDelta(initialRows, delta.inserts, delta.deletes)
+	freshRows := freshPredicateRows(t, s, pred, after)
+	if !bagEqual(incremental, freshRows) {
+		t.Fatalf("incremental rows = %v, want fresh rows %v (delta inserts=%v deletes=%v)", incremental, freshRows, delta.inserts, delta.deletes)
+	}
+	return delta
+}
+
+func freshPredicateRows(t *testing.T, s *fakeSchema, pred Predicate, view *mockCommitted) []types.ProductValue {
+	t.Helper()
+	mgr := NewManager(s, s)
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{32},
+		QueryID:    320,
+		Predicates: []Predicate{pred},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet fresh: %v", err)
+	}
+	return rowsFromUpdates(res.Update)
 }
 
 func sameRowBag(a, b []types.ProductValue) bool {

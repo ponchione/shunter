@@ -428,6 +428,134 @@ func TestMultiJoinAggregatesDeltaMatchesFreshEvaluationForIntermediateRelation(t
 	}
 }
 
+func TestMultiJoinAggregatesDeltaMatchesFreshEvaluationForEndpointRelations(t *testing.T) {
+	s := multiJoinTestSchema()
+	pred := multiJoinTestPredicate()
+	insertedLeft := types.ProductValue{types.NewUint64(4), types.NewUint64(20)}
+	deletedLeft := types.ProductValue{types.NewUint64(2), types.NewUint64(20)}
+	insertedRight := types.ProductValue{types.NewUint64(301), types.NewUint64(20)}
+	deletedRight := types.ProductValue{types.NewUint64(300), types.NewUint64(20)}
+
+	aggregates := []multiJoinAggregateCase{
+		{queryID: 280, aggregate: countStarAggregate(), column: "n"},
+		{queryID: 281, aggregate: countMultiJoinRIDAggregate(), column: "n"},
+		{queryID: 282, aggregate: countDistinctMultiJoinTIDAggregate(), column: "n"},
+		{queryID: 283, aggregate: sumMultiJoinRIDAggregate(), column: "total"},
+	}
+	tests := []struct {
+		name      string
+		after     map[TableID][]types.ProductValue
+		changeset *store.Changeset
+		want      map[uint32]aggregateDelta
+	}{
+		{
+			name: "projected-relation-insert",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[1] = append(rows[1], insertedLeft)
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 11,
+				Tables: map[TableID]*store.TableChangeset{
+					1: {Inserts: []types.ProductValue{insertedLeft}},
+				},
+			},
+			want: map[uint32]aggregateDelta{
+				280: {before: 5, after: 7},
+				281: {before: 5, after: 7},
+				282: {before: 3, after: 4},
+				283: {before: 1300, after: 1900},
+			},
+		},
+		{
+			name: "projected-relation-delete",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[1] = []types.ProductValue{
+					{types.NewUint64(1), types.NewUint64(10)},
+					{types.NewUint64(3), types.NewUint64(20)},
+				}
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 12,
+				Tables: map[TableID]*store.TableChangeset{
+					1: {Deletes: []types.ProductValue{deletedLeft}},
+				},
+			},
+			want: map[uint32]aggregateDelta{
+				280: {before: 5, after: 3},
+				281: {before: 5, after: 3},
+				282: {before: 3, after: 2},
+				283: {before: 1300, after: 700},
+			},
+		},
+		{
+			name: "right-relation-insert",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[3] = append(rows[3], insertedRight)
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 13,
+				Tables: map[TableID]*store.TableChangeset{
+					3: {Inserts: []types.ProductValue{insertedRight}},
+				},
+			},
+			want: map[uint32]aggregateDelta{
+				280: {before: 5, after: 9},
+				281: {before: 5, after: 9},
+				283: {before: 1300, after: 2504},
+			},
+		},
+		{
+			name: "right-relation-delete",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[3] = []types.ProductValue{
+					{types.NewUint64(100), types.NewUint64(10)},
+					{types.NewUint64(99), types.NewUint64(20)},
+				}
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 14,
+				Tables: map[TableID]*store.TableChangeset{
+					3: {Deletes: []types.ProductValue{deletedRight}},
+				},
+			},
+			want: map[uint32]aggregateDelta{
+				280: {before: 5, after: 1},
+				281: {before: 5, after: 1},
+				282: {before: 3, after: 1},
+				283: {before: 1300, after: 100},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := requireMultiJoinAggregateDeltasMatchFresh(t, s, pred, aggregates, buildMockCommitted(s, multiJoinBaseContents()), buildMockCommitted(s, tt.after), tt.changeset)
+			if len(got) != len(tt.want) {
+				t.Fatalf("aggregate update count = %d (%+v), want %d", len(got), got, len(tt.want))
+			}
+			for _, agg := range aggregates {
+				want, shouldChange := tt.want[agg.queryID]
+				update, changed := got[agg.queryID]
+				if !shouldChange {
+					if changed {
+						t.Fatalf("query %d emitted unchanged aggregate delta: %+v", agg.queryID, update)
+					}
+					continue
+				}
+				requireAggregateDelta(t, update, want.before, want.after, agg.column)
+			}
+		})
+	}
+}
+
 func TestMultiJoinRegisterInitialRowsAndDeltas(t *testing.T) {
 	s := multiJoinTestSchema()
 	inbox := make(chan FanOutMessage, 2)
@@ -634,6 +762,152 @@ func TestMultiJoinDeltaMatchesFreshEvaluationForIntermediateRelation(t *testing.
 	}
 }
 
+func TestMultiJoinDeltaMatchesFreshEvaluationForEveryChangedRelation(t *testing.T) {
+	s := multiJoinTestSchema()
+	pred := multiJoinTestPredicate()
+	insertedLeft := types.ProductValue{types.NewUint64(4), types.NewUint64(20)}
+	deletedLeft := types.ProductValue{types.NewUint64(2), types.NewUint64(20)}
+	insertedMiddle := types.ProductValue{types.NewUint64(23), types.NewUint64(20)}
+	deletedMiddle := types.ProductValue{types.NewUint64(21), types.NewUint64(20)}
+	insertedRight := types.ProductValue{types.NewUint64(301), types.NewUint64(20)}
+	deletedRight := types.ProductValue{types.NewUint64(300), types.NewUint64(20)}
+	unmatchedLeft := types.ProductValue{types.NewUint64(5), types.NewUint64(30)}
+
+	tests := []struct {
+		name        string
+		after       map[TableID][]types.ProductValue
+		changeset   *store.Changeset
+		wantInserts []uint64
+		wantDeletes []uint64
+	}{
+		{
+			name: "projected-relation-insert",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[1] = append(rows[1], insertedLeft)
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 11,
+				Tables: map[TableID]*store.TableChangeset{
+					1: {Inserts: []types.ProductValue{insertedLeft}},
+				},
+			},
+			wantInserts: []uint64{4, 4},
+		},
+		{
+			name: "projected-relation-delete",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[1] = []types.ProductValue{
+					{types.NewUint64(1), types.NewUint64(10)},
+					{types.NewUint64(3), types.NewUint64(20)},
+				}
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 12,
+				Tables: map[TableID]*store.TableChangeset{
+					1: {Deletes: []types.ProductValue{deletedLeft}},
+				},
+			},
+			wantDeletes: []uint64{2, 2},
+		},
+		{
+			name: "middle-relation-insert",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[2] = append(rows[2], insertedMiddle)
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 13,
+				Tables: map[TableID]*store.TableChangeset{
+					2: {Inserts: []types.ProductValue{insertedMiddle}},
+				},
+			},
+			wantInserts: []uint64{2, 3},
+		},
+		{
+			name: "middle-relation-delete",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[2] = []types.ProductValue{
+					{types.NewUint64(10), types.NewUint64(10)},
+					{types.NewUint64(22), types.NewUint64(20)},
+				}
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 14,
+				Tables: map[TableID]*store.TableChangeset{
+					2: {Deletes: []types.ProductValue{deletedMiddle}},
+				},
+			},
+			wantDeletes: []uint64{2, 3},
+		},
+		{
+			name: "right-relation-insert",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[3] = append(rows[3], insertedRight)
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 15,
+				Tables: map[TableID]*store.TableChangeset{
+					3: {Inserts: []types.ProductValue{insertedRight}},
+				},
+			},
+			wantInserts: []uint64{2, 2, 3, 3},
+		},
+		{
+			name: "right-relation-delete",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[3] = []types.ProductValue{
+					{types.NewUint64(100), types.NewUint64(10)},
+					{types.NewUint64(99), types.NewUint64(20)},
+				}
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 16,
+				Tables: map[TableID]*store.TableChangeset{
+					3: {Deletes: []types.ProductValue{deletedRight}},
+				},
+			},
+			wantDeletes: []uint64{2, 2, 3, 3},
+		},
+		{
+			name: "unmatched-projected-relation-insert",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[1] = append(rows[1], unmatchedLeft)
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 17,
+				Tables: map[TableID]*store.TableChangeset{
+					1: {Inserts: []types.ProductValue{unmatchedLeft}},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			delta := requireMultiJoinIncrementalMatchesFresh(t, s, pred, buildMockCommitted(s, multiJoinBaseContents()), buildMockCommitted(s, tt.after), tt.changeset)
+			if !productRowsHaveUint64IDs(delta.inserts, tt.wantInserts...) {
+				t.Fatalf("insert ids = %v, want %v", delta.inserts, tt.wantInserts)
+			}
+			if !productRowsHaveUint64IDs(delta.deletes, tt.wantDeletes...) {
+				t.Fatalf("delete ids = %v, want %v", delta.deletes, tt.wantDeletes)
+			}
+		})
+	}
+}
+
 func TestMultiJoinNonKeyPreservingPathDeltaMatchesFreshForSameTransactionRows(t *testing.T) {
 	s := dualIndexedMultiJoinTestSchema()
 	pred := splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate()
@@ -684,6 +958,38 @@ func TestMultiJoinNonKeyPreservingPathDeltaMatchesFreshForSameTransactionRows(t 
 					1: {Deletes: []types.ProductValue{left}},
 					2: {Deletes: []types.ProductValue{middle}},
 					3: {Deletes: []types.ProductValue{right}},
+				},
+			},
+			wantDeletes: []uint64{500},
+		},
+		{
+			name: "inserted-intermediate-with-committed-endpoints",
+			before: map[TableID][]types.ProductValue{
+				1: {left},
+				2: nil,
+				3: {right},
+			},
+			after: full,
+			changeset: &store.Changeset{
+				TxID: 4,
+				Tables: map[TableID]*store.TableChangeset{
+					2: {Inserts: []types.ProductValue{middle}},
+				},
+			},
+			wantInserts: []uint64{500},
+		},
+		{
+			name:   "deleted-intermediate-with-committed-endpoints",
+			before: full,
+			after: map[TableID][]types.ProductValue{
+				1: {left},
+				2: nil,
+				3: {right},
+			},
+			changeset: &store.Changeset{
+				TxID: 5,
+				Tables: map[TableID]*store.TableChangeset{
+					2: {Deletes: []types.ProductValue{middle}},
 				},
 			},
 			wantDeletes: []uint64{500},
