@@ -125,6 +125,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   decoders and default generated table subscription helpers to those decoders.
 - TypeScript managed table subscription handles now apply RowList insert/delete
   updates using raw row bytes as local row identity.
+- The TypeScript runtime now supports explicit opt-in reconnect with bounded
+  retry, token-provider refresh per attempt, and subscription replay after a
+  fresh identity handshake.
 - Generated TypeScript reducer helpers now include full-update result-envelope
   wrappers alongside the existing raw byte helpers.
 - The TypeScript runtime now defines explicit reducer argument encoder helpers

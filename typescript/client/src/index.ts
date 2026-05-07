@@ -290,6 +290,15 @@ export type ConnectionStateListener<Protocol extends ProtocolMetadata = Protocol
 export type TokenProvider = () => string | Promise<string>;
 export type TokenSource = string | TokenProvider;
 
+export interface ReconnectOptions {
+  readonly enabled?: boolean;
+  readonly maxAttempts?: number;
+  readonly initialDelayMs?: number;
+  readonly maxDelayMs?: number;
+  readonly backoffMultiplier?: number;
+  readonly resubscribe?: boolean;
+}
+
 export interface RuntimeClientOptions<Protocol extends ProtocolMetadata = ProtocolMetadata> {
   readonly url: string;
   readonly protocol: Protocol;
@@ -297,6 +306,7 @@ export interface RuntimeClientOptions<Protocol extends ProtocolMetadata = Protoc
   readonly signal?: AbortSignal;
   readonly webSocketFactory?: WebSocketFactory;
   readonly onStateChange?: ConnectionStateListener<Protocol>;
+  readonly reconnect?: ReconnectOptions | false;
 }
 
 export interface WebSocketLike {
@@ -358,7 +368,10 @@ interface ActiveSubscription {
   readonly target: string;
   readonly queryId: QueryID;
   readonly tableName?: string;
+  readonly onRawRows?: (message: SubscribeSingleAppliedMessage) => void;
   readonly onRawUpdate?: RawSubscriptionUpdateCallback;
+  readonly onRows?: (rows: readonly unknown[]) => void;
+  readonly onInitialRows?: (rows: readonly unknown[]) => void;
   readonly onUpdate?: (update: SubscriptionUpdate<unknown>) => void;
   readonly decodeRow?: RowDecoder<unknown>;
   readonly handle?: ManagedSubscriptionHandle<unknown>;
@@ -388,17 +401,31 @@ export interface ShunterClient<Protocol extends ProtocolMetadata = ProtocolMetad
 const closeNormalCode = 1000;
 const maxUint32 = 0xffffffff;
 
+interface NormalizedReconnectOptions {
+  readonly enabled: boolean;
+  readonly maxAttempts: number;
+  readonly initialDelayMs: number;
+  readonly maxDelayMs: number;
+  readonly backoffMultiplier: number;
+  readonly resubscribe: boolean;
+}
+
 export function createShunterClient<Protocol extends ProtocolMetadata>(
   options: RuntimeClientOptions<Protocol>,
 ): ShunterClient<Protocol> {
+  const reconnectOptions = normalizeReconnectOptions(options.reconnect);
   let state: ConnectionState<Protocol> = { status: "idle" };
   let socket: WebSocketLike | undefined;
   let connectPromise: Promise<ConnectionMetadata<Protocol>> | undefined;
   let closePromise: Promise<void> | undefined;
   let disposed = false;
   let suppressSocketCloseTransition = false;
+  let hasConnected = false;
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let resolveClose: (() => void) | undefined;
   let rejectConnect: ((error: ShunterError) => void) | undefined;
+  let connectClient: (() => Promise<ConnectionMetadata<Protocol>>) | undefined;
   let nextRequestId: RequestID = 1;
   let nextQueryId: QueryID = 1;
   const pendingReducerCalls = new Map<RequestID, PendingReducerCall>();
@@ -480,16 +507,32 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
   };
 
-  const rejectPendingOperations = (error: ShunterError): void => {
+  const rejectInFlightOperations = (error: ShunterError): void => {
     rejectPendingReducerCalls(error);
     rejectPendingDeclaredQueries(error);
     rejectPendingSubscriptions(error);
     rejectPendingUnsubscribes(error);
+  };
+
+  const closeActiveSubscriptions = (error: ShunterError): void => {
     for (const active of new Set(activeSubscriptionsByQuery.values())) {
       active.handle?.close(error);
     }
     activeSubscriptionsByQuery.clear();
     activeSubscriptionAliasesByRootQuery.clear();
+  };
+
+  const rejectPendingOperations = (error: ShunterError): void => {
+    rejectInFlightOperations(error);
+    closeActiveSubscriptions(error);
+  };
+
+  const clearReconnectTimer = (): void => {
+    if (reconnectTimer === undefined) {
+      return;
+    }
+    clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
   };
 
   const finishClose = (): void => {
@@ -525,7 +568,46 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     finishClose();
   };
 
+  const scheduleReconnect = (error: ShunterError): boolean => {
+    if (
+      !reconnectOptions.enabled ||
+      !hasConnected ||
+      disposed ||
+      state.status === "closing" ||
+      state.status === "closed"
+    ) {
+      return false;
+    }
+    if (reconnectAttempt >= reconnectOptions.maxAttempts) {
+      rejectPendingOperations(error);
+      setState({ status: "closed", error });
+      finishClose();
+      return true;
+    }
+    reconnectAttempt += 1;
+    rejectConnect?.(error);
+    rejectInFlightOperations(error);
+    finishClose();
+    setState({ status: "reconnecting", attempt: reconnectAttempt, error });
+    const delay = reconnectDelayMs(reconnectOptions, reconnectAttempt);
+    clearReconnectTimer();
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = undefined;
+      void connectClient?.().then(() => {
+        reconnectAttempt = 0;
+      }).catch((connectError) => {
+        const reconnectError = isShunterError(connectError)
+          ? connectError
+          : toShunterError(connectError, "transport", "Reconnect failed");
+        scheduleReconnect(reconnectError);
+      });
+    }, delay);
+    return true;
+  };
+
   const beginClose = (code = closeNormalCode, reason = ""): Promise<void> => {
+    clearReconnectTimer();
+    reconnectAttempt = 0;
     if (closePromise !== undefined) {
       return closePromise;
     }
@@ -732,6 +814,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     active: ActiveSubscription,
     aliases: Iterable<QueryID> = [active.queryId],
   ): void => {
+    const previousAliases = activeSubscriptionAliasesByRootQuery.get(active.queryId);
+    if (previousAliases !== undefined) {
+      for (const alias of previousAliases) {
+        activeSubscriptionsByQuery.delete(alias);
+      }
+    }
     const activeAliases = new Set<QueryID>([active.queryId, ...aliases]);
     activeSubscriptionAliasesByRootQuery.set(active.queryId, activeAliases);
     for (const alias of activeAliases) {
@@ -932,6 +1020,64 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       "Table unsubscribe request send failed",
     );
 
+  const resubscribeActiveSubscriptions = (activeSocket: WebSocketLike): ShunterError | undefined => {
+    if (!reconnectOptions.resubscribe) {
+      return undefined;
+    }
+    for (const active of new Set(activeSubscriptionsByQuery.values())) {
+      const request = active.kind === "table"
+        ? encodeTableSubscriptionRequest(active.tableName ?? active.target, {
+          requestId: allocateRequestId(),
+          queryId: active.queryId,
+        })
+        : encodeDeclaredViewSubscriptionRequest(active.target, {
+          requestId: allocateRequestId(),
+          queryId: active.queryId,
+        });
+      if (
+        pendingSubscriptionsByRequest.has(request.requestId) ||
+        pendingSubscriptionsByQuery.has(request.queryId)
+      ) {
+        return new ShunterValidationError("Reconnect subscription ID is already in flight.", {
+          details: {
+            kind: active.kind,
+            target: active.target,
+            requestId: request.requestId,
+            queryId: request.queryId,
+          },
+        });
+      }
+      const pending: PendingSubscription = {
+        kind: active.kind,
+        target: active.target,
+        requestId: request.requestId,
+        queryId: request.queryId,
+        tableName: active.tableName,
+        onRawRows: active.onRawRows,
+        onRawUpdate: active.onRawUpdate,
+        onRows: active.onRows,
+        onInitialRows: active.onInitialRows,
+        onUpdate: active.onUpdate,
+        decodeRow: active.decodeRow,
+        handle: active.handle,
+        resolve: () => {},
+        reject: (error) => {
+          removeActiveSubscription(active.queryId);
+          active.handle?.close(error);
+        },
+      };
+      pendingSubscriptionsByRequest.set(request.requestId, pending);
+      pendingSubscriptionsByQuery.set(request.queryId, pending);
+      try {
+        activeSocket.send(request.frame);
+      } catch (error) {
+        cleanupPendingSubscription(pending);
+        return toShunterError(error, "transport", "Reconnect subscription request send failed");
+      }
+    }
+    return undefined;
+  };
+
   const settleTableSubscriptionApplied = (response: SubscribeSingleAppliedMessage): void => {
     const pending = pendingSubscriptionForResponse(
       response.requestId,
@@ -957,7 +1103,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       target: pending.target,
       queryId: response.queryId,
       tableName: response.tableName,
+      onRawRows: pending.onRawRows,
       onRawUpdate: pending.onRawUpdate,
+      onRows: pending.onRows,
+      onInitialRows: pending.onInitialRows,
       onUpdate: pending.onUpdate,
       decodeRow: pending.decodeRow,
       handle: pending.handle,
@@ -1150,11 +1299,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
   };
 
-  return {
-    get state() {
-      return state;
-    },
-    async connect(): Promise<ConnectionMetadata<Protocol>> {
+  connectClient = async (): Promise<ConnectionMetadata<Protocol>> => {
       if (disposed) {
         throw new ShunterClosedClientError("Cannot connect a disposed Shunter client.");
       }
@@ -1165,7 +1310,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         return connectPromise;
       }
 
-      const attempt = state.status === "reconnecting" ? state.attempt + 1 : 1;
+      const attempt = state.status === "reconnecting" ? state.attempt : 1;
       setState({ status: "connecting", attempt });
 
       connectPromise = new Promise<ConnectionMetadata<Protocol>>(async (resolve, reject) => {
@@ -1234,7 +1379,14 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
                 identity: identityToken.identity,
                 connectionId: identityToken.connectionId,
               };
+              hasConnected = true;
               setState({ status: "connected", metadata });
+              const resubscribeError = resubscribeActiveSubscriptions(ws);
+              if (resubscribeError !== undefined) {
+                failConnected(resubscribeError);
+                reject(resubscribeError);
+                return;
+              }
               resolve(metadata);
             } catch (error) {
               failConnecting(
@@ -1254,45 +1406,58 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
                 code: String(event.code),
                 details: { reason: event.reason, wasClean: event.wasClean },
               });
-              setState({ status: "failed", error });
-              rejectPendingOperations(error);
-              reject(error);
+              if (!scheduleReconnect(error)) {
+                setState({ status: "failed", error });
+                rejectPendingOperations(error);
+                reject(error);
+                finishClose();
+              }
+            } else if (state.status === "closing") {
+              setState({ status: "closed" });
+              finishClose();
             } else if (state.status !== "closed") {
-              rejectPendingOperations(new ShunterClosedClientError("Shunter client connection closed.", {
+              const error = new ShunterClosedClientError("Shunter client connection closed.", {
                 code: String(event.code),
                 details: { reason: event.reason, wasClean: event.wasClean },
-              }));
-              setState({ status: "closed" });
+              });
+              if (!scheduleReconnect(error)) {
+                rejectPendingOperations(error);
+                setState({ status: "closed", error });
+                finishClose();
+              }
             }
-            finishClose();
           },
           error: (event: Event): void => {
             if (state.status === "connecting") {
               const error = new ShunterTransportError("WebSocket failed before opening.", {
                 details: event,
               });
-              setState({ status: "failed", error });
-              reject(error);
+              if (!scheduleReconnect(error)) {
+                setState({ status: "failed", error });
+                reject(error);
+                finishClose();
+              }
               suppressSocketCloseTransition = true;
               try {
                 ws.close(closeNormalCode, "open failed");
               } catch {
                 // Nothing useful can be recovered from a failed close here.
               }
-              finishClose();
             } else if (state.status === "connected") {
               const error = new ShunterTransportError("WebSocket failed.", {
                 details: event,
               });
               suppressSocketCloseTransition = true;
-              rejectPendingOperations(error);
-              setState({ status: "failed", error });
+              if (!scheduleReconnect(error)) {
+                rejectPendingOperations(error);
+                setState({ status: "failed", error });
+                finishClose();
+              }
               try {
                 ws.close(closeNormalCode, "transport failure");
               } catch {
                 // Nothing useful can be recovered from a failed close here.
               }
-              finishClose();
             }
           },
         };
@@ -1303,7 +1468,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       });
 
       return connectPromise;
+  };
+
+  return {
+    get state() {
+      return state;
     },
+    connect: connectClient,
     async callReducer(name: string, args: Uint8Array, options: ReducerCallOptions = {}): Promise<Uint8Array> {
       if (disposed) {
         throw new ShunterClosedClientError("Cannot call a reducer on a disposed Shunter client.");
@@ -1578,6 +1749,48 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       };
     },
   };
+}
+
+function normalizeReconnectOptions(options: ReconnectOptions | false | undefined): NormalizedReconnectOptions {
+  if (options === undefined || options === false || options.enabled !== true) {
+    return {
+      enabled: false,
+      maxAttempts: 0,
+      initialDelayMs: 0,
+      maxDelayMs: 0,
+      backoffMultiplier: 1,
+      resubscribe: false,
+    };
+  }
+  return {
+    enabled: true,
+    maxAttempts: positiveInteger(options.maxAttempts, 3),
+    initialDelayMs: nonNegativeNumber(options.initialDelayMs, 250),
+    maxDelayMs: nonNegativeNumber(options.maxDelayMs, 5_000),
+    backoffMultiplier: Math.max(1, nonNegativeNumber(options.backoffMultiplier, 2)),
+    resubscribe: options.resubscribe !== false,
+  };
+}
+
+function reconnectDelayMs(options: NormalizedReconnectOptions, attempt: number): number {
+  return Math.min(
+    options.maxDelayMs,
+    options.initialDelayMs * (options.backoffMultiplier ** Math.max(0, attempt - 1)),
+  );
+}
+
+function positiveInteger(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(0, Math.trunc(value));
+}
+
+function nonNegativeNumber(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(0, value);
 }
 
 async function resolveToken(token?: TokenSource): Promise<string | undefined> {

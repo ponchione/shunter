@@ -77,7 +77,10 @@ generated TypeScript bindings emit per-table row decoders plus a
 decoders by default while still allowing callers to override `decodeRow`.
 It does not yet implement typed reducer argument/result encoding, generated
 declared-query/view projection row decoding, declared-query/view cache
-behavior, auth refresh, or reconnect policy.
+behavior, or canary-proven SDK-only app wiring. Reconnect is available as an
+explicit opt-in policy: bounded reconnect attempts call the token provider
+again, restore the WebSocket handshake, and resubscribe accepted subscriptions
+after a fresh identity frame.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
 fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
@@ -232,6 +235,9 @@ Completed or partially complete:
 - Apply RowList insert/delete deltas to managed table subscription handles
   using raw row bytes as the local identity, preserving raw callbacks and
   decoded update callbacks.
+- Add an explicit opt-in TypeScript reconnect policy with bounded attempts,
+  token-provider refresh per attempt, and automatic resubscription of accepted
+  table/declared-view subscriptions after a fresh identity handshake.
 
 Remaining:
 
@@ -243,7 +249,8 @@ Remaining:
   lifecycle shell.
 - Expand managed cache/update behavior beyond table subscription handles to
   declared-query/view rows once projection schemas are exported.
-- Implement reconnect, auth refresh, resubscription, and cache behavior.
+- Broaden reconnect coverage in the external canary and document any
+  production tuning defaults before release.
 - Add client tests for:
   - connection state transitions
   - reducer success/failure

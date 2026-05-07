@@ -84,9 +84,11 @@ includes a schema-aware BSATN product row decoder, and generated bindings emit
 per-table row decoder functions plus a `tableRowDecoders` map that generated
 whole-table subscription helpers use by default. Managed table subscription
 handles now apply RowList insert/delete deltas using raw row bytes as local row
-identity. Typed reducer argument/result encoding, generated declared query/view
-projection row decoding, declared-query/view cache behavior, reconnect policy,
-and broader local cache implementation remain open.
+identity. The runtime also has an explicit opt-in reconnect policy with bounded
+attempts, token-provider refresh per attempt, and automatic resubscription
+after a fresh identity handshake. Typed reducer argument/result encoding,
+generated declared query/view projection row decoding, declared-query/view
+cache behavior, and broader local cache implementation remain open.
 
 ## Runtime API
 
@@ -115,14 +117,17 @@ Current lifecycle behavior: the runtime offers Shunter's v1 WebSocket
 subprotocol, appends configured tokens as the server-supported `token` query
 parameter for browser compatibility, and accepts an injected WebSocket factory
 for Node or host-specific transports. `connect()` resolves after the initial
-server `IdentityToken` frame is decoded into connection metadata.
+server `IdentityToken` frame is decoded into connection metadata. Passing
+`reconnect: { enabled: true }` enables bounded reconnect attempts for
+unexpected transport failures; each attempt resolves the configured token
+source again, reconnects with backoff, and replays accepted subscription
+requests after the new identity frame is received.
 
 ## Auth
 
-The runtime should accept either a static token string or an async token
-provider. A refresh hook should be called before reconnect when the previous
-connection failed with an auth-related error or the caller explicitly requests a
-refresh.
+The runtime accepts either a static token string or an async token provider.
+Opt-in reconnect calls the token provider again before each reconnect attempt,
+which is the v1 refresh hook for browser-compatible query-token auth.
 
 Strict-mode failures should surface as auth errors, not generic WebSocket close
 events.
@@ -294,11 +299,12 @@ app should drive the smallest useful choice.
 
 Default v1 policy should be explicit and conservative:
 
+- reconnect is disabled unless `reconnect: { enabled: true }` is passed
 - clean caller close does not reconnect
-- transient transport failure may reconnect with backoff
-- auth failure refreshes token once if a refresh hook is available
-- subscriptions are automatically resubscribed only when the SDK can re-deliver
-  an initial snapshot and clearly notify callers that state was refreshed
+- unexpected transport failure reconnects with bounded backoff attempts
+- token providers are called again before each reconnect attempt
+- accepted subscriptions are automatically resubscribed only after a fresh
+  identity handshake; managed table handles receive a refreshed initial snapshot
 - missed-update replay is out of scope until the protocol exposes a stable
   cursor
 

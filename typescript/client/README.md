@@ -48,16 +48,20 @@ while keeping raw callbacks unchanged. The runtime also exports
 `decodeBsatnProduct()` for schema-aware row decoding, and generated bindings
 emit per-table row decoder functions plus a `tableRowDecoders` map that
 generated table subscription helpers use by default. Managed table handles
-apply RowList insert/delete updates using raw row bytes as local identity. It
-does not implement
-typed reducer argument/result encoding, declared query/view projection row
-decoding, declared-query/view cache behavior, or reconnect policy yet.
+apply RowList insert/delete updates using raw row bytes as local identity. The
+runtime also supports explicit opt-in reconnect with bounded retry,
+token-provider refresh per attempt, and subscription replay after a fresh
+identity handshake. It does not implement typed reducer argument/result
+encoding, declared query/view projection row decoding, or declared-query/view
+cache behavior yet.
 
 The lifecycle shell offers Shunter's v1 subprotocol, appends a configured token
 as the server-supported `token` query parameter, tracks `idle`/`connecting`/
-`connected`/`closing`/`closed`/`failed` states, and accepts an injected
-WebSocket factory for Node tests or host-specific transports. `connect()`
-resolves after the first server frame is decoded as an `IdentityToken`.
+`connected`/`reconnecting`/`closing`/`closed`/`failed` states, and accepts an
+injected WebSocket factory for Node tests or host-specific transports.
+`connect()` resolves after the first server frame is decoded as an
+`IdentityToken`. Passing `reconnect: { enabled: true }` reconnects unexpected
+transport failures with configurable bounded backoff.
 Full-update `callReducer()` calls currently resolve with the raw
 `TransactionUpdate` response frame on committed status and reject on failed
 status. `NoSuccessNotify` calls resolve after send because successful server

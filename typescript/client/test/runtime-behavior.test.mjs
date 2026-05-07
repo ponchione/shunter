@@ -841,6 +841,9 @@ const unsubscribeTableHandleAppliedFrame = bytesFromHex(
 const tableHandleCacheUpdateFrame = bytesFromHex(
   "083433323101000000141312110500000075736572730a000000010000000200000004050a00000001000000020000000102",
 );
+const reconnectSubscribeSingleAppliedFrame = bytesFromHex(
+  "02010000000000000000000000141312110500000075736572730a00000001000000020000000405",
+);
 const tableHandleSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x01020304,
   queryId: 0x11121314,
@@ -947,3 +950,63 @@ malformedSocket.open();
 malformedSocket.message(new Uint8Array([1, 2, 3]));
 await assert.rejects(malformedConnecting, ShunterProtocolError);
 assert.equal(malformedClient.state.status, "failed");
+
+const reconnectSockets = [];
+const reconnectFactory = (url, protocols) => {
+  const socket = new FakeWebSocket(url, protocols);
+  reconnectSockets.push(socket);
+  return socket;
+};
+const reconnectStates = [];
+let reconnectTokenCalls = 0;
+const reconnectClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => {
+    reconnectTokenCalls += 1;
+    return `token-${reconnectTokenCalls}`;
+  },
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: reconnectFactory,
+  onStateChange: ({ current }) => reconnectStates.push(current.status),
+});
+const reconnecting = reconnectClient.connect();
+await new Promise((resolve) => setTimeout(resolve, 0));
+reconnectSockets[0].open();
+reconnectSockets[0].message(identityTokenFrame({ token: "initial-token" }).buffer);
+await reconnecting;
+assert.equal(reconnectTokenCalls, 1);
+assert.equal(reconnectSockets[0].url, "ws://127.0.0.1:3000/subscribe?token=token-1");
+const reconnectHandleSubscription = reconnectClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectHandle = await reconnectHandleSubscription;
+assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectClient.state.status, "reconnecting");
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(reconnectSockets.length, 2);
+assert.equal(reconnectSockets[1].url, "ws://127.0.0.1:3000/subscribe?token=token-2");
+reconnectSockets[1].open();
+reconnectSockets[1].message(identityTokenFrame({ token: "reconnected-token" }).buffer);
+assert.equal(reconnectClient.state.status, "connected");
+assert.deepEqual(
+  reconnectSockets[1].sent[0],
+  encodeTableSubscriptionRequest("users", {
+    requestId: 1,
+    queryId: 0x11121314,
+  }).frame,
+);
+reconnectSockets[1].message(reconnectSubscribeSingleAppliedFrame);
+assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["4-5"] });
+assert.deepEqual(reconnectStates, ["connecting", "connected", "reconnecting", "connecting", "connected"]);
+await reconnectClient.close();

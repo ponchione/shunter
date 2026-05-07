@@ -202,9 +202,12 @@ caller-supplied table decoders; table handles can now hold decoded initial rows
 when requested; generated bindings now emit schema-aware table row decoders and
 use them by default for generated whole-table subscription helpers; managed
 table handles now apply RowList insert/delete deltas using raw row bytes as
-local row identity.
+local row identity; explicit opt-in reconnect now performs bounded retry,
+token-provider refresh, and subscription replay after a fresh identity
+handshake.
 Schema-aware reducer codecs, declared-query/view projection row decoding,
-declared-query/view cache behavior, and reconnect behavior remain.
+declared-query/view cache behavior, canary wiring, and release qualification
+remain.
 
 Tasks:
 
