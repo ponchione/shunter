@@ -11,7 +11,72 @@ import (
 )
 
 func TestProtocolV1ClientGoldenWireFixtures(t *testing.T) {
-	fixtures := []protocolGoldenFixture{
+	for _, fixture := range protocolV1ClientGoldenWireFixtures() {
+		t.Run(fixture.name, func(t *testing.T) {
+			frame, err := EncodeClientMessage(fixture.msg)
+			if err != nil {
+				t.Fatalf("EncodeClientMessage: %v", err)
+			}
+			assertGoldenFrame(t, fixture, frame)
+
+			_, decoded, err := DecodeClientMessage(frame)
+			if err != nil {
+				t.Fatalf("DecodeClientMessage: %v", err)
+			}
+			assertGoldenDecoded(t, fixture.msg, decoded)
+		})
+	}
+}
+
+func TestProtocolV1ServerGoldenWireFixtures(t *testing.T) {
+	for _, fixture := range protocolV1ServerGoldenWireFixtures() {
+		t.Run(fixture.name, func(t *testing.T) {
+			frame, err := EncodeServerMessage(fixture.msg)
+			if err != nil {
+				t.Fatalf("EncodeServerMessage: %v", err)
+			}
+			assertGoldenFrame(t, fixture, frame)
+
+			_, decoded, err := DecodeServerMessage(frame)
+			if err != nil {
+				t.Fatalf("DecodeServerMessage: %v", err)
+			}
+			assertGoldenDecoded(t, fixture.msg, decoded)
+		})
+	}
+}
+
+func TestProtocolV1GoldenWireFixtureCoverage(t *testing.T) {
+	assertGoldenFixtureCoverage(t, "client", protocolV1ClientGoldenWireFixtures(), []string{
+		"client/subscribe_single",
+		"client/unsubscribe_single",
+		"client/call_reducer/full_update",
+		"client/call_reducer/no_success_notify",
+		"client/one_off_query",
+		"client/subscribe_multi",
+		"client/unsubscribe_multi",
+		"client/declared_query",
+		"client/subscribe_declared_view",
+	})
+	assertGoldenFixtureCoverage(t, "server", protocolV1ServerGoldenWireFixtures(), []string{
+		"server/identity_token",
+		"server/subscribe_single_applied",
+		"server/unsubscribe_single_applied/has_rows_true",
+		"server/unsubscribe_single_applied/has_rows_false",
+		"server/subscription_error/with_ids",
+		"server/subscription_error/without_ids",
+		"server/transaction_update_committed",
+		"server/transaction_update_failed",
+		"server/transaction_update_light",
+		"server/one_off_query_response_success",
+		"server/one_off_query_response_error",
+		"server/subscribe_multi_applied",
+		"server/unsubscribe_multi_applied",
+	})
+}
+
+func protocolV1ClientGoldenWireFixtures() []protocolGoldenFixture {
+	return []protocolGoldenFixture{
 		{
 			name: "client/subscribe_single",
 			msg: SubscribeSingleMsg{
@@ -27,7 +92,17 @@ func TestProtocolV1ClientGoldenWireFixtures(t *testing.T) {
 			wantHex: "021413121124232221",
 		},
 		{
-			name: "client/call_reducer",
+			name: "client/call_reducer/full_update",
+			msg: CallReducerMsg{
+				ReducerName: "send",
+				Args:        []byte{0xaa, 0xbb},
+				RequestID:   0x31323334,
+				Flags:       CallReducerFlagsFullUpdate,
+			},
+			wantHex: "030400000073656e6402000000aabb3433323100",
+		},
+		{
+			name: "client/call_reducer/no_success_notify",
 			msg: CallReducerMsg{
 				ReducerName: "send",
 				Args:        []byte{0xaa, 0xbb},
@@ -76,25 +151,9 @@ func TestProtocolV1ClientGoldenWireFixtures(t *testing.T) {
 			wantHex: "0884838281949392910a0000006c6976655f7573657273",
 		},
 	}
-
-	for _, fixture := range fixtures {
-		t.Run(fixture.name, func(t *testing.T) {
-			frame, err := EncodeClientMessage(fixture.msg)
-			if err != nil {
-				t.Fatalf("EncodeClientMessage: %v", err)
-			}
-			assertGoldenFrame(t, fixture, frame)
-
-			_, decoded, err := DecodeClientMessage(frame)
-			if err != nil {
-				t.Fatalf("DecodeClientMessage: %v", err)
-			}
-			assertGoldenDecoded(t, fixture.msg, decoded)
-		})
-	}
 }
 
-func TestProtocolV1ServerGoldenWireFixtures(t *testing.T) {
+func protocolV1ServerGoldenWireFixtures() []protocolGoldenFixture {
 	rowList := EncodeRowList([][]byte{{0x01, 0x02}, {0x03}})
 	update := []SubscriptionUpdate{{
 		QueryID:   0x01020304,
@@ -107,7 +166,7 @@ func TestProtocolV1ServerGoldenWireFixtures(t *testing.T) {
 	queryID := uint32(0x51525354)
 	oneOffErr := "bad query"
 
-	fixtures := []protocolGoldenFixture{
+	return []protocolGoldenFixture{
 		{
 			name: "server/identity_token",
 			msg: IdentityToken{
@@ -129,7 +188,7 @@ func TestProtocolV1ServerGoldenWireFixtures(t *testing.T) {
 			wantHex: "02040302010807060504030201141312110500000075736572730f000000020000000200000001020100000003",
 		},
 		{
-			name: "server/unsubscribe_single_applied",
+			name: "server/unsubscribe_single_applied/has_rows_true",
 			msg: UnsubscribeSingleApplied{
 				RequestID:                        0x21222324,
 				TotalHostExecutionDurationMicros: 0x1112131415161718,
@@ -140,7 +199,16 @@ func TestProtocolV1ServerGoldenWireFixtures(t *testing.T) {
 			wantHex: "0324232221181716151413121134333231010f000000020000000200000001020100000003",
 		},
 		{
-			name: "server/subscription_error",
+			name: "server/unsubscribe_single_applied/has_rows_false",
+			msg: UnsubscribeSingleApplied{
+				RequestID:                        0x21222324,
+				TotalHostExecutionDurationMicros: 0x1112131415161718,
+				QueryID:                          0x31323334,
+			},
+			wantHex: "032423222118171615141312113433323100",
+		},
+		{
+			name: "server/subscription_error/with_ids",
 			msg: SubscriptionError{
 				TotalHostExecutionDurationMicros: 0x0102030405060708,
 				RequestID:                        &requestID,
@@ -149,6 +217,14 @@ func TestProtocolV1ServerGoldenWireFixtures(t *testing.T) {
 				Error:                            "denied",
 			},
 			wantHex: "0408070605040302010144434241015453525101646362610600000064656e696564",
+		},
+		{
+			name: "server/subscription_error/without_ids",
+			msg: SubscriptionError{
+				TotalHostExecutionDurationMicros: 0x0102030405060708,
+				Error:                            "denied",
+			},
+			wantHex: "0408070605040302010000000600000064656e696564",
 		},
 		{
 			name: "server/transaction_update_committed",
@@ -215,22 +291,6 @@ func TestProtocolV1ServerGoldenWireFixtures(t *testing.T) {
 			wantHex: "0a7473727188878685848382819493929101000000040302010500000075736572730f000000020000000200000001020100000003020000000405",
 		},
 	}
-
-	for _, fixture := range fixtures {
-		t.Run(fixture.name, func(t *testing.T) {
-			frame, err := EncodeServerMessage(fixture.msg)
-			if err != nil {
-				t.Fatalf("EncodeServerMessage: %v", err)
-			}
-			assertGoldenFrame(t, fixture, frame)
-
-			_, decoded, err := DecodeServerMessage(frame)
-			if err != nil {
-				t.Fatalf("DecodeServerMessage: %v", err)
-			}
-			assertGoldenDecoded(t, fixture.msg, decoded)
-		})
-	}
 }
 
 type protocolGoldenFixture struct {
@@ -257,6 +317,25 @@ func assertGoldenDecoded(t *testing.T, want, got any) {
 	}
 	if diff := cmp.Diff(want, got, cmpopts.EquateEmpty()); diff != "" {
 		t.Fatalf("decoded value mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func assertGoldenFixtureCoverage(t *testing.T, direction string, fixtures []protocolGoldenFixture, wantNames []string) {
+	t.Helper()
+	gotNames := make([]string, 0, len(fixtures))
+	seen := make(map[string]struct{}, len(fixtures))
+	for _, fixture := range fixtures {
+		if fixture.wantHex == "" {
+			t.Fatalf("%s fixture %s has empty golden bytes", direction, fixture.name)
+		}
+		if _, ok := seen[fixture.name]; ok {
+			t.Fatalf("%s fixture %s is duplicated", direction, fixture.name)
+		}
+		seen[fixture.name] = struct{}{}
+		gotNames = append(gotNames, fixture.name)
+	}
+	if diff := cmp.Diff(wantNames, gotNames); diff != "" {
+		t.Fatalf("%s golden fixture coverage mismatch (-want +got):\n%s", direction, diff)
 	}
 }
 

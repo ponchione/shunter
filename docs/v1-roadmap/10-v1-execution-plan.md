@@ -67,8 +67,9 @@ Tasks:
   v1 codegen compatibility commitments.
 - Keep lower-level package compatibility limited to the stable subsets in
   `docs/v1-compatibility.md`.
-- Add or confirm golden coverage for every stable protocol payload,
-  `ModuleContract` JSON field, and generated TypeScript category.
+- Keep protocol payload and generated TypeScript golden coverage current as
+  stable shapes evolve.
+- Add or confirm golden coverage for every stable `ModuleContract` JSON field.
 - Add or confirm negative tests for unsupported SQL classes listed in
   `09-sql-read-scope.md`; mutation-statement protocol admission is now covered
   for one-off raw SQL and raw subscriptions.
@@ -85,6 +86,10 @@ Completed in this phase:
   now has dedicated v1 golden coverage across table, column, reducer,
   lifecycle, declared-read, visibility-filter, permission, and read-model
   identifier categories.
+- Protocol v1 wire payload coverage now has dedicated golden fixtures for every
+  stable client-to-server and server-to-client message family, stable payload
+  variants, tag assignments, reserved tag policy, malformed-body handling, and
+  trailing-byte rejection.
 
 Exit criteria:
 

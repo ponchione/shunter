@@ -216,7 +216,15 @@ Generated TypeScript identifier normalization and collision suffix behavior now
 has dedicated v1 golden coverage across table, column, reducer, lifecycle,
 declared-read, visibility-filter, permission, and read-model categories.
 
+Protocol v1 wire coverage now has dedicated golden fixtures for every stable
+client-to-server and server-to-client message family listed in this matrix,
+including the stable reducer flag values, unsubscribe row-presence variants,
+subscription-error optional metadata variants, transaction status variants, and
+one-off query success/error variants. Protocol tests also pin the v1 token,
+version numbers, tag assignments, reserved tag policy, malformed-body handling,
+and trailing-byte rejection.
+
 Remaining coverage before cutting `v1.0.0`:
 
-- Add or confirm protocol, contract JSON, and TypeScript golden coverage for
-  every stable payload shape in this document.
+- Add or confirm contract JSON golden coverage for every stable
+  `ModuleContract` field in this document.
