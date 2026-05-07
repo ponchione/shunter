@@ -265,6 +265,72 @@ func TestRegisterJoinProjectionSuppressesUnmatchedDelta(t *testing.T) {
 	}
 }
 
+func TestRegisterCrossJoinProjectionPreservesInitialAndDeltaShape(t *testing.T) {
+	s := testSchema()
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("alice")},
+			{types.NewUint64(2), types.NewString("bob")},
+		},
+		2: {
+			{types.NewUint64(10), types.NewInt32(10)},
+		},
+	})
+	pred := CrossJoin{Left: 1, Right: 2}
+	projection := []ProjectionColumn{{
+		Schema: schema.ColumnSchema{Index: 1, Name: "body", Type: types.KindString},
+		Table:  1,
+		Column: 1,
+	}}
+	connID := types.ConnectionID{5}
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:            connID,
+		QueryID:           15,
+		Predicates:        []Predicate{pred},
+		ProjectionColumns: [][]ProjectionColumn{projection},
+	}, before)
+	if err != nil {
+		t.Fatalf("RegisterSet cross projection = %v", err)
+	}
+	if len(res.Update) != 1 {
+		t.Fatalf("initial update count = %d, want 1", len(res.Update))
+	}
+	initial := res.Update[0]
+	if initial.TableID != 1 || len(initial.Columns) != 1 || initial.Columns[0].Name != "body" {
+		t.Fatalf("initial projection shape = table %d columns %#v, want table 1 body", initial.TableID, initial.Columns)
+	}
+	requireProductRowsEqual(t, initial.Inserts, []types.ProductValue{
+		{types.NewString("alice")},
+		{types.NewString("bob")},
+	})
+
+	inserted := types.ProductValue{types.NewUint64(20), types.NewInt32(20)}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("alice")},
+			{types.NewUint64(2), types.NewString("bob")},
+		},
+		2: {
+			{types.NewUint64(10), types.NewInt32(10)},
+			inserted,
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), joinChangeset(1, nil, nil, 2, []types.ProductValue{inserted}, nil), after, PostCommitMeta{})
+	update := requireSingleFanoutUpdate(t, <-inbox, connID)
+	if update.TableID != 1 || len(update.Columns) != 1 || update.Columns[0].Name != "body" {
+		t.Fatalf("delta projection shape = table %d columns %#v, want table 1 body", update.TableID, update.Columns)
+	}
+	requireProductRowsEqual(t, update.Inserts, []types.ProductValue{
+		{types.NewString("alice")},
+		{types.NewString("bob")},
+	})
+	if len(update.Deletes) != 0 {
+		t.Fatalf("cross projection deletes = %v, want none", update.Deletes)
+	}
+}
+
 func TestRegisterDedupSharesQueryState(t *testing.T) {
 	s := testSchema()
 	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
