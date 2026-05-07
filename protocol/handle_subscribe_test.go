@@ -5692,6 +5692,37 @@ func TestHandleSubscribeMulti_ShunterCompileErrorIncludesExecutingSqlSuffix(t *t
 	}
 }
 
+func TestHandleSubscribeMulti_AggregateRejectedAtomically(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockSubExecutor{}
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+
+	const badSQL = "SELECT COUNT(*) AS n FROM users"
+	msg := &SubscribeMultiMsg{
+		RequestID:    214,
+		QueryID:      215,
+		QueryStrings: []string{"SELECT * FROM users", badSQL},
+	}
+	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.RequestID, 214, "RequestID")
+	requireOptionalUint32(t, se.QueryID, 215, "QueryID")
+	want := "Column projections are not supported in subscriptions; Subscriptions must return a table type, executing: `" + badSQL + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := exec.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when any SubscribeMulti query has an unsupported aggregate")
+	}
+}
+
 // TestHandleSubscribeMulti_ShunterJoinStarProjectionRejectText pins
 // reference/SpacetimeDB/crates/expr/src/errors.rs:41
 // (`InvalidWildcard::Join` = "SELECT * is not supported for joins",

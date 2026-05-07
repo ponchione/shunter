@@ -575,8 +575,10 @@ Run benchmark commands explicitly when changing benchmarked code paths.
 
 ## Query Shape Matrix To Build
 
-Use this as the starting table for implementation tracking. Each row should
-eventually link to tests.
+Use `docs/v1-roadmap/subscription-support-matrix.md` as the active
+subscription-specific support matrix. The table below remains the roadmap seed
+shape list; the support matrix carries current support status, test owners, and
+known gaps.
 
 | Shape | Raw Subscribe | Declared Live View | Initial Rows | Deltas | Pruning | Admission |
 | --- | --- | --- | --- | --- | --- | --- |
