@@ -97,12 +97,15 @@ Completed or partially complete:
   contract fixtures for the already-pinned surfaces.
 - Make app-author docs and the compatibility matrix agree on current declared
   live-view projection, aggregate, order, limit, and offset behavior.
+- Clarify package comments for runtime implementation packages that remain
+  importable but are not v1 app-facing compatibility surfaces.
 
 Remaining:
 
 - Re-audit every exported root identifier and lower-level package after the
   next implementation slices land.
-- Add or update package comments where support level remains ambiguous.
+- Keep package comments aligned with the compatibility matrix when support
+  levels change.
 - Confirm protocol, contract JSON, and TypeScript golden coverage for every
   stable payload shape in the matrix.
 - Ensure `contractdiff` treats stable-field changes consistently with the final

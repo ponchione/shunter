@@ -1,5 +1,9 @@
-// Package subscription evaluates registered predicates after commits and
-// produces per-connection row deltas.
+// Package subscription evaluates runtime-owned live query predicates after
+// commits and produces per-connection row deltas.
+//
+// Subscription is a runtime implementation package. Application code should
+// prefer root runtime declared views, generated clients, or protocol
+// subscriptions unless it is intentionally working on Shunter internals.
 package subscription
 
 import (

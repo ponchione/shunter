@@ -1,6 +1,10 @@
-// Package sql parses the SQL subset accepted by the protocol query surfaces.
-// Unsupported joins, projections, predicates, and literals reject with
-// ErrUnsupportedSQL. Identifiers are byte-exact after quoted unescaping.
+// Package sql parses the SQL subset accepted by the runtime's protocol query
+// surfaces. Unsupported joins, projections, predicates, and literals reject
+// with ErrUnsupportedSQL. Identifiers are byte-exact after quoted unescaping.
+//
+// SQL parsing is a runtime implementation package. Application code should
+// prefer declared reads, generated clients, or protocol messages unless it is
+// intentionally working on Shunter internals.
 package sql
 
 import (
