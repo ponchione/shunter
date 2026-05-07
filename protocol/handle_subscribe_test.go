@@ -2785,11 +2785,64 @@ func TestCompileRawSubscribeAdmissionPlanRecordsIndexedJoinGraph(t *testing.T) {
 	if len(query.joinConditions) != 1 {
 		t.Fatalf("len(joinConditions) = %d, want 1", len(query.joinConditions))
 	}
+	if query.projectedRelation != 0 {
+		t.Fatalf("projectedRelation = %d, want 0 for SELECT t.*", query.projectedRelation)
+	}
 	condition := query.joinConditions[0]
 	wantLeft := rawSubscribeAdmissionColumnRef{relation: 0, table: tID, column: 1, indexed: true}
 	wantRight := rawSubscribeAdmissionColumnRef{relation: 1, table: sID, column: 1, indexed: false}
 	if condition.left != wantLeft || condition.right != wantRight {
 		t.Fatalf("join condition = %+v, want %+v = %+v", condition, wantLeft, wantRight)
+	}
+}
+
+func TestCompileRawSubscribeAdmissionPlanRecordsProjectedJoinRelation(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sID, _, ok := eng.Registry().TableByName("s")
+	if !ok {
+		t.Fatal("schema missing table s")
+	}
+
+	plan, failedSQL, err := compileRawSubscribeAdmissionPlan(
+		[]string{"SELECT s.* FROM t JOIN s ON t.u32 = s.u32"},
+		registrySchemaLookup{reg: eng.Registry()},
+		types.CallerContext{},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("compileRawSubscribeAdmissionPlan returned error for %q: %v", failedSQL, err)
+	}
+	if len(plan.queries) != 1 {
+		t.Fatalf("len(plan.queries) = %d, want 1", len(plan.queries))
+	}
+	query := plan.queries[0]
+	if query.projectedRelation != 1 {
+		t.Fatalf("projectedRelation = %d, want 1 for SELECT s.*", query.projectedRelation)
+	}
+	if query.resultShape.tableName != "s" {
+		t.Fatalf("resultShape.tableName = %q, want s", query.resultShape.tableName)
+	}
+	if len(query.relations) != 2 || query.relations[query.projectedRelation].table != sID {
+		t.Fatalf("relations/projectedRelation = %+v/%d, want projected s relation", query.relations, query.projectedRelation)
 	}
 }
 

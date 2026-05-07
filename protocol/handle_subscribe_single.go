@@ -44,6 +44,7 @@ type rawSubscribeAdmissionPlanQuery struct {
 	referencedTables      []schema.TableID
 	relations             []rawSubscribeAdmissionRelation
 	joinConditions        []rawSubscribeAdmissionJoinCondition
+	projectedRelation     int
 	resultShape           rawSubscribeAdmissionResultShape
 }
 
@@ -127,6 +128,7 @@ func compileRawSubscribeAdmissionPlan(
 			referencedTables:      compiled.ReferencedTables(),
 			relations:             relations,
 			joinConditions:        joinConditions,
+			projectedRelation:     rawSubscribeAdmissionProjectedRelation(compiled.Predicate()),
 			resultShape: rawSubscribeAdmissionResultShape{
 				tableName:  compiled.TableName(),
 				projection: compiled.SubscriptionProjection(),
@@ -139,6 +141,28 @@ func compileRawSubscribeAdmissionPlan(
 		})
 	}
 	return plan, "", nil
+}
+
+func rawSubscribeAdmissionProjectedRelation(pred subscription.Predicate) int {
+	switch p := pred.(type) {
+	case subscription.Join:
+		if p.ProjectRight {
+			return 1
+		}
+		return 0
+	case subscription.CrossJoin:
+		if p.ProjectRight {
+			return 1
+		}
+		return 0
+	case subscription.MultiJoin:
+		return p.ProjectedRelation
+	default:
+		if pred == nil || len(pred.Tables()) == 0 {
+			return -1
+		}
+		return 0
+	}
 }
 
 func rawSubscribeAdmissionJoinGraph(pred subscription.Predicate, sl SchemaLookup) ([]rawSubscribeAdmissionRelation, []rawSubscribeAdmissionJoinCondition) {
