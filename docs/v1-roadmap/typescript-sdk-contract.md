@@ -35,8 +35,10 @@ minimal `createShunterClient` WebSocket lifecycle shell with initial
 runtime interfaces consumed by generated bindings. It also exposes raw
 `Uint8Array` reducer request encoding for Shunter v1 `CallReducerMsg` frames
 and a connected-client `callReducer` send path with minimal full-update
-`TransactionUpdate` response correlation. It also exposes raw declared-query
-request encoding for v1 `DeclaredQueryMsg` frames and correlates
+`TransactionUpdate` response correlation. `decodeReducerCallResult()` wraps
+heavy reducer transaction updates in a minimal committed/failed result envelope
+while preserving the raw `callReducer()` result. It also exposes raw
+declared-query request encoding for v1 `DeclaredQueryMsg` frames and correlates
 `OneOffQueryResponse` frames. It also exposes raw declared-view subscription
 request encoding for v1 `SubscribeDeclaredView` frames, correlates
 `SubscribeMultiApplied` and `SubscriptionError` responses, and returns an
@@ -120,8 +122,11 @@ request ID, and flags. Full-update
 `TransactionUpdate`, resolve with that raw response frame on committed status,
 and reject with a structured validation error on failed status. Calls made with
 `NoSuccessNotify` resolve after send because the server may intentionally
-suppress committed success echoes for that flag. Typed argument/result codecs
-and a user-facing reducer result object remain required v1 follow-ups.
+suppress committed success echoes for that flag. `decodeReducerCallResult()`
+can wrap heavy `TransactionUpdate` frames in a reducer name/request ID/status
+envelope with an optional caller-supplied result decoder. Typed argument/result
+codecs and changing normal generated helpers away from raw bytes remain
+required v1 follow-ups.
 
 Candidate v1 default:
 

@@ -2153,6 +2153,11 @@ export interface ReducerCallResult<Name extends string = string, Result = Uint8A
   readonly error?: ShunterError;
 }
 
+export interface ReducerCallResultOptions<Result = Uint8Array> {
+  readonly requestId?: RequestID;
+  readonly decodeResult?: (update: TransactionUpdateMessage) => Result;
+}
+
 export type ReducerCaller<
   Name extends string = string,
   Args = Uint8Array,
@@ -2192,6 +2197,54 @@ export function encodeReducerCallRequest<Name extends string>(
     requestId,
     flags,
     frame,
+  };
+}
+
+export function decodeReducerCallResult<Name extends string, Result = Uint8Array>(
+  name: Name,
+  data: unknown,
+  options: ReducerCallResultOptions<Result> = {},
+): ReducerCallResult<Name, Result> {
+  const update = decodeTransactionUpdateFrame(data) as TransactionUpdateMessage<Name>;
+  if (update.reducerCall.name !== name) {
+    throw new ShunterProtocolError("Reducer response did not match the expected reducer name.", {
+      details: {
+        expectedName: name,
+        receivedName: update.reducerCall.name,
+        requestId: update.reducerCall.requestId,
+      },
+    });
+  }
+  if (options.requestId !== undefined && update.reducerCall.requestId !== options.requestId) {
+    throw new ShunterProtocolError("Reducer response did not match the expected request ID.", {
+      details: {
+        name,
+        expectedRequestId: options.requestId,
+        receivedRequestId: update.reducerCall.requestId,
+      },
+    });
+  }
+  const rawResult = new Uint8Array(update.rawFrame);
+  if (update.status.status === "failed") {
+    return {
+      name,
+      requestId: update.reducerCall.requestId,
+      status: "failed",
+      rawResult,
+      error: new ShunterValidationError(update.status.error || "Reducer call failed.", {
+        code: "reducer_failed",
+        details: update,
+      }),
+    };
+  }
+  return {
+    name,
+    requestId: update.reducerCall.requestId,
+    status: "committed",
+    value: options.decodeResult === undefined
+      ? (rawResult as Result)
+      : options.decodeResult(update),
+    rawResult,
   };
 }
 

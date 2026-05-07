@@ -28,6 +28,7 @@ import {
   decodeIdentityTokenFrame,
   decodeOneOffQueryResponseFrame,
   decodeRawDeclaredQueryResult,
+  decodeReducerCallResult,
   decodeRowList,
   decodeSubscribeSingleAppliedFrame,
   decodeSubscribeMultiAppliedFrame,
@@ -308,6 +309,22 @@ assert.deepEqual(committedUpdate.reducerCall.args, new Uint8Array([0xaa, 0xbb]))
 assert.equal(committedUpdate.reducerCall.requestId, 0x21222324);
 assert.equal(committedUpdate.totalHostExecutionDuration, 0x3132333435363738n);
 assert.deepEqual(committedUpdate.rawFrame, committedUpdateFrame);
+const committedReducerResult = decodeReducerCallResult("send", committedUpdateFrame, {
+  requestId: 0x21222324,
+});
+assert.equal(committedReducerResult.name, "send");
+assert.equal(committedReducerResult.requestId, 0x21222324);
+assert.equal(committedReducerResult.status, "committed");
+assert.deepEqual(committedReducerResult.value, committedUpdateFrame);
+assert.deepEqual(committedReducerResult.rawResult, committedUpdateFrame);
+const decodedReducerResult = decodeReducerCallResult("send", committedUpdateFrame, {
+  decodeResult: (update) => update.reducerCall.args,
+});
+assert.deepEqual(decodedReducerResult.value, new Uint8Array([0xaa, 0xbb]));
+assert.throws(
+  () => decodeReducerCallResult("other", committedUpdateFrame),
+  ShunterProtocolError,
+);
 
 const failedUpdateFrame = bytesFromHex(
   "050104000000626f6f6d18171615141312110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000073656e640000000000000000242322210000000000000000",
@@ -317,6 +334,10 @@ assert.equal(failedUpdate.status.status, "failed");
 assert.equal(failedUpdate.status.error, "boom");
 assert.equal(failedUpdate.reducerCall.name, "send");
 assert.equal(failedUpdate.reducerCall.requestId, 0x21222324);
+const failedReducerResult = decodeReducerCallResult("send", failedUpdateFrame);
+assert.equal(failedReducerResult.status, "failed");
+assert.equal(failedReducerResult.error.kind, "validation");
+assert.equal(failedReducerResult.error.code, "reducer_failed");
 
 const lightUpdateFrame = bytesFromHex(
   "083433323101000000040302010500000075736572730f000000020000000200000001020100000003020000000405",

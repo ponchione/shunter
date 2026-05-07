@@ -8,9 +8,11 @@ helpers, state and error types, a minimal `createShunterClient` WebSocket
 lifecycle shell with initial `IdentityToken` decoding, a managed subscription
 handle primitive, typed runtime interfaces, and raw reducer request encoding
 plus connected WebSocket sending for the v1 `CallReducerMsg` shape and minimal
-full-update `TransactionUpdate` response correlation. It also includes raw
-declared-query request encoding and `OneOffQueryResponse` correlation, raw
-declared-view subscription request encoding,
+full-update `TransactionUpdate` response correlation. `decodeReducerCallResult()`
+wraps heavy reducer `TransactionUpdate` frames in a minimal committed/failed
+result envelope without changing `callReducer()`'s raw-frame behavior. It also
+includes raw declared-query request encoding and `OneOffQueryResponse`
+correlation, raw declared-view subscription request encoding,
 `SubscribeMultiApplied`/`SubscriptionError` correlation, an idempotent
 unsubscribe send path for `UnsubscribeMulti`, raw table subscription request
 encoding, `SubscribeSingleApplied`/`SubscriptionError` correlation, and an
@@ -43,7 +45,9 @@ resolves after the first server frame is decoded as an `IdentityToken`.
 Full-update `callReducer()` calls currently resolve with the raw
 `TransactionUpdate` response frame on committed status and reject on failed
 status. `NoSuccessNotify` calls resolve after send because successful server
-echoes may be suppressed.
+echoes may be suppressed. Generated helpers can use `decodeReducerCallResult()`
+to wrap heavy transaction update frames in a reducer name/request ID/status
+envelope while typed result decoding remains pending.
 `runDeclaredQuery()` currently resolves with the raw `OneOffQueryResponse`
 frame on success and rejects on response errors. Consumers that want a typed raw
 envelope can pass that frame to `decodeRawDeclaredQueryResult()`.

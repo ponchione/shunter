@@ -191,8 +191,9 @@ reducer, declared-query, and declared-view subscribe request/response
 foundations added; raw table subscription request/response foundation added;
 raw subscription update callback plumbing, raw RowList splitting, optional raw
 RowList convenience fields on subscription updates, raw declared-query result
-helpers, and server-acknowledged managed subscription handle return paths added;
-schema-aware typed row decoding/cache behavior and reconnect behavior remain.
+helpers, reducer result envelope helpers, and server-acknowledged managed
+subscription handle return paths added; schema-aware typed row decoding/cache
+behavior and reconnect behavior remain.
 
 Tasks:
 

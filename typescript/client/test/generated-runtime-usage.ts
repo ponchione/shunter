@@ -6,6 +6,7 @@ import {
   encodeSubscribeSingleRequest,
   encodeTableSubscriptionRequest,
   decodeRawDeclaredQueryResult,
+  decodeReducerCallResult,
   decodeRowList,
   ShunterAuthError,
   ShunterProtocolMismatchError,
@@ -24,6 +25,7 @@ import type {
   RawDeclaredQueryResult,
   RawDeclaredQueryTable,
   RawSubscriptionUpdate,
+  ReducerCallResult,
   DeclaredViewHandleSubscriber,
   RuntimeBindings,
   ShunterErrorKind,
@@ -155,6 +157,14 @@ async function exerciseGeneratedBindings(): Promise<void> {
     reducerCaller,
     new Uint8Array([1, 2, 3]),
   );
+  const reducerResult: ReducerCallResult<ReducerName> = {
+    name: reducers.createMessage,
+    requestId: 1,
+    status: "committed",
+    value: new Uint8Array([1]),
+    rawResult: new Uint8Array([1]),
+  };
+  const reducerResultDecoder: typeof decodeReducerCallResult = decodeReducerCallResult;
 
   const declaredQueryRunner: DeclaredQueryRunner = async (name) =>
     new Uint8Array([name.length]);
@@ -231,6 +241,8 @@ async function exerciseGeneratedBindings(): Promise<void> {
   await unsubscribeTable();
 
   void reducerBytes;
+  void reducerResult;
+  void reducerResultDecoder;
   void encodedFrame;
   void encodedQueryFrame;
   void encodedViewFrame;
