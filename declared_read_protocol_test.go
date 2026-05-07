@@ -2,6 +2,7 @@ package shunter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -165,6 +166,34 @@ func TestProtocolDeclaredViewColumnProjectionSendsProjectedInitialRowsAndDeltas(
 	if len(inserts) != 1 || len(inserts[0]) != 1 || inserts[0][0].AsString() != "world" || len(deletes) != 0 {
 		t.Fatalf("projected delta inserts/deletes = %#v/%#v, want one body insert world", inserts, deletes)
 	}
+}
+
+func TestProtocolDeclaredViewColumnProjectionSuppressesNoOpReplacementDelta(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		Reducer("replace_message_projected_body", replaceMessageProjectedBodyReducer).
+		View(ViewDeclaration{
+			Name:        "live_message_bodies",
+			SQL:         "SELECT body AS text FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, "same")
+
+	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "projected-replacement-subscriber", "messages:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 44,
+		QueryID:   54,
+		Name:      "live_message_bodies",
+	})
+	projectedColumns := []schema.ColumnSchema{{Name: "text", Type: types.KindString}}
+	initial := requireDeclaredReadAppliedValues(t, client, 44, 54, "messages", projectedColumns)
+	if len(initial) != 1 || len(initial[0]) != 1 || initial[0][0].AsString() != "same" {
+		t.Fatalf("projected initial rows = %#v, want one body row same", initial)
+	}
+
+	replaceMessageProjectedBody(t, rt, 1, 2, "same")
+	requireNoDeclaredReadProtocolMessage(t, client)
 }
 
 func TestProtocolDeclaredViewOrderBySendsOrderedInitialRowsAndRowDeltas(t *testing.T) {
@@ -923,6 +952,54 @@ func readDeclaredReadProtocolMessage(t *testing.T, client *websocket.Conn) (uint
 		t.Fatalf("DecodeServerMessage: %v", err)
 	}
 	return tag, msg
+}
+
+func requireNoDeclaredReadProtocolMessage(t *testing.T, client *websocket.Conn) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	_, frame, err := client.Read(ctx)
+	if err == nil {
+		tag, msg, decErr := protocol.DecodeServerMessage(frame)
+		if decErr != nil {
+			t.Fatalf("unexpected undecodable protocol message: %v", decErr)
+		}
+		t.Fatalf("unexpected protocol message tag=%d msg=%+v, want none", tag, msg)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("read protocol message error = %v, want timeout with no message", err)
+	}
+}
+
+func replaceMessageProjectedBody(t *testing.T, rt *Runtime, oldID, newID byte, body string) {
+	t.Helper()
+	args := append([]byte{oldID, newID}, []byte(body)...)
+	res, err := rt.CallReducer(context.Background(), "replace_message_projected_body", args)
+	if err != nil {
+		t.Fatalf("replace projected message reducer admission: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("replace projected message reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+}
+
+func replaceMessageProjectedBodyReducer(ctx *schema.ReducerContext, args []byte) ([]byte, error) {
+	if len(args) < 2 {
+		return nil, fmt.Errorf("missing ids")
+	}
+	oldID := uint64(args[0])
+	newID := uint64(args[1])
+	body := string(args[2:])
+	for rowID, row := range ctx.DB.ScanTable(0) {
+		if len(row) > 0 && row[0].AsUint64() == oldID {
+			if err := ctx.DB.Delete(0, rowID); err != nil {
+				return nil, err
+			}
+			_, err := ctx.DB.Insert(0, types.ProductValue{types.NewUint64(newID), types.NewString(body)})
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("message %d not found", oldID)
 }
 
 func requireDeclaredReadOneOffRows(t *testing.T, client *websocket.Conn, wantTable string, wantRows int) {
