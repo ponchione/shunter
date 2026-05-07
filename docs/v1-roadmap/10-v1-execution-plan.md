@@ -192,9 +192,9 @@ Exit criteria:
 
 Goal: operators have one documented path for data safety and upgrades.
 
-Status: runbook, clean-shutdown fresh-restore test, incompatible-contract
-restore test, and migration hook success/failure tests added; crash/fault,
-version-metadata, and reference-app workflow remain.
+Status: runbook, release checklist, clean-shutdown fresh-restore test,
+incompatible-contract restore test, and migration hook success/failure tests
+added; crash/fault, version-metadata, and reference-app workflow remain.
 
 Tasks:
 
@@ -207,8 +207,6 @@ Tasks:
 - Test crash during reducer commit, crash during snapshot or compaction, and
   version metadata compatibility.
 - Add reference-app backup, restore, migration, and upgrade examples.
-- Add a release checklist covering `VERSION`, `CHANGELOG.md`, `vX.Y.Z` git tag,
-  and linker-stamped build metadata.
 
 Exit criteria:
 

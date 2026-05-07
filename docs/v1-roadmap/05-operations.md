@@ -1,6 +1,7 @@
 # Operations, Backup, Restore, And Migrations
 
-Status: open, runbook added; tests and reference app remain
+Status: open, runbook and release checklist added; tests and reference app
+remain
 Owner: unassigned
 Scope: operator-facing workflows for data durability, backup/restore,
 compaction, schema compatibility, migrations, and upgrades.
@@ -79,6 +80,8 @@ Completed or partially complete:
   runtime into a fresh data directory with recovered state verification.
 - Add an integration test that restored data rejects an incompatible module
   contract without mutating the restored directory.
+- Add release checklist items for `VERSION`, `CHANGELOG.md`, git tag, and
+  linker-stamped build metadata to the operations runbook.
 
 Remaining:
 
@@ -89,8 +92,6 @@ Remaining:
 - Ensure CLI and library helpers return actionable errors across the full
   operator workflow.
 - Add backup/restore/migration flow to the reference app.
-- Add release checklist items for `VERSION`, `CHANGELOG.md`, git tag, and
-  linker-stamped build metadata.
 
 ## Verification
 
