@@ -25,7 +25,9 @@ Current code reality:
   auth, scheduler behavior, read authorization, malformed and oversized
   protocol frames, restart loops, storage faults, and subprocess crash recovery.
 - `rc_app_workload_test.go` provides a release-candidate style public-runtime
-  workload, but it is not a maintained user-facing reference app.
+  workload.
+- The external `opsboard-canary` repository is the maintained canary/reference
+  app for app-author workflows that should not be duplicated in-repo.
 - Fuzz targets exist across JWT validation, BSATN decoding, protocol decoding,
   contract JSON, contract diff/plan JSON, schema build/read-policy handling,
   commitlog decoding/recovery, subscription hashing, observability config, and

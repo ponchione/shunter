@@ -28,6 +28,11 @@ Generated definitions alone do not solve connection lifecycle, subscription
 handles, auth refresh, local cache updates, reconnect policy, or protocol
 version mismatch behavior.
 
+The external `opsboard-canary` repository currently uses generated TypeScript
+fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
+exists, that app should become the main proof that normal TypeScript clients no
+longer need handwritten wire-code plumbing.
+
 SpacetimeDB's client SDKs are a useful reference for user experience:
 generated types, reducer helpers, subscription handles, callbacks, and local
 cache semantics are core parts of the product. Shunter should provide the same
@@ -100,7 +105,7 @@ Remaining:
   - auth failure
   - reconnect behavior
   - protocol version mismatch
-- Wire the reference app to use only the public SDK surface.
+- Wire the external canary app to use only the public SDK surface.
 - Document the generated/client compatibility policy in the v1 contract doc.
 
 ## Verification
@@ -121,7 +126,7 @@ exists, and record it in this document and the package README.
 - Reducer calls, declared queries, and declared view subscriptions are typed.
 - Reconnect and unsubscribe behavior are documented and tested.
 - Protocol/contract mismatch failures are clear.
-- The reference app uses the SDK as an external app would.
+- The external canary app uses the SDK as an external app would.
 
 ## Non-Goals
 

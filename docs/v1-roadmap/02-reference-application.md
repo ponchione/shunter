@@ -1,34 +1,38 @@
 # Reference Application
 
-Status: open, app contract added; implementation not started
+Status: open, external canary app exists; operational gaps remain
 Owner: unassigned
-Scope: one maintained end-to-end application that proves the normal Shunter v1
-developer and operator workflows.
+Scope: one maintained external canary/reference application that proves the
+normal Shunter v1 developer and operator workflows.
 
 ## Goal
 
-Build and maintain a realistic Shunter application that exercises the runtime
-the way real users will. This app should be the proving ground for API
-ergonomics, generated clients, auth, migrations, subscriptions, backup/restore,
-and operations.
+Maintain a realistic Shunter application that exercises the runtime the way
+real users will. This app should be the proving ground for API ergonomics,
+generated clients, auth, migrations, subscriptions, backup/restore, and
+operations.
 
 The reference app should not be a toy with one table and one reducer. It should
 be small enough to maintain, but rich enough to expose missing v1 capabilities.
 
 ## Current State
 
-Shunter has implementation and package-level coverage, but the public docs note
-limited onboarding and no maintained hello-world or tutorial. `README.md` still
-states that there is no bundled demo command.
+Shunter has implementation and package-level coverage, plus the
+release-candidate workload in `rc_app_workload_test.go`. That root workload is
+useful runtime proof, but it remains test-only.
 
-There is a release-candidate task-board workload in `rc_app_workload_test.go`
-that exercises strict auth, reducers, declared reads, protocol traffic,
-subscriptions, and restart behavior through public runtime APIs. That workload
-is useful proof, but it is test-only: there is no `examples/` app, no app-owned
-server binary, no generated TypeScript artifacts checked in for app authors, and
-no browser or Node client.
+The maintained app target is the external `opsboard-canary` repository, not a
+new app inside this repository. It defines an operations-board domain with
+public Shunter imports only, strict auth, varied read policies, sender-based
+visibility filters, reducers, declared queries, declared live views, raw SQL
+escape-hatch coverage, subscriptions, restart and rollback workflows,
+contract export, and committed TypeScript generated artifacts.
 
-Current target: [`reference-app-taskboard-contract.md`](reference-app-taskboard-contract.md)
+Do not add a duplicate in-repo task-board app for v1. The previous in-repo
+task-board contract is retained only as a retired planning note:
+[`reference-app-taskboard-contract.md`](reference-app-taskboard-contract.md).
+The active app contract lives with `opsboard-canary` in its
+`OPSBOARD_CANARY_APP_SPEC.md`.
 
 SpacetimeDB's reference material is useful here because its product experience
 is centered around modules, generated clients, local cache, reducer calls, and
@@ -37,7 +41,7 @@ module language/runtime model.
 
 ## App Requirements
 
-The reference app should include:
+The external canary app should include and keep testing:
 
 - 5-8 tables with varied schema shapes.
 - At least one private table and one public table.
@@ -53,52 +57,44 @@ The reference app should include:
 - Backup, restore, and migration examples.
 - A seed/load script or deterministic scenario for tests and demos.
 
-Good candidate domains:
-
-- collaborative task board
-- issue tracker
-- multiplayer lobby/match state
-- inventory/order workflow
-
-Avoid domains that require large unrelated product work such as billing,
-payments, rich text, media upload, or third-party integrations.
-
 ## Implementation Work
 
 Completed or partially complete:
 
-- Choose the collaborative task-board domain and write the app contract.
+- Adopt the external `opsboard-canary` repository as the maintained v1
+  canary/reference app instead of creating a duplicate in-repo example.
+- Confirm the app uses public Shunter package APIs for normal operation.
+- Confirm the app covers strict auth, permission metadata, private/public
+  tables, sender visibility, reducers, declared queries/views, raw SQL,
+  subscriptions, restart, rollback, contract export, and generated TypeScript
+  fixture checks.
 
 Remaining:
 
-- Add the app under an examples or integration-test location agreed with the
-  repo layout.
-- Build the server as an app-owned binary using normal `shunter.Module` and
-  `shunter.Runtime` APIs.
-- Generate TypeScript artifacts from the module contract.
-- Build a minimal client that uses the generated artifacts.
-- Add integration tests that run the app, call reducers, observe subscriptions,
-  and verify recovery from persisted data.
-- Add docs that show app authors the normal development loop:
-  - define schema
-  - add reducer
-  - add query/view
-  - export contract
-  - generate client
-  - run app
-  - migrate data
-  - backup and restore
+- Fix canary-repository dependency hygiene so its public-package workflow runs
+  cleanly against the sibling Shunter checkout.
+- Add the missing backup/restore workflow to the canary app.
+- Add one app-owned migration path to the canary app.
+- Replace handwritten protocol-client helpers with the v1 TypeScript runtime
+  SDK after that SDK exists.
+- Add a release qualification step that runs the canary against the intended
+  Shunter commit or tag.
+- Keep canary docs showing the normal app-author loop: define schema, add
+  reducer, add query/view, export contract, generate client, run app, migrate
+  data, and backup/restore.
 
 ## Verification
 
-The reference app should become a normal CI target once stable:
+The external canary app should become a normal release-qualification target once
+stable. From the `opsboard-canary` checkout, the intended commands are:
 
 ```bash
-rtk go test ./...
+rtk make canary-quick
+rtk make canary-full
 ```
 
-If the client uses TypeScript, add the repo-appropriate typecheck/build command
-and document it here after the package layout exists.
+If the client uses the future TypeScript runtime SDK, add the repo-appropriate
+typecheck/build command and document it here after that package exists.
 
 The app should also have at least one black-box test that starts from an empty
 data directory, performs a scenario, shuts down, restarts, and verifies state
@@ -106,7 +102,8 @@ and subscriptions after recovery.
 
 ## Done Criteria
 
-- A maintained reference app exists in-repo.
+- A maintained external canary/reference app exists and is documented as the v1
+  proving ground.
 - The app is documented as the recommended v1 starting point.
 - The app exercises auth, reducers, declared reads, subscriptions,
   contract/codegen, persistence, backup/restore, and a migration path.

@@ -1,7 +1,7 @@
 # Production Auth
 
 Status: open, strict HS256 issuer/audience/future-token support landed; v1
-policy and coverage audit documented; reference-app example remains
+policy and coverage audit documented; external canary example remains
 Owner: unassigned
 Scope: production-ready authentication, principal derivation, permission
 mapping, and operational auth documentation for Shunter v1.
@@ -82,7 +82,7 @@ Completed or partially complete:
 
 Remaining:
 
-- Add examples to the reference app using realistic non-dev auth.
+- Keep the external canary app demonstrating realistic strict non-dev auth.
 
 ## Verification
 
@@ -106,7 +106,7 @@ rtk go tool staticcheck ./...
 - Principal derivation and permission mapping are documented.
 - Auth behavior is consistent across local and protocol entry points.
 - Key rotation or key replacement behavior is documented and tested.
-- The reference app demonstrates the recommended production pattern.
+- The external canary app demonstrates the recommended production pattern.
 
 ## Non-Goals
 

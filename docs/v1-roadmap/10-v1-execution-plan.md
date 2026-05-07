@@ -15,7 +15,7 @@ gauntlet foundations.
 The remaining v1 work is mostly about freezing contracts, proving behavior
 across realistic workflows, and shipping the missing user-facing pieces:
 
-- a maintained reference application
+- a maintained external canary/reference application
 - a production-credible TypeScript client runtime
 - a strict production-auth contract
 - an operator runbook and release checklist
@@ -136,36 +136,36 @@ rtk go vet ./...
 
 ## Phase 2: Maintained Reference Application
 
-Goal: ship one in-repo application that proves the normal app-author and
-operator workflow.
+Goal: use one maintained external canary/reference application to prove the
+normal app-author and operator workflow.
 
-Recommended domain: collaborative task board. It matches existing
-release-candidate tests while leaving room for a richer maintained example.
+Target: the external `opsboard-canary` repository. Do not add a duplicate
+in-repo task-board app for v1.
 
-Status: task-board contract written; implementation, client, and tests remain.
+Status: external canary exists and covers most app-author/runtime workflows;
+backup/restore, one migration path, SDK wiring, and release gating remain.
 
 Tasks:
 
-- Keep `docs/v1-roadmap/reference-app-taskboard-contract.md` current as the
-  implementation contract.
-- Add the app under an examples or integration-test location agreed with the
-  repo layout.
-- Include 5-8 tables with varied schema shapes, at least one private table, one
-  public table, and one sender-based visibility filter.
-- Implement several reducers with validation and permission checks.
-- Include a scheduled reducer or lifecycle hook only if it remains part of the
-  v1 contract.
-- Add declared queries and declared live views. Keep raw SQL as a documented
-  escape hatch.
-- Export a committed `shunter.contract.json` fixture and generated TypeScript
-  artifacts.
-- Add a small browser or Node client once the SDK shape is available.
-- Add black-box tests for empty-data bootstrap, reducer calls, subscriptions,
-  clean restart, backup/restore, and one migration path.
+- Keep `docs/v1-roadmap/02-reference-application.md` current as the Shunter
+  roadmap entry, and keep the active app contract in
+  `opsboard-canary/OPSBOARD_CANARY_APP_SPEC.md`.
+- Keep the canary using only public Shunter APIs for normal operation.
+- Keep coverage for 5-8 varied tables, private and public read policies,
+  sender-based visibility, reducers with validation and permissions, declared
+  queries, declared live views, raw SQL escape-hatch use, subscriptions,
+  restart, rollback, contract export, and generated TypeScript fixtures.
+- Fix canary dependency hygiene so it runs cleanly against a sibling Shunter
+  checkout.
+- Add canary black-box tests for backup/restore and one app-owned migration
+  path.
+- Wire the canary client through the v1 TypeScript SDK once the SDK shape is
+  available.
+- Add canary commands to the release qualification checklist once stable.
 
 Exit criteria:
 
-- The reference app is the documented v1 starting point.
+- The external canary/reference app is the documented v1 proving ground.
 - It uses only public APIs for normal operation.
 - It fails loudly when contract/codegen/auth/subscription/recovery ergonomics
   regress.
@@ -173,10 +173,12 @@ Exit criteria:
 Verification:
 
 ```bash
-rtk go test ./...
+rtk make canary-quick
+rtk make canary-full
 ```
 
-Add the TypeScript typecheck/test command after the client package exists.
+Run these from the `opsboard-canary` checkout. Add the TypeScript
+typecheck/test command after the SDK-backed client package exists.
 
 ## Phase 3: TypeScript Client Runtime
 
@@ -198,13 +200,13 @@ Tasks:
 - Add tests for connection transitions, auth failure, reducer/query/view
   success and failure, initial snapshots, deltas, unsubscribe, reconnect, and
   mismatch handling.
-- Wire the reference app client through the SDK only.
+- Wire the external canary app client through the SDK only.
 
 Exit criteria:
 
 - Typed reducer calls, declared queries, and declared views work through the SDK.
 - Reconnect and unsubscribe semantics are documented and tested.
-- The reference app can be used without handwritten wire-code plumbing.
+- The external canary app can be used without handwritten wire-code plumbing.
 
 ## Phase 4: Production Auth Contract
 
@@ -230,7 +232,8 @@ Tasks:
 - Keep tests current for missing signing config, invalid issuer, invalid
   audience, expired/future/malformed/wrong-algorithm tokens, missing
   permissions, and visibility-filtered reads across local and protocol paths.
-- Update the reference app to demonstrate the recommended production pattern.
+- Update the external canary app to demonstrate the recommended production
+  pattern.
 
 Exit criteria:
 
@@ -257,7 +260,7 @@ Tasks:
 - Define contract policy failure behavior in startup/release workflows.
 - Keep durable metadata current as app module and Shunter version semantics
   evolve.
-- Add reference-app backup, restore, migration, and upgrade examples.
+- Add external canary backup, restore, migration, and upgrade examples.
 
 Exit criteria:
 
@@ -360,4 +363,4 @@ Tasks:
 Exit criteria:
 
 - `README.md`, `docs/README.md`, `docs/v1-compatibility.md`, roadmap files, and
-  reference app agree on the supported v1 story.
+  external canary app agree on the supported v1 story.

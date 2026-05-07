@@ -1,7 +1,7 @@
 # Operations, Backup, Restore, And Migrations
 
-Status: open, runbook and release checklist added; tests and reference app
-remain
+Status: open, runbook and release checklist added; external canary
+backup/restore/migration flow remains
 Owner: unassigned
 Scope: operator-facing workflows for data durability, backup/restore,
 compaction, schema compatibility, migrations, and upgrades.
@@ -97,7 +97,7 @@ Completed or partially complete:
 
 Remaining:
 
-- Add backup/restore/migration flow to the reference app.
+- Add backup/restore/migration flow to the external canary app.
 
 ## Verification
 
@@ -119,7 +119,7 @@ documented reason why the behavior cannot be tested at that layer.
   workflow.
 - Backup and restore are covered by integration tests.
 - Migration failure behavior is documented and tested.
-- The reference app demonstrates the full operational loop.
+- The external canary app demonstrates the full operational loop.
 
 ## Non-Goals
 

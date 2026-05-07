@@ -90,7 +90,7 @@ Remaining:
 - Add a performance envelope table under `docs/`.
 - Keep schema/indexing guidance current as benchmark envelopes and live-join
   constraints become concrete.
-- Add benchmark runs for the reference app.
+- Add benchmark or load runs for the external canary app.
 
 ## Verification
 
@@ -113,7 +113,7 @@ updating published baselines.
 
 - v1 docs include concrete workload envelopes.
 - Benchmark coverage maps to the documented envelopes.
-- The reference app has at least one benchmark or load scenario.
+- The external canary app has at least one benchmark or load scenario.
 - Indexing requirements for live subscriptions and joins are clear.
 - Known expensive query shapes are documented rather than implied.
 

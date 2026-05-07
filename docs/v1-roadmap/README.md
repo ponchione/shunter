@@ -62,8 +62,9 @@ Several original roadmap gaps now have partial implementation:
   are not complete.
 - TypeScript codegen exists. A maintained TypeScript client runtime/package does
   not.
-- A release-candidate app workload exists in tests. A maintained in-repo
-  reference app for users does not.
+- A release-candidate app workload exists in tests. The maintained v1
+  canary/reference app is the external `opsboard-canary` repository; do not add
+  a duplicate in-repo task-board app.
 
 ## v1 Product Thesis
 

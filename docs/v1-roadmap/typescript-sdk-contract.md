@@ -8,7 +8,8 @@ apps.
 
 The TypeScript SDK should let browser or Node applications use generated
 contracts without hand-writing Shunter protocol handlers. It should be small,
-framework-neutral, and stable enough to support the reference app.
+framework-neutral, and stable enough to support the external canary/reference
+app.
 
 ## Package Shape
 
