@@ -149,6 +149,97 @@ type JoinPath8Edge struct {
 	RHSFilterCol  ColID
 }
 
+const (
+	joinPathFixedMaxHops = 8
+	joinPathFixedMaxMids = joinPathFixedMaxHops - 1
+)
+
+type joinPathFixedMidDescriptor struct {
+	table     TableID
+	firstCol  ColID
+	secondCol ColID
+}
+
+type joinPathFixedEdgeDescriptor struct {
+	hops         int
+	lhsTable     TableID
+	mids         [joinPathFixedMaxMids]joinPathFixedMidDescriptor
+	rhsTable     TableID
+	lhsJoinCol   ColID
+	rhsJoinCol   ColID
+	rhsFilterCol ColID
+}
+
+func joinPathFixedMid(table TableID, firstCol, secondCol ColID) joinPathFixedMidDescriptor {
+	return joinPathFixedMidDescriptor{
+		table:     table,
+		firstCol:  firstCol,
+		secondCol: secondCol,
+	}
+}
+
+func newJoinPathFixedEdgeDescriptor(
+	lhsTable, rhsTable TableID,
+	lhsJoinCol, rhsJoinCol, rhsFilterCol ColID,
+	mids ...joinPathFixedMidDescriptor,
+) joinPathFixedEdgeDescriptor {
+	out := joinPathFixedEdgeDescriptor{
+		hops:         len(mids) + 1,
+		lhsTable:     lhsTable,
+		rhsTable:     rhsTable,
+		lhsJoinCol:   lhsJoinCol,
+		rhsJoinCol:   rhsJoinCol,
+		rhsFilterCol: rhsFilterCol,
+	}
+	copy(out.mids[:], mids)
+	return out
+}
+
+func (edge joinPathFixedEdgeDescriptor) traversalEdge() joinPathTraversalEdge {
+	if edge.hops < 2 || edge.hops > joinPathFixedMaxHops {
+		return joinPathTraversalEdge{}
+	}
+	var tables [joinPathFixedMaxHops + 1]TableID
+	var fromCols [joinPathFixedMaxHops]ColID
+	var toCols [joinPathFixedMaxHops]ColID
+
+	tables[0] = edge.lhsTable
+	tables[edge.hops] = edge.rhsTable
+	fromCols[0] = edge.lhsJoinCol
+	toCols[edge.hops-1] = edge.rhsJoinCol
+	for mid := 0; mid < edge.hops-1; mid++ {
+		tables[mid+1] = edge.mids[mid].table
+		fromCols[mid+1] = edge.mids[mid].secondCol
+		toCols[mid] = edge.mids[mid].firstCol
+	}
+
+	out, _ := newJoinPathTraversalEdge(
+		tables[:edge.hops+1],
+		fromCols[:edge.hops],
+		toCols[:edge.hops],
+		edge.rhsFilterCol,
+	)
+	return out
+}
+
+func joinPathFixedEdgeDescriptorFromTraversal(edge joinPathTraversalEdge, hops int) (joinPathFixedEdgeDescriptor, bool) {
+	if edge.hopCount() != hops || hops < 3 || hops > joinPathFixedMaxHops {
+		return joinPathFixedEdgeDescriptor{}, false
+	}
+	out := joinPathFixedEdgeDescriptor{
+		hops:         hops,
+		lhsTable:     edge.tables[0],
+		rhsTable:     edge.tables[hops],
+		lhsJoinCol:   edge.fromCols[0],
+		rhsJoinCol:   edge.toCols[hops-1],
+		rhsFilterCol: edge.rhsFilterCol,
+	}
+	for mid := 0; mid < hops-1; mid++ {
+		out.mids[mid] = joinPathFixedMid(edge.tables[mid+1], edge.toCols[mid], edge.fromCols[mid+1])
+	}
+	return out, true
+}
+
 type joinPathFixedValueIndex[E any] struct {
 	inner         *joinPathTraversalIndex
 	toTraversal   func(E) joinPathTraversalEdge
@@ -354,148 +445,169 @@ func joinPathTraversalEdgeFromJoinPathEdge(edge JoinPathEdge) joinPathTraversalE
 }
 
 func joinPathTraversalEdgeFromJoinPath3Edge(edge JoinPath3Edge) joinPathTraversalEdge {
-	out, _ := newJoinPathTraversalEdge(
-		[]TableID{edge.LHSTable, edge.Mid1Table, edge.Mid2Table, edge.RHSTable},
-		[]ColID{edge.LHSJoinCol, edge.Mid1SecondCol, edge.Mid2SecondCol},
-		[]ColID{edge.Mid1FirstCol, edge.Mid2FirstCol, edge.RHSJoinCol},
-		edge.RHSFilterCol,
-	)
-	return out
+	return newJoinPathFixedEdgeDescriptor(
+		edge.LHSTable, edge.RHSTable,
+		edge.LHSJoinCol, edge.RHSJoinCol, edge.RHSFilterCol,
+		joinPathFixedMid(edge.Mid1Table, edge.Mid1FirstCol, edge.Mid1SecondCol),
+		joinPathFixedMid(edge.Mid2Table, edge.Mid2FirstCol, edge.Mid2SecondCol),
+	).traversalEdge()
 }
 
 func joinPathTraversalEdgeFromJoinPath4Edge(edge JoinPath4Edge) joinPathTraversalEdge {
-	out, _ := newJoinPathTraversalEdge(
-		[]TableID{edge.LHSTable, edge.Mid1Table, edge.Mid2Table, edge.Mid3Table, edge.RHSTable},
-		[]ColID{edge.LHSJoinCol, edge.Mid1SecondCol, edge.Mid2SecondCol, edge.Mid3SecondCol},
-		[]ColID{edge.Mid1FirstCol, edge.Mid2FirstCol, edge.Mid3FirstCol, edge.RHSJoinCol},
-		edge.RHSFilterCol,
-	)
-	return out
+	return newJoinPathFixedEdgeDescriptor(
+		edge.LHSTable, edge.RHSTable,
+		edge.LHSJoinCol, edge.RHSJoinCol, edge.RHSFilterCol,
+		joinPathFixedMid(edge.Mid1Table, edge.Mid1FirstCol, edge.Mid1SecondCol),
+		joinPathFixedMid(edge.Mid2Table, edge.Mid2FirstCol, edge.Mid2SecondCol),
+		joinPathFixedMid(edge.Mid3Table, edge.Mid3FirstCol, edge.Mid3SecondCol),
+	).traversalEdge()
 }
 
 func joinPathTraversalEdgeFromJoinPath5Edge(edge JoinPath5Edge) joinPathTraversalEdge {
-	out, _ := newJoinPathTraversalEdge(
-		[]TableID{edge.LHSTable, edge.Mid1Table, edge.Mid2Table, edge.Mid3Table, edge.Mid4Table, edge.RHSTable},
-		[]ColID{edge.LHSJoinCol, edge.Mid1SecondCol, edge.Mid2SecondCol, edge.Mid3SecondCol, edge.Mid4SecondCol},
-		[]ColID{edge.Mid1FirstCol, edge.Mid2FirstCol, edge.Mid3FirstCol, edge.Mid4FirstCol, edge.RHSJoinCol},
-		edge.RHSFilterCol,
-	)
-	return out
+	return newJoinPathFixedEdgeDescriptor(
+		edge.LHSTable, edge.RHSTable,
+		edge.LHSJoinCol, edge.RHSJoinCol, edge.RHSFilterCol,
+		joinPathFixedMid(edge.Mid1Table, edge.Mid1FirstCol, edge.Mid1SecondCol),
+		joinPathFixedMid(edge.Mid2Table, edge.Mid2FirstCol, edge.Mid2SecondCol),
+		joinPathFixedMid(edge.Mid3Table, edge.Mid3FirstCol, edge.Mid3SecondCol),
+		joinPathFixedMid(edge.Mid4Table, edge.Mid4FirstCol, edge.Mid4SecondCol),
+	).traversalEdge()
 }
 
 func joinPathTraversalEdgeFromJoinPath6Edge(edge JoinPath6Edge) joinPathTraversalEdge {
-	out, _ := newJoinPathTraversalEdge(
-		[]TableID{edge.LHSTable, edge.Mid1Table, edge.Mid2Table, edge.Mid3Table, edge.Mid4Table, edge.Mid5Table, edge.RHSTable},
-		[]ColID{edge.LHSJoinCol, edge.Mid1SecondCol, edge.Mid2SecondCol, edge.Mid3SecondCol, edge.Mid4SecondCol, edge.Mid5SecondCol},
-		[]ColID{edge.Mid1FirstCol, edge.Mid2FirstCol, edge.Mid3FirstCol, edge.Mid4FirstCol, edge.Mid5FirstCol, edge.RHSJoinCol},
-		edge.RHSFilterCol,
-	)
-	return out
+	return newJoinPathFixedEdgeDescriptor(
+		edge.LHSTable, edge.RHSTable,
+		edge.LHSJoinCol, edge.RHSJoinCol, edge.RHSFilterCol,
+		joinPathFixedMid(edge.Mid1Table, edge.Mid1FirstCol, edge.Mid1SecondCol),
+		joinPathFixedMid(edge.Mid2Table, edge.Mid2FirstCol, edge.Mid2SecondCol),
+		joinPathFixedMid(edge.Mid3Table, edge.Mid3FirstCol, edge.Mid3SecondCol),
+		joinPathFixedMid(edge.Mid4Table, edge.Mid4FirstCol, edge.Mid4SecondCol),
+		joinPathFixedMid(edge.Mid5Table, edge.Mid5FirstCol, edge.Mid5SecondCol),
+	).traversalEdge()
 }
 
 func joinPathTraversalEdgeFromJoinPath7Edge(edge JoinPath7Edge) joinPathTraversalEdge {
-	out, _ := newJoinPathTraversalEdge(
-		[]TableID{edge.LHSTable, edge.Mid1Table, edge.Mid2Table, edge.Mid3Table, edge.Mid4Table, edge.Mid5Table, edge.Mid6Table, edge.RHSTable},
-		[]ColID{edge.LHSJoinCol, edge.Mid1SecondCol, edge.Mid2SecondCol, edge.Mid3SecondCol, edge.Mid4SecondCol, edge.Mid5SecondCol, edge.Mid6SecondCol},
-		[]ColID{edge.Mid1FirstCol, edge.Mid2FirstCol, edge.Mid3FirstCol, edge.Mid4FirstCol, edge.Mid5FirstCol, edge.Mid6FirstCol, edge.RHSJoinCol},
-		edge.RHSFilterCol,
-	)
-	return out
+	return newJoinPathFixedEdgeDescriptor(
+		edge.LHSTable, edge.RHSTable,
+		edge.LHSJoinCol, edge.RHSJoinCol, edge.RHSFilterCol,
+		joinPathFixedMid(edge.Mid1Table, edge.Mid1FirstCol, edge.Mid1SecondCol),
+		joinPathFixedMid(edge.Mid2Table, edge.Mid2FirstCol, edge.Mid2SecondCol),
+		joinPathFixedMid(edge.Mid3Table, edge.Mid3FirstCol, edge.Mid3SecondCol),
+		joinPathFixedMid(edge.Mid4Table, edge.Mid4FirstCol, edge.Mid4SecondCol),
+		joinPathFixedMid(edge.Mid5Table, edge.Mid5FirstCol, edge.Mid5SecondCol),
+		joinPathFixedMid(edge.Mid6Table, edge.Mid6FirstCol, edge.Mid6SecondCol),
+	).traversalEdge()
 }
 
 func joinPathTraversalEdgeFromJoinPath8Edge(edge JoinPath8Edge) joinPathTraversalEdge {
-	out, _ := newJoinPathTraversalEdge(
-		[]TableID{edge.LHSTable, edge.Mid1Table, edge.Mid2Table, edge.Mid3Table, edge.Mid4Table, edge.Mid5Table, edge.Mid6Table, edge.Mid7Table, edge.RHSTable},
-		[]ColID{edge.LHSJoinCol, edge.Mid1SecondCol, edge.Mid2SecondCol, edge.Mid3SecondCol, edge.Mid4SecondCol, edge.Mid5SecondCol, edge.Mid6SecondCol, edge.Mid7SecondCol},
-		[]ColID{edge.Mid1FirstCol, edge.Mid2FirstCol, edge.Mid3FirstCol, edge.Mid4FirstCol, edge.Mid5FirstCol, edge.Mid6FirstCol, edge.Mid7FirstCol, edge.RHSJoinCol},
-		edge.RHSFilterCol,
-	)
-	return out
+	return newJoinPathFixedEdgeDescriptor(
+		edge.LHSTable, edge.RHSTable,
+		edge.LHSJoinCol, edge.RHSJoinCol, edge.RHSFilterCol,
+		joinPathFixedMid(edge.Mid1Table, edge.Mid1FirstCol, edge.Mid1SecondCol),
+		joinPathFixedMid(edge.Mid2Table, edge.Mid2FirstCol, edge.Mid2SecondCol),
+		joinPathFixedMid(edge.Mid3Table, edge.Mid3FirstCol, edge.Mid3SecondCol),
+		joinPathFixedMid(edge.Mid4Table, edge.Mid4FirstCol, edge.Mid4SecondCol),
+		joinPathFixedMid(edge.Mid5Table, edge.Mid5FirstCol, edge.Mid5SecondCol),
+		joinPathFixedMid(edge.Mid6Table, edge.Mid6FirstCol, edge.Mid6SecondCol),
+		joinPathFixedMid(edge.Mid7Table, edge.Mid7FirstCol, edge.Mid7SecondCol),
+	).traversalEdge()
 }
 
 func joinPathTraversalEdgeToJoinPath3Edge(edge joinPathTraversalEdge) (JoinPath3Edge, bool) {
-	if edge.hopCount() != 3 {
+	fixed, ok := joinPathFixedEdgeDescriptorFromTraversal(edge, 3)
+	if !ok {
 		return JoinPath3Edge{}, false
 	}
+	mids := fixed.mids
 	return JoinPath3Edge{
-		LHSTable: edge.tables[0], Mid1Table: edge.tables[1], Mid2Table: edge.tables[2], RHSTable: edge.tables[3],
-		LHSJoinCol: edge.fromCols[0], Mid1FirstCol: edge.toCols[0], Mid1SecondCol: edge.fromCols[1],
-		Mid2FirstCol: edge.toCols[1], Mid2SecondCol: edge.fromCols[2],
-		RHSJoinCol: edge.toCols[2], RHSFilterCol: edge.rhsFilterCol,
+		LHSTable: fixed.lhsTable, Mid1Table: mids[0].table, Mid2Table: mids[1].table, RHSTable: fixed.rhsTable,
+		LHSJoinCol: fixed.lhsJoinCol, Mid1FirstCol: mids[0].firstCol, Mid1SecondCol: mids[0].secondCol,
+		Mid2FirstCol: mids[1].firstCol, Mid2SecondCol: mids[1].secondCol,
+		RHSJoinCol: fixed.rhsJoinCol, RHSFilterCol: fixed.rhsFilterCol,
 	}, true
 }
 
 func joinPathTraversalEdgeToJoinPath4Edge(edge joinPathTraversalEdge) (JoinPath4Edge, bool) {
-	if edge.hopCount() != 4 {
+	fixed, ok := joinPathFixedEdgeDescriptorFromTraversal(edge, 4)
+	if !ok {
 		return JoinPath4Edge{}, false
 	}
+	mids := fixed.mids
 	return JoinPath4Edge{
-		LHSTable: edge.tables[0], Mid1Table: edge.tables[1], Mid2Table: edge.tables[2], Mid3Table: edge.tables[3], RHSTable: edge.tables[4],
-		LHSJoinCol: edge.fromCols[0], Mid1FirstCol: edge.toCols[0], Mid1SecondCol: edge.fromCols[1],
-		Mid2FirstCol: edge.toCols[1], Mid2SecondCol: edge.fromCols[2],
-		Mid3FirstCol: edge.toCols[2], Mid3SecondCol: edge.fromCols[3],
-		RHSJoinCol: edge.toCols[3], RHSFilterCol: edge.rhsFilterCol,
+		LHSTable: fixed.lhsTable, Mid1Table: mids[0].table, Mid2Table: mids[1].table, Mid3Table: mids[2].table, RHSTable: fixed.rhsTable,
+		LHSJoinCol: fixed.lhsJoinCol, Mid1FirstCol: mids[0].firstCol, Mid1SecondCol: mids[0].secondCol,
+		Mid2FirstCol: mids[1].firstCol, Mid2SecondCol: mids[1].secondCol,
+		Mid3FirstCol: mids[2].firstCol, Mid3SecondCol: mids[2].secondCol,
+		RHSJoinCol: fixed.rhsJoinCol, RHSFilterCol: fixed.rhsFilterCol,
 	}, true
 }
 
 func joinPathTraversalEdgeToJoinPath5Edge(edge joinPathTraversalEdge) (JoinPath5Edge, bool) {
-	if edge.hopCount() != 5 {
+	fixed, ok := joinPathFixedEdgeDescriptorFromTraversal(edge, 5)
+	if !ok {
 		return JoinPath5Edge{}, false
 	}
+	mids := fixed.mids
 	return JoinPath5Edge{
-		LHSTable: edge.tables[0], Mid1Table: edge.tables[1], Mid2Table: edge.tables[2], Mid3Table: edge.tables[3], Mid4Table: edge.tables[4], RHSTable: edge.tables[5],
-		LHSJoinCol: edge.fromCols[0], Mid1FirstCol: edge.toCols[0], Mid1SecondCol: edge.fromCols[1],
-		Mid2FirstCol: edge.toCols[1], Mid2SecondCol: edge.fromCols[2],
-		Mid3FirstCol: edge.toCols[2], Mid3SecondCol: edge.fromCols[3],
-		Mid4FirstCol: edge.toCols[3], Mid4SecondCol: edge.fromCols[4],
-		RHSJoinCol: edge.toCols[4], RHSFilterCol: edge.rhsFilterCol,
+		LHSTable: fixed.lhsTable, Mid1Table: mids[0].table, Mid2Table: mids[1].table, Mid3Table: mids[2].table, Mid4Table: mids[3].table, RHSTable: fixed.rhsTable,
+		LHSJoinCol: fixed.lhsJoinCol, Mid1FirstCol: mids[0].firstCol, Mid1SecondCol: mids[0].secondCol,
+		Mid2FirstCol: mids[1].firstCol, Mid2SecondCol: mids[1].secondCol,
+		Mid3FirstCol: mids[2].firstCol, Mid3SecondCol: mids[2].secondCol,
+		Mid4FirstCol: mids[3].firstCol, Mid4SecondCol: mids[3].secondCol,
+		RHSJoinCol: fixed.rhsJoinCol, RHSFilterCol: fixed.rhsFilterCol,
 	}, true
 }
 
 func joinPathTraversalEdgeToJoinPath6Edge(edge joinPathTraversalEdge) (JoinPath6Edge, bool) {
-	if edge.hopCount() != 6 {
+	fixed, ok := joinPathFixedEdgeDescriptorFromTraversal(edge, 6)
+	if !ok {
 		return JoinPath6Edge{}, false
 	}
+	mids := fixed.mids
 	return JoinPath6Edge{
-		LHSTable: edge.tables[0], Mid1Table: edge.tables[1], Mid2Table: edge.tables[2], Mid3Table: edge.tables[3], Mid4Table: edge.tables[4], Mid5Table: edge.tables[5], RHSTable: edge.tables[6],
-		LHSJoinCol: edge.fromCols[0], Mid1FirstCol: edge.toCols[0], Mid1SecondCol: edge.fromCols[1],
-		Mid2FirstCol: edge.toCols[1], Mid2SecondCol: edge.fromCols[2],
-		Mid3FirstCol: edge.toCols[2], Mid3SecondCol: edge.fromCols[3],
-		Mid4FirstCol: edge.toCols[3], Mid4SecondCol: edge.fromCols[4],
-		Mid5FirstCol: edge.toCols[4], Mid5SecondCol: edge.fromCols[5],
-		RHSJoinCol: edge.toCols[5], RHSFilterCol: edge.rhsFilterCol,
+		LHSTable: fixed.lhsTable, Mid1Table: mids[0].table, Mid2Table: mids[1].table, Mid3Table: mids[2].table, Mid4Table: mids[3].table, Mid5Table: mids[4].table, RHSTable: fixed.rhsTable,
+		LHSJoinCol: fixed.lhsJoinCol, Mid1FirstCol: mids[0].firstCol, Mid1SecondCol: mids[0].secondCol,
+		Mid2FirstCol: mids[1].firstCol, Mid2SecondCol: mids[1].secondCol,
+		Mid3FirstCol: mids[2].firstCol, Mid3SecondCol: mids[2].secondCol,
+		Mid4FirstCol: mids[3].firstCol, Mid4SecondCol: mids[3].secondCol,
+		Mid5FirstCol: mids[4].firstCol, Mid5SecondCol: mids[4].secondCol,
+		RHSJoinCol: fixed.rhsJoinCol, RHSFilterCol: fixed.rhsFilterCol,
 	}, true
 }
 
 func joinPathTraversalEdgeToJoinPath7Edge(edge joinPathTraversalEdge) (JoinPath7Edge, bool) {
-	if edge.hopCount() != 7 {
+	fixed, ok := joinPathFixedEdgeDescriptorFromTraversal(edge, 7)
+	if !ok {
 		return JoinPath7Edge{}, false
 	}
+	mids := fixed.mids
 	return JoinPath7Edge{
-		LHSTable: edge.tables[0], Mid1Table: edge.tables[1], Mid2Table: edge.tables[2], Mid3Table: edge.tables[3], Mid4Table: edge.tables[4], Mid5Table: edge.tables[5], Mid6Table: edge.tables[6], RHSTable: edge.tables[7],
-		LHSJoinCol: edge.fromCols[0], Mid1FirstCol: edge.toCols[0], Mid1SecondCol: edge.fromCols[1],
-		Mid2FirstCol: edge.toCols[1], Mid2SecondCol: edge.fromCols[2],
-		Mid3FirstCol: edge.toCols[2], Mid3SecondCol: edge.fromCols[3],
-		Mid4FirstCol: edge.toCols[3], Mid4SecondCol: edge.fromCols[4],
-		Mid5FirstCol: edge.toCols[4], Mid5SecondCol: edge.fromCols[5],
-		Mid6FirstCol: edge.toCols[5], Mid6SecondCol: edge.fromCols[6],
-		RHSJoinCol: edge.toCols[6], RHSFilterCol: edge.rhsFilterCol,
+		LHSTable: fixed.lhsTable, Mid1Table: mids[0].table, Mid2Table: mids[1].table, Mid3Table: mids[2].table, Mid4Table: mids[3].table, Mid5Table: mids[4].table, Mid6Table: mids[5].table, RHSTable: fixed.rhsTable,
+		LHSJoinCol: fixed.lhsJoinCol, Mid1FirstCol: mids[0].firstCol, Mid1SecondCol: mids[0].secondCol,
+		Mid2FirstCol: mids[1].firstCol, Mid2SecondCol: mids[1].secondCol,
+		Mid3FirstCol: mids[2].firstCol, Mid3SecondCol: mids[2].secondCol,
+		Mid4FirstCol: mids[3].firstCol, Mid4SecondCol: mids[3].secondCol,
+		Mid5FirstCol: mids[4].firstCol, Mid5SecondCol: mids[4].secondCol,
+		Mid6FirstCol: mids[5].firstCol, Mid6SecondCol: mids[5].secondCol,
+		RHSJoinCol: fixed.rhsJoinCol, RHSFilterCol: fixed.rhsFilterCol,
 	}, true
 }
 
 func joinPathTraversalEdgeToJoinPath8Edge(edge joinPathTraversalEdge) (JoinPath8Edge, bool) {
-	if edge.hopCount() != 8 {
+	fixed, ok := joinPathFixedEdgeDescriptorFromTraversal(edge, 8)
+	if !ok {
 		return JoinPath8Edge{}, false
 	}
+	mids := fixed.mids
 	return JoinPath8Edge{
-		LHSTable: edge.tables[0], Mid1Table: edge.tables[1], Mid2Table: edge.tables[2], Mid3Table: edge.tables[3], Mid4Table: edge.tables[4], Mid5Table: edge.tables[5], Mid6Table: edge.tables[6], Mid7Table: edge.tables[7], RHSTable: edge.tables[8],
-		LHSJoinCol: edge.fromCols[0], Mid1FirstCol: edge.toCols[0], Mid1SecondCol: edge.fromCols[1],
-		Mid2FirstCol: edge.toCols[1], Mid2SecondCol: edge.fromCols[2],
-		Mid3FirstCol: edge.toCols[2], Mid3SecondCol: edge.fromCols[3],
-		Mid4FirstCol: edge.toCols[3], Mid4SecondCol: edge.fromCols[4],
-		Mid5FirstCol: edge.toCols[4], Mid5SecondCol: edge.fromCols[5],
-		Mid6FirstCol: edge.toCols[5], Mid6SecondCol: edge.fromCols[6],
-		Mid7FirstCol: edge.toCols[6], Mid7SecondCol: edge.fromCols[7],
-		RHSJoinCol: edge.toCols[7], RHSFilterCol: edge.rhsFilterCol,
+		LHSTable: fixed.lhsTable, Mid1Table: mids[0].table, Mid2Table: mids[1].table, Mid3Table: mids[2].table, Mid4Table: mids[3].table, Mid5Table: mids[4].table, Mid6Table: mids[5].table, Mid7Table: mids[6].table, RHSTable: fixed.rhsTable,
+		LHSJoinCol: fixed.lhsJoinCol, Mid1FirstCol: mids[0].firstCol, Mid1SecondCol: mids[0].secondCol,
+		Mid2FirstCol: mids[1].firstCol, Mid2SecondCol: mids[1].secondCol,
+		Mid3FirstCol: mids[2].firstCol, Mid3SecondCol: mids[2].secondCol,
+		Mid4FirstCol: mids[3].firstCol, Mid4SecondCol: mids[3].secondCol,
+		Mid5FirstCol: mids[4].firstCol, Mid5SecondCol: mids[4].secondCol,
+		Mid6FirstCol: mids[5].firstCol, Mid6SecondCol: mids[5].secondCol,
+		Mid7FirstCol: mids[6].firstCol, Mid7SecondCol: mids[6].secondCol,
+		RHSJoinCol: fixed.rhsJoinCol, RHSFilterCol: fixed.rhsFilterCol,
 	}, true
 }
