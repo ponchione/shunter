@@ -163,18 +163,18 @@ Exit criteria:
 Goal: strict auth is safe to configure and clear to operate.
 
 Status: current dev/strict auth behavior documented, issuer allowlists
-implemented, and strict future-token handling tested; broader strict-auth
-decisions and reference-app example remain.
+implemented, strict future-token handling tested, and v1 strict-auth policy
+documented; consistency audit and reference-app example remain.
 
 Tasks:
 
-- Decide whether v1 is HS256-only or whether asymmetric/JWKS/OIDC support is
-  required before `v1.0.0`.
+- Keep the v1 HS256-only strict-auth policy documented unless a new roadmap
+  decision expands the supported algorithms.
 - Keep `AuthIssuers` issuer allowlist behavior documented and tested.
-- Decide key replacement/rotation behavior and document operational procedure.
-- Decide whether permissions come only from the `permissions` claim or through
-  an app-provided mapper.
-- Decide strict-mode anonymous-token behavior.
+- Keep restart-based key replacement documented as the v1 operational
+  procedure.
+- Keep `permissions` claim mapping and no strict-mode anonymous-token behavior
+  documented as v1 policy.
 - Add startup/config validation for any newly required strict fields.
 - Keep `docs/authentication.md` current as structured dev/strict auth guidance.
 - Keep tests current for missing signing config, invalid issuer, invalid

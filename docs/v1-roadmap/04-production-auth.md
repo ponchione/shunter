@@ -1,7 +1,7 @@
 # Production Auth
 
-Status: open, strict HS256 issuer/audience/future-token support landed; broader
-auth remains
+Status: open, strict HS256 issuer/audience/future-token support landed; v1
+policy documented; reference-app example remains
 Owner: unassigned
 Scope: production-ready authentication, principal derivation, permission
 mapping, and operational auth documentation for Shunter v1.
@@ -25,9 +25,8 @@ For v1, auth should answer:
 
 Shunter has JWT validation, identity derivation, protocol auth handling, table
 read policy, reducer permissions, declared read permissions, visibility filters,
-and dev/strict auth modes. This is a strong base, but production operation
-still needs a clearer strict-mode contract and likely broader token validation
-support.
+and dev/strict auth modes. The v1 strict-mode contract is intentionally narrow
+and documented in `docs/authentication.md`.
 
 Current code reality:
 
@@ -40,29 +39,25 @@ Current code reality:
   optional `permissions` claims into the caller principal.
 - Dev mode can mint anonymous tokens with an ephemeral or configured signing
   key. This is still the zero-value convenience path.
-- There is no asymmetric key support, JWKS/OIDC discovery, key-rotation cache,
-  or app-provided claim mapper in the current root config.
+- v1 strict auth is HS256-only. There is no asymmetric key support, JWKS/OIDC
+  discovery, key-rotation cache, anonymous-token minting in strict mode, or
+  app-provided claim mapper in the current root config.
 
 The current `AuthModeDev` behavior is useful for local development. It should
 remain easy, but v1 must prevent accidental production use of dev auth.
 
-## v1 Decisions To Make
+## v1 Policy
 
-1. Decide required fields for strict auth configuration.
-2. Decide supported signing algorithms:
-   - keep symmetric signing key only
-   - add asymmetric key support
-   - add JWKS/OIDC discovery
-3. Decide key rotation behavior and cache lifetime.
-4. Decide issuer and audience validation rules.
-5. Decide claim-to-permission mapping:
-   - static claim names
-   - app-provided mapper
-   - both
-6. Decide anonymous-token behavior in strict mode.
-7. Decide how auth errors are represented in protocol responses and local APIs.
-8. Decide whether table visibility filters may depend only on sender identity
-   or also on token claims.
+- `AuthModeStrict` requires `AuthSigningKey` when protocol serving is enabled.
+- Tokens must be HS256 JWTs with `iss` and `sub`.
+- `AuthIssuers` and `AuthAudiences` are allowlists when configured.
+- Permission mapping uses the `permissions` claim only.
+- Strict mode does not mint anonymous tokens.
+- Key replacement is restart/deployment based; overlapping key rotation is
+  outside the v1 runtime contract.
+- Visibility filters may depend on `:sender`, not arbitrary token claims.
+- Auth failures on protocol upgrade fail before the WebSocket is accepted;
+  local permission failures are returned as reducer/read admission failures.
 
 ## Implementation Work
 
@@ -80,15 +75,12 @@ Completed or partially complete:
   future-issued, not-yet-valid, malformed, wrong-algorithm, bad-signature, and
   missing-claim tokens, protocol upgrade auth, local strict permissions,
   declared-read permissions, read authorization, and visibility-filtered reads.
+- Decide and document the v1 strict-auth policy: HS256-only, restart-based key
+  replacement, `permissions` claim mapping, no strict-mode anonymous tokens, and
+  `:sender`-only visibility claim exposure.
 
 Remaining:
 
-- Decide whether HS256-only strict auth is sufficient for v1 or whether
-  asymmetric/JWKS/OIDC support must land before release.
-- Decide whether key replacement remains restart-based or gains runtime
-  multi-key rotation.
-- Decide whether claim-to-permission mapping stays on the `permissions` claim
-  or gains an app-provided mapper.
 - Confirm any remaining tests needed to prove auth is enforced consistently
   across:
   - WebSocket reducer calls

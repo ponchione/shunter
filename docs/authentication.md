@@ -53,7 +53,7 @@ Behavior:
 
 Current strict mode does not include asymmetric keys, JWKS/OIDC discovery,
 multi-key rotation caches, or app-provided claim mappers. Those remain
-production-auth roadmap decisions.
+post-v1 directions unless a new roadmap decision expands the v1 auth surface.
 
 ## Principal And Identity
 
