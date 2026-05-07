@@ -53,12 +53,14 @@ also expose optional decoded insert/delete row byte arrays when their payloads
 decode as RowList envelopes. A raw declared-query result helper wraps
 successful `OneOffQueryResponse` frames in a name-stamped envelope with table
 names, raw RowList bytes, split row byte arrays, duration, message ID, and the
-raw frame. Declared-view and table subscriptions can opt into managed
-subscription handles with `returnHandle: true`; those handles use the same
-server-acknowledged unsubscribe path, and table handles expose raw initial row
-bytes. Table subscriptions can now also accept a caller-supplied row decoder
-for decoded initial-row and update callbacks while preserving the raw callback
-path. It does not yet implement typed reducer argument/result encoding,
+raw frame. A decoded declared-query helper can map returned table row bytes
+through caller-supplied table decoders while preserving the raw result helper.
+Declared-view and table subscriptions can opt into managed subscription handles
+with `returnHandle: true`; those handles use the same server-acknowledged
+unsubscribe path, and table handles expose raw initial row bytes. Table
+subscriptions can now also accept a caller-supplied row decoder for decoded
+initial-row and update callbacks while preserving the raw callback path. It
+does not yet implement typed reducer argument/result encoding, generated
 schema-aware declared query/view row decoding, subscription cache behavior,
 auth refresh, or reconnect policy.
 
@@ -191,17 +193,20 @@ Completed or partially complete:
   to `subscribeTable()` to receive decoded initial rows through the existing
   `onRows`/`onInitialRows` path and decoded RowList insert/delete updates
   through `onUpdate`, without changing raw callbacks.
+- Add a decoded declared-query bridge that maps successful raw declared-query
+  table RowList bytes through caller-supplied table decoders while keeping the
+  raw result helper unchanged.
 
 Remaining:
 
 - Decide and implement typed reducer argument/result encoding conventions
   beyond the current raw `Uint8Array` request path.
 - Implement typed reducer result decoding beyond the current raw
-  `TransactionUpdate` frame result, schema-aware declared-query/view row
-  decoding, and subscription cache behavior on top of the WebSocket lifecycle
-  shell.
-- Implement schema-aware row decoding for declared query/view results and
-  managed cache/update behavior.
+  `TransactionUpdate` frame result, generated schema-aware declared-query/view
+  row decoding, and subscription cache behavior on top of the WebSocket
+  lifecycle shell.
+- Implement generated schema-aware row decoders for declared query/view results
+  and managed cache/update behavior.
 - Implement reconnect, auth refresh, resubscription, and cache behavior.
 - Add client tests for:
   - connection state transitions

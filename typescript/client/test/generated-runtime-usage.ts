@@ -1,5 +1,6 @@
 import {
   SHUNTER_SUBPROTOCOL_V1,
+  decodeDeclaredQueryResult,
   encodeDeclaredQueryRequest,
   encodeDeclaredViewSubscriptionRequest,
   encodeReducerCallRequest,
@@ -27,6 +28,9 @@ import type {
   RawSubscriptionUpdate,
   ReducerCallResult,
   DeclaredViewHandleSubscriber,
+  DecodedDeclaredQueryResult,
+  DeclaredQueryDecodeOptions,
+  DeclaredQueryRowDecoder,
   RowDecoder,
   RuntimeBindings,
   ShunterErrorKind,
@@ -169,6 +173,12 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const tableRowDecoders: TableRowDecoders<TableRows> = {
     messages: messageRowDecoder,
   };
+  const declaredQueryRowDecoder: DeclaredQueryRowDecoder<MessagesRow> = (_tableName, row) =>
+    messageRowDecoder(row);
+  const declaredQueryDecodeOptions: DeclaredQueryDecodeOptions<TableRows> = {
+    tableDecoders: tableRowDecoders,
+    decodeRow: declaredQueryRowDecoder,
+  };
   const decodedUpdateHandler = (update: SubscriptionUpdate<MessagesRow>): void => {
     const insertedRows: readonly MessagesRow[] = update.inserts;
     const deletedRows: readonly MessagesRow[] = update.deletes;
@@ -210,6 +220,19 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const generatedRawDeclaredQueryResult: GeneratedRawDeclaredQueryResult<typeof queries.recentMessages> =
     rawDeclaredQueryResult;
   const rawDeclaredQueryDecoder: typeof decodeRawDeclaredQueryResult = decodeRawDeclaredQueryResult;
+  const decodedDeclaredQueryResult: DecodedDeclaredQueryResult<ExecutableQueryName, TableRows> = {
+    name: "recent_messages",
+    messageId: new Uint8Array([1]),
+    tables: [{
+      tableName: "messages",
+      rows: [messageRowDecoder(new Uint8Array([0]))],
+      rawRows: new Uint8Array([0]),
+      rowBytes: [new Uint8Array([0])],
+    }],
+    totalHostExecutionDuration: 0n,
+    rawFrame: new Uint8Array([0]),
+  };
+  const decodedDeclaredQueryDecoder: typeof decodeDeclaredQueryResult = decodeDeclaredQueryResult;
 
   const declaredViewSubscriber: DeclaredViewSubscriber = async (_name) => () => {};
   const unsubscribeView: SubscriptionUnsubscribe =
@@ -294,6 +317,9 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void rawDeclaredQueryResult;
   void generatedRawDeclaredQueryResult;
   void rawDeclaredQueryDecoder;
+  void decodedDeclaredQueryResult;
+  void decodedDeclaredQueryDecoder;
+  void declaredQueryDecodeOptions;
   void tableRowDecoders;
 }
 

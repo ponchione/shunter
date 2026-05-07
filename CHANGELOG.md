@@ -115,6 +115,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   reducer result envelope and raw declared-query result envelope.
 - TypeScript table subscriptions now accept caller-supplied row decoders for
   decoded initial-row and update callbacks while preserving raw callbacks.
+- TypeScript declared-query results can now be decoded with caller-supplied
+  table row decoders while preserving raw declared-query result helpers.
 
 ## v0.1.0 - 2026-05-05
 

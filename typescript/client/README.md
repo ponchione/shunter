@@ -28,6 +28,9 @@ rows. Raw subscription updates include optional `insertRowBytes` and
 RowList envelopes. `decodeRawDeclaredQueryResult()` wraps successful
 `OneOffQueryResponse` frames in a raw declared-query result envelope containing
 table names, raw RowList bytes, and split row byte arrays.
+`decodeDeclaredQueryResult()` maps those raw table row bytes through
+caller-provided table decoders when consumers already have schema-aware row
+codecs.
 `subscribeDeclaredView()` and `subscribeTable()` also accept `returnHandle:
 true` to resolve with a managed subscription handle wired to the same
 server-acknowledged unsubscribe path. Table handles expose raw row bytes from
@@ -73,6 +76,9 @@ Table subscriptions can also pass `decodeRow` when the caller already has a
 schema-aware row decoder; the runtime will call the table `onRows`/
 `onInitialRows` callbacks for accepted initial rows and `onUpdate` for RowList
 insert/delete deltas.
+Declared query consumers that want decoded rows can call
+`decodeDeclaredQueryResult()` with table-specific decoders; consumers that need
+raw RowList bytes can keep using `decodeRawDeclaredQueryResult()`.
 
 Generated module bindings should import types from `@shunter/client` and keep
 module-specific table, reducer, query, and view names in the generated file.

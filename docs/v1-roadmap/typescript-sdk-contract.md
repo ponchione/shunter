@@ -61,6 +61,9 @@ arrays when their insert/delete payloads decode as RowList envelopes.
 `decodeRawDeclaredQueryResult()` wraps successful `OneOffQueryResponse` frames
 in a raw declared-query result envelope containing table names, raw RowList
 bytes, and split row byte arrays for generated helpers to type against.
+`decodeDeclaredQueryResult()` builds on that raw helper by mapping each returned
+table's row bytes through caller-provided table decoders or a table-name-aware
+fallback decoder.
 `subscribeDeclaredView()` and `subscribeTable()` can also opt into
 `returnHandle: true`, resolving with a managed subscription handle backed by the
 same server-acknowledged unsubscribe path. Table handles expose raw initial row
@@ -68,7 +71,7 @@ bytes; declared-view handles currently expose lifecycle state only.
 `subscribeTable()` also accepts a caller-supplied `decodeRow` hook that decodes
 raw RowList row bytes for `onRows`/`onInitialRows` and RowList insert/delete
 updates for `onUpdate`, leaving raw callbacks unchanged. Typed reducer
-argument/result encoding, schema-aware declared query/view row decoding,
+argument/result encoding, generated schema-aware declared query/view row decoding,
 subscription cache behavior, reconnect policy, and local cache implementation
 remain open.
 
@@ -163,8 +166,10 @@ for a matching `OneOffQueryResponse`. Successful responses resolve with the raw
 response frame; server error responses reject with a structured validation
 error. `decodeRawDeclaredQueryResult()` turns a successful raw response frame
 into a name-stamped result with table names, raw RowList bytes, split row byte
-slices, duration, message ID, and the raw frame. Typed row decoding and
-table/view metadata extraction remain required v1 follow-ups.
+slices, duration, message ID, and the raw frame. `decodeDeclaredQueryResult()`
+can then map those table row bytes with caller-supplied decoders and fails
+clearly when a returned table has no decoder. Generated schema-aware row
+decoders and table/view metadata extraction remain required v1 follow-ups.
 
 Query calls should return:
 

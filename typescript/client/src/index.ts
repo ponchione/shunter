@@ -1687,6 +1687,37 @@ export interface RawDeclaredQueryResult<Name extends string = string> {
   readonly rawFrame: Uint8Array;
 }
 
+export interface DecodedDeclaredQueryTable<Table extends string = string, Row = unknown> {
+  readonly tableName: Table;
+  readonly rows: readonly Row[];
+  readonly rawRows: Uint8Array;
+  readonly rowBytes: readonly Uint8Array[];
+}
+
+export type DecodedDeclaredQueryTableFor<RowsByName extends object> = {
+  readonly [Name in keyof RowsByName & string]: DecodedDeclaredQueryTable<Name, RowsByName[Name]>;
+}[keyof RowsByName & string];
+
+export interface DecodedDeclaredQueryResult<
+  Name extends string = string,
+  RowsByName extends object = Record<string, unknown>,
+> {
+  readonly name: Name;
+  readonly messageId: Uint8Array;
+  readonly tables: readonly DecodedDeclaredQueryTableFor<RowsByName>[];
+  readonly totalHostExecutionDuration: bigint;
+  readonly rawFrame: Uint8Array;
+}
+
+export type DeclaredQueryRowDecoder<Row = unknown> = (tableName: string, row: Uint8Array) => Row;
+
+export interface DeclaredQueryDecodeOptions<
+  RowsByName extends object = Record<string, unknown>,
+> {
+  readonly tableDecoders?: TableRowDecoders<RowsByName>;
+  readonly decodeRow?: DeclaredQueryRowDecoder<RowsByName[keyof RowsByName & string]>;
+}
+
 export function decodeOneOffQueryResponseFrame(data: unknown): OneOffQueryResponseMessage {
   const frame = frameBytes(data);
   if (frame.length < 1 || frame[0] !== SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE) {
@@ -1739,6 +1770,69 @@ export function decodeRawDeclaredQueryResult<Name extends string>(
     totalHostExecutionDuration: response.totalHostExecutionDuration,
     rawFrame: new Uint8Array(response.rawFrame),
   };
+}
+
+export function decodeDeclaredQueryResult<
+  Name extends string,
+  RowsByName extends object = Record<string, unknown>,
+>(
+  name: Name,
+  data: unknown,
+  options: DeclaredQueryDecodeOptions<RowsByName>,
+): DecodedDeclaredQueryResult<Name, RowsByName> {
+  const raw = decodeRawDeclaredQueryResult(name, data);
+  const tables = raw.tables.map((table) => {
+    const decodeRow = declaredQueryRowDecoderForTable(options, table.tableName);
+    if (decodeRow === undefined) {
+      throw new ShunterValidationError("No row decoder registered for declared query table.", {
+        code: "missing_row_decoder",
+        details: { name, tableName: table.tableName },
+      });
+    }
+    return {
+      tableName: table.tableName,
+      rows: table.rowBytes.map((row, rowIndex) => {
+        try {
+          return decodeRow(new Uint8Array(row));
+        } catch (error) {
+          if (isShunterError(error)) {
+            throw error;
+          }
+          throw new ShunterValidationError("Declared query row decoder failed.", {
+            cause: error,
+            details: { name, tableName: table.tableName, rowIndex },
+          });
+        }
+      }),
+      rawRows: new Uint8Array(table.rows),
+      rowBytes: table.rowBytes.map((row) => new Uint8Array(row)),
+    };
+  });
+  return {
+    name,
+    messageId: new Uint8Array(raw.messageId),
+    tables: tables as unknown as DecodedDeclaredQueryTableFor<RowsByName>[],
+    totalHostExecutionDuration: raw.totalHostExecutionDuration,
+    rawFrame: new Uint8Array(raw.rawFrame),
+  };
+}
+
+function declaredQueryRowDecoderForTable<RowsByName extends object>(
+  options: DeclaredQueryDecodeOptions<RowsByName>,
+  tableName: string,
+): RowDecoder<unknown> | undefined {
+  const tableDecoders = options.tableDecoders as
+    | Record<string, TableRowDecoder<unknown> | undefined>
+    | undefined;
+  const tableDecoder = tableDecoders?.[tableName];
+  if (tableDecoder !== undefined) {
+    return tableDecoder;
+  }
+  if (options.decodeRow === undefined) {
+    return undefined;
+  }
+  const decodeRow = options.decodeRow;
+  return (row: Uint8Array): unknown => decodeRow(tableName, row);
 }
 
 export interface RawRowList {

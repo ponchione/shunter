@@ -25,6 +25,7 @@ import {
   checkProtocolCompatibility,
   createShunterClient,
   createSubscriptionHandle,
+  decodeDeclaredQueryResult,
   decodeIdentityTokenFrame,
   decodeOneOffQueryResponseFrame,
   decodeRawDeclaredQueryResult,
@@ -379,6 +380,23 @@ assert.deepEqual(rawDeclaredQueryResult.messageId, new Uint8Array([0x01, 0x02]))
 assert.equal(rawDeclaredQueryResult.tables[0].tableName, "users");
 assert.deepEqual(rawDeclaredQueryResult.tables[0].rowBytes.map((row) => [...row]), [[1, 2], [3]]);
 assert.deepEqual(rawDeclaredQueryResult.rawFrame, oneOffSuccessFrame);
+const decodedDeclaredQueryResult = decodeDeclaredQueryResult("recent_users", oneOffSuccessFrame, {
+  tableDecoders: {
+    users: (row) => [...row].join("-"),
+  },
+});
+assert.equal(decodedDeclaredQueryResult.name, "recent_users");
+assert.deepEqual(decodedDeclaredQueryResult.tables[0].rows, ["1-2", "3"]);
+assert.deepEqual(decodedDeclaredQueryResult.tables[0].rawRows, rawDeclaredQueryResult.tables[0].rows);
+assert.deepEqual(decodedDeclaredQueryResult.tables[0].rowBytes.map((row) => [...row]), [[1, 2], [3]]);
+const fallbackDecodedDeclaredQueryResult = decodeDeclaredQueryResult("recent_users", oneOffSuccessFrame, {
+  decodeRow: (tableName, row) => `${tableName}:${[...row].join("-")}`,
+});
+assert.deepEqual(fallbackDecodedDeclaredQueryResult.tables[0].rows, ["users:1-2", "users:3"]);
+assert.throws(
+  () => decodeDeclaredQueryResult("recent_users", oneOffSuccessFrame, { tableDecoders: {} }),
+  ShunterValidationError,
+);
 
 const oneOffErrorFrame = bytesFromHex(
   "060200000003040109000000626164207175657279000000002827262524232221",
