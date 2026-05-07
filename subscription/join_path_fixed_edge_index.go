@@ -149,452 +149,198 @@ type JoinPath8Edge struct {
 	RHSFilterCol  ColID
 }
 
+type joinPathFixedValueIndex[E any] struct {
+	inner         *joinPathTraversalIndex
+	toTraversal   func(E) joinPathTraversalEdge
+	fromTraversal func(joinPathTraversalEdge) (E, bool)
+}
+
+func newJoinPathFixedValueIndex[E any](
+	toTraversal func(E) joinPathTraversalEdge,
+	fromTraversal func(joinPathTraversalEdge) (E, bool),
+) *joinPathFixedValueIndex[E] {
+	return &joinPathFixedValueIndex[E]{
+		inner:         newJoinPathTraversalIndex(),
+		toTraversal:   toTraversal,
+		fromTraversal: fromTraversal,
+	}
+}
+
+func (ji *joinPathFixedValueIndex[E]) Add(edge E, filterValue Value, hash QueryHash) {
+	ji.inner.Add(ji.toTraversal(edge), filterValue, hash)
+}
+
+func (ji *joinPathFixedValueIndex[E]) Remove(edge E, filterValue Value, hash QueryHash) {
+	ji.inner.Remove(ji.toTraversal(edge), filterValue, hash)
+}
+
+func (ji *joinPathFixedValueIndex[E]) Lookup(edge E, filterValue Value) []QueryHash {
+	return ji.inner.Lookup(ji.toTraversal(edge), filterValue)
+}
+
+func (ji *joinPathFixedValueIndex[E]) ForEachHash(edge E, filterValue Value, fn func(QueryHash)) {
+	ji.inner.ForEachHash(ji.toTraversal(edge), filterValue, fn)
+}
+
+func (ji *joinPathFixedValueIndex[E]) ForEachEdge(table TableID, fn func(E)) {
+	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
+		if fixed, ok := ji.fromTraversal(edge); ok {
+			fn(fixed)
+		}
+	})
+}
+
+type joinPathFixedRangeIndex[E any] struct {
+	inner         *joinRangePathTraversalIndex
+	toTraversal   func(E) joinPathTraversalEdge
+	fromTraversal func(joinPathTraversalEdge) (E, bool)
+}
+
+func newJoinPathFixedRangeIndex[E any](
+	toTraversal func(E) joinPathTraversalEdge,
+	fromTraversal func(joinPathTraversalEdge) (E, bool),
+) *joinPathFixedRangeIndex[E] {
+	return &joinPathFixedRangeIndex[E]{
+		inner:         newJoinRangePathTraversalIndex(),
+		toTraversal:   toTraversal,
+		fromTraversal: fromTraversal,
+	}
+}
+
+func (ji *joinPathFixedRangeIndex[E]) Add(edge E, lower, upper Bound, hash QueryHash) {
+	ji.inner.Add(ji.toTraversal(edge), lower, upper, hash)
+}
+
+func (ji *joinPathFixedRangeIndex[E]) Remove(edge E, lower, upper Bound, hash QueryHash) {
+	ji.inner.Remove(ji.toTraversal(edge), lower, upper, hash)
+}
+
+func (ji *joinPathFixedRangeIndex[E]) Lookup(edge E, filterValue Value) []QueryHash {
+	return ji.inner.Lookup(ji.toTraversal(edge), filterValue)
+}
+
+func (ji *joinPathFixedRangeIndex[E]) ForEachHash(edge E, filterValue Value, fn func(QueryHash)) {
+	ji.inner.ForEachHash(ji.toTraversal(edge), filterValue, fn)
+}
+
+func (ji *joinPathFixedRangeIndex[E]) ForEachEdge(table TableID, fn func(E)) {
+	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
+		if fixed, ok := ji.fromTraversal(edge); ok {
+			fn(fixed)
+		}
+	})
+}
+
 type JoinPathEdgeIndex struct {
-	inner *joinPathTraversalIndex
+	*joinPathFixedValueIndex[JoinPathEdge]
 }
 
 func NewJoinPathEdgeIndex() *JoinPathEdgeIndex {
-	return &JoinPathEdgeIndex{inner: newJoinPathTraversalIndex()}
-}
-
-func (ji *JoinPathEdgeIndex) Add(edge JoinPathEdge, filterValue Value, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPathEdge(edge), filterValue, hash)
-}
-
-func (ji *JoinPathEdgeIndex) Remove(edge JoinPathEdge, filterValue Value, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPathEdge(edge), filterValue, hash)
-}
-
-func (ji *JoinPathEdgeIndex) Lookup(edge JoinPathEdge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPathEdge(edge), filterValue)
-}
-
-func (ji *JoinPathEdgeIndex) ForEachHash(edge JoinPathEdge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPathEdge(edge), filterValue, fn)
-}
-
-func (ji *JoinPathEdgeIndex) ForEachEdge(table TableID, fn func(JoinPathEdge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPathEdge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinPathEdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPathEdge, joinPathTraversalEdgeToJoinPathEdge)}
 }
 
 type JoinRangePathEdgeIndex struct {
-	inner *joinRangePathTraversalIndex
+	*joinPathFixedRangeIndex[JoinPathEdge]
 }
 
 func NewJoinRangePathEdgeIndex() *JoinRangePathEdgeIndex {
-	return &JoinRangePathEdgeIndex{inner: newJoinRangePathTraversalIndex()}
-}
-
-func (ji *JoinRangePathEdgeIndex) Add(edge JoinPathEdge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPathEdge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePathEdgeIndex) Remove(edge JoinPathEdge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPathEdge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePathEdgeIndex) Lookup(edge JoinPathEdge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPathEdge(edge), filterValue)
-}
-
-func (ji *JoinRangePathEdgeIndex) ForEachHash(edge JoinPathEdge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPathEdge(edge), filterValue, fn)
-}
-
-func (ji *JoinRangePathEdgeIndex) ForEachEdge(table TableID, fn func(JoinPathEdge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPathEdge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinRangePathEdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPathEdge, joinPathTraversalEdgeToJoinPathEdge)}
 }
 
 type JoinPath3EdgeIndex struct {
-	inner *joinPathTraversalIndex
+	*joinPathFixedValueIndex[JoinPath3Edge]
 }
 
 func NewJoinPath3EdgeIndex() *JoinPath3EdgeIndex {
-	return &JoinPath3EdgeIndex{inner: newJoinPathTraversalIndex()}
-}
-
-func (ji *JoinPath3EdgeIndex) Add(edge JoinPath3Edge, filterValue Value, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPath3Edge(edge), filterValue, hash)
-}
-
-func (ji *JoinPath3EdgeIndex) Remove(edge JoinPath3Edge, filterValue Value, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPath3Edge(edge), filterValue, hash)
-}
-
-func (ji *JoinPath3EdgeIndex) Lookup(edge JoinPath3Edge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPath3Edge(edge), filterValue)
-}
-
-func (ji *JoinPath3EdgeIndex) ForEachHash(edge JoinPath3Edge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPath3Edge(edge), filterValue, fn)
-}
-
-func (ji *JoinPath3EdgeIndex) ForEachEdge(table TableID, fn func(JoinPath3Edge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPath3Edge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinPath3EdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPath3Edge, joinPathTraversalEdgeToJoinPath3Edge)}
 }
 
 type JoinRangePath3EdgeIndex struct {
-	inner *joinRangePathTraversalIndex
+	*joinPathFixedRangeIndex[JoinPath3Edge]
 }
 
 func NewJoinRangePath3EdgeIndex() *JoinRangePath3EdgeIndex {
-	return &JoinRangePath3EdgeIndex{inner: newJoinRangePathTraversalIndex()}
-}
-
-func (ji *JoinRangePath3EdgeIndex) Add(edge JoinPath3Edge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPath3Edge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePath3EdgeIndex) Remove(edge JoinPath3Edge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPath3Edge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePath3EdgeIndex) Lookup(edge JoinPath3Edge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPath3Edge(edge), filterValue)
-}
-
-func (ji *JoinRangePath3EdgeIndex) ForEachHash(edge JoinPath3Edge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPath3Edge(edge), filterValue, fn)
-}
-
-func (ji *JoinRangePath3EdgeIndex) ForEachEdge(table TableID, fn func(JoinPath3Edge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPath3Edge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinRangePath3EdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPath3Edge, joinPathTraversalEdgeToJoinPath3Edge)}
 }
 
 type JoinPath4EdgeIndex struct {
-	inner *joinPathTraversalIndex
+	*joinPathFixedValueIndex[JoinPath4Edge]
 }
 
 func NewJoinPath4EdgeIndex() *JoinPath4EdgeIndex {
-	return &JoinPath4EdgeIndex{inner: newJoinPathTraversalIndex()}
-}
-
-func (ji *JoinPath4EdgeIndex) Add(edge JoinPath4Edge, filterValue Value, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPath4Edge(edge), filterValue, hash)
-}
-
-func (ji *JoinPath4EdgeIndex) Remove(edge JoinPath4Edge, filterValue Value, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPath4Edge(edge), filterValue, hash)
-}
-
-func (ji *JoinPath4EdgeIndex) Lookup(edge JoinPath4Edge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPath4Edge(edge), filterValue)
-}
-
-func (ji *JoinPath4EdgeIndex) ForEachHash(edge JoinPath4Edge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPath4Edge(edge), filterValue, fn)
-}
-
-func (ji *JoinPath4EdgeIndex) ForEachEdge(table TableID, fn func(JoinPath4Edge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPath4Edge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinPath4EdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPath4Edge, joinPathTraversalEdgeToJoinPath4Edge)}
 }
 
 type JoinRangePath4EdgeIndex struct {
-	inner *joinRangePathTraversalIndex
+	*joinPathFixedRangeIndex[JoinPath4Edge]
 }
 
 func NewJoinRangePath4EdgeIndex() *JoinRangePath4EdgeIndex {
-	return &JoinRangePath4EdgeIndex{inner: newJoinRangePathTraversalIndex()}
-}
-
-func (ji *JoinRangePath4EdgeIndex) Add(edge JoinPath4Edge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPath4Edge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePath4EdgeIndex) Remove(edge JoinPath4Edge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPath4Edge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePath4EdgeIndex) Lookup(edge JoinPath4Edge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPath4Edge(edge), filterValue)
-}
-
-func (ji *JoinRangePath4EdgeIndex) ForEachHash(edge JoinPath4Edge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPath4Edge(edge), filterValue, fn)
-}
-
-func (ji *JoinRangePath4EdgeIndex) ForEachEdge(table TableID, fn func(JoinPath4Edge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPath4Edge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinRangePath4EdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPath4Edge, joinPathTraversalEdgeToJoinPath4Edge)}
 }
 
 type JoinPath5EdgeIndex struct {
-	inner *joinPathTraversalIndex
+	*joinPathFixedValueIndex[JoinPath5Edge]
 }
 
 func NewJoinPath5EdgeIndex() *JoinPath5EdgeIndex {
-	return &JoinPath5EdgeIndex{inner: newJoinPathTraversalIndex()}
-}
-
-func (ji *JoinPath5EdgeIndex) Add(edge JoinPath5Edge, filterValue Value, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPath5Edge(edge), filterValue, hash)
-}
-
-func (ji *JoinPath5EdgeIndex) Remove(edge JoinPath5Edge, filterValue Value, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPath5Edge(edge), filterValue, hash)
-}
-
-func (ji *JoinPath5EdgeIndex) Lookup(edge JoinPath5Edge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPath5Edge(edge), filterValue)
-}
-
-func (ji *JoinPath5EdgeIndex) ForEachHash(edge JoinPath5Edge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPath5Edge(edge), filterValue, fn)
-}
-
-func (ji *JoinPath5EdgeIndex) ForEachEdge(table TableID, fn func(JoinPath5Edge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPath5Edge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinPath5EdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPath5Edge, joinPathTraversalEdgeToJoinPath5Edge)}
 }
 
 type JoinRangePath5EdgeIndex struct {
-	inner *joinRangePathTraversalIndex
+	*joinPathFixedRangeIndex[JoinPath5Edge]
 }
 
 func NewJoinRangePath5EdgeIndex() *JoinRangePath5EdgeIndex {
-	return &JoinRangePath5EdgeIndex{inner: newJoinRangePathTraversalIndex()}
-}
-
-func (ji *JoinRangePath5EdgeIndex) Add(edge JoinPath5Edge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPath5Edge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePath5EdgeIndex) Remove(edge JoinPath5Edge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPath5Edge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePath5EdgeIndex) Lookup(edge JoinPath5Edge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPath5Edge(edge), filterValue)
-}
-
-func (ji *JoinRangePath5EdgeIndex) ForEachHash(edge JoinPath5Edge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPath5Edge(edge), filterValue, fn)
-}
-
-func (ji *JoinRangePath5EdgeIndex) ForEachEdge(table TableID, fn func(JoinPath5Edge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPath5Edge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinRangePath5EdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPath5Edge, joinPathTraversalEdgeToJoinPath5Edge)}
 }
 
 type JoinPath6EdgeIndex struct {
-	inner *joinPathTraversalIndex
+	*joinPathFixedValueIndex[JoinPath6Edge]
 }
 
 func NewJoinPath6EdgeIndex() *JoinPath6EdgeIndex {
-	return &JoinPath6EdgeIndex{inner: newJoinPathTraversalIndex()}
-}
-
-func (ji *JoinPath6EdgeIndex) Add(edge JoinPath6Edge, filterValue Value, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPath6Edge(edge), filterValue, hash)
-}
-
-func (ji *JoinPath6EdgeIndex) Remove(edge JoinPath6Edge, filterValue Value, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPath6Edge(edge), filterValue, hash)
-}
-
-func (ji *JoinPath6EdgeIndex) Lookup(edge JoinPath6Edge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPath6Edge(edge), filterValue)
-}
-
-func (ji *JoinPath6EdgeIndex) ForEachHash(edge JoinPath6Edge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPath6Edge(edge), filterValue, fn)
-}
-
-func (ji *JoinPath6EdgeIndex) ForEachEdge(table TableID, fn func(JoinPath6Edge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPath6Edge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinPath6EdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPath6Edge, joinPathTraversalEdgeToJoinPath6Edge)}
 }
 
 type JoinRangePath6EdgeIndex struct {
-	inner *joinRangePathTraversalIndex
+	*joinPathFixedRangeIndex[JoinPath6Edge]
 }
 
 func NewJoinRangePath6EdgeIndex() *JoinRangePath6EdgeIndex {
-	return &JoinRangePath6EdgeIndex{inner: newJoinRangePathTraversalIndex()}
-}
-
-func (ji *JoinRangePath6EdgeIndex) Add(edge JoinPath6Edge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPath6Edge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePath6EdgeIndex) Remove(edge JoinPath6Edge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPath6Edge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePath6EdgeIndex) Lookup(edge JoinPath6Edge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPath6Edge(edge), filterValue)
-}
-
-func (ji *JoinRangePath6EdgeIndex) ForEachHash(edge JoinPath6Edge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPath6Edge(edge), filterValue, fn)
-}
-
-func (ji *JoinRangePath6EdgeIndex) ForEachEdge(table TableID, fn func(JoinPath6Edge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPath6Edge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinRangePath6EdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPath6Edge, joinPathTraversalEdgeToJoinPath6Edge)}
 }
 
 type JoinPath7EdgeIndex struct {
-	inner *joinPathTraversalIndex
+	*joinPathFixedValueIndex[JoinPath7Edge]
 }
 
 func NewJoinPath7EdgeIndex() *JoinPath7EdgeIndex {
-	return &JoinPath7EdgeIndex{inner: newJoinPathTraversalIndex()}
-}
-
-func (ji *JoinPath7EdgeIndex) Add(edge JoinPath7Edge, filterValue Value, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPath7Edge(edge), filterValue, hash)
-}
-
-func (ji *JoinPath7EdgeIndex) Remove(edge JoinPath7Edge, filterValue Value, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPath7Edge(edge), filterValue, hash)
-}
-
-func (ji *JoinPath7EdgeIndex) Lookup(edge JoinPath7Edge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPath7Edge(edge), filterValue)
-}
-
-func (ji *JoinPath7EdgeIndex) ForEachHash(edge JoinPath7Edge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPath7Edge(edge), filterValue, fn)
-}
-
-func (ji *JoinPath7EdgeIndex) ForEachEdge(table TableID, fn func(JoinPath7Edge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPath7Edge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinPath7EdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPath7Edge, joinPathTraversalEdgeToJoinPath7Edge)}
 }
 
 type JoinRangePath7EdgeIndex struct {
-	inner *joinRangePathTraversalIndex
+	*joinPathFixedRangeIndex[JoinPath7Edge]
 }
 
 func NewJoinRangePath7EdgeIndex() *JoinRangePath7EdgeIndex {
-	return &JoinRangePath7EdgeIndex{inner: newJoinRangePathTraversalIndex()}
-}
-
-func (ji *JoinRangePath7EdgeIndex) Add(edge JoinPath7Edge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPath7Edge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePath7EdgeIndex) Remove(edge JoinPath7Edge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPath7Edge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePath7EdgeIndex) Lookup(edge JoinPath7Edge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPath7Edge(edge), filterValue)
-}
-
-func (ji *JoinRangePath7EdgeIndex) ForEachHash(edge JoinPath7Edge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPath7Edge(edge), filterValue, fn)
-}
-
-func (ji *JoinRangePath7EdgeIndex) ForEachEdge(table TableID, fn func(JoinPath7Edge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPath7Edge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinRangePath7EdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPath7Edge, joinPathTraversalEdgeToJoinPath7Edge)}
 }
 
 type JoinPath8EdgeIndex struct {
-	inner *joinPathTraversalIndex
+	*joinPathFixedValueIndex[JoinPath8Edge]
 }
 
 func NewJoinPath8EdgeIndex() *JoinPath8EdgeIndex {
-	return &JoinPath8EdgeIndex{inner: newJoinPathTraversalIndex()}
-}
-
-func (ji *JoinPath8EdgeIndex) Add(edge JoinPath8Edge, filterValue Value, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPath8Edge(edge), filterValue, hash)
-}
-
-func (ji *JoinPath8EdgeIndex) Remove(edge JoinPath8Edge, filterValue Value, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPath8Edge(edge), filterValue, hash)
-}
-
-func (ji *JoinPath8EdgeIndex) Lookup(edge JoinPath8Edge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPath8Edge(edge), filterValue)
-}
-
-func (ji *JoinPath8EdgeIndex) ForEachHash(edge JoinPath8Edge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPath8Edge(edge), filterValue, fn)
-}
-
-func (ji *JoinPath8EdgeIndex) ForEachEdge(table TableID, fn func(JoinPath8Edge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPath8Edge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinPath8EdgeIndex{newJoinPathFixedValueIndex(joinPathTraversalEdgeFromJoinPath8Edge, joinPathTraversalEdgeToJoinPath8Edge)}
 }
 
 type JoinRangePath8EdgeIndex struct {
-	inner *joinRangePathTraversalIndex
+	*joinPathFixedRangeIndex[JoinPath8Edge]
 }
 
 func NewJoinRangePath8EdgeIndex() *JoinRangePath8EdgeIndex {
-	return &JoinRangePath8EdgeIndex{inner: newJoinRangePathTraversalIndex()}
-}
-
-func (ji *JoinRangePath8EdgeIndex) Add(edge JoinPath8Edge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Add(joinPathTraversalEdgeFromJoinPath8Edge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePath8EdgeIndex) Remove(edge JoinPath8Edge, lower, upper Bound, hash QueryHash) {
-	ji.inner.Remove(joinPathTraversalEdgeFromJoinPath8Edge(edge), lower, upper, hash)
-}
-
-func (ji *JoinRangePath8EdgeIndex) Lookup(edge JoinPath8Edge, filterValue Value) []QueryHash {
-	return ji.inner.Lookup(joinPathTraversalEdgeFromJoinPath8Edge(edge), filterValue)
-}
-
-func (ji *JoinRangePath8EdgeIndex) ForEachHash(edge JoinPath8Edge, filterValue Value, fn func(QueryHash)) {
-	ji.inner.ForEachHash(joinPathTraversalEdgeFromJoinPath8Edge(edge), filterValue, fn)
-}
-
-func (ji *JoinRangePath8EdgeIndex) ForEachEdge(table TableID, fn func(JoinPath8Edge)) {
-	ji.inner.ForEachEdge(table, func(edge joinPathTraversalEdge) {
-		if fixed, ok := joinPathTraversalEdgeToJoinPath8Edge(edge); ok {
-			fn(fixed)
-		}
-	})
+	return &JoinRangePath8EdgeIndex{newJoinPathFixedRangeIndex(joinPathTraversalEdgeFromJoinPath8Edge, joinPathTraversalEdgeToJoinPath8Edge)}
 }
 
 func joinPathTraversalEdgeFromJoinPathEdge(edge JoinPathEdge) joinPathTraversalEdge {
