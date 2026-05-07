@@ -96,6 +96,10 @@ Completed in this phase:
 - Unsupported SQL negative coverage now spans every explicit v1 non-goal class
   in `09-sql-read-scope.md` at parser admission plus OneOff and SubscribeSingle
   protocol admission.
+- Unsupported SQL diagnostics coverage now pins client-visible OneOff,
+  SubscribeSingle, and SubscribeMulti errors for every explicit v1 non-goal
+  class, including the subscription offending-SQL suffix and no executor
+  registration on rejection.
 - Auth/visibility read-surface proof now covers private/read-policy admission,
   declared-read permission context, `:sender` caller identity, and visibility
   filtering before query results, live initial rows, and live deltas across

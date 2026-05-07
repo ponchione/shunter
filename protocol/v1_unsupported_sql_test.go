@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -26,6 +27,7 @@ func TestV1UnsupportedSQLNonGoalsReturnProtocolErrors(t *testing.T) {
 			if result.Error == nil || *result.Error == "" {
 				t.Fatalf("OneOff error = %v, want non-empty validation error", result.Error)
 			}
+			requireV1UnsupportedSQLDiagnostic(t, "OneOffQueryResponse.Error", *result.Error)
 			if len(result.Tables) != 0 {
 				t.Fatalf("OneOff tables = %d, want 0 on unsupported SQL", len(result.Tables))
 			}
@@ -54,10 +56,61 @@ func TestV1UnsupportedSQLNonGoalsReturnProtocolErrors(t *testing.T) {
 			if se.Error == "" {
 				t.Fatal("SubscriptionError.Error = empty, want validation error")
 			}
+			requireV1UnsupportedSQLDiagnostic(t, "SubscribeSingle SubscriptionError.Error", se.Error)
+			requireV1ExecutingSQLSuffix(t, se.Error, tc.sql)
 			if req := executor.getRegisterSetReq(); req != nil {
 				t.Fatal("executor should not be called for unsupported SQL")
 			}
 		})
+
+		t.Run(tc.name+"/subscribe_multi", func(t *testing.T) {
+			conn := testConnDirect(nil)
+			executor := &mockSubExecutor{}
+			requestID := uint32(1900 + i*2)
+			queryID := requestID + 1
+			msg := &SubscribeMultiMsg{
+				RequestID: requestID,
+				QueryID:   queryID,
+				QueryStrings: []string{
+					"SELECT * FROM t",
+					tc.sql,
+				},
+			}
+
+			handleSubscribeMulti(context.Background(), conn, msg, executor, v1UnsupportedSQLSchemaLookup(t))
+
+			tag, decoded := drainServerMsgEventually(t, conn)
+			if tag != TagSubscriptionError {
+				t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+			}
+			se := decoded.(SubscriptionError)
+			requireOptionalUint32(t, se.RequestID, requestID, "SubscriptionError.RequestID")
+			requireOptionalUint32(t, se.QueryID, queryID, "SubscriptionError.QueryID")
+			if se.Error == "" {
+				t.Fatal("SubscriptionError.Error = empty, want validation error")
+			}
+			requireV1UnsupportedSQLDiagnostic(t, "SubscribeMulti SubscriptionError.Error", se.Error)
+			requireV1ExecutingSQLSuffix(t, se.Error, tc.sql)
+			if req := executor.getRegisterSetReq(); req != nil {
+				t.Fatal("executor should not be called for unsupported SQL")
+			}
+		})
+	}
+}
+
+func requireV1UnsupportedSQLDiagnostic(t *testing.T, field, got string) {
+	t.Helper()
+	lower := strings.ToLower(got)
+	if !strings.Contains(lower, "unsupported") && !strings.Contains(lower, "not supported") {
+		t.Fatalf("%s = %q, want unsupported-SQL diagnostic text", field, got)
+	}
+}
+
+func requireV1ExecutingSQLSuffix(t *testing.T, got, sqlText string) {
+	t.Helper()
+	want := ", executing: `" + sqlText + "`"
+	if !strings.Contains(got, want) {
+		t.Fatalf("SubscriptionError.Error = %q, want offending SQL suffix %q", got, want)
 	}
 }
 

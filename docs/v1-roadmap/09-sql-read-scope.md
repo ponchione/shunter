@@ -1,6 +1,6 @@
 # SQL And Read Scope
 
-Status: active, declared-read contract/codegen shape coverage complete
+Status: active, declared-read contract/codegen shape coverage and unsupported SQL diagnostics coverage complete
 Owner: unassigned
 Scope: the amount of SQL and declared-read behavior Shunter actually needs for
 v1.
@@ -200,13 +200,15 @@ Completed or partially complete:
 - Clarify the app-author guide that declared-read SQL limits are governed by
   the v1 compatibility matrix and generated TypeScript declared-read helpers
   are byte-level until the client runtime adds typed decoding.
+- Add protocol coverage that unsupported v1 SQL non-goals return
+  client-visible diagnostics on OneOff, SubscribeSingle, and SubscribeMulti;
+  subscription admission errors include the offending SQL text and do not reach
+  executor registration.
 
 Remaining:
 
 - Add or confirm parser/planner tests for every supported and rejected shape in
   the final matrix.
-- Keep unsupported SQL diagnostics useful and client-visible as parser and
-  admission behavior changes.
 - Add performance tests for expensive supported shapes.
 - Remove or label docs that imply broader SQL support than the code guarantees.
 
