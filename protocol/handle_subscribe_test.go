@@ -547,6 +547,91 @@ func TestHandleSubscribeSingle_NotEqualComparison(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_NullPredicates(t *testing.T) {
+	cases := []struct {
+		name      string
+		sql       string
+		wantType  string
+		requestID uint32
+		queryID   uint32
+	}{
+		{
+			name:      "is_null",
+			sql:       "SELECT * FROM users WHERE nickname IS NULL",
+			wantType:  "ColEq",
+			requestID: 16,
+			queryID:   13,
+		},
+		{
+			name:      "is_not_null",
+			sql:       "SELECT * FROM users WHERE nickname IS NOT NULL",
+			wantType:  "ColNe",
+			requestID: 17,
+			queryID:   14,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			executor := &mockSubExecutor{}
+			sl := newMockSchema("users", 1,
+				schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+				schema.ColumnSchema{Index: 1, Name: "nickname", Type: schema.KindString, Nullable: true},
+			)
+
+			msg := &SubscribeSingleMsg{
+				RequestID:   tc.requestID,
+				QueryID:     tc.queryID,
+				QueryString: tc.sql,
+			}
+
+			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+			select {
+			case frame := <-conn.OutboundCh:
+				t.Fatalf("unexpected message on OutboundCh: %x", frame)
+			default:
+			}
+
+			req := executor.getRegisterSetReq()
+			if req == nil {
+				t.Fatal("executor did not receive RegisterSubscriptionSet call")
+			}
+			if len(req.Predicates) != 1 {
+				t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+			}
+			var (
+				column types.ColID
+				value  types.Value
+			)
+			switch pred := req.Predicates[0].(type) {
+			case subscription.ColEq:
+				if tc.wantType != "ColEq" {
+					t.Fatalf("Predicates[0] type = ColEq, want %s", tc.wantType)
+				}
+				column = pred.Column
+				value = pred.Value
+			case subscription.ColNe:
+				if tc.wantType != "ColNe" {
+					t.Fatalf("Predicates[0] type = ColNe, want %s", tc.wantType)
+				}
+				column = pred.Column
+				value = pred.Value
+			default:
+				t.Fatalf("Predicates[0] type = %T, want %s", req.Predicates[0], tc.wantType)
+			}
+			if column != 1 {
+				t.Fatalf("Predicates[0].Column = %d, want 1", column)
+			}
+			wantValue := types.NewNull(types.KindString)
+			if !value.Equal(wantValue) {
+				t.Fatalf("Predicates[0].Value = %v, want typed null string", value)
+			}
+		})
+	}
+}
+
 func TestHandleSubscribeSingle_OrComparison(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}

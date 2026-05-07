@@ -34,7 +34,7 @@ Legend:
 | Single-table equality filter | supported | supported | `TestHandleSubscribeSingleSuccess`, `TestEvalSingleTableColEqMatches`, `TestExecuteCompiledSQLQueryIndexedEqualityPredicateUsesIndexSeek` | done |
 | Single-table range filter | supported | supported | `TestHandleSubscribeSingle_GreaterThanComparison`, `TestEvalSingleTableDeltaInserts`, `TestPlaceOrRangeBranchesUseRangeIndex` | done |
 | Single-table `!=` / `<>` | supported through range-style pruning | supported through same predicate lowering | `TestHandleSubscribeSingle_NotEqualComparison`, `TestMatchRowColNe`, `TestCollectCandidatesMixedEqNeOrUsesIndexes` | done |
-| `IS NULL` / `IS NOT NULL` | parser support exists; subscription runtime represents null inequality through `ColNe` | declared aggregate/query tests cover nullable semantics | `TestParseNullPredicates`, `TestMatchRowColNeNull`, `TestCollectCandidatesColNeNullRangeMatchAndMismatch`, `TestDeclaredQueryNullableAggregateSemantics` | partial: add raw subscribe protocol pins for `IS NULL`/`IS NOT NULL` |
+| `IS NULL` / `IS NOT NULL` | supported; raw admission lowers to typed null predicates | declared aggregate/query tests cover nullable semantics | `TestHandleSubscribeSingle_NullPredicates`, `TestParseNullPredicates`, `TestMatchRowColNeNull`, `TestCollectCandidatesColNeNullRangeMatchAndMismatch`, `TestDeclaredQueryNullableAggregateSemantics` | done |
 | `AND`, `OR`, and parentheses | supported | supported | `TestHandleSubscribeSingle_OrComparison`, `TestParseWhereHarmlessParenthesizationMetamorphic`, `TestMatchRowAnd`, `TestMatchRowOr` | done |
 | Mixed equality/range OR filters | supported when branches are indexable or conservatively placed | supported | `TestPlaceOrMixedEqRangeBranchesUseIndexes`, `TestCollectCandidatesMixedEqRangeOrPrunesMismatch`, `TestEvalOrWithMixedEqRangeBranchesUsesIndexes` | done |
 | `:sender` filter | supported and caller-hashed | supported and permission-aware | `TestHandleSubscribeSingle_SenderParameterOnIdentityColumn`, `TestHandleSubscribeMulti_MixedLiteralAndSenderParameterCarriesPerPredicateHashIdentity`, `TestRegisterParameterizedHashUsesClientIdentity`, `TestProtocolDeclaredReadsApplyVisibilityToInitialRowsAndDeltas` | done |
@@ -58,8 +58,6 @@ Legend:
 
 ## Missing Test Backlog
 
-- Add raw `SubscribeSingle` protocol pins for `IS NULL` and `IS NOT NULL`
-  once the intended predicate lowering is finalized for subscription SQL.
 - Consolidate raw cross-join admission tests into one named table that separates
   accepted table-shaped column-equality joins from rejected unconstrained cross
   joins.
