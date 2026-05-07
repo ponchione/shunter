@@ -74,11 +74,11 @@ func TestJoinPathEdgeIndexRemoveCleansUp(t *testing.T) {
 	if got := idx.Lookup(edge, types.NewUint64(42)); len(got) != 0 {
 		t.Fatalf("Lookup after remove = %v, want empty", got)
 	}
-	if len(idx.edges) != 0 {
-		t.Fatalf("edges not cleaned up: %+v", idx.edges)
+	if len(idx.inner.edges) != 0 {
+		t.Fatalf("edges not cleaned up: %+v", idx.inner.edges)
 	}
-	if len(idx.byTable) != 0 {
-		t.Fatalf("byTable not cleaned up: %+v", idx.byTable)
+	if len(idx.inner.byTable) != 0 {
+		t.Fatalf("byTable not cleaned up: %+v", idx.inner.byTable)
 	}
 }
 
@@ -168,11 +168,11 @@ func TestJoinRangePathEdgeIndexRemoveCleansUp(t *testing.T) {
 	if got := idx.Lookup(edge, types.NewUint64(11)); len(got) != 0 {
 		t.Fatalf("Lookup after remove = %v, want empty", got)
 	}
-	if len(idx.edges) != 0 {
-		t.Fatalf("edges not cleaned up: %+v", idx.edges)
+	if len(idx.inner.edges) != 0 {
+		t.Fatalf("edges not cleaned up: %+v", idx.inner.edges)
 	}
-	if len(idx.byTable) != 0 {
-		t.Fatalf("byTable not cleaned up: %+v", idx.byTable)
+	if len(idx.inner.byTable) != 0 {
+		t.Fatalf("byTable not cleaned up: %+v", idx.inner.byTable)
 	}
 }
 

@@ -644,46 +644,46 @@ func pruningIndexesEmpty(idx *PruningIndexes) bool {
 	if len(idx.joinRangePathEdge.edges) != 0 || len(idx.joinRangePathEdge.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinPathEdge.edges) != 0 || len(idx.JoinPathEdge.byTable) != 0 {
+	if len(idx.JoinPathEdge.inner.edges) != 0 || len(idx.JoinPathEdge.inner.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinRangePathEdge.edges) != 0 || len(idx.JoinRangePathEdge.byTable) != 0 {
+	if len(idx.JoinRangePathEdge.inner.edges) != 0 || len(idx.JoinRangePathEdge.inner.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinPath3Edge.edges) != 0 || len(idx.JoinPath3Edge.byTable) != 0 {
+	if len(idx.JoinPath3Edge.inner.edges) != 0 || len(idx.JoinPath3Edge.inner.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinRangePath3Edge.edges) != 0 || len(idx.JoinRangePath3Edge.byTable) != 0 {
+	if len(idx.JoinRangePath3Edge.inner.edges) != 0 || len(idx.JoinRangePath3Edge.inner.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinPath4Edge.edges) != 0 || len(idx.JoinPath4Edge.byTable) != 0 {
+	if len(idx.JoinPath4Edge.inner.edges) != 0 || len(idx.JoinPath4Edge.inner.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinRangePath4Edge.edges) != 0 || len(idx.JoinRangePath4Edge.byTable) != 0 {
+	if len(idx.JoinRangePath4Edge.inner.edges) != 0 || len(idx.JoinRangePath4Edge.inner.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinPath5Edge.edges) != 0 || len(idx.JoinPath5Edge.byTable) != 0 {
+	if len(idx.JoinPath5Edge.inner.edges) != 0 || len(idx.JoinPath5Edge.inner.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinRangePath5Edge.edges) != 0 || len(idx.JoinRangePath5Edge.byTable) != 0 {
+	if len(idx.JoinRangePath5Edge.inner.edges) != 0 || len(idx.JoinRangePath5Edge.inner.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinPath6Edge.edges) != 0 || len(idx.JoinPath6Edge.byTable) != 0 {
+	if len(idx.JoinPath6Edge.inner.edges) != 0 || len(idx.JoinPath6Edge.inner.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinRangePath6Edge.edges) != 0 || len(idx.JoinRangePath6Edge.byTable) != 0 {
+	if len(idx.JoinRangePath6Edge.inner.edges) != 0 || len(idx.JoinRangePath6Edge.inner.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinPath7Edge.edges) != 0 || len(idx.JoinPath7Edge.byTable) != 0 {
+	if len(idx.JoinPath7Edge.inner.edges) != 0 || len(idx.JoinPath7Edge.inner.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinRangePath7Edge.edges) != 0 || len(idx.JoinRangePath7Edge.byTable) != 0 {
+	if len(idx.JoinRangePath7Edge.inner.edges) != 0 || len(idx.JoinRangePath7Edge.inner.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinPath8Edge.edges) != 0 || len(idx.JoinPath8Edge.byTable) != 0 {
+	if len(idx.JoinPath8Edge.inner.edges) != 0 || len(idx.JoinPath8Edge.inner.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinRangePath8Edge.edges) != 0 || len(idx.JoinRangePath8Edge.byTable) != 0 {
+	if len(idx.JoinRangePath8Edge.inner.edges) != 0 || len(idx.JoinRangePath8Edge.inner.byTable) != 0 {
 		return false
 	}
 	if len(idx.Table.tables) != 0 {
