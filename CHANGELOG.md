@@ -72,6 +72,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added the initial `@shunter/client` TypeScript runtime foundation in
   `typescript/client` and updated generated TypeScript bindings to import its
   shared runtime types.
+- Added `@shunter/client` protocol compatibility helpers and a managed
+  subscription handle primitive with idempotent unsubscribe behavior.
 
 ## v0.1.0 - 2026-05-05
 

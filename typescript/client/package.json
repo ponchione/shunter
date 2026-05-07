@@ -9,6 +9,7 @@
     }
   },
   "scripts": {
+    "test": "npm run typecheck && npm exec --yes --package typescript -- tsc -p tsconfig.runtime-test.json && node test/runtime-behavior.test.mjs",
     "typecheck": "npm exec --yes --package typescript -- tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

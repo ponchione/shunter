@@ -25,11 +25,13 @@ permission metadata, read-model metadata, value-kind mappings, and runtime type
 imports for the shared SDK surface.
 
 That is necessary but not sufficient for v1. The runtime package currently
-defines protocol constants, connection state types, structured errors, and
-typed interfaces for reducer calls, declared queries, declared views, and table
-subscriptions. It does not yet implement the browser or Node WebSocket client,
-reducer argument encoding, row decoding, auth refresh, local cache updates,
-reconnect policy, or protocol version mismatch behavior.
+defines protocol constants, protocol compatibility helpers, connection state
+types, structured errors, a managed subscription handle primitive with
+idempotent unsubscribe, and typed interfaces for reducer calls, declared
+queries, declared views, and table subscriptions. It does not yet implement the
+browser or Node WebSocket client, reducer argument encoding, row decoding, auth
+refresh, local cache updates, reconnect policy, or WebSocket handshake
+integration.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
 fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
@@ -102,12 +104,17 @@ Completed or partially complete:
   behavior.
 - Add a TypeScript typecheck fixture proving generated TypeScript can import
   and use the runtime type surface.
+- Add protocol compatibility helpers that surface structured protocol mismatch
+  errors before the WebSocket runtime exists.
+- Add an executable TypeScript runtime test for protocol mismatch handling and
+  idempotent managed subscription-handle unsubscribe.
 
 Remaining:
 
 - Decide and implement reducer argument/result encoding conventions.
 - Implement the actual browser/Node WebSocket connection runtime.
-- Implement protocol version/subprotocol mismatch handling in the runtime.
+- Wire protocol version/subprotocol mismatch handling into the WebSocket
+  handshake path.
 - Implement row decoding for declared query/view results and subscription
   updates.
 - Implement reconnect, auth refresh, resubscription, and cache behavior.
@@ -129,11 +136,12 @@ Use the repo's Go verification for generator changes:
 
 ```bash
 rtk go test ./...
-rtk npm --prefix typescript/client run typecheck
+rtk npm --prefix typescript/client run test
 ```
 
-The TypeScript command currently typechecks the runtime foundation and generated
-golden fixture usage. Broaden it once runtime behavior tests exist.
+The TypeScript command currently typechecks the runtime foundation, typechecks
+generated golden fixture usage, and runs focused runtime behavior tests. Broaden
+it as the WebSocket runtime lands.
 
 ## Done Criteria
 

@@ -184,8 +184,9 @@ typecheck/test command after the SDK-backed client package exists.
 
 Goal: a normal TypeScript app should not write protocol handlers by hand.
 
-Status: package location decided; runtime type foundation and generated import
-goldens added; behavioral runtime remains.
+Status: package location decided; runtime type foundation, protocol
+compatibility helpers, generated import goldens, and subscription handle
+primitive added; WebSocket runtime remains.
 
 Tasks:
 
@@ -197,8 +198,9 @@ Tasks:
   bytes, and generated helpers remain byte-level until this is resolved.
 - Implement the actual WebSocket connection runtime for browser and Node
   clients.
-- Implement subscription handles with idempotent unsubscribe.
-- Implement protocol version/subprotocol mismatch errors.
+- Wire the managed subscription handle primitive into real server subscribe and
+  unsubscribe responses.
+- Wire protocol version/subprotocol mismatch errors into the WebSocket handshake.
 - Add tests for connection transitions, auth failure, reducer/query/view
   success and failure, initial snapshots, deltas, unsubscribe, reconnect, and
   mismatch handling.

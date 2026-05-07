@@ -29,10 +29,10 @@ policy, local cache primitives, and structured errors. Generated bindings should
 own module-specific names and types.
 
 Current foundation scope: `@shunter/client` exposes protocol constants,
-connection state types, structured errors, subscription handle types, and typed
-runtime interfaces consumed by generated bindings. The WebSocket client factory,
-reducer argument encoding, row decoding, reconnect policy, and local cache
-implementation remain open.
+protocol compatibility helpers, connection state types, structured errors, a
+managed subscription handle primitive, and typed runtime interfaces consumed by
+generated bindings. The WebSocket client factory, reducer argument encoding,
+row decoding, reconnect policy, and local cache implementation remain open.
 
 ## Runtime API
 

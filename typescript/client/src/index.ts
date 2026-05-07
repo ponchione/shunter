@@ -21,6 +21,21 @@ export const shunterProtocol = {
   supportedSubprotocols: SHUNTER_SUPPORTED_SUBPROTOCOLS,
 } as const satisfies ProtocolMetadata<ShunterSubprotocol>;
 
+export interface ProtocolCompatibilityIssue {
+  readonly code:
+    | "client_too_old"
+    | "client_too_new"
+    | "unsupported_default_subprotocol"
+    | "unsupported_selected_subprotocol";
+  readonly message: string;
+  readonly receivedVersion?: number;
+  readonly receivedSubprotocol?: string;
+}
+
+export type ProtocolCompatibilityResult =
+  | { readonly ok: true; readonly subprotocol: ShunterSubprotocol }
+  | { readonly ok: false; readonly issue: ProtocolCompatibilityIssue };
+
 export type ShunterErrorKind =
   | "auth"
   | "validation"
@@ -110,6 +125,100 @@ export class ShunterClosedClientError extends ShunterError {
 
 export function isShunterError(error: unknown): error is ShunterError {
   return error instanceof ShunterError;
+}
+
+export function toShunterError(
+  error: unknown,
+  kind: ShunterErrorKind = "transport",
+  message = "Shunter operation failed",
+): ShunterError {
+  if (isShunterError(error)) {
+    return error;
+  }
+  if (error instanceof Error) {
+    return new ShunterError(kind, error.message || message, { cause: error });
+  }
+  return new ShunterError(kind, message, { cause: error });
+}
+
+export function checkProtocolCompatibility(
+  protocol: ProtocolMetadata,
+  selectedSubprotocol?: string,
+): ProtocolCompatibilityResult {
+  if (protocol.minSupportedVersion > SHUNTER_CURRENT_PROTOCOL_VERSION) {
+    return {
+      ok: false,
+      issue: {
+        code: "client_too_old",
+        message: "Generated bindings require a newer Shunter protocol than this client runtime supports.",
+        receivedVersion: protocol.minSupportedVersion,
+      },
+    };
+  }
+  if (protocol.currentVersion < SHUNTER_MIN_SUPPORTED_PROTOCOL_VERSION) {
+    return {
+      ok: false,
+      issue: {
+        code: "client_too_new",
+        message: "Generated bindings target an older Shunter protocol than this client runtime supports.",
+        receivedVersion: protocol.currentVersion,
+      },
+    };
+  }
+  if (!protocol.supportedSubprotocols.includes(protocol.defaultSubprotocol)) {
+    return {
+      ok: false,
+      issue: {
+        code: "unsupported_default_subprotocol",
+        message: "Generated bindings declare a default subprotocol outside their supported subprotocol set.",
+        receivedSubprotocol: protocol.defaultSubprotocol,
+      },
+    };
+  }
+  if (
+    selectedSubprotocol !== undefined &&
+    selectedSubprotocol !== SHUNTER_SUBPROTOCOL_V1
+  ) {
+    return {
+      ok: false,
+      issue: {
+        code: "unsupported_selected_subprotocol",
+        message: "The server selected an unsupported Shunter WebSocket subprotocol.",
+        receivedSubprotocol: selectedSubprotocol,
+      },
+    };
+  }
+  if (!protocol.supportedSubprotocols.includes(SHUNTER_SUBPROTOCOL_V1)) {
+    return {
+      ok: false,
+      issue: {
+        code: "unsupported_default_subprotocol",
+        message: "Generated bindings do not support this client runtime's Shunter WebSocket subprotocol.",
+        receivedSubprotocol: protocol.defaultSubprotocol,
+      },
+    };
+  }
+  return { ok: true, subprotocol: SHUNTER_SUBPROTOCOL_V1 };
+}
+
+export function assertProtocolCompatible(
+  protocol: ProtocolMetadata,
+  selectedSubprotocol?: string,
+): ShunterSubprotocol {
+  const result = checkProtocolCompatibility(protocol, selectedSubprotocol);
+  if (result.ok) {
+    return result.subprotocol;
+  }
+  throw new ShunterProtocolMismatchError(result.issue.message, {
+    code: result.issue.code,
+    expected: protocol,
+    receivedVersion: result.issue.receivedVersion,
+    receivedSubprotocol: result.issue.receivedSubprotocol,
+  });
+}
+
+export function selectShunterSubprotocol(protocol: ProtocolMetadata): ShunterSubprotocol {
+  return assertProtocolCompatible(protocol);
 }
 
 export type ConnectionStatus =
@@ -243,7 +352,88 @@ export interface SubscriptionHandle<Row = unknown> {
   unsubscribe(): void | Promise<void>;
 }
 
-export type SubscriptionUnsubscribe = () => void;
+export interface ManagedSubscriptionHandle<Row = unknown> extends SubscriptionHandle<Row> {
+  replaceRows(rows: readonly Row[]): void;
+  close(error?: ShunterError): void;
+}
+
+export interface SubscriptionHandleOptions<Row = unknown> {
+  readonly queryId?: QueryID;
+  readonly initialRows?: readonly Row[];
+  readonly unsubscribe?: () => void | Promise<void>;
+  readonly onStateChange?: (state: SubscriptionState<Row>) => void;
+}
+
+export type SubscriptionUnsubscribe = () => void | Promise<void>;
+
+export function createSubscriptionHandle<Row = unknown>(
+  options: SubscriptionHandleOptions<Row> = {},
+): ManagedSubscriptionHandle<Row> {
+  let state: SubscriptionState<Row> =
+    options.initialRows === undefined
+      ? { status: "subscribing" }
+      : { status: "active", rows: [...options.initialRows] };
+  let unsubscribePromise: Promise<void> | undefined;
+  let resolveClosed!: (closed: SubscriptionClosed) => void;
+  const closed = new Promise<SubscriptionClosed>((resolve) => {
+    resolveClosed = resolve;
+  });
+
+  const setState = (next: SubscriptionState<Row>): void => {
+    state = next;
+    options.onStateChange?.(state);
+  };
+
+  const finish = (closedState: SubscriptionClosed): void => {
+    if (state.status === "closed") {
+      return;
+    }
+    setState(
+      closedState.error === undefined
+        ? { status: "closed" }
+        : { status: "closed", error: closedState.error },
+    );
+    resolveClosed(closedState);
+  };
+
+  return {
+    get queryId() {
+      return options.queryId;
+    },
+    get state() {
+      return state;
+    },
+    closed,
+    replaceRows(rows: readonly Row[]): void {
+      if (state.status === "closed") {
+        throw new ShunterClosedClientError("Cannot replace rows on a closed subscription.");
+      }
+      setState({ status: "active", rows: [...rows] });
+    },
+    close(error?: ShunterError): void {
+      finish(error === undefined ? { reason: "closed" } : { reason: "error", error });
+    },
+    async unsubscribe(): Promise<void> {
+      if (unsubscribePromise !== undefined) {
+        return unsubscribePromise;
+      }
+      unsubscribePromise = (async () => {
+        if (state.status === "closed") {
+          return;
+        }
+        const rows = state.status === "active" || state.status === "unsubscribing" ? state.rows : [];
+        setState({ status: "unsubscribing", rows });
+        try {
+          await options.unsubscribe?.();
+          finish({ reason: "unsubscribed" });
+        } catch (error) {
+          finish({ reason: "error", error: toShunterError(error, "transport", "Unsubscribe failed") });
+        }
+      })();
+      return unsubscribePromise;
+    },
+  };
+}
 
 export interface DeclaredViewSubscriptionOptions<Row = unknown> {
   readonly requestId?: RequestID;
