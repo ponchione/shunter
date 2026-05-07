@@ -16,6 +16,7 @@ export const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_SINGLE_APPLIED = 3 as const;
 export const SHUNTER_SERVER_MESSAGE_SUBSCRIPTION_ERROR = 4 as const;
 export const SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE = 6 as const;
 export const SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE = 5 as const;
+export const SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE_LIGHT = 8 as const;
 export const SHUNTER_SERVER_MESSAGE_SUBSCRIBE_MULTI_APPLIED = 9 as const;
 export const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_MULTI_APPLIED = 10 as const;
 export const SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE = 0 as const;
@@ -340,9 +341,19 @@ interface PendingSubscription {
   readonly requestId: RequestID;
   readonly queryId: QueryID;
   readonly tableName?: string;
+  readonly onRawRows?: (message: SubscribeSingleAppliedMessage) => void;
+  readonly onRawUpdate?: RawSubscriptionUpdateCallback;
   readonly cleanup?: () => void;
   resolve(value: SubscriptionUnsubscribe): void;
   reject(error: ShunterError): void;
+}
+
+interface ActiveSubscription {
+  readonly kind: "declared_view" | "table";
+  readonly target: string;
+  readonly queryId: QueryID;
+  readonly tableName?: string;
+  readonly onRawUpdate?: RawSubscriptionUpdateCallback;
 }
 
 export interface ShunterClient<Protocol extends ProtocolMetadata = ProtocolMetadata> {
@@ -377,6 +388,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   const pendingDeclaredQueries = new Map<string, PendingDeclaredQuery>();
   const pendingSubscriptionsByRequest = new Map<RequestID, PendingSubscription>();
   const pendingSubscriptionsByQuery = new Map<QueryID, PendingSubscription>();
+  const activeSubscriptionsByQuery = new Map<QueryID, ActiveSubscription>();
+  const activeSubscriptionAliasesByRootQuery = new Map<QueryID, Set<QueryID>>();
   const listeners = new Set<ConnectionStateListener<Protocol>>();
   if (options.onStateChange !== undefined) {
     listeners.add(options.onStateChange);
@@ -439,6 +452,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     rejectPendingReducerCalls(error);
     rejectPendingDeclaredQueries(error);
     rejectPendingSubscriptions(error);
+    activeSubscriptionsByQuery.clear();
+    activeSubscriptionAliasesByRootQuery.clear();
   };
 
   const finishClose = (): void => {
@@ -544,6 +559,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       }));
       return;
     }
+    const updateError = dispatchRawSubscriptionUpdates(update.status.updates, "TransactionUpdate");
+    if (updateError !== undefined) {
+      pending.reject(updateError);
+      failConnected(updateError);
+      return;
+    }
     pending.resolve(update.rawFrame);
   };
 
@@ -563,6 +584,52 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return;
     }
     pending.resolve(response.rawFrame);
+  };
+
+  const cloneRawSubscriptionUpdate = (update: RawSubscriptionUpdate): RawSubscriptionUpdate => ({
+    queryId: update.queryId,
+    tableName: update.tableName,
+    inserts: new Uint8Array(update.inserts),
+    deletes: new Uint8Array(update.deletes),
+  });
+
+  const registerActiveSubscription = (
+    active: ActiveSubscription,
+    aliases: Iterable<QueryID> = [active.queryId],
+  ): void => {
+    const activeAliases = new Set<QueryID>([active.queryId, ...aliases]);
+    activeSubscriptionAliasesByRootQuery.set(active.queryId, activeAliases);
+    for (const alias of activeAliases) {
+      activeSubscriptionsByQuery.set(alias, active);
+    }
+  };
+
+  const removeActiveSubscription = (queryId: QueryID): void => {
+    const active = activeSubscriptionsByQuery.get(queryId);
+    const rootQueryId = active?.queryId ?? queryId;
+    const aliases = activeSubscriptionAliasesByRootQuery.get(rootQueryId) ?? new Set<QueryID>([queryId]);
+    for (const alias of aliases) {
+      activeSubscriptionsByQuery.delete(alias);
+    }
+    activeSubscriptionAliasesByRootQuery.delete(rootQueryId);
+  };
+
+  const dispatchRawSubscriptionUpdates = (
+    updates: readonly RawSubscriptionUpdate[],
+    label: string,
+  ): ShunterError | undefined => {
+    for (const update of updates) {
+      const active = activeSubscriptionsByQuery.get(update.queryId);
+      if (active?.onRawUpdate === undefined) {
+        continue;
+      }
+      try {
+        active.onRawUpdate(cloneRawSubscriptionUpdate(update));
+      } catch (error) {
+        return toShunterError(error, "validation", `${label} raw subscription update callback failed`);
+      }
+    }
+    return undefined;
   };
 
   const pendingSubscriptionForResponse = (
@@ -622,6 +689,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         });
         try {
           activeSocket.send(request.frame);
+          removeActiveSubscription(queryId);
         } catch (error) {
           throw toShunterError(error, "transport", sendMessage);
         }
@@ -666,6 +734,29 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       }));
       return;
     }
+    registerActiveSubscription({
+      kind: pending.kind,
+      target: pending.target,
+      queryId: response.queryId,
+      tableName: response.tableName,
+      onRawUpdate: pending.onRawUpdate,
+    });
+    if (pending.onRawRows !== undefined) {
+      try {
+        pending.onRawRows({
+          ...response,
+          rows: new Uint8Array(response.rows),
+          rawFrame: new Uint8Array(response.rawFrame),
+        });
+      } catch (error) {
+        const callbackError = toShunterError(error, "validation", "SubscribeSingleApplied raw rows callback failed");
+        removeActiveSubscription(response.queryId);
+        cleanupPendingSubscription(pending);
+        pending.reject(callbackError);
+        failConnected(callbackError);
+        return;
+      }
+    }
     cleanupPendingSubscription(pending);
     pending.resolve(tableSubscriptionUnsubscribe(response.queryId));
   };
@@ -683,6 +774,20 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       failConnected(new ShunterProtocolError("SubscribeMultiApplied response did not match the pending declared view subscription.", {
         details: { expectedKind: pending.kind, response },
       }));
+      return;
+    }
+    registerActiveSubscription({
+      kind: pending.kind,
+      target: pending.target,
+      queryId: response.queryId,
+      onRawUpdate: pending.onRawUpdate,
+    }, response.updates.map((update) => update.queryId));
+    const updateError = dispatchRawSubscriptionUpdates(response.updates, "SubscribeMultiApplied");
+    if (updateError !== undefined) {
+      removeActiveSubscription(response.queryId);
+      cleanupPendingSubscription(pending);
+      pending.reject(updateError);
+      failConnected(updateError);
       return;
     }
     cleanupPendingSubscription(pending);
@@ -705,6 +810,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }));
   };
 
+  const settleTransactionUpdateLight = (update: TransactionUpdateLightMessage): void => {
+    const updateError = dispatchRawSubscriptionUpdates(update.updates, "TransactionUpdateLight");
+    if (updateError !== undefined) {
+      failConnected(updateError);
+    }
+  };
+
   const handleConnectedMessage = (event: MessageEvent): void => {
     let frame: Uint8Array;
     try {
@@ -723,6 +835,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           return;
         case SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE:
           settleReducerResponse(decodeTransactionUpdateFrame(frame));
+          return;
+        case SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE_LIGHT:
+          settleTransactionUpdateLight(decodeTransactionUpdateLightFrame(frame));
           return;
         case SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE:
           settleDeclaredQueryResponse(decodeOneOffQueryResponseFrame(frame));
@@ -1051,6 +1166,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           target: name,
           requestId: request.requestId,
           queryId: request.queryId,
+          onRawUpdate: options.onRawUpdate,
           cleanup,
           resolve,
           reject,
@@ -1115,6 +1231,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           requestId: request.requestId,
           queryId: request.queryId,
           tableName: table,
+          onRawRows: options.onRawRows,
+          onRawUpdate: options.onRawUpdate,
           cleanup,
           resolve,
           reject,
@@ -1223,6 +1341,8 @@ export interface RawSubscriptionUpdate {
   readonly deletes: Uint8Array;
 }
 
+export type RawSubscriptionUpdateCallback = (update: RawSubscriptionUpdate) => void;
+
 export interface ReducerCallInfo<Name extends string = string> {
   readonly name: Name;
   readonly reducerId: number;
@@ -1237,6 +1357,12 @@ export interface TransactionUpdateMessage<Name extends string = string> {
   readonly callerConnectionId: Uint8Array;
   readonly reducerCall: ReducerCallInfo<Name>;
   readonly totalHostExecutionDuration: bigint;
+  readonly rawFrame: Uint8Array;
+}
+
+export interface TransactionUpdateLightMessage {
+  readonly requestId: RequestID;
+  readonly updates: readonly RawSubscriptionUpdate[];
   readonly rawFrame: Uint8Array;
 }
 
@@ -1277,6 +1403,26 @@ export function decodeTransactionUpdateFrame(data: unknown): TransactionUpdateMe
     callerConnectionId,
     reducerCall,
     totalHostExecutionDuration,
+    rawFrame: new Uint8Array(frame),
+  };
+}
+
+export function decodeTransactionUpdateLightFrame(data: unknown): TransactionUpdateLightMessage {
+  const frame = frameBytes(data);
+  if (frame.length < 1 || frame[0] !== SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE_LIGHT) {
+    throw new ShunterProtocolError("Expected TransactionUpdateLight server message.");
+  }
+  let offset = 1;
+  const [requestId, requestOffset] = readUint32LE(frame, offset, "TransactionUpdateLight request_id");
+  offset = requestOffset;
+  const [updates, updatesOffset] = readRawSubscriptionUpdates(frame, offset);
+  offset = updatesOffset;
+  if (offset !== frame.length) {
+    throw new ShunterProtocolError("Malformed TransactionUpdateLight: trailing bytes.");
+  }
+  return {
+    requestId,
+    updates,
     rawFrame: new Uint8Array(frame),
   };
 }
@@ -2016,6 +2162,7 @@ export interface DeclaredViewSubscriptionOptions<Row = unknown> {
   readonly signal?: AbortSignal;
   readonly onInitialRows?: (rows: readonly Row[]) => void;
   readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
+  readonly onRawUpdate?: RawSubscriptionUpdateCallback;
 }
 
 export interface EncodedSubscribeSingleRequest {
@@ -2175,6 +2322,8 @@ export interface TableSubscriptionOptions<Row = unknown> {
   readonly requestId?: RequestID;
   readonly queryId?: QueryID;
   readonly signal?: AbortSignal;
+  readonly onRawRows?: (message: SubscribeSingleAppliedMessage) => void;
+  readonly onRawUpdate?: RawSubscriptionUpdateCallback;
   readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
 }
 

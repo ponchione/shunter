@@ -14,10 +14,12 @@ declared-view subscription request encoding,
 `SubscribeMultiApplied`/`SubscriptionError` correlation, an idempotent
 unsubscribe send path for `UnsubscribeMulti`, raw table subscription request
 encoding, `SubscribeSingleApplied`/`SubscriptionError` correlation, and an
-idempotent unsubscribe send path for `UnsubscribeSingle`. It does not implement
-typed reducer argument/result encoding, declared query/view row decoding,
-table row decoding/callbacks, subscription delta/cache behavior, unsubscribe
-acknowledgement handling, reconnect policy, or cache behavior yet.
+idempotent unsubscribe send path for `UnsubscribeSingle`. Accepted
+subscriptions are registered for raw `TransactionUpdate` and
+`TransactionUpdateLight` callback delivery. It does not implement typed reducer
+argument/result encoding, declared query/view/table row decoding, typed row
+callbacks, subscription cache behavior, unsubscribe acknowledgement handling,
+or reconnect policy yet.
 
 The lifecycle shell offers Shunter's v1 subprotocol, appends a configured token
 as the server-supported `token` query parameter, tracks `idle`/`connecting`/
@@ -37,6 +39,9 @@ one `UnsubscribeMulti` frame for repeated calls.
 query, resolves after `SubscribeSingleApplied`, rejects on `SubscriptionError`,
 and returns an unsubscribe function that sends one `UnsubscribeSingle` frame
 for repeated calls.
+Declared-view and table subscriptions can opt into raw row-list/update bytes
+with `onRawUpdate` and table-only `onRawRows` callbacks while typed decoding is
+still pending.
 
 Generated module bindings should import types from `@shunter/client` and keep
 module-specific table, reducer, query, and view names in the generated file.

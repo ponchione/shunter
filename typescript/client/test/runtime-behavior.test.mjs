@@ -12,6 +12,7 @@ import {
   SHUNTER_SERVER_MESSAGE_SUBSCRIBE_MULTI_APPLIED,
   SHUNTER_SERVER_MESSAGE_SUBSCRIPTION_ERROR,
   SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE,
+  SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE_LIGHT,
   SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_SINGLE_APPLIED,
   SHUNTER_SUBPROTOCOL_V1,
   ShunterAuthError,
@@ -28,6 +29,7 @@ import {
   decodeSubscribeSingleAppliedFrame,
   decodeSubscribeMultiAppliedFrame,
   decodeSubscriptionErrorFrame,
+  decodeTransactionUpdateLightFrame,
   decodeTransactionUpdateFrame,
   decodeUnsubscribeSingleAppliedFrame,
   encodeDeclaredQueryRequest,
@@ -302,6 +304,16 @@ assert.equal(failedUpdate.status.error, "boom");
 assert.equal(failedUpdate.reducerCall.name, "send");
 assert.equal(failedUpdate.reducerCall.requestId, 0x21222324);
 
+const lightUpdateFrame = bytesFromHex(
+  "083433323101000000040302010500000075736572730f000000020000000200000001020100000003020000000405",
+);
+const lightUpdate = decodeTransactionUpdateLightFrame(lightUpdateFrame);
+assert.equal(lightUpdateFrame[0], SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE_LIGHT);
+assert.equal(lightUpdate.requestId, 0x31323334);
+assert.equal(lightUpdate.updates.length, 1);
+assert.equal(lightUpdate.updates[0].queryId, 0x01020304);
+assert.equal(lightUpdate.updates[0].tableName, "users");
+
 const oneOffSuccessFrame = bytesFromHex(
   "0602000000010200010000000500000075736572730f0000000200000002000000010201000000031817161514131211",
 );
@@ -433,9 +445,11 @@ assert.equal(sockets[0].sent.length, 5);
 sockets[0].message(oneOffErrorFrame);
 await assert.rejects(declaredQueryFailure, ShunterValidationError);
 
+const declaredViewRawUpdates = [];
 const declaredViewSubscription = client.subscribeDeclaredView("live_users", {
   requestId: 0x41424344,
   queryId: 0x61626364,
+  onRawUpdate: (update) => declaredViewRawUpdates.push(update),
 });
 assert.equal(sockets[0].sent.length, 6);
 assert.deepEqual(
@@ -447,6 +461,11 @@ assert.deepEqual(
 );
 sockets[0].message(subscribeAppliedFrame);
 const unsubscribeDeclaredView = await declaredViewSubscription;
+assert.equal(declaredViewRawUpdates.length, 1);
+assert.equal(declaredViewRawUpdates[0].queryId, 0x01020304);
+sockets[0].message(lightUpdateFrame);
+assert.equal(declaredViewRawUpdates.length, 2);
+assert.equal(declaredViewRawUpdates[1].tableName, "users");
 await unsubscribeDeclaredView();
 await unsubscribeDeclaredView();
 assert.equal(sockets[0].sent.length, 7);
@@ -463,9 +482,16 @@ assert.equal(sockets[0].sent.length, 8);
 sockets[0].message(subscriptionErrorFrame);
 await assert.rejects(deniedViewSubscription, ShunterValidationError);
 
+const tableRawRows = [];
+const tableRawUpdates = [];
+const tableLightUpdateFrame = bytesFromHex(
+  "083433323101000000141312110500000075736572730f000000020000000200000001020100000003020000000405",
+);
 const tableSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x01020304,
   queryId: 0x11121314,
+  onRawRows: (message) => tableRawRows.push(message),
+  onRawUpdate: (update) => tableRawUpdates.push(update),
 });
 assert.equal(sockets[0].sent.length, 9);
 assert.deepEqual(
@@ -477,6 +503,11 @@ assert.deepEqual(
 );
 sockets[0].message(subscribeSingleAppliedFrame);
 const unsubscribeTable = await tableSubscription;
+assert.equal(tableRawRows.length, 1);
+assert.equal(tableRawRows[0].tableName, "users");
+sockets[0].message(tableLightUpdateFrame);
+assert.equal(tableRawUpdates.length, 1);
+assert.equal(tableRawUpdates[0].queryId, 0x11121314);
 await unsubscribeTable();
 await unsubscribeTable();
 assert.equal(sockets[0].sent.length, 10);
@@ -484,6 +515,8 @@ assert.deepEqual(
   sockets[0].sent[9],
   encodeUnsubscribeSingleRequest(0x11121314, { requestId: 2 }).frame,
 );
+sockets[0].message(tableLightUpdateFrame);
+assert.equal(tableRawUpdates.length, 1);
 
 const deniedTableSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x41424344,
