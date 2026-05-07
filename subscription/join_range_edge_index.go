@@ -7,14 +7,14 @@ package subscription
 // affected.
 type JoinRangeEdgeIndex struct {
 	edges   map[JoinEdge]map[rangeKey]*rangeBucket
-	byTable map[TableID]map[JoinEdge]int
+	byTable joinEdgeRefs
 }
 
 // NewJoinRangeEdgeIndex constructs an empty JoinRangeEdgeIndex.
 func NewJoinRangeEdgeIndex() *JoinRangeEdgeIndex {
 	return &JoinRangeEdgeIndex{
 		edges:   make(map[JoinEdge]map[rangeKey]*rangeBucket),
-		byTable: make(map[TableID]map[JoinEdge]int),
+		byTable: newJoinEdgeRefs(),
 	}
 }
 
@@ -39,13 +39,7 @@ func (ji *JoinRangeEdgeIndex) Add(edge JoinEdge, lower, upper Bound, hash QueryH
 		return
 	}
 	bucket.hashes[hash] = struct{}{}
-
-	perEdge, ok := ji.byTable[edge.LHSTable]
-	if !ok {
-		perEdge = make(map[JoinEdge]int)
-		ji.byTable[edge.LHSTable] = perEdge
-	}
-	perEdge[edge]++
+	ji.byTable.add(edge)
 }
 
 // Remove removes (edge, range) -> hash. Empty keys are cleaned up.
@@ -69,16 +63,7 @@ func (ji *JoinRangeEdgeIndex) Remove(edge JoinEdge, lower, upper Bound, hash Que
 	if len(byRange) == 0 {
 		delete(ji.edges, edge)
 	}
-
-	if perEdge, ok := ji.byTable[edge.LHSTable]; ok {
-		perEdge[edge]--
-		if perEdge[edge] <= 0 {
-			delete(perEdge, edge)
-		}
-		if len(perEdge) == 0 {
-			delete(ji.byTable, edge.LHSTable)
-		}
-	}
+	ji.byTable.remove(edge)
 }
 
 // Lookup returns query hashes for registered ranges containing filterValue.
@@ -117,21 +102,11 @@ func (ji *JoinRangeEdgeIndex) ForEachHash(edge JoinEdge, filterValue Value, fn f
 
 // EdgesForTable returns all range-filter edges where LHSTable matches.
 func (ji *JoinRangeEdgeIndex) EdgesForTable(table TableID) []JoinEdge {
-	perEdge, ok := ji.byTable[table]
-	if !ok {
-		return []JoinEdge{}
-	}
-	return mapKeys(perEdge)
+	return ji.byTable.edgesForTable(table)
 }
 
 // ForEachEdge calls fn for every range-filter join edge whose LHSTable matches
 // table.
 func (ji *JoinRangeEdgeIndex) ForEachEdge(table TableID, fn func(JoinEdge)) {
-	perEdge, ok := ji.byTable[table]
-	if !ok {
-		return
-	}
-	for edge := range perEdge {
-		fn(edge)
-	}
+	ji.byTable.forEach(table, fn)
 }

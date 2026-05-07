@@ -11,6 +11,51 @@ type JoinEdge struct {
 	RHSFilterCol ColID
 }
 
+type joinEdgeRefs map[TableID]map[JoinEdge]int
+
+func newJoinEdgeRefs() joinEdgeRefs {
+	return make(joinEdgeRefs)
+}
+
+func (refs joinEdgeRefs) add(edge JoinEdge) {
+	perEdge, ok := refs[edge.LHSTable]
+	if !ok {
+		perEdge = make(map[JoinEdge]int)
+		refs[edge.LHSTable] = perEdge
+	}
+	perEdge[edge]++
+}
+
+func (refs joinEdgeRefs) remove(edge JoinEdge) {
+	if perEdge, ok := refs[edge.LHSTable]; ok {
+		perEdge[edge]--
+		if perEdge[edge] <= 0 {
+			delete(perEdge, edge)
+		}
+		if len(perEdge) == 0 {
+			delete(refs, edge.LHSTable)
+		}
+	}
+}
+
+func (refs joinEdgeRefs) edgesForTable(table TableID) []JoinEdge {
+	perEdge, ok := refs[table]
+	if !ok {
+		return []JoinEdge{}
+	}
+	return mapKeys(perEdge)
+}
+
+func (refs joinEdgeRefs) forEach(table TableID, fn func(JoinEdge)) {
+	perEdge, ok := refs[table]
+	if !ok {
+		return
+	}
+	for edge := range perEdge {
+		fn(edge)
+	}
+}
+
 // JoinEdgeIndex is the Tier 2 pruning index (SPEC-004 §5.2).
 //
 // Given a change on the LHS table plus an RHS filter value, returns the
@@ -22,7 +67,7 @@ type JoinEdgeIndex struct {
 	// whether an indexed RHS join-key match exists.
 	exists map[JoinEdge]map[QueryHash]struct{}
 	// byTable tracks edges per LHS table for EdgesForTable iteration.
-	byTable map[TableID]map[JoinEdge]int
+	byTable joinEdgeRefs
 }
 
 // NewJoinEdgeIndex constructs an empty JoinEdgeIndex.
@@ -30,7 +75,7 @@ func NewJoinEdgeIndex() *JoinEdgeIndex {
 	return &JoinEdgeIndex{
 		edges:   make(map[JoinEdge]map[valueKey]map[QueryHash]struct{}),
 		exists:  make(map[JoinEdge]map[QueryHash]struct{}),
-		byTable: make(map[TableID]map[JoinEdge]int),
+		byTable: newJoinEdgeRefs(),
 	}
 }
 
@@ -51,7 +96,7 @@ func (ji *JoinEdgeIndex) Add(edge JoinEdge, filterValue Value, hash QueryHash) {
 		return
 	}
 	set[hash] = struct{}{}
-	ji.addEdgeRef(edge)
+	ji.byTable.add(edge)
 }
 
 // AddExistence registers edge-level existence pruning for hash.
@@ -65,16 +110,7 @@ func (ji *JoinEdgeIndex) AddExistence(edge JoinEdge, hash QueryHash) {
 		return
 	}
 	set[hash] = struct{}{}
-	ji.addEdgeRef(edge)
-}
-
-func (ji *JoinEdgeIndex) addEdgeRef(edge JoinEdge) {
-	perEdge, ok := ji.byTable[edge.LHSTable]
-	if !ok {
-		perEdge = make(map[JoinEdge]int)
-		ji.byTable[edge.LHSTable] = perEdge
-	}
-	perEdge[edge]++
+	ji.byTable.add(edge)
 }
 
 // Remove removes (edge, filterValue) → hash. Empty keys are cleaned up.
@@ -99,7 +135,7 @@ func (ji *JoinEdgeIndex) Remove(edge JoinEdge, filterValue Value, hash QueryHash
 		delete(ji.edges, edge)
 	}
 
-	ji.removeEdgeRef(edge)
+	ji.byTable.remove(edge)
 }
 
 // RemoveExistence removes edge-level existence pruning for hash.
@@ -115,19 +151,7 @@ func (ji *JoinEdgeIndex) RemoveExistence(edge JoinEdge, hash QueryHash) {
 	if len(set) == 0 {
 		delete(ji.exists, edge)
 	}
-	ji.removeEdgeRef(edge)
-}
-
-func (ji *JoinEdgeIndex) removeEdgeRef(edge JoinEdge) {
-	if perEdge, ok := ji.byTable[edge.LHSTable]; ok {
-		perEdge[edge]--
-		if perEdge[edge] <= 0 {
-			delete(perEdge, edge)
-		}
-		if len(perEdge) == 0 {
-			delete(ji.byTable, edge.LHSTable)
-		}
-	}
+	ji.byTable.remove(edge)
 }
 
 // Lookup returns query hashes for the given (edge, filter value).
@@ -173,20 +197,10 @@ func (ji *JoinEdgeIndex) ForEachExistenceHash(edge JoinEdge, fn func(QueryHash))
 
 // EdgesForTable returns all edges where LHSTable matches.
 func (ji *JoinEdgeIndex) EdgesForTable(table TableID) []JoinEdge {
-	perEdge, ok := ji.byTable[table]
-	if !ok {
-		return []JoinEdge{}
-	}
-	return mapKeys(perEdge)
+	return ji.byTable.edgesForTable(table)
 }
 
 // ForEachEdge calls fn for every join edge whose LHSTable matches table.
 func (ji *JoinEdgeIndex) ForEachEdge(table TableID, fn func(JoinEdge)) {
-	perEdge, ok := ji.byTable[table]
-	if !ok {
-		return
-	}
-	for edge := range perEdge {
-		fn(edge)
-	}
+	ji.byTable.forEach(table, fn)
 }
