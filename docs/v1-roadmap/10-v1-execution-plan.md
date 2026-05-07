@@ -77,7 +77,8 @@ Tasks:
 
 Exit criteria:
 
-- `docs/v1-compatibility.md` has no open decision that blocks `v1.0.0`.
+- `docs/v1-compatibility.md` has no open compatibility decision that blocks
+  `v1.0.0`.
 - Every stable payload shape has a fixture or compatibility test.
 - App-author docs cite the compatibility matrix for read-surface limits.
 

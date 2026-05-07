@@ -205,7 +205,7 @@ No lower-level package beyond the stable subsets listed in this matrix receives
 a normal Go compatibility promise for v1. Runtime implementation packages stay
 implementation details even when importable.
 
-Open decisions before cutting `v1.0.0`:
+Remaining coverage before cutting `v1.0.0`:
 
 - Add or confirm protocol, contract JSON, and TypeScript golden coverage for
   every stable payload shape in this document.

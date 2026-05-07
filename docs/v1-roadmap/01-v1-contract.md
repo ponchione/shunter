@@ -1,6 +1,6 @@
 # v1 Contract Freeze
 
-Status: open, partial implementation landed
+Status: open, v1 support decisions settled; coverage and policy audit remain
 Owner: unassigned
 Scope: supported Shunter v1 API, protocol, contract JSON, generated client
 shape, and read/query behavior.
@@ -24,7 +24,8 @@ Initial matrix: [`docs/v1-compatibility.md`](../v1-compatibility.md)
 
 ## Current State
 
-Shunter already exposes a broad root API through package `github.com/ponchione/shunter`:
+Shunter already exposes a broad root API through package
+`github.com/ponchione/shunter`:
 
 - `Module`, `Config`, `Runtime`, `Build`, `NewHost`
 - reducer, query, view, schema, migration, backup, restore, and contract helpers
