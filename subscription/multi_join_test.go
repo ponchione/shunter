@@ -665,6 +665,52 @@ func TestMultiJoinProjectionPreservesInitialAndDeltaShape(t *testing.T) {
 	}
 }
 
+func TestMultiJoinProjectionCancelsProjectedNoOpDelta(t *testing.T) {
+	s := multiJoinTestSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := multiJoinTestPredicate()
+	projection := []ProjectionColumn{{
+		Schema: schema.ColumnSchema{Index: 1, Name: "u32", Type: types.KindUint64},
+		Table:  1,
+		Column: 1,
+		Alias:  0,
+	}}
+	connID := types.ConnectionID{19}
+	beforeRows := multiJoinBaseContents()
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:            connID,
+		QueryID:           190,
+		Predicates:        []Predicate{pred},
+		ProjectionColumns: [][]ProjectionColumn{projection},
+	}, buildMockCommitted(s, beforeRows)); err != nil {
+		t.Fatalf("RegisterSet multi-join projection: %v", err)
+	}
+
+	deleted := types.ProductValue{types.NewUint64(2), types.NewUint64(20)}
+	inserted := types.ProductValue{types.NewUint64(4), types.NewUint64(20)}
+	afterRows := multiJoinBaseContents()
+	afterRows[1] = []types.ProductValue{
+		{types.NewUint64(1), types.NewUint64(10)},
+		{types.NewUint64(3), types.NewUint64(20)},
+		inserted,
+	}
+	cs := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {
+				Inserts: []types.ProductValue{inserted},
+				Deletes: []types.ProductValue{deleted},
+			},
+		},
+	}
+	mgr.EvalAndBroadcast(types.TxID(1), cs, buildMockCommitted(s, afterRows), PostCommitMeta{})
+	msg := <-inbox
+	if got := msg.Fanout[connID]; len(got) != 0 {
+		t.Fatalf("projected multi-join no-op fanout = %+v, want no updates", got)
+	}
+}
+
 func TestMultiJoinDeltaMatchesFreshEvaluationForIntermediateRelation(t *testing.T) {
 	s := multiJoinTestSchema()
 	pred := multiJoinTestPredicate()

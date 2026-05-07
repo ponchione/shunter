@@ -160,6 +160,43 @@ func TestRegisterProjectionSuppressesUnmatchedDelta(t *testing.T) {
 	}
 }
 
+func TestRegisterProjectionCancelsProjectedNoOpDelta(t *testing.T) {
+	s := testSchema()
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("same")},
+		},
+	})
+	projection := []ProjectionColumn{{
+		Schema: schema.ColumnSchema{Index: 1, Name: "body", Type: types.KindString},
+		Table:  1,
+		Column: 1,
+	}}
+	connID := types.ConnectionID{6}
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:            connID,
+		QueryID:           16,
+		Predicates:        []Predicate{AllRows{Table: 1}},
+		ProjectionColumns: [][]ProjectionColumn{projection},
+	}, before); err != nil {
+		t.Fatalf("RegisterSet projection = %v", err)
+	}
+
+	inserted := types.ProductValue{types.NewUint64(2), types.NewString("same")}
+	deleted := types.ProductValue{types.NewUint64(1), types.NewString("same")}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {inserted},
+	})
+	cs := simpleChangeset(1, []types.ProductValue{inserted}, []types.ProductValue{deleted})
+	mgr.EvalAndBroadcast(types.TxID(1), cs, after, PostCommitMeta{})
+	msg := <-inbox
+	if got := msg.Fanout[connID]; len(got) != 0 {
+		t.Fatalf("projected no-op fanout = %+v, want no updates", got)
+	}
+}
+
 func TestRegisterJoinProjectionPreservesInitialAndDeltaShape(t *testing.T) {
 	s := testSchema()
 	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
@@ -265,6 +302,51 @@ func TestRegisterJoinProjectionSuppressesUnmatchedDelta(t *testing.T) {
 	}
 }
 
+func TestRegisterJoinProjectionCancelsProjectedNoOpDelta(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64, 2: types.KindInt32}, 1)
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("left-one")},
+		},
+		2: {
+			{types.NewUint64(10), types.NewUint64(1), types.NewInt32(7)},
+		},
+	})
+	pred := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 1, ProjectRight: true}
+	projection := []ProjectionColumn{{
+		Schema: schema.ColumnSchema{Index: 2, Name: "score", Type: types.KindInt32},
+		Table:  2,
+		Column: 2,
+	}}
+	connID := types.ConnectionID{7}
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:            connID,
+		QueryID:           17,
+		Predicates:        []Predicate{pred},
+		ProjectionColumns: [][]ProjectionColumn{projection},
+	}, before); err != nil {
+		t.Fatalf("RegisterSet join projection = %v", err)
+	}
+
+	deleted := types.ProductValue{types.NewUint64(10), types.NewUint64(1), types.NewInt32(7)}
+	inserted := types.ProductValue{types.NewUint64(11), types.NewUint64(1), types.NewInt32(7)}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("left-one")},
+		},
+		2: {inserted},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), joinChangeset(1, nil, nil, 2, []types.ProductValue{inserted}, []types.ProductValue{deleted}), after, PostCommitMeta{})
+	msg := <-inbox
+	if got := msg.Fanout[connID]; len(got) != 0 {
+		t.Fatalf("projected join no-op fanout = %+v, want no updates", got)
+	}
+}
+
 func TestRegisterCrossJoinProjectionPreservesInitialAndDeltaShape(t *testing.T) {
 	s := testSchema()
 	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
@@ -328,6 +410,43 @@ func TestRegisterCrossJoinProjectionPreservesInitialAndDeltaShape(t *testing.T) 
 	})
 	if len(update.Deletes) != 0 {
 		t.Fatalf("cross projection deletes = %v, want none", update.Deletes)
+	}
+}
+
+func TestRegisterCrossJoinProjectionCancelsProjectedNoOpDelta(t *testing.T) {
+	s := testSchema()
+	deleted := types.ProductValue{types.NewUint64(1), types.NewString("same")}
+	inserted := types.ProductValue{types.NewUint64(2), types.NewString("same")}
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {deleted},
+		2: {{types.NewUint64(10), types.NewInt32(10)}},
+	})
+	pred := CrossJoin{Left: 1, Right: 2}
+	projection := []ProjectionColumn{{
+		Schema: schema.ColumnSchema{Index: 1, Name: "body", Type: types.KindString},
+		Table:  1,
+		Column: 1,
+	}}
+	connID := types.ConnectionID{8}
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:            connID,
+		QueryID:           18,
+		Predicates:        []Predicate{pred},
+		ProjectionColumns: [][]ProjectionColumn{projection},
+	}, before); err != nil {
+		t.Fatalf("RegisterSet cross projection = %v", err)
+	}
+
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {inserted},
+		2: {{types.NewUint64(10), types.NewInt32(10)}},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), joinChangeset(1, []types.ProductValue{inserted}, []types.ProductValue{deleted}, 2, nil, nil), after, PostCommitMeta{})
+	msg := <-inbox
+	if got := msg.Fanout[connID]; len(got) != 0 {
+		t.Fatalf("projected cross join no-op fanout = %+v, want no updates", got)
 	}
 }
 

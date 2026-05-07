@@ -404,6 +404,7 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) ([]SubscriptionUpdate
 		projectJoinFragments(frags.Inserts[:], lhsWidth, p.ProjectRight)
 		projectJoinFragments(frags.Deletes[:], lhsWidth, p.ProjectRight)
 		ins, del := ReconcileJoinDelta(frags.Inserts[:], frags.Deletes[:])
+		ins, del = projectDeltaRows(ins, del, qs.projection, len(qs.projection) > 0)
 		if len(ins) == 0 && len(del) == 0 {
 			return nil, nil
 		}
@@ -413,11 +414,12 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) ([]SubscriptionUpdate
 			TableID:   projected,
 			TableName: m.schema.TableName(projected),
 			Columns:   columns,
-			Inserts:   projectRows(ins, qs.projection),
-			Deletes:   projectRows(del, qs.projection),
+			Inserts:   ins,
+			Deletes:   del,
 		}}, nil
 	case CrossJoin:
 		ins, del := evalCrossJoinDelta(dv, p)
+		ins, del = projectDeltaRows(ins, del, qs.projection, len(qs.projection) > 0)
 		if len(ins) == 0 && len(del) == 0 {
 			return nil, nil
 		}
@@ -427,11 +429,12 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) ([]SubscriptionUpdate
 			TableID:   projected,
 			TableName: m.schema.TableName(projected),
 			Columns:   columns,
-			Inserts:   projectRows(ins, qs.projection),
-			Deletes:   projectRows(del, qs.projection),
+			Inserts:   ins,
+			Deletes:   del,
 		}}, nil
 	case MultiJoin:
 		ins, del := evalMultiJoinDelta(dv, p)
+		ins, del = projectDeltaRows(ins, del, qs.projection, len(qs.projection) > 0)
 		if len(ins) == 0 && len(del) == 0 {
 			return nil, nil
 		}
@@ -441,13 +444,14 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) ([]SubscriptionUpdate
 			TableID:   projected,
 			TableName: m.schema.TableName(projected),
 			Columns:   columns,
-			Inserts:   projectRows(ins, qs.projection),
-			Deletes:   projectRows(del, qs.projection),
+			Inserts:   ins,
+			Deletes:   del,
 		}}, nil
 	default:
 		var updates []SubscriptionUpdate
 		for _, t := range qs.predicate.Tables() {
 			ins, del := EvalSingleTableDelta(dv, qs.predicate, t)
+			ins, del = projectDeltaRows(ins, del, qs.projection, true)
 			if len(ins) == 0 && len(del) == 0 {
 				continue
 			}
@@ -455,12 +459,21 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) ([]SubscriptionUpdate
 				TableID:   t,
 				TableName: m.schema.TableName(t),
 				Columns:   projectionUpdateColumns(m.columnsForUpdate(t), qs.projection),
-				Inserts:   projectRows(ins, qs.projection),
-				Deletes:   projectRows(del, qs.projection),
+				Inserts:   ins,
+				Deletes:   del,
 			})
 		}
 		return updates, nil
 	}
+}
+
+func projectDeltaRows(inserts, deletes []types.ProductValue, projection []ProjectionColumn, reconcile bool) ([]types.ProductValue, []types.ProductValue) {
+	inserts = projectRows(inserts, projection)
+	deletes = projectRows(deletes, projection)
+	if !reconcile || len(inserts) == 0 || len(deletes) == 0 {
+		return inserts, deletes
+	}
+	return ReconcileJoinDelta([][]types.ProductValue{inserts}, [][]types.ProductValue{deletes})
 }
 
 // projectJoinedRows slices each LHS++RHS-concatenated joined row down to the
