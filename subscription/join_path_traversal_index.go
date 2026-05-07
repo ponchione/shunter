@@ -54,13 +54,13 @@ func joinPathTraversalEdgeToJoinPathEdge(edge joinPathTraversalEdge) (JoinPathEd
 
 type joinPathTraversalIndex struct {
 	edges   map[joinPathTraversalEdge]map[valueKey]map[QueryHash]struct{}
-	byTable map[TableID]map[joinPathTraversalEdge]int
+	byTable joinPathTraversalEdgeRefs
 }
 
 func newJoinPathTraversalIndex() *joinPathTraversalIndex {
 	return &joinPathTraversalIndex{
 		edges:   make(map[joinPathTraversalEdge]map[valueKey]map[QueryHash]struct{}),
-		byTable: make(map[TableID]map[joinPathTraversalEdge]int),
+		byTable: make(joinPathTraversalEdgeRefs),
 	}
 }
 
@@ -80,17 +80,7 @@ func (ji *joinPathTraversalIndex) Add(edge joinPathTraversalEdge, filterValue Va
 		return
 	}
 	set[hash] = struct{}{}
-	ji.addEdgeRef(edge)
-}
-
-func (ji *joinPathTraversalIndex) addEdgeRef(edge joinPathTraversalEdge) {
-	table := edge.lhsTable()
-	perEdge, ok := ji.byTable[table]
-	if !ok {
-		perEdge = make(map[joinPathTraversalEdge]int)
-		ji.byTable[table] = perEdge
-	}
-	perEdge[edge]++
+	ji.byTable.add(edge)
 }
 
 func (ji *joinPathTraversalIndex) Remove(edge joinPathTraversalEdge, filterValue Value, hash QueryHash) {
@@ -113,20 +103,7 @@ func (ji *joinPathTraversalIndex) Remove(edge joinPathTraversalEdge, filterValue
 	if len(byVal) == 0 {
 		delete(ji.edges, edge)
 	}
-	ji.removeEdgeRef(edge)
-}
-
-func (ji *joinPathTraversalIndex) removeEdgeRef(edge joinPathTraversalEdge) {
-	table := edge.lhsTable()
-	if perEdge, ok := ji.byTable[table]; ok {
-		perEdge[edge]--
-		if perEdge[edge] <= 0 {
-			delete(perEdge, edge)
-		}
-		if len(perEdge) == 0 {
-			delete(ji.byTable, table)
-		}
-	}
+	ji.byTable.remove(edge)
 }
 
 func (ji *joinPathTraversalIndex) Lookup(edge joinPathTraversalEdge, filterValue Value) []QueryHash {
@@ -156,24 +133,18 @@ func (ji *joinPathTraversalIndex) ForEachHash(edge joinPathTraversalEdge, filter
 }
 
 func (ji *joinPathTraversalIndex) ForEachEdge(table TableID, fn func(joinPathTraversalEdge)) {
-	perEdge, ok := ji.byTable[table]
-	if !ok {
-		return
-	}
-	for edge := range perEdge {
-		fn(edge)
-	}
+	ji.byTable.forEach(table, fn)
 }
 
 type joinRangePathTraversalIndex struct {
 	edges   map[joinPathTraversalEdge]map[rangeKey]*rangeBucket
-	byTable map[TableID]map[joinPathTraversalEdge]int
+	byTable joinPathTraversalEdgeRefs
 }
 
 func newJoinRangePathTraversalIndex() *joinRangePathTraversalIndex {
 	return &joinRangePathTraversalIndex{
 		edges:   make(map[joinPathTraversalEdge]map[rangeKey]*rangeBucket),
-		byTable: make(map[TableID]map[joinPathTraversalEdge]int),
+		byTable: make(joinPathTraversalEdgeRefs),
 	}
 }
 
@@ -197,17 +168,7 @@ func (ji *joinRangePathTraversalIndex) Add(edge joinPathTraversalEdge, lower, up
 		return
 	}
 	bucket.hashes[hash] = struct{}{}
-	ji.addEdgeRef(edge)
-}
-
-func (ji *joinRangePathTraversalIndex) addEdgeRef(edge joinPathTraversalEdge) {
-	table := edge.lhsTable()
-	perEdge, ok := ji.byTable[table]
-	if !ok {
-		perEdge = make(map[joinPathTraversalEdge]int)
-		ji.byTable[table] = perEdge
-	}
-	perEdge[edge]++
+	ji.byTable.add(edge)
 }
 
 func (ji *joinRangePathTraversalIndex) Remove(edge joinPathTraversalEdge, lower, upper Bound, hash QueryHash) {
@@ -230,20 +191,7 @@ func (ji *joinRangePathTraversalIndex) Remove(edge joinPathTraversalEdge, lower,
 	if len(byRange) == 0 {
 		delete(ji.edges, edge)
 	}
-	ji.removeEdgeRef(edge)
-}
-
-func (ji *joinRangePathTraversalIndex) removeEdgeRef(edge joinPathTraversalEdge) {
-	table := edge.lhsTable()
-	if perEdge, ok := ji.byTable[table]; ok {
-		perEdge[edge]--
-		if perEdge[edge] <= 0 {
-			delete(perEdge, edge)
-		}
-		if len(perEdge) == 0 {
-			delete(ji.byTable, table)
-		}
-	}
+	ji.byTable.remove(edge)
 }
 
 func (ji *joinRangePathTraversalIndex) Lookup(edge joinPathTraversalEdge, filterValue Value) []QueryHash {
@@ -278,7 +226,36 @@ func (ji *joinRangePathTraversalIndex) ForEachHash(edge joinPathTraversalEdge, f
 }
 
 func (ji *joinRangePathTraversalIndex) ForEachEdge(table TableID, fn func(joinPathTraversalEdge)) {
-	perEdge, ok := ji.byTable[table]
+	ji.byTable.forEach(table, fn)
+}
+
+type joinPathTraversalEdgeRefs map[TableID]map[joinPathTraversalEdge]int
+
+func (refs joinPathTraversalEdgeRefs) add(edge joinPathTraversalEdge) {
+	table := edge.lhsTable()
+	perEdge, ok := refs[table]
+	if !ok {
+		perEdge = make(map[joinPathTraversalEdge]int)
+		refs[table] = perEdge
+	}
+	perEdge[edge]++
+}
+
+func (refs joinPathTraversalEdgeRefs) remove(edge joinPathTraversalEdge) {
+	table := edge.lhsTable()
+	if perEdge, ok := refs[table]; ok {
+		perEdge[edge]--
+		if perEdge[edge] <= 0 {
+			delete(perEdge, edge)
+		}
+		if len(perEdge) == 0 {
+			delete(refs, table)
+		}
+	}
+}
+
+func (refs joinPathTraversalEdgeRefs) forEach(table TableID, fn func(joinPathTraversalEdge)) {
+	perEdge, ok := refs[table]
 	if !ok {
 		return
 	}
