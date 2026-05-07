@@ -1,6 +1,6 @@
 # TypeScript Client SDK
 
-Status: open, codegen-only today
+Status: open, SDK contract drafted; implementation not started
 Owner: unassigned
 Scope: production-credible TypeScript client and generated bindings for Shunter
 v1 applications.
@@ -59,6 +59,8 @@ The generated code should provide:
 - permission/read metadata useful to clients
 - stable module contract version metadata
 
+Current target: [`typescript-sdk-contract.md`](typescript-sdk-contract.md)
+
 ## Decisions To Make
 
 1. Decide whether the SDK lives inside this repo, a sibling package, or generated
@@ -78,8 +80,16 @@ The generated code should provide:
 
 ## Implementation Work
 
-- Audit current `codegen` output and identify missing runtime helpers.
-- Define the client runtime API before generating large amounts of code.
+Completed or partially complete:
+
+- Audit current `codegen` output at the roadmap level and identify that the
+  missing piece is a runtime package, not more standalone type definitions.
+- Define the proposed client runtime API in
+  `typescript-sdk-contract.md`.
+
+Remaining:
+
+- Audit current `codegen` output against the proposed SDK contract.
 - Add generated fixtures for representative module contracts.
 - Add client tests for:
   - connection state transitions

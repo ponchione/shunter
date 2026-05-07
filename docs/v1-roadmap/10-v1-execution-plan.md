@@ -134,15 +134,15 @@ Add the TypeScript typecheck/test command after the client package exists.
 
 Goal: a normal TypeScript app should not write protocol handlers by hand.
 
+Status: proposed SDK contract written; runtime package and tests remain.
+
 Tasks:
 
 - Decide package location. Preferred default unless contradicted by repo
   constraints: keep a small runtime package in-repo beside generated fixtures so
   Go codegen and TypeScript tests evolve together.
-- Define the runtime API before generating more helpers:
-  connection, state machine, auth token provider/refresh hook, reducer calls,
-  declared query calls, declared view subscriptions, local cache, reconnect, and
-  structured errors.
+- Keep `docs/v1-roadmap/typescript-sdk-contract.md` current as the runtime API
+  target before generating more helpers.
 - Decide reducer argument encoding conventions. The Go runtime still accepts raw
   bytes, so generated helpers need a stable app-facing encoding story.
 - Implement subscription handles with idempotent unsubscribe.

@@ -1,0 +1,194 @@
+# TypeScript SDK Contract
+
+Status: proposed SDK contract
+Scope: plain TypeScript runtime API and generated binding shape for Shunter v1
+apps.
+
+## Goal
+
+The TypeScript SDK should let browser or Node applications use generated
+contracts without hand-writing Shunter protocol handlers. It should be small,
+framework-neutral, and stable enough to support the reference app.
+
+## Package Shape
+
+Preferred v1 shape:
+
+- a small checked-in TypeScript runtime package
+- generated per-module bindings that import the runtime
+- generated contract metadata committed by apps or produced during app builds
+
+The runtime package should own protocol connection lifecycle, auth token
+handling, reducer/query/view request plumbing, subscription handles, reconnect
+policy, local cache primitives, and structured errors. Generated bindings should
+own module-specific names and types.
+
+## Runtime API
+
+Connection construction:
+
+```ts
+const client = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  token: async () => token,
+  protocol: contracts.protocol,
+});
+```
+
+Expected runtime concepts:
+
+- `connect()`, `close()`, and idempotent `dispose()`
+- explicit states: `idle`, `connecting`, `connected`, `reconnecting`,
+  `closing`, `closed`, `failed`
+- state-change callbacks or async iterator
+- structured errors for auth, validation, protocol mismatch, transport, timeout,
+  and closed-client operations
+- connection metadata exposing server identity token, negotiated protocol, and
+  generated contract version metadata
+
+## Auth
+
+The runtime should accept either a static token string or an async token
+provider. A refresh hook should be called before reconnect when the previous
+connection failed with an auth-related error or the caller explicitly requests a
+refresh.
+
+Strict-mode failures should surface as auth errors, not generic WebSocket close
+events.
+
+## Reducer Calls
+
+Generated bindings should expose typed reducer helpers. The plain runtime can
+keep a lower-level byte-oriented escape hatch, but normal app code should call
+generated helpers.
+
+Open decision: reducer argument/result encoding. The Go runtime boundary is raw
+bytes. The SDK needs a documented app-facing convention before generated
+helpers are considered v1-stable.
+
+Candidate v1 default:
+
+- generated helpers encode reducer args with Shunter BSATN when the generator
+  can derive a product shape
+- apps can override with a module-local codec for reducers that intentionally
+  accept raw bytes
+- reducer results are returned as bytes unless a generated result type exists
+
+Reducer call result:
+
+- reducer name
+- request ID
+- status
+- committed TX ID when committed
+- typed return value or raw bytes
+- structured user, permission, protocol, transport, or closed-client error
+
+## Declared Queries
+
+Generated bindings should expose typed declared query helpers by executable
+query name. Metadata-only declarations should be generated as metadata but not
+as callable helpers.
+
+Query calls should return:
+
+- typed rows
+- request ID
+- optional table/view metadata needed by local caches
+- structured errors for missing permissions, validation, protocol mismatch, and
+  transport failure
+
+Raw SQL should be available only as a clearly named escape hatch if v1 decides
+to expose it in the SDK.
+
+## Declared Views And Subscriptions
+
+Generated bindings should expose typed declared view subscription helpers.
+
+Subscription handles must provide:
+
+- initial rows
+- current state
+- update callbacks or async iterator
+- idempotent `unsubscribe()`
+- `closed` promise or final-state notification
+
+Initial snapshot semantics:
+
+- the helper resolves only after the server accepts the subscription and the
+  initial rows are available
+- rejected subscriptions must not leave local cache state registered
+
+Delta semantics:
+
+- table-shaped views update by inserted/deleted row sets
+- projected views update with projected row shape
+- aggregate views update using the row shape documented in the module contract
+- ordering/limit/offset initial snapshots do not imply ordered post-commit
+  delivery unless the runtime contract explicitly says so
+
+## Local Cache
+
+The runtime should offer minimal cache primitives, not framework-specific state
+management.
+
+Required cache operations:
+
+- replace initial view rows atomically
+- apply transaction deltas
+- read by primary key or stable row identity where the contract exposes one
+- subscribe to cache change notifications
+- clear cache on close or protocol mismatch
+
+Open decision: table-oriented cache, view-oriented cache, or both. The reference
+app should drive the smallest useful choice.
+
+## Reconnect Policy
+
+Default v1 policy should be explicit and conservative:
+
+- clean caller close does not reconnect
+- transient transport failure may reconnect with backoff
+- auth failure refreshes token once if a refresh hook is available
+- subscriptions are automatically resubscribed only when the SDK can re-deliver
+  an initial snapshot and clearly notify callers that state was refreshed
+- missed-update replay is out of scope until the protocol exposes a stable
+  cursor
+
+## Generated Binding Shape
+
+Generated bindings should expose:
+
+- table row interfaces
+- table names and table-to-row maps
+- reducer names and typed reducer helper functions
+- declared query/view names and typed helpers
+- permissions/read-model metadata
+- module contract format/version metadata
+- runtime protocol metadata needed for negotiation
+
+Identifier normalization and collision suffixes remain a v1 compatibility
+decision. Until decided, apps should treat exported categories and string
+metadata as stable, not the exact generated helper spelling.
+
+## Test Matrix
+
+SDK tests should cover:
+
+- state transitions
+- token provider success/failure/refresh
+- protocol version mismatch
+- reducer success, user failure, permission failure, and transport failure
+- declared query success/failure
+- declared view initial rows and deltas
+- idempotent unsubscribe
+- reconnect with resubscription
+- close during in-flight requests
+- local cache replacement and delta application
+
+## Non-Goals
+
+- React hooks before the plain TypeScript runtime is stable
+- SpacetimeDB client API compatibility
+- SQL mutation helpers
+- multi-language client generation
+- hidden reconnect semantics that mutate app state without notification
