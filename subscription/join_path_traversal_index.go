@@ -36,22 +36,6 @@ func (edge joinPathTraversalEdge) rhsTable() TableID {
 	return edge.tables[edge.hopCount()]
 }
 
-func joinPathTraversalEdgeToJoinPathEdge(edge joinPathTraversalEdge) (JoinPathEdge, bool) {
-	if edge.hopCount() != 2 {
-		return JoinPathEdge{}, false
-	}
-	return JoinPathEdge{
-		LHSTable:     edge.tables[0],
-		MidTable:     edge.tables[1],
-		RHSTable:     edge.tables[2],
-		LHSJoinCol:   edge.fromCols[0],
-		MidFirstCol:  edge.toCols[0],
-		MidSecondCol: edge.fromCols[1],
-		RHSJoinCol:   edge.toCols[1],
-		RHSFilterCol: edge.rhsFilterCol,
-	}, true
-}
-
 type joinPathTraversalIndex struct {
 	edges   map[joinPathTraversalEdge]map[valueKey]map[QueryHash]struct{}
 	byTable joinPathTraversalEdgeRefs

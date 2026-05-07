@@ -223,7 +223,7 @@ func (edge joinPathFixedEdgeDescriptor) traversalEdge() joinPathTraversalEdge {
 }
 
 func joinPathFixedEdgeDescriptorFromTraversal(edge joinPathTraversalEdge, hops int) (joinPathFixedEdgeDescriptor, bool) {
-	if edge.hopCount() != hops || hops < 3 || hops > joinPathFixedMaxHops {
+	if edge.hopCount() != hops || hops < 2 || hops > joinPathFixedMaxHops {
 		return joinPathFixedEdgeDescriptor{}, false
 	}
 	out := joinPathFixedEdgeDescriptor{
@@ -435,13 +435,29 @@ func NewJoinRangePath8EdgeIndex() *JoinRangePath8EdgeIndex {
 }
 
 func joinPathTraversalEdgeFromJoinPathEdge(edge JoinPathEdge) joinPathTraversalEdge {
-	out, _ := newJoinPathTraversalEdge(
-		[]TableID{edge.LHSTable, edge.MidTable, edge.RHSTable},
-		[]ColID{edge.LHSJoinCol, edge.MidSecondCol},
-		[]ColID{edge.MidFirstCol, edge.RHSJoinCol},
-		edge.RHSFilterCol,
-	)
-	return out
+	return newJoinPathFixedEdgeDescriptor(
+		edge.LHSTable, edge.RHSTable,
+		edge.LHSJoinCol, edge.RHSJoinCol, edge.RHSFilterCol,
+		joinPathFixedMid(edge.MidTable, edge.MidFirstCol, edge.MidSecondCol),
+	).traversalEdge()
+}
+
+func joinPathTraversalEdgeToJoinPathEdge(edge joinPathTraversalEdge) (JoinPathEdge, bool) {
+	fixed, ok := joinPathFixedEdgeDescriptorFromTraversal(edge, 2)
+	if !ok {
+		return JoinPathEdge{}, false
+	}
+	mid := fixed.mids[0]
+	return JoinPathEdge{
+		LHSTable:     fixed.lhsTable,
+		MidTable:     mid.table,
+		RHSTable:     fixed.rhsTable,
+		LHSJoinCol:   fixed.lhsJoinCol,
+		MidFirstCol:  mid.firstCol,
+		MidSecondCol: mid.secondCol,
+		RHSJoinCol:   fixed.rhsJoinCol,
+		RHSFilterCol: fixed.rhsFilterCol,
+	}, true
 }
 
 func joinPathTraversalEdgeFromJoinPath3Edge(edge JoinPath3Edge) joinPathTraversalEdge {
