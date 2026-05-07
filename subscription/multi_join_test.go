@@ -640,6 +640,7 @@ func TestMultiJoinNonKeyPreservingPathDeltaMatchesFreshForSameTransactionRows(t 
 	left := types.ProductValue{types.NewUint64(500), types.NewUint64(20)}
 	middle := types.ProductValue{types.NewUint64(30), types.NewUint64(20)}
 	right := types.ProductValue{types.NewUint64(100), types.NewUint64(30)}
+	filteredRight := types.ProductValue{types.NewUint64(49), types.NewUint64(30)}
 	empty := map[TableID][]types.ProductValue{
 		1: nil,
 		2: nil,
@@ -686,6 +687,23 @@ func TestMultiJoinNonKeyPreservingPathDeltaMatchesFreshForSameTransactionRows(t 
 				},
 			},
 			wantDeletes: []uint64{500},
+		},
+		{
+			name:   "filtered-inserted-path",
+			before: empty,
+			after: map[TableID][]types.ProductValue{
+				1: {left},
+				2: {middle},
+				3: {filteredRight},
+			},
+			changeset: &store.Changeset{
+				TxID: 3,
+				Tables: map[TableID]*store.TableChangeset{
+					1: {Inserts: []types.ProductValue{left}},
+					2: {Inserts: []types.ProductValue{middle}},
+					3: {Inserts: []types.ProductValue{filteredRight}},
+				},
+			},
 		},
 	}
 
