@@ -343,6 +343,10 @@ interface PendingSubscription {
   readonly tableName?: string;
   readonly onRawRows?: (message: SubscribeSingleAppliedMessage) => void;
   readonly onRawUpdate?: RawSubscriptionUpdateCallback;
+  readonly onRows?: (rows: readonly unknown[]) => void;
+  readonly onInitialRows?: (rows: readonly unknown[]) => void;
+  readonly onUpdate?: (update: SubscriptionUpdate<unknown>) => void;
+  readonly decodeRow?: RowDecoder<unknown>;
   readonly handle?: ManagedSubscriptionHandle<Uint8Array>;
   readonly cleanup?: () => void;
   resolve(value: SubscriptionUnsubscribe | SubscriptionHandle<Uint8Array>): void;
@@ -355,6 +359,8 @@ interface ActiveSubscription {
   readonly queryId: QueryID;
   readonly tableName?: string;
   readonly onRawUpdate?: RawSubscriptionUpdateCallback;
+  readonly onUpdate?: (update: SubscriptionUpdate<unknown>) => void;
+  readonly decodeRow?: RowDecoder<unknown>;
   readonly handle?: ManagedSubscriptionHandle<Uint8Array>;
 }
 
@@ -628,6 +634,32 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       : { deleteRowBytes: update.deleteRowBytes.map((row) => new Uint8Array(row)) }),
   });
 
+  const cloneRowBytes = (rows: readonly Uint8Array[]): Uint8Array[] =>
+    rows.map((row) => new Uint8Array(row));
+
+  const decodeSubscriptionRows = (
+    rows: readonly Uint8Array[] | undefined,
+    decodeRow: RowDecoder<unknown>,
+    label: string,
+  ): unknown[] => {
+    if (rows === undefined) {
+      throw new ShunterProtocolError(`${label} rows were not encoded as a RowList.`);
+    }
+    return rows.map((row, rowIndex) => {
+      try {
+        return decodeRow(new Uint8Array(row));
+      } catch (error) {
+        if (isShunterError(error)) {
+          throw error;
+        }
+        throw new ShunterValidationError(`${label} row decoder failed.`, {
+          cause: error,
+          details: { rowIndex },
+        });
+      }
+    });
+  };
+
   const registerActiveSubscription = (
     active: ActiveSubscription,
     aliases: Iterable<QueryID> = [active.queryId],
@@ -655,13 +687,27 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   ): ShunterError | undefined => {
     for (const update of updates) {
       const active = activeSubscriptionsByQuery.get(update.queryId);
-      if (active?.onRawUpdate === undefined) {
+      if (active === undefined) {
         continue;
       }
-      try {
-        active.onRawUpdate(cloneRawSubscriptionUpdate(update));
-      } catch (error) {
-        return toShunterError(error, "validation", `${label} raw subscription update callback failed`);
+      if (active.onRawUpdate !== undefined) {
+        try {
+          active.onRawUpdate(cloneRawSubscriptionUpdate(update));
+        } catch (error) {
+          return toShunterError(error, "validation", `${label} raw subscription update callback failed`);
+        }
+      }
+      if (active.onUpdate !== undefined && active.decodeRow !== undefined) {
+        try {
+          active.onUpdate({
+            queryId: update.queryId,
+            tableName: update.tableName,
+            inserts: decodeSubscriptionRows(update.insertRowBytes, active.decodeRow, `${label} insert`),
+            deletes: decodeSubscriptionRows(update.deleteRowBytes, active.decodeRow, `${label} delete`),
+          });
+        } catch (error) {
+          return toShunterError(error, "validation", `${label} subscription update callback failed`);
+        }
       }
     }
     return undefined;
@@ -833,9 +879,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       queryId: response.queryId,
       tableName: response.tableName,
       onRawUpdate: pending.onRawUpdate,
+      onUpdate: pending.onUpdate,
+      decodeRow: pending.decodeRow,
       handle: pending.handle,
     });
-    pending.handle?.replaceRows(response.rowBytes.map((row) => new Uint8Array(row)));
+    pending.handle?.replaceRows(cloneRowBytes(response.rowBytes));
     if (pending.onRawRows !== undefined) {
       try {
         pending.onRawRows({
@@ -845,6 +893,21 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         });
       } catch (error) {
         const callbackError = toShunterError(error, "validation", "SubscribeSingleApplied raw rows callback failed");
+        removeActiveSubscription(response.queryId);
+        cleanupPendingSubscription(pending);
+        pending.handle?.close(callbackError);
+        pending.reject(callbackError);
+        failConnected(callbackError);
+        return;
+      }
+    }
+    if (pending.decodeRow !== undefined) {
+      try {
+        const rows = decodeSubscriptionRows(response.rowBytes, pending.decodeRow, "SubscribeSingleApplied initial");
+        pending.onRows?.(rows);
+        pending.onInitialRows?.(rows);
+      } catch (error) {
+        const callbackError = toShunterError(error, "validation", "SubscribeSingleApplied row callback failed");
         removeActiveSubscription(response.queryId);
         cleanupPendingSubscription(pending);
         pending.handle?.close(callbackError);
@@ -1339,7 +1402,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }) as DeclaredViewSubscriber<string> & DeclaredViewHandleSubscriber<string>,
     subscribeTable: (async <Table extends string, Row = unknown>(
       table: Table,
-      _onRows?: (rows: Row[]) => void,
+      onRows?: (rows: Row[]) => void,
       options: TableSubscriptionOptions<Row> = {},
     ): Promise<SubscriptionUnsubscribe | SubscriptionHandle<Uint8Array>> => {
       if (disposed) {
@@ -1397,6 +1460,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           tableName: table,
           onRawRows: options.onRawRows,
           onRawUpdate: options.onRawUpdate,
+          onRows: onRows as ((rows: readonly unknown[]) => void) | undefined,
+          onInitialRows: options.onInitialRows as ((rows: readonly unknown[]) => void) | undefined,
+          onUpdate: options.onUpdate as ((update: SubscriptionUpdate<unknown>) => void) | undefined,
+          decodeRow: options.decodeRow as RowDecoder<unknown> | undefined,
           handle,
           cleanup,
           resolve,
@@ -2383,6 +2450,12 @@ export interface SubscriptionUpdate<Row = unknown> {
   readonly deletes: readonly Row[];
 }
 
+export type RowDecoder<Row = unknown> = (row: Uint8Array) => Row;
+export type TableRowDecoder<Row = unknown> = RowDecoder<Row>;
+export type TableRowDecoders<RowsByName extends object = Record<string, unknown>> = {
+  readonly [Name in keyof RowsByName]?: TableRowDecoder<RowsByName[Name]>;
+};
+
 export interface SubscriptionHandle<Row = unknown> {
   readonly queryId?: QueryID;
   readonly state: SubscriptionState<Row>;
@@ -2650,6 +2723,8 @@ export interface TableSubscriptionOptions<Row = unknown> {
   readonly queryId?: QueryID;
   readonly signal?: AbortSignal;
   readonly returnHandle?: boolean;
+  readonly decodeRow?: RowDecoder<Row>;
+  readonly onInitialRows?: (rows: readonly Row[]) => void;
   readonly onRawRows?: (message: SubscribeSingleAppliedMessage) => void;
   readonly onRawUpdate?: RawSubscriptionUpdateCallback;
   readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;

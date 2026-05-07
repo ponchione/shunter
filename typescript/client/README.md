@@ -32,10 +32,12 @@ table names, raw RowList bytes, and split row byte arrays.
 true` to resolve with a managed subscription handle wired to the same
 server-acknowledged unsubscribe path. Table handles expose raw row bytes from
 the initial snapshot; declared-view handles are lifecycle-only until
-schema-aware view row decoding lands. It does not implement typed reducer
-argument/result encoding,
-schema-aware declared query/view/table row decoding, typed row callbacks,
-subscription cache behavior, or reconnect policy yet.
+schema-aware view row decoding lands. Table subscriptions can accept `decodeRow`
+to invoke decoded `onRows`/`onInitialRows` and `onUpdate` callbacks from split
+RowList row bytes while keeping raw callbacks unchanged. It does not implement
+typed reducer argument/result encoding,
+schema-aware declared query/view row decoding, subscription cache behavior, or
+reconnect policy yet.
 
 The lifecycle shell offers Shunter's v1 subprotocol, appends a configured token
 as the server-supported `token` query parameter, tracks `idle`/`connecting`/
@@ -67,6 +69,10 @@ with `onRawUpdate` and table-only `onRawRows` callbacks while typed decoding is
 still pending. Callback consumers can use `decodeRowList()` to split live
 RowList payloads into raw per-row bytes before generated schema codecs exist,
 or read `insertRowBytes`/`deleteRowBytes` from raw updates when present.
+Table subscriptions can also pass `decodeRow` when the caller already has a
+schema-aware row decoder; the runtime will call the table `onRows`/
+`onInitialRows` callbacks for accepted initial rows and `onUpdate` for RowList
+insert/delete deltas.
 
 Generated module bindings should import types from `@shunter/client` and keep
 module-specific table, reducer, query, and view names in the generated file.

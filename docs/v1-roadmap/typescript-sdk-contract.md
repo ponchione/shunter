@@ -64,10 +64,13 @@ bytes, and split row byte arrays for generated helpers to type against.
 `subscribeDeclaredView()` and `subscribeTable()` can also opt into
 `returnHandle: true`, resolving with a managed subscription handle backed by the
 same server-acknowledged unsubscribe path. Table handles expose raw initial row
-bytes; declared-view handles currently expose lifecycle state only. Typed
-reducer argument/result encoding, schema-aware declared query/view/table row
-decoding, typed row callbacks, subscription cache behavior, reconnect policy,
-and local cache implementation remain open.
+bytes; declared-view handles currently expose lifecycle state only.
+`subscribeTable()` also accepts a caller-supplied `decodeRow` hook that decodes
+raw RowList row bytes for `onRows`/`onInitialRows` and RowList insert/delete
+updates for `onUpdate`, leaving raw callbacks unchanged. Typed reducer
+argument/result encoding, schema-aware declared query/view row decoding,
+subscription cache behavior, reconnect policy, and local cache implementation
+remain open.
 
 ## Runtime API
 
@@ -203,15 +206,18 @@ whole-table `SELECT * FROM "<table>"` query. The method waits for the matching
 `SubscribeSingleApplied` response, rejects matching `SubscriptionError`
 responses, and returns an idempotent unsubscribe function that sends
 `UnsubscribeSingle`. The runtime can route the accepted raw row-list bytes to a
-table-only `onRawRows` callback and raw delta bytes to `onRawUpdate`. It also
+table-only `onRawRows` callback and raw delta bytes to `onRawUpdate`. When
+callers provide `decodeRow`, the runtime decodes split RowList row bytes for
+the table `onRows`/`onInitialRows` callbacks and decodes RowList insert/delete
+updates for `onUpdate`. It also
 splits table initial and optional unsubscribe RowList payloads into raw per-row
 bytes on the decoded message envelopes. It does not resolve the unsubscribe
 helper until `UnsubscribeSingleApplied` or a matching `SubscriptionError`. It
 can also resolve with a `SubscriptionHandle` when callers pass
 `returnHandle: true`; the handle starts active with the raw initial row byte
-slices and closes after the acknowledged unsubscribe. It does not yet call the
-typed table row callback, perform schema-aware row decoding, update local cache
-state, or apply typed row deltas.
+slices and closes after the acknowledged unsubscribe. It does not yet generate
+schema-aware row decoders, update local cache state, or apply typed row deltas
+to managed handles.
 
 Subscription handles must provide:
 

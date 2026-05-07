@@ -27,11 +27,15 @@ import type {
   RawSubscriptionUpdate,
   ReducerCallResult,
   DeclaredViewHandleSubscriber,
+  RowDecoder,
   RuntimeBindings,
   ShunterErrorKind,
   SubscribeSingleAppliedMessage,
   SubscriptionHandle,
+  SubscriptionUpdate,
   TableHandleSubscriber,
+  TableRowDecoder,
+  TableRowDecoders,
 } from "../src/index";
 import {
   callCreateMessage,
@@ -154,6 +158,23 @@ async function exerciseGeneratedBindings(): Promise<void> {
     void decodedRows;
     void rawRows;
   };
+  const messageRowDecoder: TableRowDecoder<MessagesRow> = (_row) => ({
+    id: 1n,
+    sender: "identity",
+    topic: null,
+    body: "decoded",
+    sentAt: 2n,
+  });
+  const rowDecoder: RowDecoder<MessagesRow> = messageRowDecoder;
+  const tableRowDecoders: TableRowDecoders<TableRows> = {
+    messages: messageRowDecoder,
+  };
+  const decodedUpdateHandler = (update: SubscriptionUpdate<MessagesRow>): void => {
+    const insertedRows: readonly MessagesRow[] = update.inserts;
+    const deletedRows: readonly MessagesRow[] = update.deletes;
+    void insertedRows;
+    void deletedRows;
+  };
 
   const reducerCaller: ReducerCaller = async (_name, args) => args;
   const reducerBytes: Uint8Array = await callCreateMessage(
@@ -221,6 +242,19 @@ async function exerciseGeneratedBindings(): Promise<void> {
       onRawUpdate: rawUpdateHandler,
     });
   await unsubscribeRawTable();
+  const unsubscribeDecodedTable: SubscriptionUnsubscribe =
+    await runtimeBindings.subscribeTable("messages", (rows) => {
+      const firstBody: string | undefined = rows[0]?.body;
+      void firstBody;
+    }, {
+      decodeRow: rowDecoder,
+      onInitialRows: (rows) => {
+        const firstSender: string | undefined = rows[0]?.sender;
+        void firstSender;
+      },
+      onUpdate: decodedUpdateHandler,
+    });
+  await unsubscribeDecodedTable();
   const declaredViewHandle: SubscriptionHandle<Uint8Array> =
     await generatedClientDeclaredViewHandleSubscriber("live_message_projection", {
       returnHandle: true,
@@ -260,6 +294,7 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void rawDeclaredQueryResult;
   void generatedRawDeclaredQueryResult;
   void rawDeclaredQueryDecoder;
+  void tableRowDecoders;
 }
 
 void connectedState;

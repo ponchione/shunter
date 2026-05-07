@@ -113,6 +113,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   subscription handles backed by server-acknowledged unsubscribe paths.
 - Generated TypeScript clients now export module-scoped aliases for the
   reducer result envelope and raw declared-query result envelope.
+- TypeScript table subscriptions now accept caller-supplied row decoders for
+  decoded initial-row and update callbacks while preserving raw callbacks.
 
 ## v0.1.0 - 2026-05-05
 

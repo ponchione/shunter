@@ -56,10 +56,11 @@ names, raw RowList bytes, split row byte arrays, duration, message ID, and the
 raw frame. Declared-view and table subscriptions can opt into managed
 subscription handles with `returnHandle: true`; those handles use the same
 server-acknowledged unsubscribe path, and table handles expose raw initial row
-bytes until typed row decoding lands. It does not yet implement typed reducer
-argument/result encoding, schema-aware declared query/view/table row decoding,
-typed row callbacks, subscription cache behavior, auth refresh, or reconnect
-policy.
+bytes. Table subscriptions can now also accept a caller-supplied row decoder
+for decoded initial-row and update callbacks while preserving the raw callback
+path. It does not yet implement typed reducer argument/result encoding,
+schema-aware declared query/view row decoding, subscription cache behavior,
+auth refresh, or reconnect policy.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
 fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
@@ -186,17 +187,21 @@ Completed or partially complete:
   managed subscription handle primitive. The handle path preserves the existing
   server-acknowledged unsubscribe behavior; table handles currently hold raw
   initial row bytes and declared-view handles are lifecycle-only.
+- Add narrow typed table row callback delivery: callers can pass `decodeRow`
+  to `subscribeTable()` to receive decoded initial rows through the existing
+  `onRows`/`onInitialRows` path and decoded RowList insert/delete updates
+  through `onUpdate`, without changing raw callbacks.
 
 Remaining:
 
 - Decide and implement typed reducer argument/result encoding conventions
   beyond the current raw `Uint8Array` request path.
 - Implement typed reducer result decoding beyond the current raw
-  `TransactionUpdate` frame result, schema-aware declared-query row decoding,
-  declared view/table typed row callback delivery, and subscription cache
-  behavior on top of the WebSocket lifecycle shell.
-- Implement schema-aware row decoding for declared query/view/table results and
-  subscription updates.
+  `TransactionUpdate` frame result, schema-aware declared-query/view row
+  decoding, and subscription cache behavior on top of the WebSocket lifecycle
+  shell.
+- Implement schema-aware row decoding for declared query/view results and
+  managed cache/update behavior.
 - Implement reconnect, auth refresh, resubscription, and cache behavior.
 - Add client tests for:
   - connection state transitions

@@ -194,8 +194,9 @@ RowList convenience fields on subscription updates, raw declared-query result
 helpers, reducer result envelope helpers, and server-acknowledged managed
 subscription handle return paths added; generated bindings now expose
 module-scoped aliases for reducer result and raw declared-query result
-envelopes. Schema-aware typed row decoding/cache behavior and reconnect
-behavior remain.
+envelopes; table subscriptions now support caller-supplied row decoders for
+decoded initial-row and update callbacks. Schema-aware generated row
+decoding/cache behavior and reconnect behavior remain.
 
 Tasks:
 
