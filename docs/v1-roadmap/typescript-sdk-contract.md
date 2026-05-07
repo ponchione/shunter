@@ -30,9 +30,11 @@ own module-specific names and types.
 
 Current foundation scope: `@shunter/client` exposes protocol constants,
 protocol compatibility helpers, connection state types, structured errors, a
-managed subscription handle primitive, and typed runtime interfaces consumed by
-generated bindings. The WebSocket client factory, reducer argument encoding,
-row decoding, reconnect policy, and local cache implementation remain open.
+minimal `createShunterClient` WebSocket lifecycle shell, a managed subscription
+handle primitive, and typed runtime interfaces consumed by generated bindings.
+Reducer/query/view message plumbing, identity-token decoding, reducer argument
+encoding, row decoding, reconnect policy, and local cache implementation remain
+open.
 
 ## Runtime API
 
@@ -56,6 +58,11 @@ Expected runtime concepts:
   and closed-client operations
 - connection metadata exposing server identity token, negotiated protocol, and
   generated contract version metadata
+
+Current lifecycle behavior: the runtime offers Shunter's v1 WebSocket
+subprotocol, appends configured tokens as the server-supported `token` query
+parameter for browser compatibility, and accepts an injected WebSocket factory
+for Node or host-specific transports. Identity-token decoding is not wired yet.
 
 ## Auth
 

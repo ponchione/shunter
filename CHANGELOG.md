@@ -74,6 +74,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   shared runtime types.
 - Added `@shunter/client` protocol compatibility helpers and a managed
   subscription handle primitive with idempotent unsubscribe behavior.
+- Added a minimal `createShunterClient` TypeScript WebSocket lifecycle shell
+  with token query propagation, subprotocol negotiation, state callbacks,
+  `connect()`, `close()`, and idempotent `dispose()`.
 
 ## v0.1.0 - 2026-05-05
 

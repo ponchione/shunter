@@ -185,8 +185,8 @@ typecheck/test command after the SDK-backed client package exists.
 Goal: a normal TypeScript app should not write protocol handlers by hand.
 
 Status: package location decided; runtime type foundation, protocol
-compatibility helpers, generated import goldens, and subscription handle
-primitive added; WebSocket runtime remains.
+compatibility helpers, generated import goldens, subscription handle primitive,
+and minimal WebSocket lifecycle shell added; protocol message runtime remains.
 
 Tasks:
 
@@ -196,11 +196,11 @@ Tasks:
   target before generating more helpers.
 - Decide reducer argument encoding conventions. The Go runtime still accepts raw
   bytes, and generated helpers remain byte-level until this is resolved.
-- Implement the actual WebSocket connection runtime for browser and Node
-  clients.
+- Build reducer/query/view/table-subscription protocol message plumbing on top
+  of the minimal WebSocket lifecycle shell.
+- Decode the initial server `IdentityToken` frame into connection metadata.
 - Wire the managed subscription handle primitive into real server subscribe and
   unsubscribe responses.
-- Wire protocol version/subprotocol mismatch errors into the WebSocket handshake.
 - Add tests for connection transitions, auth failure, reducer/query/view
   success and failure, initial snapshots, deltas, unsubscribe, reconnect, and
   mismatch handling.

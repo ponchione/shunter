@@ -272,6 +272,290 @@ export interface RuntimeClientOptions<Protocol extends ProtocolMetadata = Protoc
   readonly protocol: Protocol;
   readonly token?: TokenSource;
   readonly signal?: AbortSignal;
+  readonly webSocketFactory?: WebSocketFactory;
+  readonly onStateChange?: ConnectionStateListener<Protocol>;
+}
+
+export interface WebSocketLike {
+  readonly protocol: string;
+  binaryType?: BinaryType;
+  addEventListener(type: "open", listener: (event: Event) => void): void;
+  addEventListener(type: "close", listener: (event: CloseEvent) => void): void;
+  addEventListener(type: "error", listener: (event: Event) => void): void;
+  removeEventListener(type: "open", listener: (event: Event) => void): void;
+  removeEventListener(type: "close", listener: (event: CloseEvent) => void): void;
+  removeEventListener(type: "error", listener: (event: Event) => void): void;
+  close(code?: number, reason?: string): void;
+}
+
+export type WebSocketFactory = (
+  url: string,
+  protocols: readonly ShunterSubprotocol[],
+) => WebSocketLike;
+
+export interface ShunterClient<Protocol extends ProtocolMetadata = ProtocolMetadata> {
+  readonly state: ConnectionState<Protocol>;
+  connect(): Promise<ConnectionMetadata<Protocol>>;
+  close(code?: number, reason?: string): Promise<void>;
+  dispose(): Promise<void>;
+  onStateChange(listener: ConnectionStateListener<Protocol>): () => void;
+}
+
+const closeNormalCode = 1000;
+
+export function createShunterClient<Protocol extends ProtocolMetadata>(
+  options: RuntimeClientOptions<Protocol>,
+): ShunterClient<Protocol> {
+  let state: ConnectionState<Protocol> = { status: "idle" };
+  let socket: WebSocketLike | undefined;
+  let connectPromise: Promise<ConnectionMetadata<Protocol>> | undefined;
+  let closePromise: Promise<void> | undefined;
+  let disposed = false;
+  let suppressSocketCloseTransition = false;
+  let resolveClose: (() => void) | undefined;
+  let rejectConnect: ((error: ShunterError) => void) | undefined;
+  const listeners = new Set<ConnectionStateListener<Protocol>>();
+  if (options.onStateChange !== undefined) {
+    listeners.add(options.onStateChange);
+  }
+
+  const setState = (current: ConnectionState<Protocol>): void => {
+    const previous = state;
+    state = current;
+    const change = { previous, current };
+    for (const listener of [...listeners]) {
+      listener(change);
+    }
+  };
+
+  const cleanupSocketListeners = (
+    ws: WebSocketLike,
+    handlers: {
+      open: (event: Event) => void;
+      close: (event: CloseEvent) => void;
+      error: (event: Event) => void;
+    },
+  ): void => {
+    ws.removeEventListener("open", handlers.open);
+    ws.removeEventListener("close", handlers.close);
+    ws.removeEventListener("error", handlers.error);
+  };
+
+  const finishClose = (): void => {
+    socket = undefined;
+    connectPromise = undefined;
+    closePromise = undefined;
+    rejectConnect = undefined;
+    resolveClose?.();
+    resolveClose = undefined;
+  };
+
+  const failConnecting = (error: ShunterError): void => {
+    suppressSocketCloseTransition = true;
+    setState({ status: "failed", error });
+    rejectConnect?.(error);
+    try {
+      socket?.close(closeNormalCode, "protocol failure");
+    } catch {
+      // Closing after a failed opening handshake is best-effort only.
+    }
+    finishClose();
+  };
+
+  const beginClose = (code = closeNormalCode, reason = ""): Promise<void> => {
+    if (closePromise !== undefined) {
+      return closePromise;
+    }
+    if (state.status === "closed" || state.status === "failed") {
+      finishClose();
+      return Promise.resolve();
+    }
+    if (state.status === "idle") {
+      setState({ status: "closed" });
+      finishClose();
+      return Promise.resolve();
+    }
+    const closedError = new ShunterClosedClientError("Shunter client connection is closing.");
+    rejectConnect?.(closedError);
+    setState({ status: "closing" });
+    const pendingClose = new Promise<void>((resolve) => {
+      resolveClose = resolve;
+    });
+    closePromise = pendingClose;
+    const closingSocket = socket;
+    try {
+      closingSocket?.close(code, reason);
+    } catch (error) {
+      setState({ status: "closed", error: toShunterError(error, "transport", "WebSocket close failed") });
+      finishClose();
+    }
+    if (closingSocket === undefined) {
+      setState({ status: "closed" });
+      finishClose();
+    }
+    return pendingClose;
+  };
+
+  return {
+    get state() {
+      return state;
+    },
+    async connect(): Promise<ConnectionMetadata<Protocol>> {
+      if (disposed) {
+        throw new ShunterClosedClientError("Cannot connect a disposed Shunter client.");
+      }
+      if (state.status === "connected") {
+        return state.metadata;
+      }
+      if (connectPromise !== undefined) {
+        return connectPromise;
+      }
+
+      const attempt = state.status === "reconnecting" ? state.attempt + 1 : 1;
+      setState({ status: "connecting", attempt });
+
+      connectPromise = new Promise<ConnectionMetadata<Protocol>>(async (resolve, reject) => {
+        rejectConnect = reject;
+        let offeredSubprotocol: ShunterSubprotocol;
+        let url: string;
+        try {
+          offeredSubprotocol = selectShunterSubprotocol(options.protocol);
+          url = withTokenQuery(options.url, await resolveToken(options.token));
+          if (options.signal?.aborted) {
+            throw new ShunterClosedClientError("Connection aborted before opening.");
+          }
+        } catch (error) {
+          const shunterError =
+            isShunterError(error)
+              ? error
+              : new ShunterAuthError("Token provider failed.", { cause: error });
+          setState({ status: "failed", error: shunterError });
+          finishClose();
+          reject(shunterError);
+          return;
+        }
+
+        let ws: WebSocketLike;
+        try {
+          ws = createWebSocket(url, [offeredSubprotocol], options.webSocketFactory);
+        } catch (error) {
+          const shunterError = toShunterError(error, "transport", "Create WebSocket failed");
+          setState({ status: "failed", error: shunterError });
+          finishClose();
+          reject(shunterError);
+          return;
+        }
+
+        socket = ws;
+        suppressSocketCloseTransition = false;
+        ws.binaryType = "arraybuffer";
+        const handlers = {
+          open: (): void => {
+            try {
+              const selectedSubprotocol = ws.protocol || offeredSubprotocol;
+              assertProtocolCompatible(options.protocol, selectedSubprotocol);
+              const metadata: ConnectionMetadata<Protocol> = {
+                protocol: options.protocol,
+                subprotocol: selectedSubprotocol,
+              };
+              setState({ status: "connected", metadata });
+              resolve(metadata);
+            } catch (error) {
+              failConnecting(
+                isShunterError(error)
+                  ? error
+                  : toShunterError(error, "protocol", "Protocol negotiation failed"),
+              );
+            }
+          },
+          close: (event: CloseEvent): void => {
+            cleanupSocketListeners(ws, handlers);
+            if (suppressSocketCloseTransition) {
+              return;
+            }
+            if (state.status === "connecting") {
+              const error = new ShunterTransportError("WebSocket closed before opening.", {
+                code: String(event.code),
+                details: { reason: event.reason, wasClean: event.wasClean },
+              });
+              setState({ status: "failed", error });
+              reject(error);
+            } else if (state.status !== "closed") {
+              setState({ status: "closed" });
+            }
+            finishClose();
+          },
+          error: (event: Event): void => {
+            if (state.status === "connecting") {
+              const error = new ShunterTransportError("WebSocket failed before opening.", {
+                details: event,
+              });
+              setState({ status: "failed", error });
+              reject(error);
+              suppressSocketCloseTransition = true;
+              try {
+                ws.close(closeNormalCode, "open failed");
+              } catch {
+                // Nothing useful can be recovered from a failed close here.
+              }
+              finishClose();
+            }
+          },
+        };
+        ws.addEventListener("open", handlers.open);
+        ws.addEventListener("close", handlers.close);
+        ws.addEventListener("error", handlers.error);
+      });
+
+      return connectPromise;
+    },
+    close(code = closeNormalCode, reason = ""): Promise<void> {
+      return beginClose(code, reason);
+    },
+    dispose(): Promise<void> {
+      disposed = true;
+      return beginClose(closeNormalCode, "disposed");
+    },
+    onStateChange(listener: ConnectionStateListener<Protocol>): () => void {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}
+
+async function resolveToken(token?: TokenSource): Promise<string | undefined> {
+  if (token === undefined) {
+    return undefined;
+  }
+  if (typeof token === "string") {
+    return token;
+  }
+  return token();
+}
+
+function withTokenQuery(url: string, token?: string): string {
+  if (token === undefined || token === "") {
+    return url;
+  }
+  const parsed = new URL(url);
+  parsed.searchParams.set("token", token);
+  return parsed.toString();
+}
+
+function createWebSocket(
+  url: string,
+  protocols: readonly ShunterSubprotocol[],
+  factory?: WebSocketFactory,
+): WebSocketLike {
+  if (factory !== undefined) {
+    return factory(url, protocols);
+  }
+  if (typeof WebSocket === "undefined") {
+    throw new ShunterTransportError("No WebSocket implementation is available.");
+  }
+  return new WebSocket(url, [...protocols]);
 }
 
 export type RequestID = number;

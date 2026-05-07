@@ -2,6 +2,7 @@ import {
   SHUNTER_SUBPROTOCOL_V1,
   ShunterAuthError,
   ShunterProtocolMismatchError,
+  createShunterClient,
   shunterProtocol as runtimeProtocol,
 } from "../src/index";
 import type {
@@ -60,6 +61,19 @@ const activeMessages: SubscriptionHandle<MessagesRow> = {
   unsubscribe() {},
 };
 
+const client = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: generatedProtocol,
+  token: async () => "token",
+  webSocketFactory: () => ({
+    protocol: SHUNTER_SUBPROTOCOL_V1,
+    binaryType: "arraybuffer",
+    addEventListener() {},
+    removeEventListener() {},
+    close() {},
+  }),
+});
+
 async function exerciseGeneratedBindings(): Promise<void> {
   const reducerCaller: ReducerCaller = async (_name, args) => args;
   const reducerBytes: Uint8Array = await callCreateMessage(
@@ -117,4 +131,5 @@ void runtimeProtocolMetadata;
 void authErrorKind;
 void mismatch;
 void activeMessages;
+void client;
 void exerciseGeneratedBindings;

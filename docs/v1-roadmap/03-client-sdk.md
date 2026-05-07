@@ -26,12 +26,12 @@ imports for the shared SDK surface.
 
 That is necessary but not sufficient for v1. The runtime package currently
 defines protocol constants, protocol compatibility helpers, connection state
-types, structured errors, a managed subscription handle primitive with
-idempotent unsubscribe, and typed interfaces for reducer calls, declared
-queries, declared views, and table subscriptions. It does not yet implement the
-browser or Node WebSocket client, reducer argument encoding, row decoding, auth
-refresh, local cache updates, reconnect policy, or WebSocket handshake
-integration.
+types, structured errors, a minimal `createShunterClient` WebSocket lifecycle
+shell, a managed subscription handle primitive with idempotent unsubscribe, and
+typed interfaces for reducer calls, declared queries, declared views, and table
+subscriptions. It does not yet implement reducer/query/view protocol message
+plumbing, reducer argument encoding, row decoding, auth refresh, local cache
+updates, reconnect policy, or identity-token decoding.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
 fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
@@ -108,13 +108,16 @@ Completed or partially complete:
   errors before the WebSocket runtime exists.
 - Add an executable TypeScript runtime test for protocol mismatch handling and
   idempotent managed subscription-handle unsubscribe.
+- Add a minimal `createShunterClient` lifecycle shell with token resolution,
+  Shunter subprotocol negotiation, injected WebSocket construction, state-change
+  callbacks, `connect()`, `close()`, and idempotent `dispose()`.
 
 Remaining:
 
 - Decide and implement reducer argument/result encoding conventions.
-- Implement the actual browser/Node WebSocket connection runtime.
-- Wire protocol version/subprotocol mismatch handling into the WebSocket
-  handshake path.
+- Implement reducer, declared-query, declared-view, and table-subscription
+  protocol message plumbing on top of the WebSocket lifecycle shell.
+- Decode the initial server `IdentityToken` frame into connection metadata.
 - Implement row decoding for declared query/view results and subscription
   updates.
 - Implement reconnect, auth refresh, resubscription, and cache behavior.
