@@ -191,7 +191,8 @@ Exit criteria:
 
 Goal: operators have one documented path for data safety and upgrades.
 
-Status: runbook added; failure-path tests and reference-app workflow remain.
+Status: runbook and clean-shutdown backup/restore test added; remaining
+failure-path tests and reference-app workflow remain.
 
 Tasks:
 

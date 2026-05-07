@@ -74,11 +74,12 @@ Completed or partially complete:
   checklist.
 - Add tests for backup/restore helper refusal cases, migration hook success and
   failure, and basic snapshot/compaction behavior.
+- Add an integration test for offline backup/restore from a cleanly shut down
+  runtime with recovered state verification.
 
 Remaining:
 
 - Add or update tests for:
-  - backup from clean shutdown
   - restore into fresh data dir
   - restore with incompatible contract
   - crash during reducer commit

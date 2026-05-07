@@ -2,10 +2,14 @@ package shunter
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/types"
 )
 
 func TestBackupAndRestoreDataDirHelpersCopyCompleteDirectory(t *testing.T) {
@@ -33,6 +37,63 @@ func TestBackupAndRestoreDataDirHelpersCopyCompleteDirectory(t *testing.T) {
 	}
 	assertDataDirFileBytes(t, filepath.Join(restoreDir, "00000000000000000001.log"), []byte("segment-1"))
 	assertDataDirFileBytes(t, filepath.Join(restoreDir, "snapshots", "7", "snapshot"), []byte("snapshot-7"))
+}
+
+func TestBackupAndRestoreCleanShutdownRuntimeRecoversState(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	backupDir := filepath.Join(dir, "backup")
+	restoreDir := filepath.Join(dir, "restored")
+
+	rt, err := Build(dataDirBackupTestModule(), Config{DataDir: dataDir})
+	if err != nil {
+		t.Fatalf("Build source runtime: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start source runtime: %v", err)
+	}
+	res, err := rt.CallReducer(context.Background(), "insert_message", []byte("before-backup"))
+	if err != nil {
+		t.Fatalf("CallReducer source insert: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("source insert status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+	if err := rt.WaitUntilDurable(context.Background(), res.TxID); err != nil {
+		t.Fatalf("WaitUntilDurable source tx: %v", err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close source runtime: %v", err)
+	}
+
+	if err := BackupDataDir(dataDir, backupDir); err != nil {
+		t.Fatalf("BackupDataDir returned error: %v", err)
+	}
+	if err := RestoreDataDir(backupDir, restoreDir); err != nil {
+		t.Fatalf("RestoreDataDir returned error: %v", err)
+	}
+
+	restored, err := Build(dataDirBackupTestModule(), Config{DataDir: restoreDir})
+	if err != nil {
+		t.Fatalf("Build restored runtime: %v", err)
+	}
+	if err := restored.Start(context.Background()); err != nil {
+		t.Fatalf("Start restored runtime: %v", err)
+	}
+	defer restored.Close()
+
+	var bodies []string
+	if err := restored.Read(context.Background(), func(view LocalReadView) error {
+		for _, row := range view.TableScan(schema.TableID(0)) {
+			bodies = append(bodies, row[1].AsString())
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("Read restored runtime: %v", err)
+	}
+	if len(bodies) != 1 || bodies[0] != "before-backup" {
+		t.Fatalf("restored message bodies = %#v, want [before-backup]", bodies)
+	}
 }
 
 func TestBackupDataDirRejectsExistingOutputWithoutMutation(t *testing.T) {
@@ -163,6 +224,13 @@ func TestDataDirHelpersRejectSymlinkSourcesAndEntries(t *testing.T) {
 	}
 	assertErrorContains(t, err, "entry-link")
 	assertErrorContains(t, err, "is a symlink; refusing to copy")
+}
+
+func dataDirBackupTestModule() *Module {
+	return validChatModule().Reducer("insert_message", func(ctx *schema.ReducerContext, args []byte) ([]byte, error) {
+		_, err := ctx.DB.Insert(0, types.ProductValue{types.NewUint64(0), types.NewString(string(args))})
+		return nil, err
+	})
 }
 
 func writeDataDirTestBytes(t *testing.T, dir, name string, data []byte) string {
