@@ -190,14 +190,19 @@ Current code and docs now agree that declared live views accept single-table
 projected views while post-commit delivery remains row deltas over matching
 rows.
 
+The multi-module `Host` remains preview/advanced for v1. It is useful for
+composition tests and explicit multi-runtime deployments, but normal v1 app
+development should build one runtime per hosted module and should not depend on
+cross-module behavior.
+
+No lower-level package beyond the stable subsets listed in this matrix receives
+a normal Go compatibility promise for v1. Runtime implementation packages stay
+implementation details even when importable.
+
 Open decisions before cutting `v1.0.0`:
 
-- Decide whether `Host` graduates from preview to stable, or remains a
-  composition helper for v1.x.
 - Decide whether exact generated TypeScript identifier normalization and
   collision suffixes are compatibility commitments, or whether only the
   exported contract categories are stable.
-- Decide whether any importable lower-level package beyond the stable subsets
-  above receives normal Go compatibility promises before v1.
 - Add or confirm protocol, contract JSON, and TypeScript golden coverage for
   every stable payload shape in this document.

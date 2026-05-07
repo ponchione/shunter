@@ -61,11 +61,12 @@ Tasks:
 
 - Re-audit root `shunter` exports and lower-level package docs after recent
   ops, migration, declared-read, and health additions.
-- Decide whether `Host` remains preview for v1 or graduates to stable.
+- Keep `Host` preview/advanced for v1 unless a separate compatibility decision
+  graduates it.
 - Decide whether generated TypeScript identifier normalization and collision
   suffixes are compatibility commitments.
-- Confirm whether any lower-level package beyond the existing stable subsets
-  receives normal Go compatibility promises.
+- Keep lower-level package compatibility limited to the stable subsets in
+  `docs/v1-compatibility.md`.
 - Add or confirm golden coverage for every stable protocol payload,
   `ModuleContract` JSON field, and generated TypeScript category.
 - Add or confirm negative tests for unsupported SQL classes listed in

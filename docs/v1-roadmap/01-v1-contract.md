@@ -47,6 +47,10 @@ TypeScript codegen boundary, read-surface matrix, multi-module host preview
 status, and the separation between app module metadata and Shunter
 runtime/tool version metadata.
 
+Current v1 decisions now settled in `docs/v1-compatibility.md`: `Host` remains
+preview/advanced for v1, and no importable lower-level package beyond the
+stable subsets listed in the matrix receives a normal Go compatibility promise.
+
 Code reality as of this roadmap cleanup:
 
 - `docs/v1-compatibility.md` is the current compatibility matrix and is linked
@@ -101,8 +105,8 @@ Remaining:
   stable payload shape in the matrix.
 - Ensure `contractdiff` treats stable-field changes consistently with the final
   v1 compatibility policy.
-- Resolve the remaining `Host`, TypeScript identifier normalization, and
-  lower-level-package compatibility decisions before cutting `v1.0.0`.
+- Resolve the remaining TypeScript identifier normalization compatibility
+  decision before cutting `v1.0.0`.
 
 ## Verification
 
