@@ -343,8 +343,9 @@ interface PendingSubscription {
   readonly tableName?: string;
   readonly onRawRows?: (message: SubscribeSingleAppliedMessage) => void;
   readonly onRawUpdate?: RawSubscriptionUpdateCallback;
+  readonly handle?: ManagedSubscriptionHandle<Uint8Array>;
   readonly cleanup?: () => void;
-  resolve(value: SubscriptionUnsubscribe): void;
+  resolve(value: SubscriptionUnsubscribe | SubscriptionHandle<Uint8Array>): void;
   reject(error: ShunterError): void;
 }
 
@@ -354,6 +355,7 @@ interface ActiveSubscription {
   readonly queryId: QueryID;
   readonly tableName?: string;
   readonly onRawUpdate?: RawSubscriptionUpdateCallback;
+  readonly handle?: ManagedSubscriptionHandle<Uint8Array>;
 }
 
 interface PendingUnsubscribe {
@@ -369,8 +371,8 @@ export interface ShunterClient<Protocol extends ProtocolMetadata = ProtocolMetad
   connect(): Promise<ConnectionMetadata<Protocol>>;
   callReducer: ReducerCaller<string, Uint8Array, Uint8Array>;
   runDeclaredQuery: DeclaredQueryRunner<string, Uint8Array>;
-  subscribeDeclaredView: DeclaredViewSubscriber<string>;
-  subscribeTable: RawTableSubscriber;
+  subscribeDeclaredView: DeclaredViewSubscriber<string> & DeclaredViewHandleSubscriber<string>;
+  subscribeTable: RawTableSubscriber & RawTableHandleSubscriber;
   close(code?: number, reason?: string): Promise<void>;
   dispose(): Promise<void>;
   onStateChange(listener: ConnectionStateListener<Protocol>): () => void;
@@ -454,6 +456,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   const rejectPendingSubscriptions = (error: ShunterError): void => {
     for (const pending of [...pendingSubscriptionsByRequest.values()]) {
       cleanupPendingSubscription(pending);
+      pending.handle?.close(error);
       pending.reject(error);
     }
   };
@@ -475,6 +478,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     rejectPendingDeclaredQueries(error);
     rejectPendingSubscriptions(error);
     rejectPendingUnsubscribes(error);
+    for (const active of new Set(activeSubscriptionsByQuery.values())) {
+      active.handle?.close(error);
+    }
     activeSubscriptionsByQuery.clear();
     activeSubscriptionAliasesByRootQuery.clear();
   };
@@ -821,7 +827,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       queryId: response.queryId,
       tableName: response.tableName,
       onRawUpdate: pending.onRawUpdate,
+      handle: pending.handle,
     });
+    pending.handle?.replaceRows(response.rowBytes.map((row) => new Uint8Array(row)));
     if (pending.onRawRows !== undefined) {
       try {
         pending.onRawRows({
@@ -833,13 +841,14 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         const callbackError = toShunterError(error, "validation", "SubscribeSingleApplied raw rows callback failed");
         removeActiveSubscription(response.queryId);
         cleanupPendingSubscription(pending);
+        pending.handle?.close(callbackError);
         pending.reject(callbackError);
         failConnected(callbackError);
         return;
       }
     }
     cleanupPendingSubscription(pending);
-    pending.resolve(tableSubscriptionUnsubscribe(response.queryId));
+    pending.resolve(pending.handle ?? tableSubscriptionUnsubscribe(response.queryId));
   };
 
   const settleDeclaredViewSubscriptionApplied = (response: SubscriptionSetAppliedMessage): void => {
@@ -862,17 +871,20 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       target: pending.target,
       queryId: response.queryId,
       onRawUpdate: pending.onRawUpdate,
+      handle: pending.handle,
     }, response.updates.map((update) => update.queryId));
+    pending.handle?.replaceRows([]);
     const updateError = dispatchRawSubscriptionUpdates(response.updates, "SubscribeMultiApplied");
     if (updateError !== undefined) {
       removeActiveSubscription(response.queryId);
       cleanupPendingSubscription(pending);
+      pending.handle?.close(updateError);
       pending.reject(updateError);
       failConnected(updateError);
       return;
     }
     cleanupPendingSubscription(pending);
-    pending.resolve(declaredViewUnsubscribe(response.queryId));
+    pending.resolve(pending.handle ?? declaredViewUnsubscribe(response.queryId));
   };
 
   const settleSubscriptionError = (response: SubscriptionErrorMessage): void => {
@@ -885,10 +897,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return;
     }
     cleanupPendingSubscription(pending);
-    pending.reject(new ShunterValidationError(response.error || "Subscription failed.", {
+    const error = new ShunterValidationError(response.error || "Subscription failed.", {
       code: "subscription_failed",
       details: { kind: pending.kind, target: pending.target, response },
-    }));
+    });
+    pending.handle?.close(error);
+    pending.reject(error);
   };
 
   const settleUnsubscribeError = (response: SubscriptionErrorMessage): void => {
@@ -1243,10 +1257,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         }
       });
     },
-    async subscribeDeclaredView(
+    subscribeDeclaredView: (async (
       name: string,
       options: DeclaredViewSubscriptionOptions = {},
-    ): Promise<SubscriptionUnsubscribe> {
+    ): Promise<SubscriptionUnsubscribe | SubscriptionHandle<Uint8Array>> => {
       if (disposed) {
         throw new ShunterClosedClientError("Cannot subscribe a declared view on a disposed Shunter client.");
       }
@@ -1270,7 +1284,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           details: { name, requestId: request.requestId, queryId: request.queryId },
         });
       }
-      return new Promise<SubscriptionUnsubscribe>((resolve, reject) => {
+      const handle = options.returnHandle === true
+        ? createSubscriptionHandle<Uint8Array>({
+          queryId: request.queryId,
+          unsubscribe: declaredViewUnsubscribe(request.queryId),
+        })
+        : undefined;
+      return new Promise<SubscriptionUnsubscribe | SubscriptionHandle<Uint8Array>>((resolve, reject) => {
         let cleanup: (() => void) | undefined;
         if (options.signal !== undefined) {
           const abort = (): void => {
@@ -1279,7 +1299,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
               cleanupPendingSubscription(pending);
             }
             cleanup?.();
-            reject(new ShunterClosedClientError("Declared view subscription aborted before a response was received."));
+            const abortError = new ShunterClosedClientError("Declared view subscription aborted before a response was received.");
+            handle?.close(abortError);
+            reject(abortError);
           };
           options.signal.addEventListener("abort", abort, { once: true });
           cleanup = () => {
@@ -1292,6 +1314,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           requestId: request.requestId,
           queryId: request.queryId,
           onRawUpdate: options.onRawUpdate,
+          handle,
           cleanup,
           resolve,
           reject,
@@ -1302,15 +1325,17 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           activeSocket.send(request.frame);
         } catch (error) {
           cleanupPendingSubscription(pending);
-          reject(toShunterError(error, "transport", "Declared view subscription request send failed"));
+          const sendError = toShunterError(error, "transport", "Declared view subscription request send failed");
+          handle?.close(sendError);
+          reject(sendError);
         }
       });
-    },
-    async subscribeTable<Table extends string, Row = unknown>(
+    }) as DeclaredViewSubscriber<string> & DeclaredViewHandleSubscriber<string>,
+    subscribeTable: (async <Table extends string, Row = unknown>(
       table: Table,
       _onRows?: (rows: Row[]) => void,
       options: TableSubscriptionOptions<Row> = {},
-    ): Promise<SubscriptionUnsubscribe> {
+    ): Promise<SubscriptionUnsubscribe | SubscriptionHandle<Uint8Array>> => {
       if (disposed) {
         throw new ShunterClosedClientError("Cannot subscribe a table on a disposed Shunter client.");
       }
@@ -1334,7 +1359,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           details: { table, requestId: request.requestId, queryId: request.queryId },
         });
       }
-      return new Promise<SubscriptionUnsubscribe>((resolve, reject) => {
+      const handle = options.returnHandle === true
+        ? createSubscriptionHandle<Uint8Array>({
+          queryId: request.queryId,
+          unsubscribe: tableSubscriptionUnsubscribe(request.queryId),
+        })
+        : undefined;
+      return new Promise<SubscriptionUnsubscribe | SubscriptionHandle<Uint8Array>>((resolve, reject) => {
         let cleanup: (() => void) | undefined;
         if (options.signal !== undefined) {
           const abort = (): void => {
@@ -1343,7 +1374,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
               cleanupPendingSubscription(pending);
             }
             cleanup?.();
-            reject(new ShunterClosedClientError("Table subscription aborted before a response was received."));
+            const abortError = new ShunterClosedClientError("Table subscription aborted before a response was received.");
+            handle?.close(abortError);
+            reject(abortError);
           };
           options.signal.addEventListener("abort", abort, { once: true });
           cleanup = () => {
@@ -1358,6 +1391,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           tableName: table,
           onRawRows: options.onRawRows,
           onRawUpdate: options.onRawUpdate,
+          handle,
           cleanup,
           resolve,
           reject,
@@ -1368,10 +1402,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           activeSocket.send(request.frame);
         } catch (error) {
           cleanupPendingSubscription(pending);
-          reject(toShunterError(error, "transport", "Table subscription request send failed"));
+          const sendError = toShunterError(error, "transport", "Table subscription request send failed");
+          handle?.close(sendError);
+          reject(sendError);
         }
       });
-    },
+    }) as RawTableSubscriber & RawTableHandleSubscriber,
     close(code = closeNormalCode, reason = ""): Promise<void> {
       return beginClose(code, reason);
     },
@@ -2256,6 +2292,10 @@ export interface SubscriptionHandleOptions<Row = unknown> {
 
 export type SubscriptionUnsubscribe = () => void | Promise<void>;
 
+export interface SubscriptionHandleReturnOptions {
+  readonly returnHandle: true;
+}
+
 export function createSubscriptionHandle<Row = unknown>(
   options: SubscriptionHandleOptions<Row> = {},
 ): ManagedSubscriptionHandle<Row> {
@@ -2329,6 +2369,7 @@ export interface DeclaredViewSubscriptionOptions<Row = unknown> {
   readonly requestId?: RequestID;
   readonly queryId?: QueryID;
   readonly signal?: AbortSignal;
+  readonly returnHandle?: boolean;
   readonly onInitialRows?: (rows: readonly Row[]) => void;
   readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
   readonly onRawUpdate?: RawSubscriptionUpdateCallback;
@@ -2370,6 +2411,11 @@ export type DeclaredViewSubscriber<Name extends string = string> = (
   name: Name,
   options?: DeclaredViewSubscriptionOptions,
 ) => Promise<SubscriptionUnsubscribe>;
+
+export type DeclaredViewHandleSubscriber<Name extends string = string> = (
+  name: Name,
+  options: DeclaredViewSubscriptionOptions<Uint8Array> & SubscriptionHandleReturnOptions,
+) => Promise<SubscriptionHandle<Uint8Array>>;
 
 export function encodeSubscribeSingleRequest<Row = unknown>(
   queryString: string,
@@ -2491,6 +2537,7 @@ export interface TableSubscriptionOptions<Row = unknown> {
   readonly requestId?: RequestID;
   readonly queryId?: QueryID;
   readonly signal?: AbortSignal;
+  readonly returnHandle?: boolean;
   readonly onRawRows?: (message: SubscribeSingleAppliedMessage) => void;
   readonly onRawUpdate?: RawSubscriptionUpdateCallback;
   readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
@@ -2506,11 +2553,23 @@ export type TableSubscriber<
   options?: TableSubscriptionOptions<[Row] extends [never] ? RowsByName[Table] : Row>,
 ) => Promise<SubscriptionUnsubscribe>;
 
+export type TableHandleSubscriber<Name extends string = string> = <Table extends Name>(
+  table: Table,
+  onRows: ((rows: Uint8Array[]) => void) | undefined,
+  options: TableSubscriptionOptions<Uint8Array> & SubscriptionHandleReturnOptions,
+) => Promise<SubscriptionHandle<Uint8Array>>;
+
 export type RawTableSubscriber = <Table extends string, Row = unknown>(
   table: Table,
   onRows?: (rows: Row[]) => void,
   options?: TableSubscriptionOptions<Row>,
 ) => Promise<SubscriptionUnsubscribe>;
+
+export type RawTableHandleSubscriber = <Table extends string>(
+  table: Table,
+  onRows: ((rows: Uint8Array[]) => void) | undefined,
+  options: TableSubscriptionOptions<Uint8Array> & SubscriptionHandleReturnOptions,
+) => Promise<SubscriptionHandle<Uint8Array>>;
 
 export type ViewSubscriber = (
   sql: string,

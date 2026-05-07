@@ -103,6 +103,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added TypeScript raw RowList decoding for live server row-batch payloads,
   including per-row byte arrays on decoded one-off query and table initial-row
   envelopes.
+- TypeScript declared-view and table subscriptions can now opt into managed
+  subscription handles backed by server-acknowledged unsubscribe paths.
 
 ## v0.1.0 - 2026-05-05
 

@@ -50,10 +50,14 @@ subscribe responses, caller-bound committed `TransactionUpdate` frames, and
 `UnsubscribeSingleApplied`/`UnsubscribeMultiApplied` or `SubscriptionError`
 frames. The runtime also exposes `decodeRowList()` for the live RowList
 payload shape and includes raw per-row byte arrays on decoded one-off query
-tables, table initial rows, and optional table unsubscribe rows. Typed reducer
-argument/result encoding, schema-aware declared query/view/table row decoding,
-typed row callbacks, subscription cache behavior, reconnect policy, and local
-cache implementation remain open.
+tables, table initial rows, and optional table unsubscribe rows.
+`subscribeDeclaredView()` and `subscribeTable()` can also opt into
+`returnHandle: true`, resolving with a managed subscription handle backed by
+the same server-acknowledged unsubscribe path. Table handles expose raw initial
+row bytes; declared-view handles currently expose lifecycle state only. Typed
+reducer argument/result encoding, schema-aware declared query/view/table row
+decoding, typed row callbacks, subscription cache behavior, reconnect policy,
+and local cache implementation remain open.
 
 ## Runtime API
 
@@ -169,8 +173,11 @@ unsubscribe function that sends `UnsubscribeMulti` for the accepted query ID.
 The runtime can route raw `SubscriptionUpdate` bytes to `onRawUpdate` callbacks
 from the initial response and later delta frames. The unsubscribe helper does
 not resolve until `UnsubscribeMultiApplied` or a matching `SubscriptionError`.
-It does not yet update local cache state, decode initial rows, or apply typed
-row deltas.
+Callers can request `returnHandle: true` to receive a `SubscriptionHandle`
+whose `unsubscribe()` uses that same acknowledgement path; until schema-aware
+view decoding lands, the handle is lifecycle-only and has an empty row set. It
+does not yet update local cache state, decode initial rows, or apply typed row
+deltas.
 Raw update callback consumers can call `decodeRowList()` on live insert/delete
 payloads when they need per-row byte slices before generated schema codecs
 exist.
@@ -185,8 +192,11 @@ table-only `onRawRows` callback and raw delta bytes to `onRawUpdate`. It also
 splits table initial and optional unsubscribe RowList payloads into raw per-row
 bytes on the decoded message envelopes. It does not resolve the unsubscribe
 helper until `UnsubscribeSingleApplied` or a matching `SubscriptionError`. It
-does not yet call the typed table row callback, perform schema-aware row
-decoding, update local cache state, or apply typed row deltas.
+can also resolve with a `SubscriptionHandle` when callers pass
+`returnHandle: true`; the handle starts active with the raw initial row byte
+slices and closes after the acknowledged unsubscribe. It does not yet call the
+typed table row callback, perform schema-aware row decoding, update local cache
+state, or apply typed row deltas.
 
 Subscription handles must provide:
 

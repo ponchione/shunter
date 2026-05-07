@@ -600,6 +600,71 @@ assert.deepEqual(
 sockets[0].message(unsubscribeErrorFrame);
 await assert.rejects(unsubscribeErrorResult, ShunterValidationError);
 
+const unsubscribeDeclaredViewHandleAppliedFrame = bytesFromHex(
+  "0a0400000000000000000000006463626100000000",
+);
+const declaredViewHandleSubscription = client.subscribeDeclaredView("live_users", {
+  requestId: 0x41424344,
+  queryId: 0x61626364,
+  returnHandle: true,
+});
+assert.equal(sockets[0].sent.length, 14);
+assert.deepEqual(
+  sockets[0].sent[13],
+  encodeDeclaredViewSubscriptionRequest("live_users", {
+    requestId: 0x41424344,
+    queryId: 0x61626364,
+  }).frame,
+);
+sockets[0].message(subscribeAppliedFrame);
+const declaredViewHandle = await declaredViewHandleSubscription;
+assert.equal(declaredViewHandle.queryId, 0x61626364);
+assert.deepEqual(declaredViewHandle.state, { status: "active", rows: [] });
+const unsubscribeDeclaredViewHandle = declaredViewHandle.unsubscribe();
+void declaredViewHandle.unsubscribe();
+assert.equal(sockets[0].sent.length, 15);
+assert.deepEqual(
+  sockets[0].sent[14],
+  encodeUnsubscribeMultiRequest(0x61626364, { requestId: 4 }).frame,
+);
+sockets[0].message(unsubscribeDeclaredViewHandleAppliedFrame);
+await unsubscribeDeclaredViewHandle;
+assert.deepEqual(await declaredViewHandle.closed, { reason: "unsubscribed" });
+assert.deepEqual(declaredViewHandle.state, { status: "closed" });
+
+const unsubscribeTableHandleAppliedFrame = bytesFromHex(
+  "030500000000000000000000001413121100",
+);
+const tableHandleSubscription = client.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+});
+assert.equal(sockets[0].sent.length, 16);
+assert.deepEqual(
+  sockets[0].sent[15],
+  encodeTableSubscriptionRequest("users", {
+    requestId: 0x01020304,
+    queryId: 0x11121314,
+  }).frame,
+);
+sockets[0].message(subscribeSingleAppliedFrame);
+const tableHandle = await tableHandleSubscription;
+assert.equal(tableHandle.queryId, 0x11121314);
+assert.equal(tableHandle.state.status, "active");
+assert.deepEqual(tableHandle.state.rows.map((row) => [...row]), [[1, 2], [3]]);
+const unsubscribeTableHandle = tableHandle.unsubscribe();
+void tableHandle.unsubscribe();
+assert.equal(sockets[0].sent.length, 17);
+assert.deepEqual(
+  sockets[0].sent[16],
+  encodeUnsubscribeSingleRequest(0x11121314, { requestId: 5 }).frame,
+);
+sockets[0].message(unsubscribeTableHandleAppliedFrame);
+await unsubscribeTableHandle;
+assert.deepEqual(await tableHandle.closed, { reason: "unsubscribed" });
+assert.deepEqual(tableHandle.state, { status: "closed" });
+
 await client.close();
 await client.close();
 await client.dispose();

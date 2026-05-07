@@ -21,7 +21,12 @@ for `UnsubscribeSingleApplied`/`UnsubscribeMultiApplied` or matching
 `SubscriptionError`. It also exposes a raw `decodeRowList()` helper for the
 live RowList payload shape and attaches raw per-row byte arrays to decoded
 one-off query table rows, table initial rows, and optional table unsubscribe
-rows. It does not implement typed reducer argument/result encoding,
+rows. `subscribeDeclaredView()` and `subscribeTable()` also accept
+`returnHandle: true` to resolve with a managed subscription handle wired to the
+same server-acknowledged unsubscribe path. Table handles expose raw row bytes
+from the initial snapshot; declared-view handles are lifecycle-only until
+schema-aware view row decoding lands. It does not implement typed reducer
+argument/result encoding,
 schema-aware declared query/view/table row decoding, typed row callbacks,
 subscription cache behavior, or reconnect policy yet.
 
@@ -44,6 +49,9 @@ acknowledgement.
 query, resolves after `SubscribeSingleApplied`, rejects on `SubscriptionError`,
 and returns an unsubscribe function that sends one `UnsubscribeSingle` frame
 for repeated calls and resolves after the matching acknowledgement.
+Passing `returnHandle: true` to either subscription method preserves the same
+acceptance and acknowledgement semantics while resolving with a
+`SubscriptionHandle` whose `unsubscribe()` is idempotent.
 Declared-view and table subscriptions can opt into raw row-list/update bytes
 with `onRawUpdate` and table-only `onRawRows` callbacks while typed decoding is
 still pending. Callback consumers can use `decodeRowList()` to split live

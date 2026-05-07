@@ -44,10 +44,13 @@ delivery, and unsubscribe promises wait for the matching
 `UnsubscribeSingleApplied`/`UnsubscribeMultiApplied` or `SubscriptionError`.
 It also has a raw RowList decoder for the live server row-batch payload shape,
 with decoded raw per-row byte arrays on one-off query table results, table
-initial rows, and optional table unsubscribe rows. It does not yet implement
-typed reducer argument/result encoding, schema-aware declared query/view/table
-row decoding, typed row callbacks, subscription cache behavior, auth refresh,
-or reconnect policy.
+initial rows, and optional table unsubscribe rows. Declared-view and table
+subscriptions can opt into managed subscription handles with
+`returnHandle: true`; those handles use the same server-acknowledged
+unsubscribe path, and table handles expose raw initial row bytes until typed
+row decoding lands. It does not yet implement typed reducer argument/result
+encoding, schema-aware declared query/view/table row decoding, typed row
+callbacks, subscription cache behavior, auth refresh, or reconnect policy.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
 fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
@@ -159,6 +162,10 @@ Completed or partially complete:
   `[row_count][row_len,row_data...]` payload shape and expose raw per-row byte
   arrays on decoded one-off query table results, table initial rows, and
   optional table unsubscribe rows.
+- Wire `returnHandle: true` on declared-view and table subscriptions to the
+  managed subscription handle primitive. The handle path preserves the existing
+  server-acknowledged unsubscribe behavior; table handles currently hold raw
+  initial row bytes and declared-view handles are lifecycle-only.
 
 Remaining:
 

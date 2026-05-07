@@ -21,10 +21,12 @@ import type {
   ProtocolMetadata,
   RawRowList,
   RawSubscriptionUpdate,
+  DeclaredViewHandleSubscriber,
   RuntimeBindings,
   ShunterErrorKind,
   SubscribeSingleAppliedMessage,
   SubscriptionHandle,
+  TableHandleSubscriber,
 } from "../src/index";
 import {
   callCreateMessage,
@@ -94,7 +96,11 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const generatedClientReducerCaller: ReducerCaller = client.callReducer;
   const generatedClientDeclaredQueryRunner: DeclaredQueryRunner = client.runDeclaredQuery;
   const generatedClientDeclaredViewSubscriber: DeclaredViewSubscriber = client.subscribeDeclaredView;
+  const generatedClientDeclaredViewHandleSubscriber: DeclaredViewHandleSubscriber<ExecutableViewName> =
+    client.subscribeDeclaredView;
   const generatedClientTableSubscriber: TableSubscriber = client.subscribeTable;
+  const generatedClientTableHandleSubscriber: TableHandleSubscriber<TableName> =
+    client.subscribeTable;
   const encodedRequest: EncodedReducerCallRequest<ReducerName> =
     encodeReducerCallRequest(reducers.createMessage, new Uint8Array([1, 2, 3]), {
       requestId: 9,
@@ -178,6 +184,16 @@ async function exerciseGeneratedBindings(): Promise<void> {
       onRawUpdate: rawUpdateHandler,
     });
   await unsubscribeRawTable();
+  const declaredViewHandle: SubscriptionHandle<Uint8Array> =
+    await generatedClientDeclaredViewHandleSubscriber("live_message_projection", {
+      returnHandle: true,
+    });
+  await declaredViewHandle.unsubscribe();
+  const tableHandleFromClient: SubscriptionHandle<Uint8Array> =
+    await generatedClientTableHandleSubscriber("messages", undefined, {
+      returnHandle: true,
+    });
+  await tableHandleFromClient.unsubscribe();
 
   const tableSubscriber: TableSubscriber<MessagesRow> = async (table, onRows) => {
     onRows?.([

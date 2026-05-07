@@ -189,7 +189,8 @@ compatibility helpers, generated import goldens, subscription handle primitive,
 minimal WebSocket lifecycle shell, initial IdentityToken decoding, and raw-byte
 reducer, declared-query, and declared-view subscribe request/response
 foundations added; raw table subscription request/response foundation added;
-raw subscription update callback plumbing and raw RowList splitting added;
+raw subscription update callback plumbing, raw RowList splitting, and
+server-acknowledged managed subscription handle return paths added;
 schema-aware typed row decoding/cache behavior and reconnect behavior remain.
 
 Tasks:
@@ -204,8 +205,9 @@ Tasks:
   row decoding, subscription cache behavior, typed row callback delivery, and
   unsubscribe acknowledgement integration with managed handles on top of the
   minimal WebSocket lifecycle shell.
-- Wire the managed subscription handle primitive into real server subscribe and
-  unsubscribe responses beyond the current raw callback and ack paths.
+- Expand the current managed subscription handle integration beyond raw table
+  initial rows and declared-view lifecycle state once schema-aware row decoding
+  and cache behavior exist.
 - Add tests for connection transitions, auth failure, reducer/query/view
   success and failure, initial snapshots, deltas, unsubscribe, reconnect, and
   mismatch handling.
