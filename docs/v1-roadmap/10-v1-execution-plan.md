@@ -100,6 +100,10 @@ Completed in this phase:
   SubscribeSingle, and SubscribeMulti errors for every explicit v1 non-goal
   class, including the subscription offending-SQL suffix and no executor
   registration on rejection.
+- Parser/planner coverage now pins representative supported read-matrix shapes
+  and every explicit v1 SQL non-goal at the `queryplan.Build` boundary;
+  generic parse failures preserve `ErrUnsupportedSQL` classification while
+  keeping the existing diagnostic text.
 - Auth/visibility read-surface proof now covers private/read-policy admission,
   declared-read permission context, `:sender` caller identity, and visibility
   filtering before query results, live initial rows, and live deltas across

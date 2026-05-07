@@ -1,6 +1,6 @@
 # SQL And Read Scope
 
-Status: active, declared-read contract/codegen shape coverage and unsupported SQL diagnostics coverage complete
+Status: active, parser/planner matrix, diagnostics, and declared-read shape coverage complete
 Owner: unassigned
 Scope: the amount of SQL and declared-read behavior Shunter actually needs for
 v1.
@@ -204,11 +204,12 @@ Completed or partially complete:
   client-visible diagnostics on OneOff, SubscribeSingle, and SubscribeMulti;
   subscription admission errors include the offending SQL text and do not reach
   executor registration.
+- Add parser/planner coverage that representative supported read-matrix shapes
+  build successfully and every explicit v1 SQL non-goal preserves
+  `ErrUnsupportedSQL` classification at the queryplan boundary.
 
 Remaining:
 
-- Add or confirm parser/planner tests for every supported and rejected shape in
-  the final matrix.
 - Add performance tests for expensive supported shapes.
 - Remove or label docs that imply broader SQL support than the code guarantees.
 

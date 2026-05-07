@@ -88,7 +88,7 @@ func normalizeParseError(err error, allowLimit bool) error {
 	if errors.As(err, &unsupExprErr) {
 		return err
 	}
-	return fmt.Errorf("parse: %v", err)
+	return fmt.Errorf("parse: %w", err)
 }
 
 // OrderByColumns returns the complete ORDER BY term list while preserving
