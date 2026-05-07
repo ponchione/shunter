@@ -100,7 +100,7 @@ func TestDeclaredViewAdmissionPlanCarriesSubscriptionRegistrationState(t *testin
 		t.Fatalf("executableDeclaredRead: %v", err)
 	}
 
-	plan := newDeclaredViewAdmissionPlan(entry, compiled, caller)
+	plan := newDeclaredViewAdmissionPlan(entry, compiled, caller, rt.registry)
 	if plan.name != "live_visible_ranks" || plan.sqlText != sqlText || plan.tableName != "messages" {
 		t.Fatalf("plan identity = name %q sql %q table %q", plan.name, plan.sqlText, plan.tableName)
 	}
@@ -148,6 +148,53 @@ func TestDeclaredViewAdmissionPlanCarriesSubscriptionRegistrationState(t *testin
 	}
 	if len(req.PredicateHashIdentities) != 1 || req.PredicateHashIdentities[0] == nil || *req.PredicateHashIdentities[0] != caller.Identity {
 		t.Fatalf("request predicate hash identities = %#v, want caller identity", req.PredicateHashIdentities)
+	}
+}
+
+func TestDeclaredViewAdmissionPlanRecordsJoinGraph(t *testing.T) {
+	const sqlText = "SELECT b.* FROM messages AS a JOIN messages AS b ON a.id = b.id"
+	rt, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name:        "live_matching_messages",
+			SQL:         sqlText,
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	entry, ok := rt.readCatalog.lookup("live_matching_messages")
+	if !ok {
+		t.Fatal("declared view catalog entry missing")
+	}
+	compiled, err := rt.executableDeclaredRead(entry, types.CallerContext{Identity: types.Identity{9}})
+	if err != nil {
+		t.Fatalf("executableDeclaredRead: %v", err)
+	}
+
+	plan := newDeclaredViewAdmissionPlan(entry, compiled, types.CallerContext{Identity: types.Identity{9}}, rt.registry)
+	if plan.projectedRelation != 1 {
+		t.Fatalf("projectedRelation = %d, want 1 for SELECT b.*", plan.projectedRelation)
+	}
+	if len(plan.relations) != 2 {
+		t.Fatalf("len(relations) = %d, want 2", len(plan.relations))
+	}
+	if plan.relations[0].table != 0 || plan.relations[1].table != 0 {
+		t.Fatalf("relations = %+v, want two messages relation instances", plan.relations)
+	}
+	if plan.relations[0].alias == plan.relations[1].alias {
+		t.Fatalf("relation aliases = %+v, want distinct self-join aliases", plan.relations)
+	}
+	if len(plan.joinConditions) != 1 {
+		t.Fatalf("len(joinConditions) = %d, want 1", len(plan.joinConditions))
+	}
+	condition := plan.joinConditions[0]
+	if condition.left.relation != 0 || condition.right.relation != 1 ||
+		condition.left.table != 0 || condition.right.table != 0 ||
+		condition.left.column != 0 || condition.right.column != 0 {
+		t.Fatalf("join condition = %+v, want relation 0 id = relation 1 id", condition)
+	}
+	if !condition.left.indexed || !condition.right.indexed {
+		t.Fatalf("join condition indexes = left %t right %t, want both indexed", condition.left.indexed, condition.right.indexed)
 	}
 }
 
