@@ -50,11 +50,13 @@ subscribe responses, caller-bound committed `TransactionUpdate` frames, and
 `UnsubscribeSingleApplied`/`UnsubscribeMultiApplied` or `SubscriptionError`
 frames. The runtime also exposes `decodeRowList()` for the live RowList
 payload shape and includes raw per-row byte arrays on decoded one-off query
-tables, table initial rows, and optional table unsubscribe rows.
+tables, table initial rows, and optional table unsubscribe rows. Raw
+subscription updates now include optional `insertRowBytes` and `deleteRowBytes`
+arrays when their insert/delete payloads decode as RowList envelopes.
 `subscribeDeclaredView()` and `subscribeTable()` can also opt into
-`returnHandle: true`, resolving with a managed subscription handle backed by
-the same server-acknowledged unsubscribe path. Table handles expose raw initial
-row bytes; declared-view handles currently expose lifecycle state only. Typed
+`returnHandle: true`, resolving with a managed subscription handle backed by the
+same server-acknowledged unsubscribe path. Table handles expose raw initial row
+bytes; declared-view handles currently expose lifecycle state only. Typed
 reducer argument/result encoding, schema-aware declared query/view/table row
 decoding, typed row callbacks, subscription cache behavior, reconnect policy,
 and local cache implementation remain open.
@@ -180,7 +182,8 @@ does not yet update local cache state, decode initial rows, or apply typed row
 deltas.
 Raw update callback consumers can call `decodeRowList()` on live insert/delete
 payloads when they need per-row byte slices before generated schema codecs
-exist.
+exist, or use optional `insertRowBytes`/`deleteRowBytes` fields on raw updates
+when the payloads already decoded as RowList envelopes.
 
 Current table foundation: the runtime can encode a raw `SubscribeSingle` query
 string and `createShunterClient().subscribeTable(...)` builds a quoted

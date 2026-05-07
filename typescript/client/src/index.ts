@@ -620,6 +620,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     tableName: update.tableName,
     inserts: new Uint8Array(update.inserts),
     deletes: new Uint8Array(update.deletes),
+    ...(update.insertRowBytes === undefined
+      ? {}
+      : { insertRowBytes: update.insertRowBytes.map((row) => new Uint8Array(row)) }),
+    ...(update.deleteRowBytes === undefined
+      ? {}
+      : { deleteRowBytes: update.deleteRowBytes.map((row) => new Uint8Array(row)) }),
   });
 
   const registerActiveSubscription = (
@@ -1500,6 +1506,8 @@ export interface RawSubscriptionUpdate {
   readonly tableName: string;
   readonly inserts: Uint8Array;
   readonly deletes: Uint8Array;
+  readonly insertRowBytes?: readonly Uint8Array[];
+  readonly deleteRowBytes?: readonly Uint8Array[];
 }
 
 export type RawSubscriptionUpdateCallback = (update: RawSubscriptionUpdate) => void;
@@ -1662,6 +1670,14 @@ export function decodeRowList(data: unknown): RawRowList {
 
 function decodeEnvelopeRowList(rows: Uint8Array): readonly Uint8Array[] {
   return rows.length === 0 ? [] : decodeRowList(rows).rows;
+}
+
+function tryDecodeEnvelopeRowList(rows: Uint8Array): readonly Uint8Array[] | undefined {
+  try {
+    return decodeEnvelopeRowList(rows);
+  } catch {
+    return undefined;
+  }
 }
 
 export interface SubscribeSingleAppliedMessage {
@@ -1991,7 +2007,16 @@ function readRawSubscriptionUpdates(
     offset = insertsOffset;
     const [deletes, deletesOffset] = readBytes(frame, offset, "SubscriptionUpdate deletes");
     offset = deletesOffset;
-    updates.push({ queryId, tableName, inserts, deletes });
+    const insertRowBytes = tryDecodeEnvelopeRowList(inserts);
+    const deleteRowBytes = tryDecodeEnvelopeRowList(deletes);
+    updates.push({
+      queryId,
+      tableName,
+      inserts,
+      deletes,
+      ...(insertRowBytes === undefined ? {} : { insertRowBytes }),
+      ...(deleteRowBytes === undefined ? {} : { deleteRowBytes }),
+    });
   }
   return [updates, offset];
 }

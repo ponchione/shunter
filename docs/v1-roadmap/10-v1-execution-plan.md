@@ -189,8 +189,9 @@ compatibility helpers, generated import goldens, subscription handle primitive,
 minimal WebSocket lifecycle shell, initial IdentityToken decoding, and raw-byte
 reducer, declared-query, and declared-view subscribe request/response
 foundations added; raw table subscription request/response foundation added;
-raw subscription update callback plumbing, raw RowList splitting, and
-server-acknowledged managed subscription handle return paths added;
+raw subscription update callback plumbing, raw RowList splitting, optional raw
+RowList convenience fields on subscription updates, and server-acknowledged
+managed subscription handle return paths added;
 schema-aware typed row decoding/cache behavior and reconnect behavior remain.
 
 Tasks:

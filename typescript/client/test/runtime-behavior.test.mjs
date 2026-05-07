@@ -296,6 +296,8 @@ assert.deepEqual(
   decodeRowList(committedUpdate.status.updates[0].inserts).rows.map((row) => [...row]),
   [[1, 2], [3]],
 );
+assert.deepEqual(committedUpdate.status.updates[0].insertRowBytes.map((row) => [...row]), [[1, 2], [3]]);
+assert.equal(committedUpdate.status.updates[0].deleteRowBytes, undefined);
 assert.equal(committedUpdate.timestamp, 0x0102030405060708n);
 assert.deepEqual([...committedUpdate.callerIdentity.slice(0, 3)], [0x20, 0x21, 0x22]);
 assert.deepEqual([...committedUpdate.callerConnectionId.slice(0, 3)], [0xa0, 0xa1, 0xa2]);
@@ -328,6 +330,14 @@ assert.deepEqual(
   decodeRowList(lightUpdate.updates[0].inserts).rows.map((row) => [...row]),
   [[1, 2], [3]],
 );
+assert.deepEqual(lightUpdate.updates[0].insertRowBytes.map((row) => [...row]), [[1, 2], [3]]);
+assert.equal(lightUpdate.updates[0].deleteRowBytes, undefined);
+
+const rowListDeleteLightUpdate = decodeTransactionUpdateLightFrame(bytesFromHex(
+  "0801000000010000000200000005000000757365727304000000000000000a00000001000000020000000405",
+));
+assert.deepEqual(rowListDeleteLightUpdate.updates[0].insertRowBytes.map((row) => [...row]), []);
+assert.deepEqual(rowListDeleteLightUpdate.updates[0].deleteRowBytes.map((row) => [...row]), [[4, 5]]);
 
 const oneOffSuccessFrame = bytesFromHex(
   "0602000000010200010000000500000075736572730f0000000200000002000000010201000000031817161514131211",
@@ -395,6 +405,8 @@ assert.equal(subscribeApplied.queryId, 0x61626364);
 assert.equal(subscribeApplied.totalHostExecutionDurationMicros, 0x5152535455565758n);
 assert.equal(subscribeApplied.updates.length, 1);
 assert.equal(subscribeApplied.updates[0].tableName, "users");
+assert.deepEqual(subscribeApplied.updates[0].insertRowBytes.map((row) => [...row]), [[1, 2], [3]]);
+assert.equal(subscribeApplied.updates[0].deleteRowBytes, undefined);
 
 const unsubscribeMultiAppliedFrame = bytesFromHex(
   "0a7473727188878685848382819493929101000000040302010500000075736572730f000000020000000200000001020100000003020000000405",
@@ -555,6 +567,8 @@ assert.equal(tableRawRows[0].tableName, "users");
 sockets[0].message(tableLightUpdateFrame);
 assert.equal(tableRawUpdates.length, 1);
 assert.equal(tableRawUpdates[0].queryId, 0x11121314);
+assert.deepEqual(tableRawUpdates[0].insertRowBytes.map((row) => [...row]), [[1, 2], [3]]);
+assert.equal(tableRawUpdates[0].deleteRowBytes, undefined);
 const unsubscribeTableResult = unsubscribeTable();
 assert.equal(unsubscribeTable(), unsubscribeTableResult);
 assert.equal(sockets[0].sent.length, 10);

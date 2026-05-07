@@ -21,10 +21,12 @@ for `UnsubscribeSingleApplied`/`UnsubscribeMultiApplied` or matching
 `SubscriptionError`. It also exposes a raw `decodeRowList()` helper for the
 live RowList payload shape and attaches raw per-row byte arrays to decoded
 one-off query table rows, table initial rows, and optional table unsubscribe
-rows. `subscribeDeclaredView()` and `subscribeTable()` also accept
-`returnHandle: true` to resolve with a managed subscription handle wired to the
-same server-acknowledged unsubscribe path. Table handles expose raw row bytes
-from the initial snapshot; declared-view handles are lifecycle-only until
+rows. Raw subscription updates include optional `insertRowBytes` and
+`deleteRowBytes` arrays when their insert/delete payloads can be decoded as
+RowList envelopes. `subscribeDeclaredView()` and `subscribeTable()` also
+accept `returnHandle: true` to resolve with a managed subscription handle wired
+to the same server-acknowledged unsubscribe path. Table handles expose raw row
+bytes from the initial snapshot; declared-view handles are lifecycle-only until
 schema-aware view row decoding lands. It does not implement typed reducer
 argument/result encoding,
 schema-aware declared query/view/table row decoding, typed row callbacks,
@@ -55,7 +57,8 @@ acceptance and acknowledgement semantics while resolving with a
 Declared-view and table subscriptions can opt into raw row-list/update bytes
 with `onRawUpdate` and table-only `onRawRows` callbacks while typed decoding is
 still pending. Callback consumers can use `decodeRowList()` to split live
-RowList payloads into raw per-row bytes before generated schema codecs exist.
+RowList payloads into raw per-row bytes before generated schema codecs exist,
+or read `insertRowBytes`/`deleteRowBytes` from raw updates when present.
 
 Generated module bindings should import types from `@shunter/client` and keep
 module-specific table, reducer, query, and view names in the generated file.

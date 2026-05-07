@@ -129,9 +129,13 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const encodedTableFrame: Uint8Array = encodedTableRequest.frame;
   const rawUpdateHandler = (update: RawSubscriptionUpdate): void => {
     const rawInserts: Uint8Array = update.inserts;
+    const insertRowBytes: readonly Uint8Array[] | undefined = update.insertRowBytes;
+    const deleteRowBytes: readonly Uint8Array[] | undefined = update.deleteRowBytes;
     const insertedRows: RawRowList = decodeRowList(rawInserts);
     const insertedRowCount: number = insertedRows.rows.length;
     void insertedRowCount;
+    void insertRowBytes;
+    void deleteRowBytes;
     void rawInserts;
   };
   const rawRowsHandler = (message: SubscribeSingleAppliedMessage): void => {
