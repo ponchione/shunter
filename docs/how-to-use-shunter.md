@@ -166,6 +166,11 @@ are reported as failed reducer results. The executor recovers reducer panics,
 records them as failed calls, and continues serving later work. That recovery
 does not protect the process from app-started goroutines, process-wide panics,
 deadlocks, memory exhaustion, or blocking calls that never return.
+Local reducer calls expose typed statuses for user errors, app panics,
+permission failures, and Shunter runtime failures. Protocol `TransactionUpdate`
+failure strings include the same source distinction with `app reducer error:`,
+`app reducer panic:`, `permission denied:`, or `shunter runtime error:`
+prefixes.
 
 Lifecycle hooks and scheduled reducer calls use the same in-process trust
 boundary. Migration hooks may run during startup or through an offline

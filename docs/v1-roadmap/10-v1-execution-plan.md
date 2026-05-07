@@ -296,8 +296,8 @@ Exit criteria:
 
 Goal: Shunter's execution boundary is clear and honest.
 
-Status: v1 app-trust model documented and confirmation tests audited; residual
-error wording remains.
+Status: v1 app-trust model documented and confirmation tests audited; reducer
+failure-source wording aligned.
 
 Tasks:
 
@@ -307,6 +307,8 @@ Tasks:
 - Document panic and error behavior.
 - Keep tests current for reducer panics, lifecycle failures, scheduler callback
   failures, migration-hook failures, cancellation, and shutdown.
+- Keep protocol reducer failure strings labeled by source: app reducer error,
+  app reducer panic, permission denial, or Shunter runtime error.
 - Keep `internal/processboundary` as internal/post-v1 unless a separate decision
   changes scope.
 - Do not add execution-limit configuration for v1 unless the runtime gains a

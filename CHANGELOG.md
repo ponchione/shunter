@@ -67,6 +67,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Hardened composite secondary index behavior across unique enforcement, reducer index seeks, snapshot/recovery rebuilds, and detached contract validation.
 - Documented fixed-point persisted values as an app-owned scaled integer convention over deterministic integer column kinds.
 - Added generic auth principals on reducer caller context, populated from validated protocol JWT claims and local call options without changing Shunter identity semantics.
+- Protocol reducer failure strings now label app reducer errors, app panics,
+  permission denials, and Shunter runtime failures.
 
 ## v0.1.0 - 2026-05-05
 

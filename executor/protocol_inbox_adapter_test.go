@@ -965,8 +965,8 @@ func TestProtocolInboxAdapter_CallReducer_TranslatesFailedReducerResponse(t *tes
 		if !ok {
 			t.Fatalf("status = %T, want protocol.StatusFailed", update.Status)
 		}
-		if failed.Error != "boom" {
-			t.Fatalf("failed.Error = %q, want boom", failed.Error)
+		if failed.Error != "app reducer error: boom" {
+			t.Fatalf("failed.Error = %q, want app reducer error", failed.Error)
 		}
 		if update.CallerConnectionID != connID || update.CallerIdentity != identity {
 			t.Fatalf("update caller metadata = %+v", update)
@@ -976,6 +976,41 @@ func TestProtocolInboxAdapter_CallReducer_TranslatesFailedReducerResponse(t *tes
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for TransactionUpdate")
+	}
+}
+
+func TestReducerStatusToProtocolLabelsFailureSource(t *testing.T) {
+	tests := []struct {
+		name   string
+		resp   ReducerResponse
+		want   string
+		commit bool
+	}{
+		{name: "committed", resp: ReducerResponse{Status: StatusCommitted}, commit: true},
+		{name: "user", resp: ReducerResponse{Status: StatusFailedUser, Error: errors.New("boom")}, want: "app reducer error: boom"},
+		{name: "panic", resp: ReducerResponse{Status: StatusFailedPanic, Error: errors.New("boom")}, want: "app reducer panic: boom"},
+		{name: "permission", resp: ReducerResponse{Status: StatusFailedPermission, Error: errors.New("missing perm")}, want: "permission denied: missing perm"},
+		{name: "internal", resp: ReducerResponse{Status: StatusFailedInternal, Error: errors.New("disk failed")}, want: "shunter runtime error: disk failed"},
+		{name: "unknown_status", resp: ReducerResponse{Status: ReducerStatus(99)}, want: "shunter runtime error: executor reducer status 99"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status := reducerStatusToProtocol(tt.resp)
+			if tt.commit {
+				if _, ok := status.(protocol.StatusCommitted); !ok {
+					t.Fatalf("status = %T, want protocol.StatusCommitted", status)
+				}
+				return
+			}
+			failed, ok := status.(protocol.StatusFailed)
+			if !ok {
+				t.Fatalf("status = %T, want protocol.StatusFailed", status)
+			}
+			if failed.Error != tt.want {
+				t.Fatalf("failed.Error = %q, want %q", failed.Error, tt.want)
+			}
+		})
 	}
 }
 
@@ -1206,8 +1241,8 @@ func TestProtocolInboxAdapter_CallReducer_DeliversFailureEvenWhenNoSuccessNotify
 		if !ok {
 			t.Fatalf("status = %T, want protocol.StatusFailed", update.Status)
 		}
-		if failed.Error != "boom" {
-			t.Fatalf("failed.Error = %q, want boom", failed.Error)
+		if failed.Error != "app reducer error: boom" {
+			t.Fatalf("failed.Error = %q, want app reducer error", failed.Error)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for TransactionUpdate")
@@ -1234,7 +1269,7 @@ func TestProtocolInboxAdapter_ForwardReducerResponse_ClosedInternalChannelFails(
 		if !ok {
 			t.Fatalf("status = %T, want protocol.StatusFailed", update.Status)
 		}
-		if failed.Error != "executor reducer response channel closed" {
+		if failed.Error != "shunter runtime error: executor reducer response channel closed" {
 			t.Fatalf("failed.Error = %q, want closed-channel error", failed.Error)
 		}
 	case <-time.After(2 * time.Second):

@@ -390,7 +390,10 @@ func (a *ProtocolInboxAdapter) forwardReducerResponse(ctx context.Context, req p
 	select {
 	case resp, ok := <-respCh:
 		if !ok {
-			sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, protocol.StatusFailed{Error: "executor reducer response channel closed"}))
+			sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(ReducerResponse{
+				Status: StatusFailedInternal,
+				Error:  errors.New("executor reducer response channel closed"),
+			})))
 			return
 		}
 		if resp.Committed != nil {
@@ -401,7 +404,10 @@ func (a *ProtocolInboxAdapter) forwardReducerResponse(ctx context.Context, req p
 			}
 			update, err := protocol.BuildTransactionUpdateHeavy(req.ConnID, resp.Committed.Outcome, resp.Committed.Updates, nil)
 			if err != nil {
-				sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, protocol.StatusFailed{Error: fmt.Sprintf("encode caller outcome: %v", err)}))
+				sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(ReducerResponse{
+					Status: StatusFailedInternal,
+					Error:  fmt.Errorf("encode caller outcome: %w", err),
+				})))
 				return
 			}
 			sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, update)
@@ -444,8 +450,24 @@ func reducerStatusToProtocol(resp ReducerResponse) protocol.UpdateStatus {
 	if resp.Status == StatusCommitted {
 		return protocol.StatusCommitted{}
 	}
+	return protocol.StatusFailed{Error: reducerFailureText(resp)}
+}
+
+func reducerFailureText(resp ReducerResponse) string {
+	detail := fmt.Sprintf("executor reducer status %d", resp.Status)
 	if resp.Error != nil {
-		return protocol.StatusFailed{Error: resp.Error.Error()}
+		detail = resp.Error.Error()
 	}
-	return protocol.StatusFailed{Error: fmt.Sprintf("executor reducer status %d", resp.Status)}
+	switch resp.Status {
+	case StatusFailedUser:
+		return "app reducer error: " + detail
+	case StatusFailedPanic:
+		return "app reducer panic: " + detail
+	case StatusFailedPermission:
+		return "permission denied: " + detail
+	case StatusFailedInternal:
+		return "shunter runtime error: " + detail
+	default:
+		return "shunter runtime error: " + detail
+	}
 }

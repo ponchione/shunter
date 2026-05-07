@@ -1,6 +1,6 @@
 # Process Isolation And App Trust Model
 
-Status: open, v1 app-trust model documented; residual error wording remains
+Status: active, v1 app-trust model and failure-source wording documented
 Owner: unassigned
 Scope: Shunter's execution trust boundary for Go modules, reducer behavior,
 side effects, global state, and future out-of-process isolation.
@@ -47,6 +47,10 @@ Current code reality:
   behavior in `executor/scheduler_firing_test.go`, migration hook failure in
   `migration_test.go`, and cancellation/shutdown behavior in `local_test.go`
   and `lifecycle_test.go`.
+- Local reducer results expose typed user-error, panic, permission, and
+  internal statuses. Protocol reducer failure strings now preserve that
+  distinction with source prefixes so app failures and Shunter runtime failures
+  are visible to clients.
 
 ## Settled v1 Decisions
 
@@ -79,13 +83,16 @@ Completed or partially complete:
   back the documented app-trust model.
 - Settle the v1 process-isolation policy as an explicit in-process app-trust
   model with no new sandbox or timeout configuration.
+- Add protocol adapter coverage that labels reducer user errors, reducer
+  panics, permission failures, internal failures, and unknown executor statuses
+  in caller-visible failed `TransactionUpdate` strings.
 
 Remaining:
 
 - Keep confirmation tests current when panic, cancellation, shutdown, or
   failed-hook behavior changes.
-- Ensure errors clearly distinguish app failure from Shunter runtime failure
-  across local and protocol surfaces.
+- Keep failure-source wording stable and clearly documented when local or
+  protocol reducer result surfaces change.
 
 ## Verification
 
