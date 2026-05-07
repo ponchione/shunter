@@ -65,10 +65,10 @@ Several original roadmap gaps now have partial implementation:
   WebSocket lifecycle shell with IdentityToken decoding, a subscription handle
   primitive, raw reducer request/response handling, and raw declared-query
   request/response handling. It now also has raw declared-view subscribe
-  acceptance/error correlation and an unsubscribe send path, but typed reducer
-  codecs, declared query/view row decoding, declared-view delta/cache behavior,
-  table-subscription plumbing, reconnect behavior, and canary wiring are not
-  complete.
+  acceptance/error correlation, raw table subscription acceptance/error
+  correlation, and unsubscribe send paths, but typed reducer codecs, declared
+  query/view/table row decoding, subscription delta/cache behavior, reconnect
+  behavior, and canary wiring are not complete.
 - A release-candidate app workload exists in tests. The maintained v1
   canary/reference app is the external `opsboard-canary` repository; do not add
   a duplicate in-repo task-board app.

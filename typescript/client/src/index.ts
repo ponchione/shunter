@@ -4,11 +4,15 @@ export const SHUNTER_CURRENT_PROTOCOL_VERSION = SHUNTER_PROTOCOL_V1;
 export const SHUNTER_SUBPROTOCOL_V1 = "v1.bsatn.shunter" as const;
 export const SHUNTER_DEFAULT_SUBPROTOCOL = SHUNTER_SUBPROTOCOL_V1;
 export const SHUNTER_SUPPORTED_SUBPROTOCOLS = [SHUNTER_SUBPROTOCOL_V1] as const;
+export const SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_SINGLE = 1 as const;
+export const SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_SINGLE = 2 as const;
 export const SHUNTER_CLIENT_MESSAGE_CALL_REDUCER = 3 as const;
 export const SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_MULTI = 6 as const;
 export const SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY = 7 as const;
 export const SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW = 8 as const;
 export const SHUNTER_SERVER_MESSAGE_IDENTITY_TOKEN = 1 as const;
+export const SHUNTER_SERVER_MESSAGE_SUBSCRIBE_SINGLE_APPLIED = 2 as const;
+export const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_SINGLE_APPLIED = 3 as const;
 export const SHUNTER_SERVER_MESSAGE_SUBSCRIPTION_ERROR = 4 as const;
 export const SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE = 6 as const;
 export const SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE = 5 as const;
@@ -330,10 +334,12 @@ interface PendingDeclaredQuery {
   reject(error: ShunterError): void;
 }
 
-interface PendingDeclaredViewSubscription {
-  readonly name: string;
+interface PendingSubscription {
+  readonly kind: "declared_view" | "table";
+  readonly target: string;
   readonly requestId: RequestID;
   readonly queryId: QueryID;
+  readonly tableName?: string;
   readonly cleanup?: () => void;
   resolve(value: SubscriptionUnsubscribe): void;
   reject(error: ShunterError): void;
@@ -345,6 +351,7 @@ export interface ShunterClient<Protocol extends ProtocolMetadata = ProtocolMetad
   callReducer: ReducerCaller<string, Uint8Array, Uint8Array>;
   runDeclaredQuery: DeclaredQueryRunner<string, Uint8Array>;
   subscribeDeclaredView: DeclaredViewSubscriber<string>;
+  subscribeTable: RawTableSubscriber;
   close(code?: number, reason?: string): Promise<void>;
   dispose(): Promise<void>;
   onStateChange(listener: ConnectionStateListener<Protocol>): () => void;
@@ -368,8 +375,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   let nextQueryId: QueryID = 1;
   const pendingReducerCalls = new Map<RequestID, PendingReducerCall>();
   const pendingDeclaredQueries = new Map<string, PendingDeclaredQuery>();
-  const pendingDeclaredViewSubscriptionsByRequest = new Map<RequestID, PendingDeclaredViewSubscription>();
-  const pendingDeclaredViewSubscriptionsByQuery = new Map<QueryID, PendingDeclaredViewSubscription>();
+  const pendingSubscriptionsByRequest = new Map<RequestID, PendingSubscription>();
+  const pendingSubscriptionsByQuery = new Map<QueryID, PendingSubscription>();
   const listeners = new Set<ConnectionStateListener<Protocol>>();
   if (options.onStateChange !== undefined) {
     listeners.add(options.onStateChange);
@@ -415,15 +422,15 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
   };
 
-  const cleanupPendingDeclaredViewSubscription = (pending: PendingDeclaredViewSubscription): void => {
+  const cleanupPendingSubscription = (pending: PendingSubscription): void => {
     pending.cleanup?.();
-    pendingDeclaredViewSubscriptionsByRequest.delete(pending.requestId);
-    pendingDeclaredViewSubscriptionsByQuery.delete(pending.queryId);
+    pendingSubscriptionsByRequest.delete(pending.requestId);
+    pendingSubscriptionsByQuery.delete(pending.queryId);
   };
 
-  const rejectPendingDeclaredViewSubscriptions = (error: ShunterError): void => {
-    for (const pending of [...pendingDeclaredViewSubscriptionsByRequest.values()]) {
-      cleanupPendingDeclaredViewSubscription(pending);
+  const rejectPendingSubscriptions = (error: ShunterError): void => {
+    for (const pending of [...pendingSubscriptionsByRequest.values()]) {
+      cleanupPendingSubscription(pending);
       pending.reject(error);
     }
   };
@@ -431,7 +438,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   const rejectPendingOperations = (error: ShunterError): void => {
     rejectPendingReducerCalls(error);
     rejectPendingDeclaredQueries(error);
-    rejectPendingDeclaredViewSubscriptions(error);
+    rejectPendingSubscriptions(error);
   };
 
   const finishClose = (): void => {
@@ -558,17 +565,17 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     pending.resolve(response.rawFrame);
   };
 
-  const pendingDeclaredViewSubscriptionForResponse = (
+  const pendingSubscriptionForResponse = (
     requestId: RequestID | undefined,
     queryId: QueryID | undefined,
     label: string,
-  ): PendingDeclaredViewSubscription | undefined => {
+  ): PendingSubscription | undefined => {
     const requestPending =
-      requestId === undefined ? undefined : pendingDeclaredViewSubscriptionsByRequest.get(requestId);
+      requestId === undefined ? undefined : pendingSubscriptionsByRequest.get(requestId);
     const queryPending =
-      queryId === undefined ? undefined : pendingDeclaredViewSubscriptionsByQuery.get(queryId);
+      queryId === undefined ? undefined : pendingSubscriptionsByQuery.get(queryId);
     if (requestPending !== undefined && queryPending !== undefined && requestPending !== queryPending) {
-      failConnected(new ShunterProtocolError(`${label} response matched multiple pending declared view subscriptions.`, {
+      failConnected(new ShunterProtocolError(`${label} response matched multiple pending subscriptions.`, {
         details: { requestId, queryId },
       }));
       return undefined;
@@ -581,7 +588,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       (requestId !== undefined && requestId !== pending.requestId) ||
       (queryId !== undefined && queryId !== pending.queryId)
     ) {
-      failConnected(new ShunterProtocolError(`${label} response did not match the pending declared view subscription.`, {
+      failConnected(new ShunterProtocolError(`${label} response did not match the pending subscription.`, {
         details: {
           expectedRequestId: pending.requestId,
           expectedQueryId: pending.queryId,
@@ -594,7 +601,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     return pending;
   };
 
-  const declaredViewUnsubscribe = (queryId: QueryID): SubscriptionUnsubscribe => {
+  const unsubscribeOnce = (
+    queryId: QueryID,
+    encodeRequest: (queryId: QueryID, options: { readonly requestId?: RequestID }) => EncodedSubscriptionUnsubscribeRequest,
+    closedMessage: string,
+    sendMessage: string,
+  ): SubscriptionUnsubscribe => {
     let unsubscribePromise: Promise<void> | undefined;
     return () => {
       if (unsubscribePromise !== undefined) {
@@ -603,23 +615,63 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       unsubscribePromise = (async () => {
         const activeSocket = socket;
         if (state.status !== "connected" || activeSocket === undefined) {
-          throw new ShunterClosedClientError("Cannot unsubscribe after the Shunter client is disconnected.");
+          throw new ShunterClosedClientError(closedMessage);
         }
-        const request = encodeUnsubscribeMultiRequest(queryId, {
+        const request = encodeRequest(queryId, {
           requestId: allocateRequestId(),
         });
         try {
           activeSocket.send(request.frame);
         } catch (error) {
-          throw toShunterError(error, "transport", "Unsubscribe request send failed");
+          throw toShunterError(error, "transport", sendMessage);
         }
       })();
       return unsubscribePromise;
     };
   };
 
+  const declaredViewUnsubscribe = (queryId: QueryID): SubscriptionUnsubscribe =>
+    unsubscribeOnce(
+      queryId,
+      encodeUnsubscribeMultiRequest,
+      "Cannot unsubscribe after the Shunter client is disconnected.",
+      "Unsubscribe request send failed",
+    );
+
+  const tableSubscriptionUnsubscribe = (queryId: QueryID): SubscriptionUnsubscribe =>
+    unsubscribeOnce(
+      queryId,
+      encodeUnsubscribeSingleRequest,
+      "Cannot unsubscribe a table subscription after the Shunter client is disconnected.",
+      "Table unsubscribe request send failed",
+    );
+
+  const settleTableSubscriptionApplied = (response: SubscribeSingleAppliedMessage): void => {
+    const pending = pendingSubscriptionForResponse(
+      response.requestId,
+      response.queryId,
+      "SubscribeSingleApplied",
+    );
+    if (pending === undefined) {
+      return;
+    }
+    if (pending.kind !== "table" || pending.tableName !== response.tableName) {
+      failConnected(new ShunterProtocolError("SubscribeSingleApplied response did not match the pending table subscription.", {
+        details: {
+          expectedKind: pending.kind,
+          expectedTableName: pending.tableName,
+          receivedTableName: response.tableName,
+          response,
+        },
+      }));
+      return;
+    }
+    cleanupPendingSubscription(pending);
+    pending.resolve(tableSubscriptionUnsubscribe(response.queryId));
+  };
+
   const settleDeclaredViewSubscriptionApplied = (response: SubscriptionSetAppliedMessage): void => {
-    const pending = pendingDeclaredViewSubscriptionForResponse(
+    const pending = pendingSubscriptionForResponse(
       response.requestId,
       response.queryId,
       "SubscribeMultiApplied",
@@ -627,12 +679,18 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     if (pending === undefined) {
       return;
     }
-    cleanupPendingDeclaredViewSubscription(pending);
+    if (pending.kind !== "declared_view") {
+      failConnected(new ShunterProtocolError("SubscribeMultiApplied response did not match the pending declared view subscription.", {
+        details: { expectedKind: pending.kind, response },
+      }));
+      return;
+    }
+    cleanupPendingSubscription(pending);
     pending.resolve(declaredViewUnsubscribe(response.queryId));
   };
 
   const settleSubscriptionError = (response: SubscriptionErrorMessage): void => {
-    const pending = pendingDeclaredViewSubscriptionForResponse(
+    const pending = pendingSubscriptionForResponse(
       response.requestId,
       response.queryId,
       "SubscriptionError",
@@ -640,10 +698,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     if (pending === undefined) {
       return;
     }
-    cleanupPendingDeclaredViewSubscription(pending);
+    cleanupPendingSubscription(pending);
     pending.reject(new ShunterValidationError(response.error || "Subscription failed.", {
       code: "subscription_failed",
-      details: { name: pending.name, response },
+      details: { kind: pending.kind, target: pending.target, response },
     }));
   };
 
@@ -657,6 +715,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
     try {
       switch (frame[0]) {
+        case SHUNTER_SERVER_MESSAGE_SUBSCRIBE_SINGLE_APPLIED:
+          settleTableSubscriptionApplied(decodeSubscribeSingleAppliedFrame(frame));
+          return;
+        case SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_SINGLE_APPLIED:
+          decodeUnsubscribeSingleAppliedFrame(frame);
+          return;
         case SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE:
           settleReducerResponse(decodeTransactionUpdateFrame(frame));
           return;
@@ -959,8 +1023,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         queryId: options.queryId ?? allocateQueryId(),
       });
       if (
-        pendingDeclaredViewSubscriptionsByRequest.has(request.requestId) ||
-        pendingDeclaredViewSubscriptionsByQuery.has(request.queryId)
+        pendingSubscriptionsByRequest.has(request.requestId) ||
+        pendingSubscriptionsByQuery.has(request.queryId)
       ) {
         throw new ShunterValidationError("Declared view subscription ID is already in flight.", {
           details: { name, requestId: request.requestId, queryId: request.queryId },
@@ -970,9 +1034,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         let cleanup: (() => void) | undefined;
         if (options.signal !== undefined) {
           const abort = (): void => {
-            const pending = pendingDeclaredViewSubscriptionsByRequest.get(request.requestId);
+            const pending = pendingSubscriptionsByRequest.get(request.requestId);
             if (pending !== undefined) {
-              cleanupPendingDeclaredViewSubscription(pending);
+              cleanupPendingSubscription(pending);
             }
             cleanup?.();
             reject(new ShunterClosedClientError("Declared view subscription aborted before a response was received."));
@@ -982,21 +1046,86 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
             options.signal?.removeEventListener("abort", abort);
           };
         }
-        const pending: PendingDeclaredViewSubscription = {
-          name,
+        const pending: PendingSubscription = {
+          kind: "declared_view",
+          target: name,
           requestId: request.requestId,
           queryId: request.queryId,
           cleanup,
           resolve,
           reject,
         };
-        pendingDeclaredViewSubscriptionsByRequest.set(request.requestId, pending);
-        pendingDeclaredViewSubscriptionsByQuery.set(request.queryId, pending);
+        pendingSubscriptionsByRequest.set(request.requestId, pending);
+        pendingSubscriptionsByQuery.set(request.queryId, pending);
         try {
           activeSocket.send(request.frame);
         } catch (error) {
-          cleanupPendingDeclaredViewSubscription(pending);
+          cleanupPendingSubscription(pending);
           reject(toShunterError(error, "transport", "Declared view subscription request send failed"));
+        }
+      });
+    },
+    async subscribeTable<Table extends string, Row = unknown>(
+      table: Table,
+      _onRows?: (rows: Row[]) => void,
+      options: TableSubscriptionOptions<Row> = {},
+    ): Promise<SubscriptionUnsubscribe> {
+      if (disposed) {
+        throw new ShunterClosedClientError("Cannot subscribe a table on a disposed Shunter client.");
+      }
+      if (options.signal?.aborted) {
+        throw new ShunterClosedClientError("Table subscription aborted before sending.");
+      }
+      const activeSocket = socket;
+      if (state.status !== "connected" || activeSocket === undefined) {
+        throw new ShunterClosedClientError("Cannot subscribe a table before the Shunter client is connected.");
+      }
+      const request = encodeTableSubscriptionRequest(table, {
+        ...options,
+        requestId: options.requestId ?? allocateRequestId(),
+        queryId: options.queryId ?? allocateQueryId(),
+      });
+      if (
+        pendingSubscriptionsByRequest.has(request.requestId) ||
+        pendingSubscriptionsByQuery.has(request.queryId)
+      ) {
+        throw new ShunterValidationError("Table subscription ID is already in flight.", {
+          details: { table, requestId: request.requestId, queryId: request.queryId },
+        });
+      }
+      return new Promise<SubscriptionUnsubscribe>((resolve, reject) => {
+        let cleanup: (() => void) | undefined;
+        if (options.signal !== undefined) {
+          const abort = (): void => {
+            const pending = pendingSubscriptionsByRequest.get(request.requestId);
+            if (pending !== undefined) {
+              cleanupPendingSubscription(pending);
+            }
+            cleanup?.();
+            reject(new ShunterClosedClientError("Table subscription aborted before a response was received."));
+          };
+          options.signal.addEventListener("abort", abort, { once: true });
+          cleanup = () => {
+            options.signal?.removeEventListener("abort", abort);
+          };
+        }
+        const pending: PendingSubscription = {
+          kind: "table",
+          target: table,
+          requestId: request.requestId,
+          queryId: request.queryId,
+          tableName: table,
+          cleanup,
+          resolve,
+          reject,
+        };
+        pendingSubscriptionsByRequest.set(request.requestId, pending);
+        pendingSubscriptionsByQuery.set(request.queryId, pending);
+        try {
+          activeSocket.send(request.frame);
+        } catch (error) {
+          cleanupPendingSubscription(pending);
+          reject(toShunterError(error, "transport", "Table subscription request send failed"));
         }
       });
     },
@@ -1195,6 +1324,24 @@ export function decodeOneOffQueryResponseFrame(data: unknown): OneOffQueryRespon
   };
 }
 
+export interface SubscribeSingleAppliedMessage {
+  readonly requestId: RequestID;
+  readonly totalHostExecutionDurationMicros: bigint;
+  readonly queryId: QueryID;
+  readonly tableName: string;
+  readonly rows: Uint8Array;
+  readonly rawFrame: Uint8Array;
+}
+
+export interface UnsubscribeSingleAppliedMessage {
+  readonly requestId: RequestID;
+  readonly totalHostExecutionDurationMicros: bigint;
+  readonly queryId: QueryID;
+  readonly hasRows: boolean;
+  readonly rows?: Uint8Array;
+  readonly rawFrame: Uint8Array;
+}
+
 export interface SubscriptionSetAppliedMessage {
   readonly requestId: RequestID;
   readonly totalHostExecutionDurationMicros: bigint;
@@ -1210,6 +1357,76 @@ export interface SubscriptionErrorMessage {
   readonly tableId?: number;
   readonly error: string;
   readonly rawFrame: Uint8Array;
+}
+
+export function decodeSubscribeSingleAppliedFrame(data: unknown): SubscribeSingleAppliedMessage {
+  const frame = frameBytes(data);
+  if (frame.length < 1 || frame[0] !== SHUNTER_SERVER_MESSAGE_SUBSCRIBE_SINGLE_APPLIED) {
+    throw new ShunterProtocolError("Expected SubscribeSingleApplied server message.");
+  }
+  let offset = 1;
+  const [requestId, requestOffset] = readUint32LE(frame, offset, "SubscribeSingleApplied request_id");
+  offset = requestOffset;
+  const [totalHostExecutionDurationMicros, durationOffset] = readUint64LE(
+    frame,
+    offset,
+    "SubscribeSingleApplied total_host_execution_duration_micros",
+  );
+  offset = durationOffset;
+  const [queryId, queryOffset] = readUint32LE(frame, offset, "SubscribeSingleApplied query_id");
+  offset = queryOffset;
+  const [tableName, tableOffset] = readStringValue(frame, offset, "SubscribeSingleApplied table_name");
+  offset = tableOffset;
+  const [rows, rowsOffset] = readBytes(frame, offset, "SubscribeSingleApplied rows");
+  offset = rowsOffset;
+  if (offset !== frame.length) {
+    throw new ShunterProtocolError("Malformed SubscribeSingleApplied: trailing bytes.");
+  }
+  return {
+    requestId,
+    totalHostExecutionDurationMicros,
+    queryId,
+    tableName,
+    rows,
+    rawFrame: new Uint8Array(frame),
+  };
+}
+
+export function decodeUnsubscribeSingleAppliedFrame(data: unknown): UnsubscribeSingleAppliedMessage {
+  const frame = frameBytes(data);
+  if (frame.length < 1 || frame[0] !== SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_SINGLE_APPLIED) {
+    throw new ShunterProtocolError("Expected UnsubscribeSingleApplied server message.");
+  }
+  let offset = 1;
+  const [requestId, requestOffset] = readUint32LE(frame, offset, "UnsubscribeSingleApplied request_id");
+  offset = requestOffset;
+  const [totalHostExecutionDurationMicros, durationOffset] = readUint64LE(
+    frame,
+    offset,
+    "UnsubscribeSingleApplied total_host_execution_duration_micros",
+  );
+  offset = durationOffset;
+  const [queryId, queryOffset] = readUint32LE(frame, offset, "UnsubscribeSingleApplied query_id");
+  offset = queryOffset;
+  const [hasRows, rowsTagOffset] = readBooleanTag(frame, offset, "UnsubscribeSingleApplied has_rows");
+  offset = rowsTagOffset;
+  let rows: Uint8Array | undefined;
+  if (hasRows) {
+    const [decodedRows, rowsOffset] = readBytes(frame, offset, "UnsubscribeSingleApplied rows");
+    rows = decodedRows;
+    offset = rowsOffset;
+  }
+  if (offset !== frame.length) {
+    throw new ShunterProtocolError("Malformed UnsubscribeSingleApplied: trailing bytes.");
+  }
+  return {
+    requestId,
+    totalHostExecutionDurationMicros,
+    queryId,
+    hasRows,
+    ...(rows === undefined ? {} : { rows }),
+    rawFrame: new Uint8Array(frame),
+  };
 }
 
 export function decodeSubscribeMultiAppliedFrame(data: unknown): SubscriptionSetAppliedMessage {
@@ -1364,6 +1581,20 @@ function readOptionalUint32(
       return readUint32LE(frame, offset, label);
     default:
       throw new ShunterProtocolError(`Malformed frame: ${label} option tag ${tag}.`);
+  }
+}
+
+function readBooleanTag(frame: Uint8Array, offset: number, label: string): [boolean, number] {
+  if (frame.length < offset + 1) {
+    throw new ShunterProtocolError(`Malformed frame: ${label} is truncated.`);
+  }
+  switch (frame[offset]) {
+    case 0:
+      return [false, offset + 1];
+    case 1:
+      return [true, offset + 1];
+    default:
+      throw new ShunterProtocolError(`Malformed frame: ${label} tag ${frame[offset]}.`);
   }
 }
 
@@ -1787,12 +2018,31 @@ export interface DeclaredViewSubscriptionOptions<Row = unknown> {
   readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
 }
 
+export interface EncodedSubscribeSingleRequest {
+  readonly queryString: string;
+  readonly requestId: RequestID;
+  readonly queryId: QueryID;
+  readonly frame: Uint8Array;
+}
+
+export interface EncodedTableSubscriptionRequest<Table extends string = string> extends EncodedSubscribeSingleRequest {
+  readonly table: Table;
+}
+
 export interface EncodedDeclaredViewSubscriptionRequest<Name extends string = string> {
   readonly name: Name;
   readonly requestId: RequestID;
   readonly queryId: QueryID;
   readonly frame: Uint8Array;
 }
+
+export interface EncodedSubscriptionUnsubscribeRequest {
+  readonly requestId: RequestID;
+  readonly queryId: QueryID;
+  readonly frame: Uint8Array;
+}
+
+export interface EncodedUnsubscribeSingleRequest extends EncodedSubscriptionUnsubscribeRequest {}
 
 export interface EncodedUnsubscribeMultiRequest {
   readonly requestId: RequestID;
@@ -1804,6 +2054,46 @@ export type DeclaredViewSubscriber<Name extends string = string> = (
   name: Name,
   options?: DeclaredViewSubscriptionOptions,
 ) => Promise<SubscriptionUnsubscribe>;
+
+export function encodeSubscribeSingleRequest<Row = unknown>(
+  queryString: string,
+  options: TableSubscriptionOptions<Row> = {},
+): EncodedSubscribeSingleRequest {
+  const requestId = options.requestId ?? 0;
+  const queryId = options.queryId ?? 0;
+  assertUint32(requestId, "SubscribeSingle request ID");
+  assertUint32(queryId, "SubscribeSingle query ID");
+  const query = utf8Bytes(queryString, "SubscribeSingle query string");
+  const frameLength =
+    1 +
+    4 +
+    4 +
+    4 + query.length;
+  const frame = new Uint8Array(frameLength);
+  let offset = 0;
+  frame[offset] = SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_SINGLE;
+  offset += 1;
+  offset = writeUint32LE(frame, offset, requestId);
+  offset = writeUint32LE(frame, offset, queryId);
+  offset = writeUint32LE(frame, offset, query.length);
+  frame.set(query, offset);
+  return {
+    queryString,
+    requestId,
+    queryId,
+    frame,
+  };
+}
+
+export function encodeTableSubscriptionRequest<Table extends string, Row = unknown>(
+  table: Table,
+  options: TableSubscriptionOptions<Row> = {},
+): EncodedTableSubscriptionRequest<Table> {
+  return {
+    table,
+    ...encodeSubscribeSingleRequest(`SELECT * FROM ${quoteSqlIdentifier(table)}`, options),
+  };
+}
 
 export function encodeDeclaredViewSubscriptionRequest<Name extends string>(
   name: Name,
@@ -1835,20 +2125,50 @@ export function encodeDeclaredViewSubscriptionRequest<Name extends string>(
   };
 }
 
+export function encodeUnsubscribeSingleRequest(
+  queryId: QueryID,
+  options: { readonly requestId?: RequestID } = {},
+): EncodedUnsubscribeSingleRequest {
+  return encodeSubscriptionUnsubscribeRequest(
+    SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_SINGLE,
+    queryId,
+    "UnsubscribeSingle",
+    options,
+  );
+}
+
 export function encodeUnsubscribeMultiRequest(
   queryId: QueryID,
   options: { readonly requestId?: RequestID } = {},
 ): EncodedUnsubscribeMultiRequest {
+  return encodeSubscriptionUnsubscribeRequest(
+    SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_MULTI,
+    queryId,
+    "Unsubscribe",
+    options,
+  );
+}
+
+function encodeSubscriptionUnsubscribeRequest(
+  tag: number,
+  queryId: QueryID,
+  label: string,
+  options: { readonly requestId?: RequestID } = {},
+): EncodedSubscriptionUnsubscribeRequest {
   const requestId = options.requestId ?? 0;
-  assertUint32(requestId, "Unsubscribe request ID");
-  assertUint32(queryId, "Unsubscribe query ID");
+  assertUint32(requestId, `${label} request ID`);
+  assertUint32(queryId, `${label} query ID`);
   const frame = new Uint8Array(1 + 4 + 4);
   let offset = 0;
-  frame[offset] = SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_MULTI;
+  frame[offset] = tag;
   offset += 1;
   offset = writeUint32LE(frame, offset, requestId);
   writeUint32LE(frame, offset, queryId);
   return { requestId, queryId, frame };
+}
+
+function quoteSqlIdentifier(identifier: string): string {
+  return `"${identifier.replaceAll('"', '""')}"`;
 }
 
 export interface TableSubscriptionOptions<Row = unknown> {
@@ -1866,6 +2186,12 @@ export type TableSubscriber<
   table: Table,
   onRows?: (rows: ([Row] extends [never] ? RowsByName[Table] : Row)[]) => void,
   options?: TableSubscriptionOptions<[Row] extends [never] ? RowsByName[Table] : Row>,
+) => Promise<SubscriptionUnsubscribe>;
+
+export type RawTableSubscriber = <Table extends string, Row = unknown>(
+  table: Table,
+  onRows?: (rows: Row[]) => void,
+  options?: TableSubscriptionOptions<Row>,
 ) => Promise<SubscriptionUnsubscribe>;
 
 export type ViewSubscriber = (

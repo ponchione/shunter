@@ -40,11 +40,13 @@ request encoding for v1 `DeclaredQueryMsg` frames and correlates
 `OneOffQueryResponse` frames. It also exposes raw declared-view subscription
 request encoding for v1 `SubscribeDeclaredView` frames, correlates
 `SubscribeMultiApplied` and `SubscriptionError` responses, and returns an
-idempotent unsubscribe function that sends `UnsubscribeMulti`. Typed reducer
-argument/result encoding, declared query/view row decoding, declared-view
-delta/cache behavior, table-subscription message plumbing, unsubscribe
-acknowledgement handling, reconnect policy, and local cache implementation
-remain open.
+idempotent unsubscribe function that sends `UnsubscribeMulti`. It also exposes
+raw table subscription request encoding for v1 `SubscribeSingle` frames,
+correlates `SubscribeSingleApplied` and `SubscriptionError` responses, and
+returns an idempotent unsubscribe function that sends `UnsubscribeSingle`.
+Typed reducer argument/result encoding, declared query/view/table row decoding,
+subscription delta/cache behavior, unsubscribe acknowledgement handling,
+reconnect policy, and local cache implementation remain open.
 
 ## Runtime API
 
@@ -158,6 +160,15 @@ structured validation error. On acceptance, the method returns an idempotent
 unsubscribe function that sends `UnsubscribeMulti` for the accepted query ID.
 The unsubscribe helper does not yet wait for `UnsubscribeMultiApplied`, update
 local cache state, decode initial rows, or apply later row deltas.
+
+Current table foundation: the runtime can encode a raw `SubscribeSingle` query
+string and `createShunterClient().subscribeTable(...)` builds a quoted
+whole-table `SELECT * FROM "<table>"` query. The method waits for the matching
+`SubscribeSingleApplied` response, rejects matching `SubscriptionError`
+responses, and returns an idempotent unsubscribe function that sends
+`UnsubscribeSingle`. It does not yet decode the initial row list, call the
+table row callback, wait for `UnsubscribeSingleApplied`, update local cache
+state, or apply later row deltas.
 
 Subscription handles must provide:
 

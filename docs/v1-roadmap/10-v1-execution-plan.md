@@ -188,8 +188,9 @@ Status: package location decided; runtime type foundation, protocol
 compatibility helpers, generated import goldens, subscription handle primitive,
 minimal WebSocket lifecycle shell, initial IdentityToken decoding, and raw-byte
 reducer, declared-query, and declared-view subscribe request/response
-foundations added; table-subscription runtime, row decoding/cache behavior,
-unsubscribe acknowledgement handling, and reconnect behavior remain.
+foundations added; raw table subscription request/response foundation added;
+row decoding/cache behavior, unsubscribe acknowledgement handling, and
+reconnect behavior remain.
 
 Tasks:
 
@@ -199,10 +200,9 @@ Tasks:
   target before generating more helpers.
 - Decide typed reducer argument/result encoding conventions beyond the current
   raw `Uint8Array` request path.
-- Build typed reducer result decoding, declared-query row decoding,
-  declared-view row/delta/cache behavior, table-subscription protocol message
-  plumbing, and unsubscribe acknowledgement semantics on top of the minimal
-  WebSocket lifecycle shell.
+- Build typed reducer result decoding, declared query/view/table row decoding,
+  subscription delta/cache behavior, row callback delivery, and unsubscribe
+  acknowledgement semantics on top of the minimal WebSocket lifecycle shell.
 - Wire the managed subscription handle primitive into real server subscribe and
   unsubscribe responses beyond the current raw unsubscribe send path.
 - Add tests for connection transitions, auth failure, reducer/query/view

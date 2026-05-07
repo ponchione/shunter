@@ -9,13 +9,15 @@ lifecycle shell with initial `IdentityToken` decoding, a managed subscription
 handle primitive, typed runtime interfaces, and raw reducer request encoding
 plus connected WebSocket sending for the v1 `CallReducerMsg` shape and minimal
 full-update `TransactionUpdate` response correlation. It also includes raw
-declared-query request encoding and `OneOffQueryResponse` correlation. It does
-also includes raw declared-view subscription request encoding,
-`SubscribeMultiApplied`/`SubscriptionError` correlation, and an idempotent
-unsubscribe send path for `UnsubscribeMulti`. It does not implement typed
-reducer argument/result encoding, declared query/view row decoding,
-declared-view delta/cache behavior, table-subscription protocol messages,
-unsubscribe acknowledgement handling, reconnect policy, or cache behavior yet.
+declared-query request encoding and `OneOffQueryResponse` correlation, raw
+declared-view subscription request encoding,
+`SubscribeMultiApplied`/`SubscriptionError` correlation, an idempotent
+unsubscribe send path for `UnsubscribeMulti`, raw table subscription request
+encoding, `SubscribeSingleApplied`/`SubscriptionError` correlation, and an
+idempotent unsubscribe send path for `UnsubscribeSingle`. It does not implement
+typed reducer argument/result encoding, declared query/view row decoding,
+table row decoding/callbacks, subscription delta/cache behavior, unsubscribe
+acknowledgement handling, reconnect policy, or cache behavior yet.
 
 The lifecycle shell offers Shunter's v1 subprotocol, appends a configured token
 as the server-supported `token` query parameter, tracks `idle`/`connecting`/
@@ -31,6 +33,10 @@ frame on success and rejects on response errors.
 `subscribeDeclaredView()` currently resolves after `SubscribeMultiApplied`,
 rejects on `SubscriptionError`, and returns an unsubscribe function that sends
 one `UnsubscribeMulti` frame for repeated calls.
+`subscribeTable()` currently sends a quoted whole-table `SubscribeSingle` SQL
+query, resolves after `SubscribeSingleApplied`, rejects on `SubscriptionError`,
+and returns an unsubscribe function that sends one `UnsubscribeSingle` frame
+for repeated calls.
 
 Generated module bindings should import types from `@shunter/client` and keep
 module-specific table, reducer, query, and view names in the generated file.

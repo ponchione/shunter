@@ -3,6 +3,8 @@ import {
   encodeDeclaredQueryRequest,
   encodeDeclaredViewSubscriptionRequest,
   encodeReducerCallRequest,
+  encodeSubscribeSingleRequest,
+  encodeTableSubscriptionRequest,
   ShunterAuthError,
   ShunterProtocolMismatchError,
   createShunterClient,
@@ -13,6 +15,8 @@ import type {
   EncodedDeclaredQueryRequest,
   EncodedDeclaredViewSubscriptionRequest,
   EncodedReducerCallRequest,
+  EncodedSubscribeSingleRequest,
+  EncodedTableSubscriptionRequest,
   ProtocolMetadata,
   RuntimeBindings,
   ShunterErrorKind,
@@ -86,6 +90,7 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const generatedClientReducerCaller: ReducerCaller = client.callReducer;
   const generatedClientDeclaredQueryRunner: DeclaredQueryRunner = client.runDeclaredQuery;
   const generatedClientDeclaredViewSubscriber: DeclaredViewSubscriber = client.subscribeDeclaredView;
+  const generatedClientTableSubscriber: TableSubscriber = client.subscribeTable;
   const encodedRequest: EncodedReducerCallRequest<ReducerName> =
     encodeReducerCallRequest(reducers.createMessage, new Uint8Array([1, 2, 3]), {
       requestId: 9,
@@ -100,6 +105,18 @@ async function exerciseGeneratedBindings(): Promise<void> {
       queryId: 12,
     });
   const encodedViewFrame: Uint8Array = encodedViewRequest.frame;
+  const encodedSubscribeSingle: EncodedSubscribeSingleRequest =
+    encodeSubscribeSingleRequest("SELECT * FROM messages", {
+      requestId: 13,
+      queryId: 14,
+    });
+  const encodedSubscribeSingleFrame: Uint8Array = encodedSubscribeSingle.frame;
+  const encodedTableRequest: EncodedTableSubscriptionRequest<TableName> =
+    encodeTableSubscriptionRequest("messages", {
+      requestId: 15,
+      queryId: 16,
+    });
+  const encodedTableFrame: Uint8Array = encodedTableRequest.frame;
 
   const reducerCaller: ReducerCaller = async (_name, args) => args;
   const reducerBytes: Uint8Array = await callCreateMessage(
@@ -116,7 +133,6 @@ async function exerciseGeneratedBindings(): Promise<void> {
     await subscribeLiveMessageProjection(declaredViewSubscriber);
   await unsubscribeView();
 
-  const runtimeTableSubscriber: TableSubscriber = async () => () => {};
   const runtimeBindings: RuntimeBindings<
     TableName,
     TableRows,
@@ -127,7 +143,7 @@ async function exerciseGeneratedBindings(): Promise<void> {
     callReducer: generatedClientReducerCaller,
     runDeclaredQuery: generatedClientDeclaredQueryRunner,
     subscribeDeclaredView: generatedClientDeclaredViewSubscriber,
-    subscribeTable: runtimeTableSubscriber,
+    subscribeTable: generatedClientTableSubscriber,
   };
   const unsubscribeFromBindings: SubscriptionUnsubscribe =
     await subscribeLiveMessageCount(runtimeBindings.subscribeDeclaredView);
@@ -152,6 +168,8 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void encodedFrame;
   void encodedQueryFrame;
   void encodedViewFrame;
+  void encodedSubscribeSingleFrame;
+  void encodedTableFrame;
   void queryBytes;
 }
 

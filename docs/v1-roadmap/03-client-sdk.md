@@ -36,10 +36,12 @@ the live v1 `CallReducerMsg` wire shape, plus minimal full-update
 raw-byte declared-query request path and `OneOffQueryResponse` correlation. It
 also has raw declared-view subscribe request encoding, `SubscribeMultiApplied`
 and `SubscriptionError` correlation, and an idempotent unsubscribe send path for
-`UnsubscribeMulti`. It does not yet implement typed reducer argument/result
-encoding, typed declared query/view row decoding, declared-view delta/cache
-behavior, table-subscription protocol plumbing, auth refresh, unsubscribe
-acknowledgement handling, or reconnect policy.
+`UnsubscribeMulti`. It also has raw table subscription request encoding,
+`SubscribeSingleApplied` and `SubscriptionError` correlation, and an idempotent
+unsubscribe send path for `UnsubscribeSingle`. It does not yet implement typed
+reducer argument/result encoding, typed declared query/view/table row decoding,
+subscription delta/cache behavior, auth refresh, unsubscribe acknowledgement
+handling, or reconnect policy.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
 fixtures and handwritten protocol helpers as a canary bridge. Once the v1 SDK
@@ -136,18 +138,22 @@ Completed or partially complete:
   `SubscribeDeclaredView` wire shape, correlate `SubscribeMultiApplied` and
   `SubscriptionError` frames for acceptance/failure, and return an idempotent
   unsubscribe function that sends `UnsubscribeMulti`.
+- Add raw table subscription request encoding for the live v1
+  `SubscribeSingle` wire shape, correlate `SubscribeSingleApplied` and
+  `SubscriptionError` frames for acceptance/failure, and return an idempotent
+  unsubscribe function that sends `UnsubscribeSingle`.
 
 Remaining:
 
 - Decide and implement typed reducer argument/result encoding conventions
   beyond the current raw `Uint8Array` request path.
 - Implement typed reducer result decoding beyond the current raw
-  `TransactionUpdate` frame result, declared-query row decoding, declared-view
-  row/delta/cache behavior, table-subscription protocol plumbing, and
+  `TransactionUpdate` frame result, declared-query row decoding, declared
+  view/table row callback delivery, subscription delta/cache behavior, and
   unsubscribe acknowledgement semantics on top of the WebSocket lifecycle
   shell.
-- Implement row decoding for declared query/view results and subscription
-  updates.
+- Implement row decoding for declared query/view/table results and
+  subscription updates.
 - Implement reconnect, auth refresh, resubscription, and cache behavior.
 - Add client tests for:
   - connection state transitions

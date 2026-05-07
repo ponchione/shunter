@@ -90,6 +90,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added raw TypeScript declared-view subscription request encoding,
   `SubscribeMultiApplied`/`SubscriptionError` correlation, and an idempotent
   `UnsubscribeMulti` send path.
+- Added raw TypeScript table subscription request encoding,
+  `SubscribeSingleApplied`/`SubscriptionError` correlation, and an idempotent
+  `UnsubscribeSingle` send path.
 
 ## v0.1.0 - 2026-05-05
 
