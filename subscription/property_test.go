@@ -662,6 +662,12 @@ func pruningIndexesEmpty(idx *PruningIndexes) bool {
 	if len(idx.JoinRangePath5Edge.edges) != 0 || len(idx.JoinRangePath5Edge.byTable) != 0 {
 		return false
 	}
+	if len(idx.JoinPath6Edge.edges) != 0 || len(idx.JoinPath6Edge.byTable) != 0 {
+		return false
+	}
+	if len(idx.JoinRangePath6Edge.edges) != 0 || len(idx.JoinRangePath6Edge.byTable) != 0 {
+		return false
+	}
 	if len(idx.Table.tables) != 0 {
 		return false
 	}
