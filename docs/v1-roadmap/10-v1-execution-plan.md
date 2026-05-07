@@ -267,7 +267,8 @@ Exit criteria:
 
 Goal: Shunter's execution boundary is clear and honest.
 
-Status: app-author trust-model docs added; confirmation tests remain.
+Status: app-author trust-model docs added and confirmation tests audited;
+residual error wording and config decisions remain.
 
 Tasks:
 
@@ -275,8 +276,8 @@ Tasks:
 - State reducer, lifecycle-hook, scheduler, and migration-hook side-effect
   expectations.
 - Document panic and error behavior.
-- Add or confirm tests for reducer panics, lifecycle failures, scheduler
-  callback failures, migration-hook failures, cancellation, and shutdown.
+- Keep tests current for reducer panics, lifecycle failures, scheduler callback
+  failures, migration-hook failures, cancellation, and shutdown.
 - Keep `internal/processboundary` as internal/post-v1 unless a separate decision
   changes scope.
 

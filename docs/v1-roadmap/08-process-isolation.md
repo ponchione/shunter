@@ -1,6 +1,7 @@
 # Process Isolation And App Trust Model
 
-Status: open, app-trust docs added; tests remain
+Status: open, app-trust docs and confirmation test audit added; residual error
+wording and config decisions remain
 Owner: unassigned
 Scope: Shunter's execution trust boundary for Go modules, reducer behavior,
 side effects, global state, and future out-of-process isolation.
@@ -42,6 +43,11 @@ Current code reality:
 - The app-author guide now includes an explicit in-process trust-model section.
 - `internal/processboundary` remains internal and should not be treated as a v1
   feature without a separate decision.
+- Confirmation coverage includes reducer panic rollback in `gauntlet_test.go`,
+  lifecycle panic handling in `executor/lifecycle_test.go`, scheduler panic
+  behavior in `executor/scheduler_firing_test.go`, migration hook failure in
+  `migration_test.go`, and cancellation/shutdown behavior in `local_test.go`
+  and `lifecycle_test.go`.
 
 ## v1 Decisions To Make
 
@@ -68,11 +74,13 @@ Completed or partially complete:
 - Document the v1 app-trust model in app-author docs.
 - Add package and gauntlet coverage for reducer panic, lifecycle, scheduler,
   shutdown, and failed migration-hook behavior.
+- Confirm the existing panic, cancellation, shutdown, and failed-hook tests that
+  back the documented app-trust model.
 
 Remaining:
 
-- Add or confirm tests for every documented panic, cancellation, shutdown, and
-  failed-hook behavior.
+- Keep confirmation tests current when panic, cancellation, shutdown, or
+  failed-hook behavior changes.
 - Ensure errors clearly distinguish app failure from Shunter runtime failure
   across local and protocol surfaces.
 - Add optional configuration for execution limits only if the current runtime
