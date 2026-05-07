@@ -619,6 +619,14 @@ func runRegistrationSymmetryIteration(t *testing.T, seed uint64) {
 
 // pruningIndexesEmpty peeks into each tier's internal state. All tiers must
 // contain zero entries for registration symmetry to hold.
+func (ji *joinPathFixedValueIndex[E]) emptyForTest() bool {
+	return len(ji.inner.edges) == 0 && len(ji.inner.byTable) == 0
+}
+
+func (ji *joinPathFixedRangeIndex[E]) emptyForTest() bool {
+	return len(ji.inner.edges) == 0 && len(ji.inner.byTable) == 0
+}
+
 func pruningIndexesEmpty(idx *PruningIndexes) bool {
 	if idx == nil {
 		return true
@@ -644,46 +652,46 @@ func pruningIndexesEmpty(idx *PruningIndexes) bool {
 	if len(idx.joinRangePathEdge.edges) != 0 || len(idx.joinRangePathEdge.byTable) != 0 {
 		return false
 	}
-	if len(idx.JoinPathEdge.inner.edges) != 0 || len(idx.JoinPathEdge.inner.byTable) != 0 {
+	if !idx.JoinPathEdge.emptyForTest() {
 		return false
 	}
-	if len(idx.JoinRangePathEdge.inner.edges) != 0 || len(idx.JoinRangePathEdge.inner.byTable) != 0 {
+	if !idx.JoinRangePathEdge.emptyForTest() {
 		return false
 	}
-	if len(idx.JoinPath3Edge.inner.edges) != 0 || len(idx.JoinPath3Edge.inner.byTable) != 0 {
+	if !idx.JoinPath3Edge.emptyForTest() {
 		return false
 	}
-	if len(idx.JoinRangePath3Edge.inner.edges) != 0 || len(idx.JoinRangePath3Edge.inner.byTable) != 0 {
+	if !idx.JoinRangePath3Edge.emptyForTest() {
 		return false
 	}
-	if len(idx.JoinPath4Edge.inner.edges) != 0 || len(idx.JoinPath4Edge.inner.byTable) != 0 {
+	if !idx.JoinPath4Edge.emptyForTest() {
 		return false
 	}
-	if len(idx.JoinRangePath4Edge.inner.edges) != 0 || len(idx.JoinRangePath4Edge.inner.byTable) != 0 {
+	if !idx.JoinRangePath4Edge.emptyForTest() {
 		return false
 	}
-	if len(idx.JoinPath5Edge.inner.edges) != 0 || len(idx.JoinPath5Edge.inner.byTable) != 0 {
+	if !idx.JoinPath5Edge.emptyForTest() {
 		return false
 	}
-	if len(idx.JoinRangePath5Edge.inner.edges) != 0 || len(idx.JoinRangePath5Edge.inner.byTable) != 0 {
+	if !idx.JoinRangePath5Edge.emptyForTest() {
 		return false
 	}
-	if len(idx.JoinPath6Edge.inner.edges) != 0 || len(idx.JoinPath6Edge.inner.byTable) != 0 {
+	if !idx.JoinPath6Edge.emptyForTest() {
 		return false
 	}
-	if len(idx.JoinRangePath6Edge.inner.edges) != 0 || len(idx.JoinRangePath6Edge.inner.byTable) != 0 {
+	if !idx.JoinRangePath6Edge.emptyForTest() {
 		return false
 	}
-	if len(idx.JoinPath7Edge.inner.edges) != 0 || len(idx.JoinPath7Edge.inner.byTable) != 0 {
+	if !idx.JoinPath7Edge.emptyForTest() {
 		return false
 	}
-	if len(idx.JoinRangePath7Edge.inner.edges) != 0 || len(idx.JoinRangePath7Edge.inner.byTable) != 0 {
+	if !idx.JoinRangePath7Edge.emptyForTest() {
 		return false
 	}
-	if len(idx.JoinPath8Edge.inner.edges) != 0 || len(idx.JoinPath8Edge.inner.byTable) != 0 {
+	if !idx.JoinPath8Edge.emptyForTest() {
 		return false
 	}
-	if len(idx.JoinRangePath8Edge.inner.edges) != 0 || len(idx.JoinRangePath8Edge.inner.byTable) != 0 {
+	if !idx.JoinRangePath8Edge.emptyForTest() {
 		return false
 	}
 	if len(idx.Table.tables) != 0 {
