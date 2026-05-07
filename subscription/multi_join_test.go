@@ -480,14 +480,16 @@ func TestMultiJoinPlacementUsesRequiredRemoteFilterPathEdges(t *testing.T) {
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
-	leftPathEdge := JoinPathEdge{
-		LHSTable: 1, MidTable: 2, RHSTable: 3,
-		LHSJoinCol: 1, MidFirstCol: 1, MidSecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(100)); len(got) != 1 || got[0] != hash {
+	leftPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3},
+		[]ColID{1, 0},
+		[]ColID{1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(100)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("required remote range path edge = %v, want [%v]", got, hash)
 	}
-	if got := idx.JoinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(99)); len(got) != 0 {
+	if got := idx.joinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(99)); len(got) != 0 {
 		t.Fatalf("required remote rejected range path edge = %v, want empty", got)
 	}
 	middleEdge := JoinEdge{LHSTable: 2, RHSTable: 3, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 0}

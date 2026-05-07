@@ -1373,11 +1373,13 @@ func TestMultiJoinPlacementSplitOrNonKeyPreservingMultiHopUsesPathEdges(t *testi
 	if got := idx.JoinRangeEdge.Lookup(leftEndpointRangeEdge, types.NewUint64(60)); len(got) != 0 {
 		t.Fatalf("non-key-preserving transitive range edge placement = %v, want empty", got)
 	}
-	leftPathEdge := JoinPathEdge{
-		LHSTable: 1, MidTable: 2, RHSTable: 3,
-		LHSJoinCol: 1, MidFirstCol: 1, MidSecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+	leftPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3},
+		[]ColID{1, 0},
+		[]ColID{1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("non-key-preserving path range edge placement = %v, want [%v]", got, hash)
 	}
 	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
@@ -1387,11 +1389,13 @@ func TestMultiJoinPlacementSplitOrNonKeyPreservingMultiHopUsesPathEdges(t *testi
 	if _, ok := idx.JoinEdge.exists[leftConditionEdge][hash]; ok {
 		t.Fatalf("fallback condition edge present: %+v, want none", idx.JoinEdge.exists)
 	}
-	rightPathEdge := JoinPathEdge{
-		LHSTable: 3, MidTable: 2, RHSTable: 1,
-		LHSJoinCol: 1, MidFirstCol: 0, MidSecondCol: 1, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinPathEdge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+	rightPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{3, 2, 1},
+		[]ColID{1, 1},
+		[]ColID{0, 1},
+		0,
+	)
+	if got := idx.joinPathEdge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("non-key-preserving path value edge placement = %v, want [%v]", got, hash)
 	}
 	for _, table := range []TableID{1, 2, 3} {
@@ -1544,22 +1548,25 @@ func TestMultiJoinPlacementSplitOrThreeHopUsesPath3Edges(t *testing.T) {
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
-	path3Edge := JoinPath3Edge{
-		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, RHSTable: 4,
-		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
-		Mid2FirstCol: 1, Mid2SecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePath3Edge.Lookup(path3Edge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+	pathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3, 4},
+		[]ColID{1, 0, 0},
+		[]ColID{1, 1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(pathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("three-hop path range edge placement = %v, want [%v]", got, hash)
 	}
 	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("three-hop endpoint local placement = %v, want [%v]", got, hash)
 	}
-	shortPathEdge := JoinPathEdge{
-		LHSTable: 1, MidTable: 2, RHSTable: 4,
-		LHSJoinCol: 1, MidFirstCol: 1, MidSecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePathEdge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
+	shortPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 4},
+		[]ColID{1, 0},
+		[]ColID{1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
 		t.Fatalf("two-hop path edge placement = %v, want empty for three-hop path", got)
 	}
 	if got := idx.Table.Lookup(1); len(got) != 0 {
@@ -1709,33 +1716,34 @@ func TestMultiJoinPlacementSplitOrFourHopUsesPath4Edges(t *testing.T) {
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
-	leftPathEdge := JoinPath4Edge{
-		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, Mid3Table: 4, RHSTable: 5,
-		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
-		Mid2FirstCol: 1, Mid2SecondCol: 0,
-		Mid3FirstCol: 1, Mid3SecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePath4Edge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+	leftPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3, 4, 5},
+		[]ColID{1, 0, 0, 0},
+		[]ColID{1, 1, 1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("four-hop path range edge placement = %v, want [%v]", got, hash)
 	}
 	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("four-hop endpoint local placement = %v, want [%v]", got, hash)
 	}
-	rightPathEdge := JoinPath4Edge{
-		LHSTable: 5, Mid1Table: 4, Mid2Table: 3, Mid3Table: 2, RHSTable: 1,
-		LHSJoinCol: 1, Mid1FirstCol: 0, Mid1SecondCol: 1,
-		Mid2FirstCol: 0, Mid2SecondCol: 1,
-		Mid3FirstCol: 0, Mid3SecondCol: 1, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinPath4Edge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+	rightPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{5, 4, 3, 2, 1},
+		[]ColID{1, 1, 1, 1},
+		[]ColID{0, 0, 0, 1},
+		0,
+	)
+	if got := idx.joinPathEdge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("four-hop path value edge placement = %v, want [%v]", got, hash)
 	}
-	shortPathEdge := JoinPath3Edge{
-		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, RHSTable: 5,
-		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
-		Mid2FirstCol: 1, Mid2SecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePath3Edge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
+	shortPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3, 5},
+		[]ColID{1, 0, 0},
+		[]ColID{1, 1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
 		t.Fatalf("three-hop path edge placement = %v, want empty for four-hop path", got)
 	}
 	for _, table := range []TableID{1, 2, 3, 4, 5} {
@@ -1846,38 +1854,34 @@ func TestMultiJoinPlacementSplitOrFiveHopUsesPath5Edges(t *testing.T) {
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
-	leftPathEdge := JoinPath5Edge{
-		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, Mid3Table: 4, Mid4Table: 5, RHSTable: 6,
-		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
-		Mid2FirstCol: 1, Mid2SecondCol: 0,
-		Mid3FirstCol: 1, Mid3SecondCol: 0,
-		Mid4FirstCol: 1, Mid4SecondCol: 0,
-		RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePath5Edge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+	leftPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3, 4, 5, 6},
+		[]ColID{1, 0, 0, 0, 0},
+		[]ColID{1, 1, 1, 1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("five-hop path range edge placement = %v, want [%v]", got, hash)
 	}
 	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("five-hop endpoint local placement = %v, want [%v]", got, hash)
 	}
-	rightPathEdge := JoinPath5Edge{
-		LHSTable: 6, Mid1Table: 5, Mid2Table: 4, Mid3Table: 3, Mid4Table: 2, RHSTable: 1,
-		LHSJoinCol: 1, Mid1FirstCol: 0, Mid1SecondCol: 1,
-		Mid2FirstCol: 0, Mid2SecondCol: 1,
-		Mid3FirstCol: 0, Mid3SecondCol: 1,
-		Mid4FirstCol: 0, Mid4SecondCol: 1,
-		RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinPath5Edge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+	rightPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{6, 5, 4, 3, 2, 1},
+		[]ColID{1, 1, 1, 1, 1},
+		[]ColID{0, 0, 0, 0, 1},
+		0,
+	)
+	if got := idx.joinPathEdge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("five-hop path value edge placement = %v, want [%v]", got, hash)
 	}
-	shortPathEdge := JoinPath4Edge{
-		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, Mid3Table: 4, RHSTable: 6,
-		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
-		Mid2FirstCol: 1, Mid2SecondCol: 0,
-		Mid3FirstCol: 1, Mid3SecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePath4Edge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
+	shortPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3, 4, 6},
+		[]ColID{1, 0, 0, 0},
+		[]ColID{1, 1, 1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
 		t.Fatalf("four-hop path edge placement = %v, want empty for five-hop path", got)
 	}
 	for _, table := range []TableID{1, 2, 3, 4, 5, 6} {
@@ -2011,41 +2015,34 @@ func TestMultiJoinPlacementSplitOrSixHopUsesPath6Edges(t *testing.T) {
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
-	leftPathEdge := JoinPath6Edge{
-		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, Mid3Table: 4, Mid4Table: 5, Mid5Table: 6, RHSTable: 7,
-		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
-		Mid2FirstCol: 1, Mid2SecondCol: 0,
-		Mid3FirstCol: 1, Mid3SecondCol: 0,
-		Mid4FirstCol: 1, Mid4SecondCol: 0,
-		Mid5FirstCol: 1, Mid5SecondCol: 0,
-		RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePath6Edge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+	leftPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3, 4, 5, 6, 7},
+		[]ColID{1, 0, 0, 0, 0, 0},
+		[]ColID{1, 1, 1, 1, 1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("six-hop path range edge placement = %v, want [%v]", got, hash)
 	}
 	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("six-hop endpoint local placement = %v, want [%v]", got, hash)
 	}
-	rightPathEdge := JoinPath6Edge{
-		LHSTable: 7, Mid1Table: 6, Mid2Table: 5, Mid3Table: 4, Mid4Table: 3, Mid5Table: 2, RHSTable: 1,
-		LHSJoinCol: 1, Mid1FirstCol: 0, Mid1SecondCol: 1,
-		Mid2FirstCol: 0, Mid2SecondCol: 1,
-		Mid3FirstCol: 0, Mid3SecondCol: 1,
-		Mid4FirstCol: 0, Mid4SecondCol: 1,
-		Mid5FirstCol: 0, Mid5SecondCol: 1,
-		RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinPath6Edge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+	rightPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{7, 6, 5, 4, 3, 2, 1},
+		[]ColID{1, 1, 1, 1, 1, 1},
+		[]ColID{0, 0, 0, 0, 0, 1},
+		0,
+	)
+	if got := idx.joinPathEdge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("six-hop path value edge placement = %v, want [%v]", got, hash)
 	}
-	shortPathEdge := JoinPath5Edge{
-		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, Mid3Table: 4, Mid4Table: 5, RHSTable: 7,
-		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
-		Mid2FirstCol: 1, Mid2SecondCol: 0,
-		Mid3FirstCol: 1, Mid3SecondCol: 0,
-		Mid4FirstCol: 1, Mid4SecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePath5Edge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
+	shortPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3, 4, 5, 7},
+		[]ColID{1, 0, 0, 0, 0},
+		[]ColID{1, 1, 1, 1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
 		t.Fatalf("five-hop path edge placement = %v, want empty for six-hop path", got)
 	}
 	for _, table := range []TableID{1, 2, 3, 4, 5, 6, 7} {
@@ -2185,44 +2182,34 @@ func TestMultiJoinPlacementSplitOrSevenHopUsesPath7Edges(t *testing.T) {
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
-	leftPathEdge := JoinPath7Edge{
-		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, Mid3Table: 4, Mid4Table: 5, Mid5Table: 6, Mid6Table: 7, RHSTable: 8,
-		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
-		Mid2FirstCol: 1, Mid2SecondCol: 0,
-		Mid3FirstCol: 1, Mid3SecondCol: 0,
-		Mid4FirstCol: 1, Mid4SecondCol: 0,
-		Mid5FirstCol: 1, Mid5SecondCol: 0,
-		Mid6FirstCol: 1, Mid6SecondCol: 0,
-		RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePath7Edge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+	leftPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3, 4, 5, 6, 7, 8},
+		[]ColID{1, 0, 0, 0, 0, 0, 0},
+		[]ColID{1, 1, 1, 1, 1, 1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("seven-hop path range edge placement = %v, want [%v]", got, hash)
 	}
 	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("seven-hop endpoint local placement = %v, want [%v]", got, hash)
 	}
-	rightPathEdge := JoinPath7Edge{
-		LHSTable: 8, Mid1Table: 7, Mid2Table: 6, Mid3Table: 5, Mid4Table: 4, Mid5Table: 3, Mid6Table: 2, RHSTable: 1,
-		LHSJoinCol: 1, Mid1FirstCol: 0, Mid1SecondCol: 1,
-		Mid2FirstCol: 0, Mid2SecondCol: 1,
-		Mid3FirstCol: 0, Mid3SecondCol: 1,
-		Mid4FirstCol: 0, Mid4SecondCol: 1,
-		Mid5FirstCol: 0, Mid5SecondCol: 1,
-		Mid6FirstCol: 0, Mid6SecondCol: 1,
-		RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinPath7Edge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+	rightPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{8, 7, 6, 5, 4, 3, 2, 1},
+		[]ColID{1, 1, 1, 1, 1, 1, 1},
+		[]ColID{0, 0, 0, 0, 0, 0, 1},
+		0,
+	)
+	if got := idx.joinPathEdge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("seven-hop path value edge placement = %v, want [%v]", got, hash)
 	}
-	shortPathEdge := JoinPath6Edge{
-		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, Mid3Table: 4, Mid4Table: 5, Mid5Table: 6, RHSTable: 8,
-		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
-		Mid2FirstCol: 1, Mid2SecondCol: 0,
-		Mid3FirstCol: 1, Mid3SecondCol: 0,
-		Mid4FirstCol: 1, Mid4SecondCol: 0,
-		Mid5FirstCol: 1, Mid5SecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePath6Edge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
+	shortPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3, 4, 5, 6, 8},
+		[]ColID{1, 0, 0, 0, 0, 0},
+		[]ColID{1, 1, 1, 1, 1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
 		t.Fatalf("six-hop path edge placement = %v, want empty for seven-hop path", got)
 	}
 	for _, table := range []TableID{1, 2, 3, 4, 5, 6, 7, 8} {
@@ -2368,56 +2355,34 @@ func TestMultiJoinPlacementSplitOrEightHopUsesPath8Edges(t *testing.T) {
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
-	leftPathEdge := JoinPath8Edge{
-		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, Mid3Table: 4, Mid4Table: 5, Mid5Table: 6, Mid6Table: 7, Mid7Table: 8, RHSTable: 9,
-		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
-		Mid2FirstCol: 1, Mid2SecondCol: 0,
-		Mid3FirstCol: 1, Mid3SecondCol: 0,
-		Mid4FirstCol: 1, Mid4SecondCol: 0,
-		Mid5FirstCol: 1, Mid5SecondCol: 0,
-		Mid6FirstCol: 1, Mid6SecondCol: 0,
-		Mid7FirstCol: 1, Mid7SecondCol: 0,
-		RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePath8Edge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
-		t.Fatalf("eight-hop path range edge placement = %v, want [%v]", got, hash)
-	}
-	leftTraversalEdge := mustJoinPathTraversalEdge(t,
+	leftPathEdge := mustJoinPathTraversalEdge(t,
 		[]TableID{1, 2, 3, 4, 5, 6, 7, 8, 9},
 		[]ColID{1, 0, 0, 0, 0, 0, 0, 0},
 		[]ColID{1, 1, 1, 1, 1, 1, 1, 1},
 		0,
 	)
-	if got := idx.joinRangePathEdge.Lookup(leftTraversalEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
-		t.Fatalf("generic eight-hop path range edge placement = %v, want [%v]", got, hash)
+	if got := idx.joinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+		t.Fatalf("eight-hop path range edge placement = %v, want [%v]", got, hash)
 	}
 	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("eight-hop endpoint local placement = %v, want [%v]", got, hash)
 	}
-	rightPathEdge := JoinPath8Edge{
-		LHSTable: 9, Mid1Table: 8, Mid2Table: 7, Mid3Table: 6, Mid4Table: 5, Mid5Table: 4, Mid6Table: 3, Mid7Table: 2, RHSTable: 1,
-		LHSJoinCol: 1, Mid1FirstCol: 0, Mid1SecondCol: 1,
-		Mid2FirstCol: 0, Mid2SecondCol: 1,
-		Mid3FirstCol: 0, Mid3SecondCol: 1,
-		Mid4FirstCol: 0, Mid4SecondCol: 1,
-		Mid5FirstCol: 0, Mid5SecondCol: 1,
-		Mid6FirstCol: 0, Mid6SecondCol: 1,
-		Mid7FirstCol: 0, Mid7SecondCol: 1,
-		RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinPath8Edge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+	rightPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{9, 8, 7, 6, 5, 4, 3, 2, 1},
+		[]ColID{1, 1, 1, 1, 1, 1, 1, 1},
+		[]ColID{0, 0, 0, 0, 0, 0, 0, 1},
+		0,
+	)
+	if got := idx.joinPathEdge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("eight-hop path value edge placement = %v, want [%v]", got, hash)
 	}
-	shortPathEdge := JoinPath7Edge{
-		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, Mid3Table: 4, Mid4Table: 5, Mid5Table: 6, Mid6Table: 7, RHSTable: 9,
-		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
-		Mid2FirstCol: 1, Mid2SecondCol: 0,
-		Mid3FirstCol: 1, Mid3SecondCol: 0,
-		Mid4FirstCol: 1, Mid4SecondCol: 0,
-		Mid5FirstCol: 1, Mid5SecondCol: 0,
-		Mid6FirstCol: 1, Mid6SecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePath7Edge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
+	shortPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3, 4, 5, 6, 7, 9},
+		[]ColID{1, 0, 0, 0, 0, 0, 0},
+		[]ColID{1, 1, 1, 1, 1, 1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(shortPathEdge, types.NewUint64(60)); len(got) != 0 {
 		t.Fatalf("seven-hop path edge placement = %v, want empty for eight-hop path", got)
 	}
 	for _, table := range []TableID{1, 2, 3, 4, 5, 6, 7, 8, 9} {
@@ -2724,11 +2689,13 @@ func TestMultiJoinPlacementSplitOrNonKeyPreservingPathFallsBackWhenMidUnindexed(
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
-	leftPathEdge := JoinPathEdge{
-		LHSTable: 1, MidTable: 2, RHSTable: 3,
-		LHSJoinCol: 1, MidFirstCol: 1, MidSecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 0 {
+	leftPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3},
+		[]ColID{1, 0},
+		[]ColID{1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 0 {
 		t.Fatalf("unindexed non-key-preserving path edge = %v, want empty", got)
 	}
 	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
@@ -2755,11 +2722,13 @@ func TestMultiJoinPlacementSplitOrNonKeyPreservingPathFallsBackWhenRHSUnindexed(
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
-	leftPathEdge := JoinPathEdge{
-		LHSTable: 1, MidTable: 2, RHSTable: 3,
-		LHSJoinCol: 1, MidFirstCol: 1, MidSecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 0 {
+	leftPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3},
+		[]ColID{1, 0},
+		[]ColID{1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 0 {
 		t.Fatalf("rhs-unindexed non-key-preserving path edge = %v, want empty", got)
 	}
 	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {
@@ -2786,21 +2755,25 @@ func TestMultiJoinPlacementSplitOrLongNonKeyPreservingMultiHopUsesPath3Edges(t *
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
-	leftPathEdge := JoinPath3Edge{
-		LHSTable: 1, Mid1Table: 2, Mid2Table: 3, RHSTable: 4,
-		LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0, Mid2FirstCol: 1, Mid2SecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinRangePath3Edge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
+	leftPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3, 4},
+		[]ColID{1, 0, 0},
+		[]ColID{1, 1, 1},
+		0,
+	)
+	if got := idx.joinRangePathEdge.Lookup(leftPathEdge, types.NewUint64(60)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("long non-key-preserving path3 range placement = %v, want [%v]", got, hash)
 	}
 	if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("long non-key-preserving left local placement = %v, want [%v]", got, hash)
 	}
-	rightPathEdge := JoinPath3Edge{
-		LHSTable: 4, Mid1Table: 3, Mid2Table: 2, RHSTable: 1,
-		LHSJoinCol: 1, Mid1FirstCol: 0, Mid1SecondCol: 1, Mid2FirstCol: 0, Mid2SecondCol: 1, RHSJoinCol: 1, RHSFilterCol: 0,
-	}
-	if got := idx.JoinPath3Edge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
+	rightPathEdge := mustJoinPathTraversalEdge(t,
+		[]TableID{4, 3, 2, 1},
+		[]ColID{1, 1, 1},
+		[]ColID{0, 0, 1},
+		0,
+	)
+	if got := idx.joinPathEdge.Lookup(rightPathEdge, types.NewUint64(7)); len(got) != 1 || got[0] != hash {
 		t.Fatalf("long non-key-preserving path3 value placement = %v, want [%v]", got, hash)
 	}
 	if len(idx.JoinEdge.exists) != 0 {
@@ -2866,12 +2839,13 @@ func TestMultiJoinPlacementSplitOrLongNonKeyPreservingPath3FallsBackWhenUnindexe
 			hash := ComputeQueryHash(pred, nil)
 			placeSubscriptionForResolver(idx, pred, hash, s)
 
-			path3Edge := JoinPath3Edge{
-				LHSTable: 1, Mid1Table: 2, Mid2Table: 3, RHSTable: 4,
-				LHSJoinCol: 1, Mid1FirstCol: 1, Mid1SecondCol: 0,
-				Mid2FirstCol: 1, Mid2SecondCol: 0, RHSJoinCol: 1, RHSFilterCol: 0,
-			}
-			if got := idx.JoinRangePath3Edge.Lookup(path3Edge, types.NewUint64(60)); len(got) != 0 {
+			pathEdge := mustJoinPathTraversalEdge(t,
+				[]TableID{1, 2, 3, 4},
+				[]ColID{1, 0, 0},
+				[]ColID{1, 1, 1},
+				0,
+			)
+			if got := idx.joinRangePathEdge.Lookup(pathEdge, types.NewUint64(60)); len(got) != 0 {
 				t.Fatalf("partial path3 range placement = %v, want empty", got)
 			}
 			if got := idx.Value.Lookup(1, 0, types.NewUint64(7)); len(got) != 0 {

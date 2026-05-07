@@ -6,22 +6,19 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func testJoinPathEdge() JoinPathEdge {
-	return JoinPathEdge{
-		LHSTable:     1,
-		MidTable:     2,
-		RHSTable:     3,
-		LHSJoinCol:   0,
-		MidFirstCol:  1,
-		MidSecondCol: 2,
-		RHSJoinCol:   3,
-		RHSFilterCol: 4,
-	}
+func testJoinPathTraversalEdge(t *testing.T) joinPathTraversalEdge {
+	t.Helper()
+	return mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3},
+		[]ColID{0, 2},
+		[]ColID{1, 3},
+		4,
+	)
 }
 
-func TestJoinPathEdgeIndexAddLookup(t *testing.T) {
-	idx := NewJoinPathEdgeIndex()
-	edge := testJoinPathEdge()
+func TestJoinPathTraversalIndexAddLookup(t *testing.T) {
+	idx := newJoinPathTraversalIndex()
+	edge := testJoinPathTraversalEdge(t)
 	h := hashN(1)
 	idx.Add(edge, types.NewUint64(42), h)
 
@@ -31,9 +28,9 @@ func TestJoinPathEdgeIndexAddLookup(t *testing.T) {
 	}
 }
 
-func TestJoinPathEdgeIndexWrongFilterValue(t *testing.T) {
-	idx := NewJoinPathEdgeIndex()
-	edge := testJoinPathEdge()
+func TestJoinPathTraversalIndexWrongFilterValue(t *testing.T) {
+	idx := newJoinPathTraversalIndex()
+	edge := testJoinPathTraversalEdge(t)
 	idx.Add(edge, types.NewUint64(42), hashN(1))
 
 	if got := idx.Lookup(edge, types.NewUint64(99)); len(got) != 0 {
@@ -41,11 +38,15 @@ func TestJoinPathEdgeIndexWrongFilterValue(t *testing.T) {
 	}
 }
 
-func TestJoinPathEdgeIndexWrongEdge(t *testing.T) {
-	idx := NewJoinPathEdgeIndex()
-	edge := testJoinPathEdge()
-	other := edge
-	other.MidSecondCol = 9
+func TestJoinPathTraversalIndexWrongEdge(t *testing.T) {
+	idx := newJoinPathTraversalIndex()
+	edge := testJoinPathTraversalEdge(t)
+	other := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3},
+		[]ColID{0, 9},
+		[]ColID{1, 3},
+		4,
+	)
 	idx.Add(edge, types.NewUint64(42), hashN(1))
 
 	if got := idx.Lookup(other, types.NewUint64(42)); len(got) != 0 {
@@ -53,9 +54,9 @@ func TestJoinPathEdgeIndexWrongEdge(t *testing.T) {
 	}
 }
 
-func TestJoinPathEdgeIndexMultipleHashes(t *testing.T) {
-	idx := NewJoinPathEdgeIndex()
-	edge := testJoinPathEdge()
+func TestJoinPathTraversalIndexMultipleHashes(t *testing.T) {
+	idx := newJoinPathTraversalIndex()
+	edge := testJoinPathTraversalEdge(t)
 	idx.Add(edge, types.NewUint64(42), hashN(1))
 	idx.Add(edge, types.NewUint64(42), hashN(2))
 
@@ -64,9 +65,9 @@ func TestJoinPathEdgeIndexMultipleHashes(t *testing.T) {
 	}
 }
 
-func TestJoinPathEdgeIndexRemoveCleansUp(t *testing.T) {
-	idx := NewJoinPathEdgeIndex()
-	edge := testJoinPathEdge()
+func TestJoinPathTraversalIndexRemoveCleansUp(t *testing.T) {
+	idx := newJoinPathTraversalIndex()
+	edge := testJoinPathTraversalEdge(t)
 	h := hashN(1)
 	idx.Add(edge, types.NewUint64(42), h)
 	idx.Remove(edge, types.NewUint64(42), h)
@@ -75,23 +76,31 @@ func TestJoinPathEdgeIndexRemoveCleansUp(t *testing.T) {
 		t.Fatalf("Lookup after remove = %v, want empty", got)
 	}
 	if !idx.emptyForTest() {
-		t.Fatalf("index not cleaned up: %+v", idx.inner)
+		t.Fatalf("index not cleaned up: %+v", idx)
 	}
 }
 
-func TestJoinPathEdgeIndexForEachEdge(t *testing.T) {
-	idx := NewJoinPathEdgeIndex()
-	first := testJoinPathEdge()
-	second := first
-	second.RHSTable = 4
-	unrelated := first
-	unrelated.LHSTable = 9
+func TestJoinPathTraversalIndexForEachEdge(t *testing.T) {
+	idx := newJoinPathTraversalIndex()
+	first := testJoinPathTraversalEdge(t)
+	second := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 4},
+		[]ColID{0, 2},
+		[]ColID{1, 3},
+		4,
+	)
+	unrelated := mustJoinPathTraversalEdge(t,
+		[]TableID{9, 2, 3},
+		[]ColID{0, 2},
+		[]ColID{1, 3},
+		4,
+	)
 	idx.Add(first, types.NewUint64(1), hashN(1))
 	idx.Add(second, types.NewUint64(1), hashN(2))
 	idx.Add(unrelated, types.NewUint64(1), hashN(3))
 
 	count := 0
-	idx.ForEachEdge(1, func(JoinPathEdge) {
+	idx.ForEachEdge(1, func(joinPathTraversalEdge) {
 		count++
 	})
 	if count != 2 {
@@ -99,9 +108,9 @@ func TestJoinPathEdgeIndexForEachEdge(t *testing.T) {
 	}
 }
 
-func TestJoinRangePathEdgeIndexAddLookup(t *testing.T) {
-	idx := NewJoinRangePathEdgeIndex()
-	edge := testJoinPathEdge()
+func TestJoinRangePathTraversalIndexAddLookup(t *testing.T) {
+	idx := newJoinRangePathTraversalIndex()
+	edge := testJoinPathTraversalEdge(t)
 	h := hashN(1)
 	idx.Add(edge,
 		Bound{Value: types.NewUint64(10), Inclusive: true},
@@ -117,25 +126,29 @@ func TestJoinRangePathEdgeIndexAddLookup(t *testing.T) {
 	}
 }
 
-func TestJoinRangePathEdgeIndexWrongEdge(t *testing.T) {
-	idx := NewJoinRangePathEdgeIndex()
-	edge := testJoinPathEdge()
+func TestJoinRangePathTraversalIndexWrongEdge(t *testing.T) {
+	idx := newJoinRangePathTraversalIndex()
+	edge := testJoinPathTraversalEdge(t)
 	idx.Add(edge,
 		Bound{Value: types.NewUint64(10), Inclusive: true},
 		Bound{Value: types.NewUint64(20), Inclusive: true},
 		hashN(1),
 	)
-	other := edge
-	other.MidFirstCol = 9
+	other := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 3},
+		[]ColID{0, 2},
+		[]ColID{9, 3},
+		4,
+	)
 
 	if got := idx.Lookup(other, types.NewUint64(15)); len(got) != 0 {
 		t.Fatalf("Lookup wrong edge = %v, want empty", got)
 	}
 }
 
-func TestJoinRangePathEdgeIndexOverlappingRangesDedup(t *testing.T) {
-	idx := NewJoinRangePathEdgeIndex()
-	edge := testJoinPathEdge()
+func TestJoinRangePathTraversalIndexOverlappingRangesDedup(t *testing.T) {
+	idx := newJoinRangePathTraversalIndex()
+	edge := testJoinPathTraversalEdge(t)
 	h := hashN(1)
 	idx.Add(edge,
 		Bound{Value: types.NewUint64(10), Inclusive: true},
@@ -153,9 +166,9 @@ func TestJoinRangePathEdgeIndexOverlappingRangesDedup(t *testing.T) {
 	}
 }
 
-func TestJoinRangePathEdgeIndexRemoveCleansUp(t *testing.T) {
-	idx := NewJoinRangePathEdgeIndex()
-	edge := testJoinPathEdge()
+func TestJoinRangePathTraversalIndexRemoveCleansUp(t *testing.T) {
+	idx := newJoinRangePathTraversalIndex()
+	edge := testJoinPathTraversalEdge(t)
 	h := hashN(1)
 	lower := Bound{Value: types.NewUint64(10), Inclusive: true}
 	upper := Bound{Unbounded: true}
@@ -166,17 +179,25 @@ func TestJoinRangePathEdgeIndexRemoveCleansUp(t *testing.T) {
 		t.Fatalf("Lookup after remove = %v, want empty", got)
 	}
 	if !idx.emptyForTest() {
-		t.Fatalf("index not cleaned up: %+v", idx.inner)
+		t.Fatalf("index not cleaned up: %+v", idx)
 	}
 }
 
-func TestJoinRangePathEdgeIndexForEachEdge(t *testing.T) {
-	idx := NewJoinRangePathEdgeIndex()
-	first := testJoinPathEdge()
-	second := first
-	second.RHSTable = 4
-	unrelated := first
-	unrelated.LHSTable = 9
+func TestJoinRangePathTraversalIndexForEachEdge(t *testing.T) {
+	idx := newJoinRangePathTraversalIndex()
+	first := testJoinPathTraversalEdge(t)
+	second := mustJoinPathTraversalEdge(t,
+		[]TableID{1, 2, 4},
+		[]ColID{0, 2},
+		[]ColID{1, 3},
+		4,
+	)
+	unrelated := mustJoinPathTraversalEdge(t,
+		[]TableID{9, 2, 3},
+		[]ColID{0, 2},
+		[]ColID{1, 3},
+		4,
+	)
 	lower := Bound{Value: types.NewUint64(10), Inclusive: true}
 	upper := Bound{Unbounded: true}
 	idx.Add(first, lower, upper, hashN(1))
@@ -184,7 +205,7 @@ func TestJoinRangePathEdgeIndexForEachEdge(t *testing.T) {
 	idx.Add(unrelated, lower, upper, hashN(3))
 
 	count := 0
-	idx.ForEachEdge(1, func(JoinPathEdge) {
+	idx.ForEachEdge(1, func(joinPathTraversalEdge) {
 		count++
 	})
 	if count != 2 {

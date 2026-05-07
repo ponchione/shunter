@@ -9,55 +9,25 @@ import (
 
 // PruningIndexes composes the pruning tiers (SPEC-004 §5).
 type PruningIndexes struct {
-	Value              *ValueIndex
-	Range              *RangeIndex
-	JoinEdge           *JoinEdgeIndex
-	JoinRangeEdge      *JoinRangeEdgeIndex
-	joinPathEdge       *joinPathTraversalIndex
-	joinRangePathEdge  *joinRangePathTraversalIndex
-	JoinPathEdge       *JoinPathEdgeIndex
-	JoinRangePathEdge  *JoinRangePathEdgeIndex
-	JoinPath3Edge      *JoinPath3EdgeIndex
-	JoinRangePath3Edge *JoinRangePath3EdgeIndex
-	JoinPath4Edge      *JoinPath4EdgeIndex
-	JoinRangePath4Edge *JoinRangePath4EdgeIndex
-	JoinPath5Edge      *JoinPath5EdgeIndex
-	JoinRangePath5Edge *JoinRangePath5EdgeIndex
-	JoinPath6Edge      *JoinPath6EdgeIndex
-	JoinRangePath6Edge *JoinRangePath6EdgeIndex
-	JoinPath7Edge      *JoinPath7EdgeIndex
-	JoinRangePath7Edge *JoinRangePath7EdgeIndex
-	JoinPath8Edge      *JoinPath8EdgeIndex
-	JoinRangePath8Edge *JoinRangePath8EdgeIndex
-	Table              *TableIndex
+	Value             *ValueIndex
+	Range             *RangeIndex
+	JoinEdge          *JoinEdgeIndex
+	JoinRangeEdge     *JoinRangeEdgeIndex
+	joinPathEdge      *joinPathTraversalIndex
+	joinRangePathEdge *joinRangePathTraversalIndex
+	Table             *TableIndex
 }
 
 // NewPruningIndexes constructs an empty composite.
 func NewPruningIndexes() *PruningIndexes {
-	joinPathEdge := newJoinPathTraversalIndex()
-	joinRangePathEdge := newJoinRangePathTraversalIndex()
 	return &PruningIndexes{
-		Value:              NewValueIndex(),
-		Range:              NewRangeIndex(),
-		JoinEdge:           NewJoinEdgeIndex(),
-		JoinRangeEdge:      NewJoinRangeEdgeIndex(),
-		joinPathEdge:       joinPathEdge,
-		joinRangePathEdge:  joinRangePathEdge,
-		JoinPathEdge:       newJoinPathEdgeIndexWithInner(joinPathEdge),
-		JoinRangePathEdge:  newJoinRangePathEdgeIndexWithInner(joinRangePathEdge),
-		JoinPath3Edge:      newJoinPath3EdgeIndexWithInner(joinPathEdge),
-		JoinRangePath3Edge: newJoinRangePath3EdgeIndexWithInner(joinRangePathEdge),
-		JoinPath4Edge:      newJoinPath4EdgeIndexWithInner(joinPathEdge),
-		JoinRangePath4Edge: newJoinRangePath4EdgeIndexWithInner(joinRangePathEdge),
-		JoinPath5Edge:      newJoinPath5EdgeIndexWithInner(joinPathEdge),
-		JoinRangePath5Edge: newJoinRangePath5EdgeIndexWithInner(joinRangePathEdge),
-		JoinPath6Edge:      newJoinPath6EdgeIndexWithInner(joinPathEdge),
-		JoinRangePath6Edge: newJoinRangePath6EdgeIndexWithInner(joinRangePathEdge),
-		JoinPath7Edge:      newJoinPath7EdgeIndexWithInner(joinPathEdge),
-		JoinRangePath7Edge: newJoinRangePath7EdgeIndexWithInner(joinRangePathEdge),
-		JoinPath8Edge:      newJoinPath8EdgeIndexWithInner(joinPathEdge),
-		JoinRangePath8Edge: newJoinRangePath8EdgeIndexWithInner(joinRangePathEdge),
-		Table:              NewTableIndex(),
+		Value:             NewValueIndex(),
+		Range:             NewRangeIndex(),
+		JoinEdge:          NewJoinEdgeIndex(),
+		JoinRangeEdge:     NewJoinRangeEdgeIndex(),
+		joinPathEdge:      newJoinPathTraversalIndex(),
+		joinRangePathEdge: newJoinRangePathTraversalIndex(),
+		Table:             NewTableIndex(),
 	}
 }
 

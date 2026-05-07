@@ -619,12 +619,12 @@ func runRegistrationSymmetryIteration(t *testing.T, seed uint64) {
 
 // pruningIndexesEmpty peeks into each tier's internal state. All tiers must
 // contain zero entries for registration symmetry to hold.
-func (ji *joinPathFixedValueIndex[E]) emptyForTest() bool {
-	return len(ji.inner.edges) == 0 && len(ji.inner.byTable) == 0
+func (ji *joinPathTraversalIndex) emptyForTest() bool {
+	return len(ji.edges) == 0 && len(ji.byTable) == 0
 }
 
-func (ji *joinPathFixedRangeIndex[E]) emptyForTest() bool {
-	return len(ji.inner.edges) == 0 && len(ji.inner.byTable) == 0
+func (ji *joinRangePathTraversalIndex) emptyForTest() bool {
+	return len(ji.edges) == 0 && len(ji.byTable) == 0
 }
 
 func pruningIndexesEmpty(idx *PruningIndexes) bool {
@@ -646,52 +646,10 @@ func pruningIndexesEmpty(idx *PruningIndexes) bool {
 	if len(idx.JoinRangeEdge.edges) != 0 || len(idx.JoinRangeEdge.byTable) != 0 {
 		return false
 	}
-	if len(idx.joinPathEdge.edges) != 0 || len(idx.joinPathEdge.byTable) != 0 {
+	if !idx.joinPathEdge.emptyForTest() {
 		return false
 	}
-	if len(idx.joinRangePathEdge.edges) != 0 || len(idx.joinRangePathEdge.byTable) != 0 {
-		return false
-	}
-	if !idx.JoinPathEdge.emptyForTest() {
-		return false
-	}
-	if !idx.JoinRangePathEdge.emptyForTest() {
-		return false
-	}
-	if !idx.JoinPath3Edge.emptyForTest() {
-		return false
-	}
-	if !idx.JoinRangePath3Edge.emptyForTest() {
-		return false
-	}
-	if !idx.JoinPath4Edge.emptyForTest() {
-		return false
-	}
-	if !idx.JoinRangePath4Edge.emptyForTest() {
-		return false
-	}
-	if !idx.JoinPath5Edge.emptyForTest() {
-		return false
-	}
-	if !idx.JoinRangePath5Edge.emptyForTest() {
-		return false
-	}
-	if !idx.JoinPath6Edge.emptyForTest() {
-		return false
-	}
-	if !idx.JoinRangePath6Edge.emptyForTest() {
-		return false
-	}
-	if !idx.JoinPath7Edge.emptyForTest() {
-		return false
-	}
-	if !idx.JoinRangePath7Edge.emptyForTest() {
-		return false
-	}
-	if !idx.JoinPath8Edge.emptyForTest() {
-		return false
-	}
-	if !idx.JoinRangePath8Edge.emptyForTest() {
+	if !idx.joinRangePathEdge.emptyForTest() {
 		return false
 	}
 	if len(idx.Table.tables) != 0 {
