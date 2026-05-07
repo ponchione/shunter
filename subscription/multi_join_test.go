@@ -478,6 +478,65 @@ func TestMultiJoinRegisterInitialRowsAndDeltas(t *testing.T) {
 	}
 }
 
+func TestMultiJoinProjectionPreservesInitialAndDeltaShape(t *testing.T) {
+	s := multiJoinTestSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := multiJoinTestPredicate()
+	projection := []ProjectionColumn{{
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Table:  1,
+		Column: 0,
+		Alias:  0,
+	}}
+	connID := types.ConnectionID{18}
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:            connID,
+		QueryID:           180,
+		Predicates:        []Predicate{pred},
+		ProjectionColumns: [][]ProjectionColumn{projection},
+	}, multiJoinCommitted(false))
+	if err != nil {
+		t.Fatalf("RegisterSet multi-join projection: %v", err)
+	}
+	if len(res.Update) != 1 {
+		t.Fatalf("initial updates = %d, want 1", len(res.Update))
+	}
+	initial := res.Update[0]
+	if initial.TableID != 1 || len(initial.Columns) != 1 || initial.Columns[0].Name != "id" {
+		t.Fatalf("initial projection shape = table %d columns %#v, want table 1 id", initial.TableID, initial.Columns)
+	}
+	if !productRowsHaveUint64IDs(initial.Inserts, 1, 2, 2, 3, 3) {
+		t.Fatalf("initial projected rows = %v, want ids 1,2,2,3,3", initial.Inserts)
+	}
+	for _, row := range initial.Inserts {
+		if len(row) != 1 {
+			t.Fatalf("initial projected row width = %d for %v, want 1", len(row), row)
+		}
+	}
+
+	extra := types.ProductValue{types.NewUint64(301), types.NewUint64(20)}
+	cs := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Inserts: []types.ProductValue{extra}},
+		},
+	}
+	mgr.EvalAndBroadcast(types.TxID(1), cs, multiJoinCommitted(true), PostCommitMeta{})
+	update := requireSingleFanoutUpdate(t, <-inbox, connID)
+	if update.TableID != 1 || len(update.Columns) != 1 || update.Columns[0].Name != "id" {
+		t.Fatalf("delta projection shape = table %d columns %#v, want table 1 id", update.TableID, update.Columns)
+	}
+	if !productRowsHaveUint64IDs(update.Inserts, 2, 2, 3, 3) || len(update.Deletes) != 0 {
+		t.Fatalf("delta projected inserts/deletes = %v/%v, want ids 2,2,3,3 and no deletes", update.Inserts, update.Deletes)
+	}
+	for _, row := range update.Inserts {
+		if len(row) != 1 {
+			t.Fatalf("delta projected row width = %d for %v, want 1", len(row), row)
+		}
+	}
+}
+
 func TestMultiJoinDeltaMatchesFreshEvaluationForIntermediateRelation(t *testing.T) {
 	s := multiJoinTestSchema()
 	pred := multiJoinTestPredicate()
