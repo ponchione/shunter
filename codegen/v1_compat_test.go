@@ -131,6 +131,40 @@ func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
 	}
 }
 
+func TestV1CompatibilityTypeScriptDeclaredReadResultShapeSurface(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "v1_module_contract.ts"))
+	if err != nil {
+		t.Fatalf("read v1 TypeScript fixture: %v", err)
+	}
+	ts := string(data)
+
+	for _, want := range []string{
+		`export type DeclaredQueryRunner = (name: ExecutableQueryName) => Promise<Uint8Array>;`,
+		`recentMessages: "SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25",`,
+		`export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`,
+		`return runDeclaredQuery("recent_messages");`,
+		`export type DeclaredViewSubscriber = (name: ExecutableViewName) => Promise<() => void>;`,
+		`liveMessageProjection: "SELECT id, body AS text FROM messages",`,
+		`liveMessageCount: "SELECT COUNT(*) AS n FROM messages",`,
+		`export function subscribeLiveMessageProjection(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`,
+		`return subscribeDeclaredView("live_message_projection");`,
+		`export function subscribeLiveMessageCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`,
+		`return subscribeDeclaredView("live_message_count");`,
+		`recentMessages: { tables: ["messages"], tags: ["history", "v1"] },`,
+		`liveMessageProjection: { tables: ["messages"], tags: ["projection", "v1"] },`,
+		`liveMessageCount: { tables: ["messages"], tags: ["aggregate", "v1"] },`,
+	} {
+		assertContains(t, ts, want)
+	}
+	for _, unexpected := range []string{
+		`export interface RecentMessagesRow`,
+		`export interface LiveMessageProjectionRow`,
+		`export interface LiveMessageCountRow`,
+	} {
+		assertNotContains(t, ts, unexpected)
+	}
+}
+
 func TestV1CompatibilityTypeScriptIdentifierNormalizationAndCollisions(t *testing.T) {
 	out, err := Generate(codegenIdentifierCollisionFixture(), Options{Language: LanguageTypeScript})
 	if err != nil {

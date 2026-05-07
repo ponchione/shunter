@@ -1,6 +1,6 @@
 # SQL And Read Scope
 
-Status: active, auth/visibility runtime proof complete
+Status: active, declared-read contract/codegen shape coverage complete
 Owner: unassigned
 Scope: the amount of SQL and declared-read behavior Shunter actually needs for
 v1.
@@ -52,6 +52,10 @@ Current code/docs reality:
   joins. Aggregate aliases without `AS` are rejected.
 - Raw subscriptions remain narrower than declared live views and reject column
   projections, aggregates, `ORDER BY`, `LIMIT`, and `OFFSET`.
+- Contract/codegen coverage pins declared query and declared live-view result
+  shapes through executable SQL plus read-model metadata. Generated TypeScript
+  declared-read helpers remain byte-level in Phase 1; typed decoding belongs to
+  the TypeScript client runtime work.
 
 ## SpacetimeDB Reference Lesson
 
@@ -190,6 +194,9 @@ Completed or partially complete:
   permissions, `:sender` caller identity, and visibility filters are applied
   before query evaluation, initial rows, and live deltas across protocol raw
   reads plus local/protocol declared reads.
+- Add contract/codegen compatibility coverage for declared query projection
+  shape metadata, declared live-view projection shape metadata, and declared
+  live-view aggregate shape metadata.
 
 Remaining:
 
@@ -197,8 +204,6 @@ Remaining:
   the final matrix.
 - Keep unsupported SQL diagnostics useful and client-visible as parser and
   admission behavior changes.
-- Add or confirm contract/codegen tests for declared query and declared view
-  result shapes.
 - Add performance tests for expensive supported shapes.
 - Remove or label docs that imply broader SQL support than the code guarantees.
 

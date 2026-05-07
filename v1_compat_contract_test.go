@@ -297,6 +297,37 @@ func TestV1CompatibilityModuleContractFixtureCoversStableJSONFields(t *testing.T
 	assertJSONObjectKeys(t, top["codegen"], "contract.codegen", []string{"contract_format", "contract_version", "default_snapshot_filename"})
 }
 
+func TestV1CompatibilityDeclaredReadResultShapeSQLMetadata(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "v1_module_contract.json"))
+	if err != nil {
+		t.Fatalf("read v1 contract fixture: %v", err)
+	}
+	var contract ModuleContract
+	if err := json.Unmarshal(data, &contract); err != nil {
+		t.Fatalf("Unmarshal v1 contract fixture: %v", err)
+	}
+
+	assertV1FixtureQuerySQL(t, contract.Queries, "recent_messages", "SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25")
+	assertV1FixtureViewSQL(t, contract.Views, "live_message_projection", "SELECT id, body AS text FROM messages")
+	assertV1FixtureViewSQL(t, contract.Views, "live_message_count", "SELECT COUNT(*) AS n FROM messages")
+	assertV1FixtureReadModel(t, contract.ReadModel.Declarations, ReadModelSurfaceQuery, "recent_messages", "history")
+	assertV1FixtureReadModel(t, contract.ReadModel.Declarations, ReadModelSurfaceView, "live_message_projection", "projection")
+	assertV1FixtureReadModel(t, contract.ReadModel.Declarations, ReadModelSurfaceView, "live_message_count", "aggregate")
+
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		t.Fatalf("Unmarshal v1 contract JSON: %v", err)
+	}
+	queries := assertJSONArrayObjects(t, top["queries"], "contract.queries")
+	recentMessages := findJSONObjectByStringField(t, queries, "name", "recent_messages", "contract.queries")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, recentMessages), "contract.queries.recent_messages", []string{"name", "sql"})
+	views := assertJSONArrayObjects(t, top["views"], "contract.views")
+	projectionView := findJSONObjectByStringField(t, views, "name", "live_message_projection", "contract.views")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, projectionView), "contract.views.live_message_projection", []string{"name", "sql"})
+	aggregateView := findJSONObjectByStringField(t, views, "name", "live_message_count", "contract.views")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, aggregateView), "contract.views.live_message_count", []string{"name", "sql"})
+}
+
 func buildV1CompatibilityRuntime(t *testing.T) *Runtime {
 	t.Helper()
 

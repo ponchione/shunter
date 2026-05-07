@@ -100,6 +100,10 @@ Completed in this phase:
   declared-read permission context, `:sender` caller identity, and visibility
   filtering before query results, live initial rows, and live deltas across
   protocol raw reads plus local/protocol declared reads.
+- Declared-read contract/codegen shape coverage now pins query projection,
+  live-view projection, and live-view aggregate shapes through executable SQL
+  and read-model metadata. Generated TypeScript declared-read helpers remain
+  byte-level until the TypeScript client runtime adds typed decoding.
 
 Exit criteria:
 
