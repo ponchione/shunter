@@ -60,6 +60,60 @@ func TestProtocolDeclaredViewSucceedsWithDeclarationPermission(t *testing.T) {
 	requireDeclaredReadAppliedRows(t, client, 31, 41, "messages", 1)
 }
 
+func TestProtocolDeclaredReadsApplyVisibilityToInitialRowsAndDeltas(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		Query(QueryDeclaration{
+			Name:        "visible_messages",
+			SQL:         "SELECT * FROM messages ORDER BY id",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}).
+		View(ViewDeclaration{
+			Name:        "live_visible_messages",
+			SQL:         "SELECT * FROM messages ORDER BY id",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+
+	client, identityToken := dialDeclaredReadProtocolWithIdentity(t, rt, mintDeclaredReadProtocolToken(t, "visible-reader", "messages:read", "messages:subscribe"))
+	visibleOwner := types.Identity(identityToken.Identity).Hex()
+	hiddenOwner := visibilityRuntimeIdentity(0x55).Hex()
+	insertMessageWithBody(t, rt, 1, visibleOwner)
+	insertMessageWithBody(t, rt, 2, hiddenOwner)
+	insertMessageWithBody(t, rt, 3, visibleOwner)
+
+	columns := []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: types.KindUint64},
+		{Index: 1, Name: "body", Type: types.KindString},
+	}
+	writeDeclaredReadProtocolMessage(t, client, protocol.DeclaredQueryMsg{
+		MessageID: []byte("visible-declared-query"),
+		Name:      "visible_messages",
+	})
+	queryRows := requireDeclaredReadOneOffValues(t, client, "messages", columns)
+	assertDeclaredReadVisibleMessageRows(t, queryRows, []uint64{1, 3}, visibleOwner, "declared query visibility")
+
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 34,
+		QueryID:   44,
+		Name:      "live_visible_messages",
+	})
+	initialRows := requireDeclaredReadAppliedValues(t, client, 34, 44, "messages", columns)
+	assertDeclaredReadVisibleMessageRows(t, initialRows, []uint64{1, 3}, visibleOwner, "declared view initial visibility")
+
+	insertMessageWithBody(t, rt, 4, hiddenOwner)
+	insertMessageWithBody(t, rt, 5, visibleOwner)
+	inserts, deletes := requireDeclaredReadDeltaValues(t, client, 44, "messages", columns)
+	assertDeclaredReadVisibleMessageRows(t, inserts, []uint64{5}, visibleOwner, "declared view delta visibility")
+	if len(deletes) != 0 {
+		t.Fatalf("declared view delta visibility deletes = %#v, want none", deletes)
+	}
+}
+
 func TestProtocolDeclaredViewMultiWayJoinSendsDeltas(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Reducer("insert_message", insertMessageReducer).
@@ -810,6 +864,11 @@ func newDeclaredReadProtocolTestConn(t *testing.T, permissions ...string) *proto
 }
 
 func dialDeclaredReadProtocol(t *testing.T, rt *Runtime, token string) *websocket.Conn {
+	client, _ := dialDeclaredReadProtocolWithIdentity(t, rt, token)
+	return client
+}
+
+func dialDeclaredReadProtocolWithIdentity(t *testing.T, rt *Runtime, token string) (*websocket.Conn, protocol.IdentityToken) {
 	t.Helper()
 	srv := httptest.NewServer(rt.HTTPHandler())
 	t.Cleanup(srv.Close)
@@ -831,7 +890,11 @@ func dialDeclaredReadProtocol(t *testing.T, rt *Runtime, token string) *websocke
 	if tag != protocol.TagIdentityToken {
 		t.Fatalf("first protocol tag = %d, msg = %T, want IdentityToken", tag, msg)
 	}
-	return client
+	identityToken, ok := msg.(protocol.IdentityToken)
+	if !ok {
+		t.Fatalf("first protocol msg = %T, want IdentityToken", msg)
+	}
+	return client, identityToken
 }
 
 func writeDeclaredReadProtocolMessage(t *testing.T, client *websocket.Conn, msg any) {
@@ -882,6 +945,22 @@ func requireDeclaredReadOneOffRows(t *testing.T, client *websocket.Conn, wantTab
 	if len(rows) != wantRows {
 		t.Fatalf("declared query row count = %d, want %d for table %q", len(rows), wantRows, wantTable)
 	}
+}
+
+func requireDeclaredReadOneOffValues(t *testing.T, client *websocket.Conn, wantTable string, columns []schema.ColumnSchema) []types.ProductValue {
+	t.Helper()
+	tag, msg := readDeclaredReadProtocolMessage(t, client)
+	if tag != protocol.TagOneOffQueryResponse {
+		t.Fatalf("tag = %d, want OneOffQueryResponse", tag)
+	}
+	resp := msg.(protocol.OneOffQueryResponse)
+	if resp.Error != nil {
+		t.Fatalf("declared query error = %q, want nil", *resp.Error)
+	}
+	if len(resp.Tables) != 1 || resp.Tables[0].TableName != wantTable {
+		t.Fatalf("declared query tables = %+v, want table %q", resp.Tables, wantTable)
+	}
+	return decodeDeclaredReadProtocolRows(t, resp.Tables[0].Rows, columns)
 }
 
 func requireDeclaredReadAppliedRows(t *testing.T, client *websocket.Conn, requestID, queryID uint32, wantTable string, wantRows int) {
@@ -1008,5 +1087,20 @@ func requireDeclaredReadSubscriptionError(t *testing.T, client *websocket.Conn, 
 	}
 	if !strings.Contains(resp.Error, wantSubstring) {
 		t.Fatalf("subscription error = %q, want substring %q", resp.Error, wantSubstring)
+	}
+}
+
+func assertDeclaredReadVisibleMessageRows(t *testing.T, rows []types.ProductValue, wantIDs []uint64, wantBody string, label string) {
+	t.Helper()
+	if len(rows) != len(wantIDs) {
+		t.Fatalf("%s rows = %#v, want ids %v", label, rows, wantIDs)
+	}
+	for i, wantID := range wantIDs {
+		if len(rows[i]) != 2 {
+			t.Fatalf("%s row %d = %#v, want id/body", label, i, rows[i])
+		}
+		if rows[i][0].AsUint64() != wantID || rows[i][1].AsString() != wantBody {
+			t.Fatalf("%s row %d = %#v, want id=%d body=%q", label, i, rows[i], wantID, wantBody)
+		}
 	}
 }

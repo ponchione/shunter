@@ -1810,6 +1810,52 @@ func TestDeclaredReadMissingPermissionRejectsBeforeExecutionOrRegistration(t *te
 	}
 }
 
+func TestDeclaredReadAuthPrincipalDoesNotGrantLocalDeclarationPermission(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message", insertMessageReducer).
+		Query(QueryDeclaration{
+			Name:        "recent_messages",
+			SQL:         "SELECT * FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}).
+		View(ViewDeclaration{
+			Name:        "live_messages",
+			SQL:         "SELECT * FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), Config{
+		DataDir:        t.TempDir(),
+		AuthMode:       AuthModeStrict,
+		AuthSigningKey: []byte("strict-declared-read-principal-secret"),
+	})
+	defer rt.Close()
+	insertMessage(t, rt, "hello")
+
+	principal := AuthPrincipal{Permissions: []string{"messages:read", "messages:subscribe"}}
+	_, err := rt.CallQuery(context.Background(), "recent_messages", WithDeclaredReadAuthPrincipal(principal))
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("CallQuery principal-only permission error = %v, want ErrPermissionDenied", err)
+	}
+	result, err := rt.CallQuery(context.Background(), "recent_messages", WithDeclaredReadPermissions("messages:read"))
+	if err != nil {
+		t.Fatalf("CallQuery with explicit read permission: %v", err)
+	}
+	if len(result.Rows) != 1 || result.Rows[0][1].AsString() != "hello" {
+		t.Fatalf("CallQuery explicit permission rows = %#v, want inserted row", result.Rows)
+	}
+
+	_, err = rt.SubscribeView(context.Background(), "live_messages", 19, WithDeclaredReadAuthPrincipal(principal))
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("SubscribeView principal-only permission error = %v, want ErrPermissionDenied", err)
+	}
+	sub, err := rt.SubscribeView(context.Background(), "live_messages", 19, WithDeclaredReadPermissions("messages:subscribe"))
+	if err != nil {
+		t.Fatalf("SubscribeView with explicit subscribe permission: %v", err)
+	}
+	if len(sub.InitialRows) != 1 || sub.InitialRows[0][1].AsString() != "hello" {
+		t.Fatalf("SubscribeView explicit permission rows = %#v, want inserted row", sub.InitialRows)
+	}
+}
+
 func TestDeclaredAggregateViewMissingPermissionRejectsBeforeRegistration(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).

@@ -1,6 +1,6 @@
 # SQL And Read Scope
 
-Status: active, explicit non-goal negative coverage complete
+Status: active, auth/visibility runtime proof complete
 Owner: unassigned
 Scope: the amount of SQL and declared-read behavior Shunter actually needs for
 v1.
@@ -23,6 +23,8 @@ Shunter already has a meaningful SQL/read implementation:
 - raw subscriptions
 - declared live views
 - predicates with visibility filtering
+- auth/read-policy admission and visibility filtering before query evaluation
+  and live delivery across the v1 read surfaces
 - joins and multi-way joins
 - projections for query surfaces
 - aggregates for query surfaces
@@ -184,13 +186,15 @@ Completed or partially complete:
   (`INSERT`, `UPDATE`, and `DELETE`) on one-off raw SQL and raw subscriptions.
 - Add parser and protocol admission coverage that rejects every explicit v1 SQL
   non-goal listed above on one-off raw SQL and raw subscriptions.
+- Add runtime proof that private/read-policy admission, declared-read
+  permissions, `:sender` caller identity, and visibility filters are applied
+  before query evaluation, initial rows, and live deltas across protocol raw
+  reads plus local/protocol declared reads.
 
 Remaining:
 
 - Add or confirm parser/planner tests for every supported and rejected shape in
   the final matrix.
-- Add or confirm runtime tests that prove auth and visibility are applied before
-  query evaluation and live delivery.
 - Keep unsupported SQL diagnostics useful and client-visible as parser and
   admission behavior changes.
 - Add or confirm contract/codegen tests for declared query and declared view
