@@ -286,6 +286,8 @@ func TestRuntimeGauntletStrictAuthProtocolWorkload(t *testing.T) {
 	assertGauntletProtocolDialRejected(t, url, gauntletBearerHeader(badAudienceToken), http.StatusUnauthorized, "strict op 1 wrong audience")
 	badIssuerToken := mintGauntletStrictToken(t, signingKey, "other-issuer", "alice", "gauntlet")
 	assertGauntletProtocolDialRejected(t, url, gauntletBearerHeader(badIssuerToken), http.StatusUnauthorized, "strict op 1 wrong issuer")
+	futureIssuedToken := mintGauntletStrictTokenAt(t, signingKey, "gauntlet-issuer", "alice", "gauntlet", time.Now().Add(time.Hour))
+	assertGauntletProtocolDialRejected(t, url, gauntletBearerHeader(futureIssuedToken), http.StatusUnauthorized, "strict op 1 future issued-at")
 
 	validToken := mintGauntletStrictToken(t, signingKey, "gauntlet-issuer", "alice", "gauntlet")
 	subscriber, subscriberIdentity := dialGauntletProtocolURLWithHeaders(t, url, gauntletBearerHeader(validToken), "strict op 2 subscriber dial")
@@ -4884,10 +4886,15 @@ func gauntletBearerHeader(token string) http.Header {
 
 func mintGauntletStrictToken(t *testing.T, signingKey []byte, issuer, subject, audience string) string {
 	t.Helper()
+	return mintGauntletStrictTokenAt(t, signingKey, issuer, subject, audience, time.Now())
+}
+
+func mintGauntletStrictTokenAt(t *testing.T, signingKey []byte, issuer, subject, audience string, issuedAt time.Time) string {
+	t.Helper()
 	claims := jwt.MapClaims{
 		"iss": issuer,
 		"sub": subject,
-		"iat": time.Now().Unix(),
+		"iat": issuedAt.Unix(),
 	}
 	if audience != "" {
 		claims["aud"] = audience
