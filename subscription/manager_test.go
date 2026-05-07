@@ -160,6 +160,111 @@ func TestRegisterProjectionSuppressesUnmatchedDelta(t *testing.T) {
 	}
 }
 
+func TestRegisterJoinProjectionPreservesInitialAndDeltaShape(t *testing.T) {
+	s := testSchema()
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("left-one")},
+			{types.NewUint64(2), types.NewString("left-two")},
+		},
+		2: {
+			{types.NewUint64(1), types.NewInt32(10)},
+			{types.NewUint64(2), types.NewInt32(20)},
+		},
+	})
+	pred := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0, ProjectRight: true}
+	projection := []ProjectionColumn{{
+		Schema: schema.ColumnSchema{Index: 1, Name: "score", Type: types.KindInt32},
+		Table:  2,
+		Column: 1,
+	}}
+	connID := types.ConnectionID{3}
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:            connID,
+		QueryID:           13,
+		Predicates:        []Predicate{pred},
+		ProjectionColumns: [][]ProjectionColumn{projection},
+	}, before)
+	if err != nil {
+		t.Fatalf("RegisterSet join projection = %v", err)
+	}
+	if len(res.Update) != 1 {
+		t.Fatalf("initial update count = %d, want 1", len(res.Update))
+	}
+	initial := res.Update[0]
+	if initial.TableID != 2 || len(initial.Columns) != 1 || initial.Columns[0].Name != "score" {
+		t.Fatalf("initial projection shape = table %d columns %#v, want table 2 score", initial.TableID, initial.Columns)
+	}
+	requireProductRowsEqual(t, initial.Inserts, []types.ProductValue{
+		{types.NewInt32(10)},
+		{types.NewInt32(20)},
+	})
+
+	inserted := types.ProductValue{types.NewUint64(1), types.NewInt32(30)}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("left-one")},
+			{types.NewUint64(2), types.NewString("left-two")},
+		},
+		2: {
+			{types.NewUint64(1), types.NewInt32(10)},
+			{types.NewUint64(2), types.NewInt32(20)},
+			inserted,
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), joinChangeset(1, nil, nil, 2, []types.ProductValue{inserted}, nil), after, PostCommitMeta{})
+	update := requireSingleFanoutUpdate(t, <-inbox, connID)
+	if update.TableID != 2 || len(update.Columns) != 1 || update.Columns[0].Name != "score" {
+		t.Fatalf("delta projection shape = table %d columns %#v, want table 2 score", update.TableID, update.Columns)
+	}
+	requireProductRowsEqual(t, update.Inserts, []types.ProductValue{{types.NewInt32(30)}})
+	if len(update.Deletes) != 0 {
+		t.Fatalf("join projection deletes = %v, want none", update.Deletes)
+	}
+}
+
+func TestRegisterJoinProjectionSuppressesUnmatchedDelta(t *testing.T) {
+	s := testSchema()
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("left-one")},
+		},
+		2: nil,
+	})
+	pred := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0, ProjectRight: true}
+	projection := []ProjectionColumn{{
+		Schema: schema.ColumnSchema{Index: 1, Name: "score", Type: types.KindInt32},
+		Table:  2,
+		Column: 1,
+	}}
+	connID := types.ConnectionID{4}
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:            connID,
+		QueryID:           14,
+		Predicates:        []Predicate{pred},
+		ProjectionColumns: [][]ProjectionColumn{projection},
+	}, before); err != nil {
+		t.Fatalf("RegisterSet join projection = %v", err)
+	}
+
+	inserted := types.ProductValue{types.NewUint64(9), types.NewInt32(90)}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("left-one")},
+		},
+		2: {inserted},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), joinChangeset(1, nil, nil, 2, []types.ProductValue{inserted}, nil), after, PostCommitMeta{})
+	msg := <-inbox
+	if got := msg.Fanout[connID]; len(got) != 0 {
+		t.Fatalf("unmatched join projection fanout = %+v, want no updates", got)
+	}
+}
+
 func TestRegisterDedupSharesQueryState(t *testing.T) {
 	s := testSchema()
 	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
