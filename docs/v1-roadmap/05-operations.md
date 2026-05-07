@@ -73,20 +73,18 @@ Completed or partially complete:
   lifecycle, offline backup/restore, migrations, upgrades, and release
   checklist.
 - Add tests for backup/restore helper refusal cases, migration hook success and
-  failure, and basic snapshot/compaction behavior.
+  failure, startup after failed migration, and basic snapshot/compaction
+  behavior.
 - Add an integration test for offline backup/restore from a cleanly shut down
-  runtime with recovered state verification.
+  runtime into a fresh data directory with recovered state verification.
+- Add an integration test that restored data rejects an incompatible module
+  contract without mutating the restored directory.
 
 Remaining:
 
 - Add or update tests for:
-  - restore into fresh data dir
-  - restore with incompatible contract
   - crash during reducer commit
   - crash during snapshot/compaction
-  - migration hook success
-  - migration hook failure
-  - startup after failed migration
   - version metadata compatibility
 - Ensure CLI and library helpers return actionable errors across the full
   operator workflow.
