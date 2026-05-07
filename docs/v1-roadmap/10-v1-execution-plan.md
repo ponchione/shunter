@@ -213,9 +213,13 @@ Exit criteria:
 
 Goal: v1 release confidence comes from repeatable tests, not ad hoc confidence.
 
+Status: release-candidate command set documented; seed/corpus and coverage
+expansion remain.
+
 Tasks:
 
-- Define the release hardening command set in docs and keep it current.
+- Keep the release hardening command set documented in
+  `docs/RUNTIME-HARDENING-GAUNTLET.md`.
 - Add fixed seed sets and durable regression traces for gauntlet workloads.
 - Extend crash/fault tests across commit, snapshot, compaction, migration, and
   shutdown boundaries.

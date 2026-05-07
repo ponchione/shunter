@@ -1,6 +1,6 @@
 # Runtime Hardening
 
-Status: open, partial gauntlet/fuzz coverage landed
+Status: open, command set documented; coverage expansion remains
 Owner: unassigned
 Scope: correctness proof for Shunter runtime behavior under concurrency,
 crashes, recovery, protocol traffic, visibility filtering, and malformed input.
@@ -67,6 +67,8 @@ Completed or partially complete:
   - visibility and read-authorization behavior
   - declared query/view auth failures
 - Add fuzz targets for many parser/decoder and contract boundaries.
+- Document the current release-candidate command set in
+  `docs/RUNTIME-HARDENING-GAUNTLET.md`.
 
 Remaining:
 
@@ -74,7 +76,8 @@ Remaining:
   gauntlet, including snapshot, compaction, migration, and shutdown faults.
 - Add broader subscription correctness scenarios for joins, deletes, updates,
   and visibility changes under concurrent writes.
-- Add race-enabled test guidance for packages that should be race-clean.
+- Expand race-enabled guidance beyond the current release-candidate command set
+  as package ownership changes.
 - Add soak/load tests that can run outside the normal short test loop.
 - Record fixed seed sets, failing seeds, and regression scenarios in durable
   fixtures or corpus entries.
@@ -88,15 +91,19 @@ rtk go test ./...
 rtk go vet ./...
 ```
 
-Hardening verification should also define slower commands for release
-qualification. Candidate commands:
+Hardening verification for release candidates is documented in
+`docs/RUNTIME-HARDENING-GAUNTLET.md`. Current core commands:
 
 ```bash
-rtk go test -race ./...
-rtk go test ./... -run Hardening
+rtk go test ./... -count=1
+rtk go vet ./...
+rtk go tool staticcheck ./...
+rtk go test . -run 'RuntimeGauntlet|ReleaseCandidateExampleApp' -count=1
+rtk go test -race . ./executor ./protocol ./subscription ./store ./commitlog -count=1
 ```
 
-If the exact commands differ, update this document and the release checklist.
+If the exact commands differ, update this document, the gauntlet doc, and the
+release checklist.
 
 ## Done Criteria
 

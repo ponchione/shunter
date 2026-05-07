@@ -187,17 +187,46 @@ panic/fatal error.
 
 Before calling a major build ready, run:
 
-- `rtk go test ./... -count=1`
-- pinned static analysis with `rtk go tool staticcheck ./...`; this is a
-  required green release-candidate gate
-- targeted package tests with `-race` for runtime, executor, protocol,
-  subscription, store, and commitlog
-- fuzz corpus replay
-- randomized model workloads across a fixed seed set
-- crash/recovery matrix across representative schemas
-- fault-injection tests for commitlog and snapshot boundaries
-- multi-client protocol soak
-- at least one real example app workload using the public hosted-runtime API
+- normal correctness:
+
+```bash
+rtk go test ./... -count=1
+rtk go vet ./...
+rtk go tool staticcheck ./...
+```
+
+- focused public-surface hardening:
+
+```bash
+rtk go test . -run 'RuntimeGauntlet|ReleaseCandidateExampleApp' -count=1
+rtk go test ./... -run 'RuntimeGauntlet|ReleaseCandidateExampleApp|ShortSoak' -count=1
+```
+
+- targeted race qualification for the packages with the highest concurrency
+  risk:
+
+```bash
+rtk go test -race . ./executor ./protocol ./subscription ./store ./commitlog -count=1
+```
+
+- fuzz corpus replay is part of normal `rtk go test ./...`; active fuzzing
+  should run package-at-a-time so failures are easy to attribute. Start with
+  the trust-boundary packages:
+
+```bash
+rtk go test ./auth -run '^$' -fuzz Fuzz -fuzztime=30s
+rtk go test ./bsatn -run '^$' -fuzz Fuzz -fuzztime=30s
+rtk go test ./protocol -run '^$' -fuzz Fuzz -fuzztime=30s
+rtk go test ./commitlog -run '^$' -fuzz Fuzz -fuzztime=30s
+rtk go test ./schema -run '^$' -fuzz Fuzz -fuzztime=30s
+rtk go test ./codegen -run '^$' -fuzz Fuzz -fuzztime=30s
+rtk go test ./contractdiff -run '^$' -fuzz Fuzz -fuzztime=30s
+rtk go test ./subscription -run '^$' -fuzz Fuzz -fuzztime=30s
+```
+
+This command set is the current documented release-candidate gate. It still
+needs fixed seed/corpus artifacts, broader crash/fault coverage, and a maintained
+reference-app workload before it is sufficient for a real `v1.0.0`.
 
 The fixed seed set should be checked in once it starts finding meaningful
 coverage. New bug seeds should become regression cases or corpus entries.
