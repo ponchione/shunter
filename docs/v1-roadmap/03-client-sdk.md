@@ -71,8 +71,12 @@ unsubscribe path. Table handles expose raw initial row bytes by default, or
 decoded initial rows when `decodeRow` is supplied with `returnHandle: true`.
 Table subscriptions can now also accept a caller-supplied row decoder for
 decoded initial-row and update callbacks while preserving the raw callback
-path. It does not yet implement typed reducer argument/result encoding,
-generated schema-aware declared query/view row decoding, subscription cache
+path. The runtime now includes a schema-aware BSATN product row decoder and
+generated TypeScript bindings emit per-table row decoders plus a
+`tableRowDecoders` map. Generated table subscription helpers use those
+decoders by default while still allowing callers to override `decodeRow`.
+It does not yet implement typed reducer argument/result encoding, generated
+declared-query/view projection row decoding, subscription cache update
 behavior, auth refresh, or reconnect policy.
 
 The external `opsboard-canary` repository currently uses generated TypeScript
@@ -106,6 +110,7 @@ The TypeScript client should provide:
 The generated code should provide:
 
 - table row types
+- schema-aware table row decoders
 - reducer names and argument/result helpers
 - declared query/view names and result types
 - permission/read metadata useful to clients
@@ -220,13 +225,17 @@ Completed or partially complete:
 - Populate table subscription handles with decoded initial rows when callers
   pass both `returnHandle: true` and `decodeRow`, while preserving raw
   initial-row handles when no decoder is provided.
+- Add a schema-aware TypeScript BSATN product row decoder and generated
+  per-table row decoder functions plus a `tableRowDecoders` map. Generated
+  table subscription helpers now default to those decoders for whole-table
+  subscription rows and managed table handles.
 
 Remaining:
 
 - Generate schema-aware reducer argument/result codecs beyond the current
   explicit encoder hooks and raw `Uint8Array` request path.
 - Implement typed reducer result decoding beyond the current raw
-  `TransactionUpdate` frame result, generated schema-aware declared-query/view
+  `TransactionUpdate` frame result, generated declared-query/view projection
   row decoders, and subscription cache behavior on top of the WebSocket
   lifecycle shell.
 - Implement managed cache/update behavior for decoded table/query/view rows;

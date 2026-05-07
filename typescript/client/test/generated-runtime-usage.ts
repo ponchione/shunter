@@ -51,6 +51,7 @@ import type {
 import {
   callCreateMessage,
   callCreateMessageResult,
+  decodeMessagesRow,
   queryRecentMessages,
   queryRecentMessagesResult,
   queries,
@@ -59,6 +60,7 @@ import {
   subscribeLiveMessageCount,
   subscribeLiveMessageProjection,
   subscribeMessages,
+  tableRowDecoders as generatedTableRowDecodersValue,
 } from "../../../codegen/testdata/v1_module_contract";
 import type {
   DeclaredQueryRunner,
@@ -190,10 +192,14 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const tableRowDecoders: TableRowDecoders<TableRows> = {
     messages: messageRowDecoder,
   };
-  const generatedMessageRowDecoder: GeneratedTableRowDecoder<"messages"> = messageRowDecoder;
+  const generatedMessageRowDecoder: GeneratedTableRowDecoder<"messages"> = decodeMessagesRow;
+  const generatedMessageRowDecoderAlias: GeneratedTableRowDecoder<"messages"> =
+    generatedTableRowDecodersValue.messages;
   const generatedTableRowDecoders: GeneratedTableRowDecoders = {
     messages: generatedMessageRowDecoder,
   };
+  const exportedGeneratedTableRowDecoders: GeneratedTableRowDecoders =
+    generatedTableRowDecodersValue;
   const generatedTableSubscriptionOptions: GeneratedTableSubscriptionOptions<MessagesRow> = {
     decodeRow: generatedMessageRowDecoder,
   };
@@ -405,6 +411,8 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void declaredQueryDecodeOptions;
   void tableRowDecoders;
   void generatedTableRowDecoders;
+  void generatedMessageRowDecoderAlias;
+  void exportedGeneratedTableRowDecoders;
 }
 
 void connectedState;

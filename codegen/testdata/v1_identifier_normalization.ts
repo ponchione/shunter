@@ -3,6 +3,7 @@
 // Module: chat v1.2.3
 
 import type {
+  BsatnColumn as ShunterBsatnColumn,
   DecodedDeclaredQueryResult as ShunterDecodedDeclaredQueryResult,
   DeclaredQueryDecodeOptions as ShunterDeclaredQueryDecodeOptions,
   DeclaredQueryRunner as ShunterDeclaredQueryRunner,
@@ -23,6 +24,7 @@ import type {
 
 import {
   callReducerWithResult as shunterCallReducerWithResult,
+  decodeBsatnProduct as shunterDecodeBsatnProduct,
   decodeDeclaredQueryResult as shunterDecodeDeclaredQueryResult,
 } from "@shunter/client";
 
@@ -98,6 +100,78 @@ export type TableRows = {
   "class!": Class2Row;
 };
 
+const messagesColumns = [
+  { name: "id", kind: "uint64" },
+  { name: "body", kind: "string" },
+  { name: "sent_at", kind: "timestamp" },
+  { name: "payload", kind: "bytes" },
+  { name: "tags", kind: "arrayString" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decodeMessagesRow(row: Uint8Array): MessagesRow {
+  return shunterDecodeBsatnProduct(row, messagesColumns, (values) => ({
+    id: values[0] as bigint,
+    body: values[1] as string,
+    sentAt: values[2] as bigint,
+    payload: values[3] as Uint8Array,
+    tags: values[4] as string[],
+  }));
+}
+
+const _Columns = [
+  { name: "id", kind: "uint64" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decode_Row(row: Uint8Array): _Row {
+  return shunterDecodeBsatnProduct(row, _Columns, (values) => ({
+    id: values[0] as bigint,
+  }));
+}
+
+const _1TableColumns = [
+  { name: "id", kind: "uint64" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decode_1TableRow(row: Uint8Array): _1TableRow {
+  return shunterDecodeBsatnProduct(row, _1TableColumns, (values) => ({
+    id: values[0] as bigint,
+  }));
+}
+
+const classColumns = [
+  { name: "body_text", kind: "string" },
+  { name: "body-text", kind: "string" },
+  { name: "class", kind: "uint64" },
+  { name: "1-count", kind: "uint64" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decodeClassRow(row: Uint8Array): ClassRow {
+  return shunterDecodeBsatnProduct(row, classColumns, (values) => ({
+    bodyText: values[0] as string,
+    bodyText2: values[1] as string,
+    class_: values[2] as bigint,
+    _1Count: values[3] as bigint,
+  }));
+}
+
+const class2Columns = [
+  { name: "id", kind: "uint64" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decodeClass2Row(row: Uint8Array): Class2Row {
+  return shunterDecodeBsatnProduct(row, class2Columns, (values) => ({
+    id: values[0] as bigint,
+  }));
+}
+
+export const tableRowDecoders = {
+  "messages": decodeMessagesRow,
+  "!!!": decode_Row,
+  "1-table": decode_1TableRow,
+  "class": decodeClassRow,
+  "class!": decodeClass2Row,
+} as const satisfies TableRowDecoders;
+
 export const tableReadPolicies = {
   messages: { access: "private", permissions: [] },
   _: { access: "private", permissions: [] },
@@ -113,23 +187,28 @@ export const visibilityFilters = {
 } as const;
 
 export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>, onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}): Promise<SubscriptionUnsubscribe> {
-  return subscribeTable("messages", onRows, options);
+  const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : options;
+  return subscribeTable("messages", onRows, subscribeOptions);
 }
 
 export function subscribe_(subscribeTable: TableSubscriber<_Row>, onRows?: (rows: _Row[]) => void, options: TableSubscriptionOptions<_Row> = {}): Promise<SubscriptionUnsubscribe> {
-  return subscribeTable("!!!", onRows, options);
+  const subscribeOptions: TableSubscriptionOptions<_Row> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["!!!"] } : options;
+  return subscribeTable("!!!", onRows, subscribeOptions);
 }
 
 export function subscribe_1Table(subscribeTable: TableSubscriber<_1TableRow>, onRows?: (rows: _1TableRow[]) => void, options: TableSubscriptionOptions<_1TableRow> = {}): Promise<SubscriptionUnsubscribe> {
-  return subscribeTable("1-table", onRows, options);
+  const subscribeOptions: TableSubscriptionOptions<_1TableRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["1-table"] } : options;
+  return subscribeTable("1-table", onRows, subscribeOptions);
 }
 
 export function subscribeClass(subscribeTable: TableSubscriber<ClassRow>, onRows?: (rows: ClassRow[]) => void, options: TableSubscriptionOptions<ClassRow> = {}): Promise<SubscriptionUnsubscribe> {
-  return subscribeTable("class", onRows, options);
+  const subscribeOptions: TableSubscriptionOptions<ClassRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["class"] } : options;
+  return subscribeTable("class", onRows, subscribeOptions);
 }
 
 export function subscribeClass2(subscribeTable: TableSubscriber<Class2Row>, onRows?: (rows: Class2Row[]) => void, options: TableSubscriptionOptions<Class2Row> = {}): Promise<SubscriptionUnsubscribe> {
-  return subscribeTable("class!", onRows, options);
+  const subscribeOptions: TableSubscriptionOptions<Class2Row> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["class!"] } : options;
+  return subscribeTable("class!", onRows, subscribeOptions);
 }
 
 export const reducers = {

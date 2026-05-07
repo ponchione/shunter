@@ -44,10 +44,12 @@ the initial snapshot by default, or decoded initial rows when `decodeRow` is
 supplied; declared-view handles are lifecycle-only until schema-aware view row
 decoding lands. Table subscriptions can accept `decodeRow` to invoke decoded
 `onRows`/`onInitialRows` and `onUpdate` callbacks from split RowList row bytes
-while keeping raw callbacks unchanged. It does not implement typed reducer
-argument/result encoding,
-schema-aware declared query/view row decoding, subscription cache behavior, or
-reconnect policy yet.
+while keeping raw callbacks unchanged. The runtime also exports
+`decodeBsatnProduct()` for schema-aware row decoding, and generated bindings
+emit per-table row decoder functions plus a `tableRowDecoders` map that
+generated table subscription helpers use by default. It does not implement
+typed reducer argument/result encoding, declared query/view projection row
+decoding, subscription cache behavior, or reconnect policy yet.
 
 The lifecycle shell offers Shunter's v1 subprotocol, appends a configured token
 as the server-supported `token` query parameter, tracks `idle`/`connecting`/
@@ -87,7 +89,9 @@ schema-aware row decoder; the runtime will call the table `onRows`/
 `onInitialRows` callbacks for accepted initial rows and `onUpdate` for RowList
 insert/delete deltas. Generated table subscription helpers pass through those
 callbacks and options. When `returnHandle: true` is also set, the returned
-table handle starts with decoded initial rows.
+table handle starts with decoded initial rows. Generated bindings now provide
+table row decoders for exported table schemas and default generated table
+subscription helpers to those decoders.
 Declared query consumers that want decoded rows can call
 `decodeDeclaredQueryResult()` with table-specific decoders; consumers that need
 raw RowList bytes can keep using `decodeRawDeclaredQueryResult()`.

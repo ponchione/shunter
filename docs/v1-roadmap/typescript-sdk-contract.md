@@ -79,10 +79,12 @@ declared-view handles currently expose lifecycle state only.
 raw RowList row bytes for `onRows`/`onInitialRows` and RowList insert/delete
 updates for `onUpdate`, leaving raw callbacks unchanged. Generated table
 subscription helpers pass through optional row callbacks and subscription
-options, and expose module-scoped table decoder aliases. Typed reducer
-argument/result encoding, generated schema-aware declared query/view row decoding,
-subscription cache behavior, reconnect policy, and local cache implementation
-remain open.
+options, and expose module-scoped table decoder aliases. The runtime now also
+includes a schema-aware BSATN product row decoder, and generated bindings emit
+per-table row decoder functions plus a `tableRowDecoders` map that generated
+whole-table subscription helpers use by default. Typed reducer argument/result
+encoding, generated declared query/view projection row decoding, subscription
+cache behavior, reconnect policy, and local cache implementation remain open.
 
 ## Runtime API
 
@@ -185,7 +187,8 @@ error. `decodeRawDeclaredQueryResult()` turns a successful raw response frame
 into a name-stamped result with table names, raw RowList bytes, split row byte
 slices, duration, message ID, and the raw frame. `decodeDeclaredQueryResult()`
 can then map those table row bytes with caller-supplied decoders and fails
-clearly when a returned table has no decoder. Generated schema-aware row
+clearly when a returned table has no decoder. Generated table row decoders are
+available for whole-table result rows. Declared query/view projection row
 decoders and table/view metadata extraction remain required v1 follow-ups.
 
 Query calls should return:
@@ -239,9 +242,11 @@ helper until `UnsubscribeSingleApplied` or a matching `SubscriptionError`. It
 can also resolve with a `SubscriptionHandle` when callers pass
 `returnHandle: true`; the handle starts active with the raw initial row byte
 slices, or decoded initial rows when `decodeRow` is provided, and closes after
-the acknowledged unsubscribe. It does not yet generate schema-aware row
-decoders, update local cache state, or apply typed row deltas to managed
-handles.
+the acknowledged unsubscribe. Generated table helpers now default `decodeRow`
+to the generated table decoder for that table, so whole-table subscriptions
+receive typed row callbacks and typed handle initial rows without handwritten
+decoders. It does not yet update local cache state or apply typed row deltas
+to managed handles.
 
 Subscription handles must provide:
 
@@ -298,6 +303,7 @@ Default v1 policy should be explicit and conservative:
 Generated bindings should expose:
 
 - table row interfaces
+- schema-aware table row decoder functions and a table decoder map
 - table names and table-to-row maps
 - reducer names and typed reducer helper functions
 - declared query/view names and typed helpers

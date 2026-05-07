@@ -57,6 +57,15 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;`)
 	assertContains(t, ts, `export type TableRowDecoder<Name extends TableName> = ShunterTableRowDecoder<TableRows[Name]>;`)
 	assertContains(t, ts, `export type TableRowDecoders = ShunterTableRowDecoders<TableRows>;`)
+	assertContains(t, ts, `BsatnColumn as ShunterBsatnColumn,`)
+	assertContains(t, ts, `decodeBsatnProduct as shunterDecodeBsatnProduct,`)
+	assertContains(t, ts, `export function decodeMessagesRow(row: Uint8Array): MessagesRow {`)
+	assertContains(t, ts, `return shunterDecodeBsatnProduct(row, messagesColumns, (values) => ({`)
+	assertContains(t, ts, `body: values[1] as string,`)
+	assertContains(t, ts, `export const tableRowDecoders = {`)
+	assertContains(t, ts, `"messages": decodeMessagesRow,`)
+	assertContains(t, ts, `const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : options;`)
+	assertContains(t, ts, `return subscribeTable("messages", onRows, subscribeOptions);`)
 	assertContains(t, ts, `export const tableReadPolicies = {`)
 	assertContains(t, ts, `messages: { access: "private", permissions: [] },`)
 	assertContains(t, ts, `export const queries = {`)
@@ -97,6 +106,8 @@ func TestGeneratorMapsNullableColumnsToUnionNull(t *testing.T) {
 		t.Fatalf("GenerateTypeScript returned error: %v", err)
 	}
 	assertContains(t, string(out), `body: string | null;`)
+	assertContains(t, string(out), `{ name: "body", kind: "string", nullable: true },`)
+	assertContains(t, string(out), `body: values[1] as string | null,`)
 }
 
 func TestGeneratorAcceptsModuleContractWithoutRuntime(t *testing.T) {

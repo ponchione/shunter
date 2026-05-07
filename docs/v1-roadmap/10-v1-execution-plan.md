@@ -199,8 +199,10 @@ explicit reducer argument encoder conventions; generated table subscription
 helpers pass through caller-supplied row decoders for decoded initial-row and
 update callbacks; declared-query results can now be decoded through
 caller-supplied table decoders; table handles can now hold decoded initial rows
-when requested. Schema-aware generated row/reducer codecs, cache behavior, and
-reconnect behavior remain.
+when requested; generated bindings now emit schema-aware table row decoders and
+use them by default for generated whole-table subscription helpers.
+Schema-aware reducer codecs, declared-query/view projection row decoding,
+cache behavior, and reconnect behavior remain.
 
 Tasks:
 
@@ -210,8 +212,8 @@ Tasks:
   target before generating more helpers.
 - Generate schema-aware typed reducer argument/result codecs beyond the current
   explicit encoder hooks and raw `Uint8Array` request path.
-- Build typed reducer result decoding, schema-aware declared query/view/table
-  row decoding, subscription cache behavior, typed row callback delivery, and
+- Build typed reducer result decoding, declared query/view projection row
+  decoding, subscription cache behavior, typed row callback delivery, and
   unsubscribe acknowledgement integration with managed handles on top of the
   minimal WebSocket lifecycle shell.
 - Expand the current managed subscription handle integration beyond raw table
@@ -220,8 +222,9 @@ Tasks:
 - Add tests for connection transitions, auth failure, reducer/query/view
   success and failure, initial snapshots, deltas, unsubscribe, reconnect, and
   mismatch handling.
-- Implement schema-aware row decoding and local cache primitives for declared
-  query/view and table subscription results.
+- Implement local cache primitives for declared query/view and table
+  subscription results, and add generated projection decoders once declared
+  query/view result schemas are exported.
 - Wire the external canary app client through the SDK only.
 
 Exit criteria:

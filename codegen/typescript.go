@@ -18,6 +18,11 @@ type namedTypeScriptIdentifier struct {
 	sql        string
 }
 
+type typeScriptTableDecoder struct {
+	columnsIdentifier string
+	decoderIdentifier string
+}
+
 func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	var b bytes.Buffer
 
@@ -81,14 +86,18 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	writeTypeScriptConstMap(&b, "tables", tableConstants)
 	b.WriteString("export type TableName = (typeof tables)[keyof typeof tables];\n\n")
 	writeTypeScriptTableRows(&b, contract.Schema.Tables, tableTypes)
+	topLevelValueNames := typeScriptTopLevelValueNames()
+	if _, err := writeTypeScriptTableRowDecoders(&b, contract.Schema.Tables, tableTypes, topLevelValueNames); err != nil {
+		return nil, err
+	}
 	writeTypeScriptTableReadPolicies(&b, contract.Schema.Tables, tableConstants)
 	writeTypeScriptVisibilityFilters(&b, contract.VisibilityFilters)
-	topLevelValueNames := typeScriptTopLevelValueNames()
 	for i, table := range contract.Schema.Tables {
 		rowType := tableTypes[i].identifier + "Row"
 		functionName := uniqueTypeScriptIdentifier("subscribe"+tableTypes[i].identifier, topLevelValueNames)
 		fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>, onRows?: (rows: %s[]) => void, options: TableSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, rowType, rowType, rowType)
-		fmt.Fprintf(&b, "  return subscribeTable(%s, onRows, options);\n", strconv.Quote(table.Name))
+		fmt.Fprintf(&b, "  const subscribeOptions: TableSubscriptionOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders[%s] } : options;\n", rowType, strconv.Quote(table.Name))
+		fmt.Fprintf(&b, "  return subscribeTable(%s, onRows, subscribeOptions);\n", strconv.Quote(table.Name))
 		b.WriteString("}\n\n")
 	}
 
@@ -165,9 +174,11 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 func typeScriptTopLevelValueNames() map[string]int {
 	names := []string{
 		"shunterCallReducerWithResult",
+		"shunterDecodeBsatnProduct",
 		"shunterDecodeDeclaredQueryResult",
 		"shunterProtocol",
 		"tables",
+		"tableRowDecoders",
 		"tableReadPolicies",
 		"visibilityFilters",
 		"reducers",
@@ -188,6 +199,7 @@ func typeScriptTopLevelValueNames() map[string]int {
 
 func writeTypeScriptRuntimeImports(b *bytes.Buffer) {
 	b.WriteString("import type {\n")
+	b.WriteString("  BsatnColumn as ShunterBsatnColumn,\n")
 	b.WriteString("  DecodedDeclaredQueryResult as ShunterDecodedDeclaredQueryResult,\n")
 	b.WriteString("  DeclaredQueryDecodeOptions as ShunterDeclaredQueryDecodeOptions,\n")
 	b.WriteString("  DeclaredQueryRunner as ShunterDeclaredQueryRunner,\n")
@@ -210,6 +222,7 @@ func writeTypeScriptRuntimeImports(b *bytes.Buffer) {
 func writeTypeScriptRuntimeValueImports(b *bytes.Buffer) {
 	b.WriteString("import {\n")
 	b.WriteString("  callReducerWithResult as shunterCallReducerWithResult,\n")
+	b.WriteString("  decodeBsatnProduct as shunterDecodeBsatnProduct,\n")
 	b.WriteString("  decodeDeclaredQueryResult as shunterDecodeDeclaredQueryResult,\n")
 	b.WriteString("} from \"@shunter/client\";\n\n")
 }
@@ -251,6 +264,59 @@ func writeTypeScriptTableRows(b *bytes.Buffer, tables []schema.TableExport, rowT
 		fmt.Fprintf(b, "  %s: %sRow;\n", strconv.Quote(table.Name), rowTypes[i].identifier)
 	}
 	b.WriteString("};\n\n")
+}
+
+func writeTypeScriptTableRowDecoders(b *bytes.Buffer, tables []schema.TableExport, rowTypes []namedTypeScriptIdentifier, topLevelValueNames map[string]int) ([]typeScriptTableDecoder, error) {
+	decoders := make([]typeScriptTableDecoder, len(tables))
+	for i, table := range tables {
+		rowName := rowTypes[i].identifier + "Row"
+		columnsName := uniqueTypeScriptIdentifier(lowerFirst(rowTypes[i].identifier)+"Columns", topLevelValueNames)
+		decoderName := uniqueTypeScriptIdentifier("decode"+rowTypes[i].identifier+"Row", topLevelValueNames)
+		decoders[i] = typeScriptTableDecoder{
+			columnsIdentifier: columnsName,
+			decoderIdentifier: decoderName,
+		}
+
+		fmt.Fprintf(b, "const %s = [\n", columnsName)
+		for _, column := range table.Columns {
+			if _, err := typeScriptColumnType(column.Type); err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(b, "  { name: %s, kind: %s", strconv.Quote(column.Name), strconv.Quote(column.Type))
+			if column.Nullable {
+				b.WriteString(", nullable: true")
+			}
+			b.WriteString(" },\n")
+		}
+		b.WriteString("] as const satisfies readonly ShunterBsatnColumn[];\n\n")
+
+		columnNames := make([]string, len(table.Columns))
+		for j, column := range table.Columns {
+			columnNames[j] = column.Name
+		}
+		columnIdentifiers := uniqueTypeScriptIdentifiers(columnNames, typeScriptCamelIdentifier)
+		fmt.Fprintf(b, "export function %s(row: Uint8Array): %s {\n", decoderName, rowName)
+		fmt.Fprintf(b, "  return shunterDecodeBsatnProduct(row, %s, (values) => ({\n", columnsName)
+		for j, column := range table.Columns {
+			tsType, err := typeScriptColumnType(column.Type)
+			if err != nil {
+				return nil, err
+			}
+			if column.Nullable {
+				tsType += " | null"
+			}
+			fmt.Fprintf(b, "    %s: values[%d] as %s,\n", columnIdentifiers[j].identifier, j, tsType)
+		}
+		b.WriteString("  }));\n")
+		b.WriteString("}\n\n")
+	}
+
+	b.WriteString("export const tableRowDecoders = {\n")
+	for i := range tables {
+		fmt.Fprintf(b, "  %s: %s,\n", strconv.Quote(tables[i].Name), decoders[i].decoderIdentifier)
+	}
+	b.WriteString("} as const satisfies TableRowDecoders;\n\n")
+	return decoders, nil
 }
 
 func writeTypeScriptTableReadPolicies(b *bytes.Buffer, tables []schema.TableExport, identifiers []namedTypeScriptIdentifier) {

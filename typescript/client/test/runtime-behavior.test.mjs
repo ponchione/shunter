@@ -28,6 +28,7 @@ import {
   checkProtocolCompatibility,
   createShunterClient,
   createSubscriptionHandle,
+  decodeBsatnProduct,
   decodeDeclaredQueryResult,
   decodeIdentityTokenFrame,
   decodeOneOffQueryResponseFrame,
@@ -205,6 +206,65 @@ assert.throws(
 function bytesFromHex(hex) {
   return Uint8Array.from(hex.match(/../g).map((byte) => Number.parseInt(byte, 16)));
 }
+
+const decodedBsatnMessage = decodeBsatnProduct(
+  bytesFromHex("0801000000000000000b05000000616c6963650b000b0500000068656c6c6f110200000000000000"),
+  [
+    { name: "id", kind: "uint64" },
+    { name: "sender", kind: "string" },
+    { name: "topic", kind: "string", nullable: true },
+    { name: "body", kind: "string" },
+    { name: "sent_at", kind: "timestamp" },
+  ],
+  (values) => ({
+    id: values[0],
+    sender: values[1],
+    topic: values[2],
+    body: values[3],
+    sentAt: values[4],
+  }),
+);
+assert.deepEqual(decodedBsatnMessage, {
+  id: 1n,
+  sender: "alice",
+  topic: null,
+  body: "hello",
+  sentAt: 2n,
+});
+assert.deepEqual(
+  decodeBsatnProduct(
+    bytesFromHex(
+      "000103feff06040302010c02000000dead120200000001000000610200000062631300112233445566778899aabbccddeeff15070000007b2261223a317d",
+    ),
+    [
+      { name: "active", kind: "bool" },
+      { name: "count", kind: "int16" },
+      { name: "mask", kind: "uint32" },
+      { name: "payload", kind: "bytes" },
+      { name: "tags", kind: "arrayString" },
+      { name: "owner", kind: "uuid" },
+      { name: "metadata", kind: "json" },
+    ],
+    (values) => values,
+  ),
+  [
+    true,
+    -2,
+    0x01020304,
+    new Uint8Array([0xde, 0xad]),
+    ["a", "bc"],
+    "00112233-4455-6677-8899-aabbccddeeff",
+    { a: 1 },
+  ],
+);
+assert.throws(
+  () => decodeBsatnProduct(bytesFromHex("070100000000000000"), [{ name: "id", kind: "uint64" }], (values) => values),
+  ShunterValidationError,
+);
+assert.throws(
+  () => decodeBsatnProduct(bytesFromHex("0b02"), [{ name: "topic", kind: "string", nullable: true }], (values) => values),
+  ShunterValidationError,
+);
 
 const encodedReducer = encodeReducerCallRequest("send", new Uint8Array([0xaa, 0xbb]), {
   requestId: 0x31323334,

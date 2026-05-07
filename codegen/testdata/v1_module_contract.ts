@@ -3,6 +3,7 @@
 // Module: v1_guardrails v1.0.0
 
 import type {
+  BsatnColumn as ShunterBsatnColumn,
   DecodedDeclaredQueryResult as ShunterDecodedDeclaredQueryResult,
   DeclaredQueryDecodeOptions as ShunterDeclaredQueryDecodeOptions,
   DeclaredQueryRunner as ShunterDeclaredQueryRunner,
@@ -23,6 +24,7 @@ import type {
 
 import {
   callReducerWithResult as shunterCallReducerWithResult,
+  decodeBsatnProduct as shunterDecodeBsatnProduct,
   decodeDeclaredQueryResult as shunterDecodeDeclaredQueryResult,
 } from "@shunter/client";
 
@@ -89,6 +91,62 @@ export type TableRows = {
   "sys_scheduled": SysScheduledRow;
 };
 
+const messagesColumns = [
+  { name: "id", kind: "uint64" },
+  { name: "sender", kind: "string" },
+  { name: "topic", kind: "string", nullable: true },
+  { name: "body", kind: "string" },
+  { name: "sent_at", kind: "timestamp" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decodeMessagesRow(row: Uint8Array): MessagesRow {
+  return shunterDecodeBsatnProduct(row, messagesColumns, (values) => ({
+    id: values[0] as bigint,
+    sender: values[1] as string,
+    topic: values[2] as string | null,
+    body: values[3] as string,
+    sentAt: values[4] as bigint,
+  }));
+}
+
+const sysClientsColumns = [
+  { name: "connection_id", kind: "bytes" },
+  { name: "identity", kind: "bytes" },
+  { name: "connected_at", kind: "int64" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decodeSysClientsRow(row: Uint8Array): SysClientsRow {
+  return shunterDecodeBsatnProduct(row, sysClientsColumns, (values) => ({
+    connectionId: values[0] as Uint8Array,
+    identity: values[1] as Uint8Array,
+    connectedAt: values[2] as bigint,
+  }));
+}
+
+const sysScheduledColumns = [
+  { name: "schedule_id", kind: "uint64" },
+  { name: "reducer_name", kind: "string" },
+  { name: "args", kind: "bytes" },
+  { name: "next_run_at_ns", kind: "int64" },
+  { name: "repeat_ns", kind: "int64" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decodeSysScheduledRow(row: Uint8Array): SysScheduledRow {
+  return shunterDecodeBsatnProduct(row, sysScheduledColumns, (values) => ({
+    scheduleId: values[0] as bigint,
+    reducerName: values[1] as string,
+    args: values[2] as Uint8Array,
+    nextRunAtNs: values[3] as bigint,
+    repeatNs: values[4] as bigint,
+  }));
+}
+
+export const tableRowDecoders = {
+  "messages": decodeMessagesRow,
+  "sys_clients": decodeSysClientsRow,
+  "sys_scheduled": decodeSysScheduledRow,
+} as const satisfies TableRowDecoders;
+
 export const tableReadPolicies = {
   messages: { access: "permissioned", permissions: ["messages:read"] },
   sysClients: { access: "private", permissions: [] },
@@ -100,15 +158,18 @@ export const visibilityFilters = {
 } as const;
 
 export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>, onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}): Promise<SubscriptionUnsubscribe> {
-  return subscribeTable("messages", onRows, options);
+  const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : options;
+  return subscribeTable("messages", onRows, subscribeOptions);
 }
 
 export function subscribeSysClients(subscribeTable: TableSubscriber<SysClientsRow>, onRows?: (rows: SysClientsRow[]) => void, options: TableSubscriptionOptions<SysClientsRow> = {}): Promise<SubscriptionUnsubscribe> {
-  return subscribeTable("sys_clients", onRows, options);
+  const subscribeOptions: TableSubscriptionOptions<SysClientsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_clients"] } : options;
+  return subscribeTable("sys_clients", onRows, subscribeOptions);
 }
 
 export function subscribeSysScheduled(subscribeTable: TableSubscriber<SysScheduledRow>, onRows?: (rows: SysScheduledRow[]) => void, options: TableSubscriptionOptions<SysScheduledRow> = {}): Promise<SubscriptionUnsubscribe> {
-  return subscribeTable("sys_scheduled", onRows, options);
+  const subscribeOptions: TableSubscriptionOptions<SysScheduledRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_scheduled"] } : options;
+  return subscribeTable("sys_scheduled", onRows, subscribeOptions);
 }
 
 export const reducers = {

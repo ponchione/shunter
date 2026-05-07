@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	shunter "github.com/ponchione/shunter"
@@ -83,6 +84,7 @@ func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
 
 	for _, want := range []string{
 		`import type {`,
+		`BsatnColumn as ShunterBsatnColumn,`,
 		`DecodedDeclaredQueryResult as ShunterDecodedDeclaredQueryResult,`,
 		`DeclaredQueryDecodeOptions as ShunterDeclaredQueryDecodeOptions,`,
 		`DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,`,
@@ -94,6 +96,7 @@ func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
 		`TableRowDecoder as ShunterTableRowDecoder,`,
 		`TableRowDecoders as ShunterTableRowDecoders,`,
 		`callReducerWithResult as shunterCallReducerWithResult,`,
+		`decodeBsatnProduct as shunterDecodeBsatnProduct,`,
 		`decodeDeclaredQueryResult as shunterDecodeDeclaredQueryResult,`,
 		`export const shunterProtocol = {`,
 		`defaultSubprotocol: "v1.bsatn.shunter",`,
@@ -109,6 +112,11 @@ func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
 		`export type TableName = (typeof tables)[keyof typeof tables];`,
 		`export type TableRows = {`,
 		`"messages": MessagesRow;`,
+		`export function decodeMessagesRow(row: Uint8Array): MessagesRow {`,
+		`return shunterDecodeBsatnProduct(row, messagesColumns, (values) => ({`,
+		`topic: values[2] as string | null,`,
+		`export const tableRowDecoders = {`,
+		`"messages": decodeMessagesRow,`,
 		`export const tableReadPolicies = {`,
 		`messages: { access: "permissioned", permissions: ["messages:read"] },`,
 		`export const visibilityFilters = {`,
@@ -343,6 +351,7 @@ func TestV1CompatibilityTypeScriptCoversCurrentValueKindMappings(t *testing.T) {
 	assertContains(t, ts, `export interface AllValuesRow {`)
 	for _, column := range columns {
 		assertContains(t, ts, `  `+column.field+`: `+column.want+`;`)
+		assertContains(t, ts, `{ name: `+strconv.Quote(column.name)+`, kind: `+strconv.Quote(schema.ValueKindExportString(column.kind)))
 	}
 }
 

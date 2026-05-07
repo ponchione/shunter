@@ -1842,6 +1842,61 @@ export interface RawRowList {
   readonly rawBytes: Uint8Array;
 }
 
+export type BsatnValueKind =
+  | "bool"
+  | "int8"
+  | "uint8"
+  | "int16"
+  | "uint16"
+  | "int32"
+  | "uint32"
+  | "int64"
+  | "uint64"
+  | "float32"
+  | "float64"
+  | "string"
+  | "bytes"
+  | "int128"
+  | "uint128"
+  | "int256"
+  | "uint256"
+  | "timestamp"
+  | "arrayString"
+  | "uuid"
+  | "duration"
+  | "json";
+
+export interface BsatnColumn {
+  readonly name: string;
+  readonly kind: BsatnValueKind;
+  readonly nullable?: boolean;
+}
+
+const bsatnTags = {
+  bool: 0,
+  int8: 1,
+  uint8: 2,
+  int16: 3,
+  uint16: 4,
+  int32: 5,
+  uint32: 6,
+  int64: 7,
+  uint64: 8,
+  float32: 9,
+  float64: 10,
+  string: 11,
+  bytes: 12,
+  int128: 13,
+  uint128: 14,
+  int256: 15,
+  uint256: 16,
+  timestamp: 17,
+  arrayString: 18,
+  uuid: 19,
+  duration: 20,
+  json: 21,
+} as const satisfies Record<BsatnValueKind, number>;
+
 export function decodeRowList(data: unknown): RawRowList {
   const rowList = binaryBytes(data, "encoded RowList");
   let offset = 0;
@@ -1863,6 +1918,230 @@ export function decodeRowList(data: unknown): RawRowList {
     rows,
     rawBytes: new Uint8Array(rowList),
   };
+}
+
+export function decodeBsatnProduct<Row>(
+  data: unknown,
+  columns: readonly BsatnColumn[],
+  buildRow: (values: readonly unknown[]) => Row,
+): Row {
+  const row = binaryBytes(data, "encoded BSATN product row");
+  let offset = 0;
+  const values: unknown[] = [];
+  for (const column of columns) {
+    const [value, valueOffset] = readBsatnColumn(row, offset, column);
+    values.push(value);
+    offset = valueOffset;
+  }
+  if (offset !== row.length) {
+    throw new ShunterValidationError("Malformed BSATN row: trailing bytes.", {
+      code: "bsatn_trailing_bytes",
+      details: { expectedColumns: columns.length },
+    });
+  }
+  return buildRow(values);
+}
+
+function readBsatnColumn(
+  row: Uint8Array,
+  offset: number,
+  column: BsatnColumn,
+): [unknown, number] {
+  if (row.length < offset + 1) {
+    throw new ShunterValidationError("Malformed BSATN row: column tag is truncated.", {
+      code: "bsatn_truncated_column",
+      details: { column: column.name },
+    });
+  }
+  const expectedTag = bsatnTags[column.kind];
+  const tag = row[offset];
+  offset += 1;
+  if (tag !== expectedTag) {
+    throw new ShunterValidationError("Malformed BSATN row: column tag mismatch.", {
+      code: "bsatn_column_tag_mismatch",
+      details: { column: column.name, expected: column.kind, expectedTag, receivedTag: tag },
+    });
+  }
+  if (column.nullable !== true) {
+    return readBsatnPayload(row, offset, column.kind, column.name);
+  }
+  if (row.length < offset + 1) {
+    throw new ShunterValidationError("Malformed BSATN row: nullable presence marker is truncated.", {
+      code: "bsatn_truncated_presence",
+      details: { column: column.name },
+    });
+  }
+  const presence = row[offset];
+  offset += 1;
+  switch (presence) {
+    case 0:
+      return [null, offset];
+    case 1:
+      return readBsatnPayload(row, offset, column.kind, column.name);
+    default:
+      throw new ShunterValidationError("Malformed BSATN row: invalid nullable presence marker.", {
+        code: "bsatn_invalid_presence",
+        details: { column: column.name, presence },
+      });
+  }
+}
+
+function readBsatnPayload(
+  row: Uint8Array,
+  offset: number,
+  kind: BsatnValueKind,
+  column: string,
+): [unknown, number] {
+  const view = new DataView(row.buffer, row.byteOffset, row.byteLength);
+  switch (kind) {
+    case "bool":
+      assertBsatnAvailable(row, offset, 1, column);
+      switch (row[offset]) {
+        case 0:
+          return [false, offset + 1];
+        case 1:
+          return [true, offset + 1];
+        default:
+          throw new ShunterValidationError("Malformed BSATN row: invalid bool payload.", {
+            code: "bsatn_invalid_bool",
+            details: { column, value: row[offset] },
+          });
+      }
+    case "int8":
+      assertBsatnAvailable(row, offset, 1, column);
+      return [view.getInt8(offset), offset + 1];
+    case "uint8":
+      assertBsatnAvailable(row, offset, 1, column);
+      return [view.getUint8(offset), offset + 1];
+    case "int16":
+      assertBsatnAvailable(row, offset, 2, column);
+      return [view.getInt16(offset, true), offset + 2];
+    case "uint16":
+      assertBsatnAvailable(row, offset, 2, column);
+      return [view.getUint16(offset, true), offset + 2];
+    case "int32":
+      assertBsatnAvailable(row, offset, 4, column);
+      return [view.getInt32(offset, true), offset + 4];
+    case "uint32":
+      assertBsatnAvailable(row, offset, 4, column);
+      return [view.getUint32(offset, true), offset + 4];
+    case "int64":
+    case "timestamp":
+    case "duration":
+      assertBsatnAvailable(row, offset, 8, column);
+      return [view.getBigInt64(offset, true), offset + 8];
+    case "uint64":
+      assertBsatnAvailable(row, offset, 8, column);
+      return [view.getBigUint64(offset, true), offset + 8];
+    case "float32":
+      assertBsatnAvailable(row, offset, 4, column);
+      return [view.getFloat32(offset, true), offset + 4];
+    case "float64":
+      assertBsatnAvailable(row, offset, 8, column);
+      return [view.getFloat64(offset, true), offset + 8];
+    case "string":
+      return readBsatnString(row, offset, column);
+    case "bytes":
+      return readBytes(row, offset, `BSATN ${column}`);
+    case "int128":
+      return readBsatnWideInt(row, offset, 2, true, column);
+    case "uint128":
+      return readBsatnWideInt(row, offset, 2, false, column);
+    case "int256":
+      return readBsatnWideInt(row, offset, 4, true, column);
+    case "uint256":
+      return readBsatnWideInt(row, offset, 4, false, column);
+    case "arrayString":
+      return readBsatnStringArray(row, offset, column);
+    case "uuid":
+      return readBsatnUUID(row, offset, column);
+    case "json":
+      return readBsatnJSON(row, offset, column);
+  }
+}
+
+function assertBsatnAvailable(
+  row: Uint8Array,
+  offset: number,
+  length: number,
+  column: string,
+): void {
+  if (row.length < offset + length) {
+    throw new ShunterValidationError("Malformed BSATN row: column payload is truncated.", {
+      code: "bsatn_truncated_payload",
+      details: { column },
+    });
+  }
+}
+
+function readBsatnString(row: Uint8Array, offset: number, column: string): [string, number] {
+  const [raw, nextOffset] = readBytes(row, offset, `BSATN ${column}`);
+  try {
+    return [new TextDecoder("utf-8", { fatal: true }).decode(raw), nextOffset];
+  } catch (error) {
+    throw new ShunterValidationError("Malformed BSATN row: string payload is not valid UTF-8.", {
+      code: "bsatn_invalid_utf8",
+      details: { column },
+      cause: error,
+    });
+  }
+}
+
+function readBsatnStringArray(
+  row: Uint8Array,
+  offset: number,
+  column: string,
+): [readonly string[], number] {
+  const [count, countOffset] = readUint32LE(row, offset, `BSATN ${column} array count`);
+  offset = countOffset;
+  const values: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const [value, valueOffset] = readBsatnString(row, offset, `${column}[${i}]`);
+    values.push(value);
+    offset = valueOffset;
+  }
+  return [values, offset];
+}
+
+function readBsatnUUID(row: Uint8Array, offset: number, column: string): [string, number] {
+  assertBsatnAvailable(row, offset, 16, column);
+  const hex = bytesKey(row.slice(offset, offset + 16));
+  return [
+    `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`,
+    offset + 16,
+  ];
+}
+
+function readBsatnJSON(row: Uint8Array, offset: number, column: string): [unknown, number] {
+  const [rawJSON, nextOffset] = readBsatnString(row, offset, column);
+  try {
+    return [JSON.parse(rawJSON) as unknown, nextOffset];
+  } catch (error) {
+    throw new ShunterValidationError("Malformed BSATN row: JSON payload is invalid.", {
+      code: "bsatn_invalid_json",
+      details: { column },
+      cause: error,
+    });
+  }
+}
+
+function readBsatnWideInt(
+  row: Uint8Array,
+  offset: number,
+  words: 2 | 4,
+  signed: boolean,
+  column: string,
+): [bigint, number] {
+  const length = words * 8;
+  assertBsatnAvailable(row, offset, length, column);
+  const view = new DataView(row.buffer, row.byteOffset, row.byteLength);
+  let value = signed
+    ? view.getBigInt64(offset + (words - 1) * 8, true) << BigInt((words - 1) * 64)
+    : view.getBigUint64(offset + (words - 1) * 8, true) << BigInt((words - 1) * 64);
+  for (let i = 0; i < words - 1; i += 1) {
+    value += view.getBigUint64(offset + i * 8, true) << BigInt(i * 64);
+  }
+  return [value, offset + length];
 }
 
 function decodeEnvelopeRowList(rows: Uint8Array): readonly Uint8Array[] {
