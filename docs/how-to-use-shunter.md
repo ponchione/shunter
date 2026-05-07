@@ -105,6 +105,37 @@ Reducers run on the serialized executor path. Do not retain
 `*schema.ReducerContext`, use it from another goroutine, or do blocking
 network/disk/RPC work while holding the executor.
 
+## In-Process Trust Model
+
+Shunter v1 is an in-process Go runtime. Your reducers, lifecycle hooks,
+scheduled reducer calls, and migration hooks run inside the application process,
+not inside a sandbox. Shunter does not provide WASM isolation, dynamic module
+upload, process-level memory limits, or automatic protection from goroutines
+started by app code.
+
+Reducer rules for v1 app code:
+
+- Mutate Shunter state only through the reducer `DB` APIs.
+- Keep reducer work deterministic where replay, scheduling, or recovery depends
+  on the result.
+- Avoid external side effects inside reducers. If a side effect is required,
+  make the app-level idempotency and failure behavior explicit.
+- Do not retain reducer contexts, read views, scheduler handles, or row values
+  beyond their documented callback or reducer scope.
+- Do not perform long-running network, disk, RPC, or sleep work on the
+  serialized executor path.
+
+Reducer user errors and reducer panics roll back the reducer transaction and
+are reported as failed reducer results. The executor recovers reducer panics,
+records them as failed calls, and continues serving later work. That recovery
+does not protect the process from app-started goroutines, process-wide panics,
+deadlocks, memory exhaustion, or blocking calls that never return.
+
+Lifecycle hooks and scheduled reducer calls use the same in-process trust
+boundary. Migration hooks may run during startup or through an offline
+maintenance binary; write them as app-owned data migrations that can fail
+clearly and be retried safely from a known backup.
+
 ## Build The Runtime
 
 `Build` validates the module, builds the schema registry, opens or bootstraps

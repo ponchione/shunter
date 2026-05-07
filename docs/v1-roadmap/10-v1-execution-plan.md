@@ -257,9 +257,11 @@ Exit criteria:
 
 Goal: Shunter's execution boundary is clear and honest.
 
+Status: app-author trust-model docs added; confirmation tests remain.
+
 Tasks:
 
-- Document the v1 app-trust model in app-author docs.
+- Keep the v1 app-trust model documented in app-author docs.
 - State reducer, lifecycle-hook, scheduler, and migration-hook side-effect
   expectations.
 - Document panic and error behavior.
