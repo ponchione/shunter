@@ -1,6 +1,7 @@
 # Production Auth
 
-Status: open, strict HS256 issuer/audience support landed; broader auth remains
+Status: open, strict HS256 issuer/audience/future-token support landed; broader
+auth remains
 Owner: unassigned
 Scope: production-ready authentication, principal derivation, permission
 mapping, and operational auth documentation for Shunter v1.
@@ -39,8 +40,8 @@ Current code reality:
   optional `permissions` claims into the caller principal.
 - Dev mode can mint anonymous tokens with an ephemeral or configured signing
   key. This is still the zero-value convenience path.
-- There is no issuer allowlist, asymmetric key support, JWKS/OIDC discovery,
-  key-rotation cache, or app-provided claim mapper in the current root config.
+- There is no asymmetric key support, JWKS/OIDC discovery, key-rotation cache,
+  or app-provided claim mapper in the current root config.
 
 The current `AuthModeDev` behavior is useful for local development. It should
 remain easy, but v1 must prevent accidental production use of dev auth.
@@ -75,9 +76,10 @@ Completed or partially complete:
 - Document current dev/strict auth behavior, principal derivation, permission
   mapping, visibility-filter limits, key replacement, and production checklist
   in `docs/authentication.md`.
-- Add coverage for JWT validation, audience validation, wrong algorithms,
-  protocol upgrade auth, local strict permissions, declared-read permissions,
-  read authorization, and visibility-filtered reads.
+- Add coverage for JWT validation, issuer and audience validation, expired,
+  future-issued, not-yet-valid, malformed, wrong-algorithm, bad-signature, and
+  missing-claim tokens, protocol upgrade auth, local strict permissions,
+  declared-read permissions, read authorization, and visibility-filtered reads.
 
 Remaining:
 
@@ -87,9 +89,8 @@ Remaining:
   multi-key rotation.
 - Decide whether claim-to-permission mapping stays on the `permissions` claim
   or gains an app-provided mapper.
-- Add or confirm tests for future token, expired token, malformed token, wrong
-  algorithm, missing permissions, and visibility-filtered reads.
-- Add or confirm tests that verify auth is enforced consistently across:
+- Confirm any remaining tests needed to prove auth is enforced consistently
+  across:
   - WebSocket reducer calls
   - local `CallReducer`
   - one-off raw SQL

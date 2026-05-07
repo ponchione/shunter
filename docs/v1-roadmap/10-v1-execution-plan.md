@@ -162,8 +162,9 @@ Exit criteria:
 
 Goal: strict auth is safe to configure and clear to operate.
 
-Status: current dev/strict auth behavior documented and issuer allowlists
-implemented; broader strict-auth decisions and reference-app example remain.
+Status: current dev/strict auth behavior documented, issuer allowlists
+implemented, and strict future-token handling tested; broader strict-auth
+decisions and reference-app example remain.
 
 Tasks:
 
@@ -176,8 +177,8 @@ Tasks:
 - Decide strict-mode anonymous-token behavior.
 - Add startup/config validation for any newly required strict fields.
 - Keep `docs/authentication.md` current as structured dev/strict auth guidance.
-- Add tests for missing signing config, invalid issuer, invalid audience,
-  expired token, future token, malformed token, wrong algorithm, missing
+- Keep tests current for missing signing config, invalid issuer, invalid
+  audience, expired/future/malformed/wrong-algorithm tokens, missing
   permissions, and visibility-filtered reads across local and protocol paths.
 - Update the reference app to demonstrate the recommended production pattern.
 

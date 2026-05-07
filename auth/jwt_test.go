@@ -133,6 +133,40 @@ func TestValidateJWTExpiredRejected(t *testing.T) {
 	}
 }
 
+func TestValidateJWTFutureIssuedAtRejected(t *testing.T) {
+	cfg := &JWTConfig{SigningKey: testKey}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub": "a",
+		"iss": "b",
+		"iat": time.Now().Add(time.Hour).Unix(),
+		"exp": time.Now().Add(2 * time.Hour).Unix(),
+	})
+	_, err := ValidateJWT(s, cfg)
+	if !errors.Is(err, ErrJWTInvalid) {
+		t.Errorf("got %v, want ErrJWTInvalid for future issued-at token", err)
+	}
+	if !errors.Is(err, jwt.ErrTokenUsedBeforeIssued) {
+		t.Fatalf("future issued-at error should preserve jwt.ErrTokenUsedBeforeIssued, got %v", err)
+	}
+}
+
+func TestValidateJWTNotBeforeRejected(t *testing.T) {
+	cfg := &JWTConfig{SigningKey: testKey}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub": "a",
+		"iss": "b",
+		"nbf": time.Now().Add(time.Hour).Unix(),
+		"exp": time.Now().Add(2 * time.Hour).Unix(),
+	})
+	_, err := ValidateJWT(s, cfg)
+	if !errors.Is(err, ErrJWTInvalid) {
+		t.Errorf("got %v, want ErrJWTInvalid for not-before token", err)
+	}
+	if !errors.Is(err, jwt.ErrTokenNotValidYet) {
+		t.Fatalf("not-before error should preserve jwt.ErrTokenNotValidYet, got %v", err)
+	}
+}
+
 func TestValidateJWTBadSignatureRejected(t *testing.T) {
 	cfg := &JWTConfig{SigningKey: []byte("WRONG-KEY")}
 	s := mintHS256(t, jwt.MapClaims{"sub": "a", "iss": "b"})
@@ -142,6 +176,17 @@ func TestValidateJWTBadSignatureRejected(t *testing.T) {
 	}
 	if !errors.Is(err, jwt.ErrTokenSignatureInvalid) {
 		t.Fatalf("bad signature error should preserve jwt.ErrTokenSignatureInvalid, got %v", err)
+	}
+}
+
+func TestValidateJWTMalformedRejected(t *testing.T) {
+	cfg := &JWTConfig{SigningKey: testKey}
+	_, err := ValidateJWT("not-a-jwt", cfg)
+	if !errors.Is(err, ErrJWTInvalid) {
+		t.Fatalf("got %v, want ErrJWTInvalid for malformed token", err)
+	}
+	if !errors.Is(err, jwt.ErrTokenMalformed) {
+		t.Fatalf("malformed token error should preserve jwt.ErrTokenMalformed, got %v", err)
 	}
 }
 

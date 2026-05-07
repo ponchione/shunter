@@ -6,6 +6,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 - Current development line.
 - Added `Config.AuthIssuers` for strict JWT issuer allowlist validation.
+- Strict JWT validation now rejects future `iat` claims.
 - Live subscription join deltas now avoid per-row committed table rescans when only the changed side's join column is indexed.
 - Live subscription initial join snapshots now choose the lower-cost indexed scan side, including filter-reduced candidate sets, when both join columns are indexed.
 - Live subscription initial join snapshots now use indexed required equality/range filters to skip unnecessary join probes.

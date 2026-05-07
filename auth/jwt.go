@@ -78,10 +78,10 @@ var (
 )
 
 // ValidateJWT parses + verifies tokenString against config and
-// normalizes its claims. Signature errors, expiry, missing sub/iss,
-// mismatched hex_identity, and audience-policy violations all map to
-// dedicated sentinels so the transport layer can produce the right
-// HTTP 401 responses (SPEC-005 §4.3).
+// normalizes its claims. Signature errors, expiry, future `iat`/`nbf`,
+// missing sub/iss, mismatched hex_identity, and audience-policy violations all
+// map to dedicated sentinels so the transport layer can produce the right HTTP
+// 401 responses (SPEC-005 §4.3).
 func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	if config == nil {
 		return nil, fmt.Errorf("%w: config is required", ErrJWTInvalid)
@@ -91,7 +91,7 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	}
 	parsed, err := jwt.Parse(tokenString, func(*jwt.Token) (any, error) {
 		return config.SigningKey, nil
-	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithIssuedAt())
 	if err != nil {
 		return nil, errors.Join(ErrJWTInvalid, err)
 	}

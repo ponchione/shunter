@@ -81,7 +81,7 @@ func buildValidateJWTGeneratedClaimsScenario(t testing.TB, seed []byte) validate
 	t.Helper()
 
 	const (
-		fixedIAT = int64(1767225600) // 2026-01-01T00:00:00Z
+		fixedIAT = int64(1704067200) // 2024-01-01T00:00:00Z
 		futureEP = int64(2524608000) // 2050-01-01T00:00:00Z
 		pastEP   = int64(946684800)  // 2000-01-01T00:00:00Z
 	)

@@ -45,8 +45,9 @@ Behavior:
 - `aud` is checked only when `AuthAudiences` is non-empty.
 - `permissions` may be a string or string list and is copied into the caller
   principal and protocol connection.
-- Missing, malformed, expired, wrong-algorithm, bad-signature, audience-mismatched,
-  or missing-claim tokens are rejected before the WebSocket upgrade completes.
+- Missing, malformed, expired, future-issued, not-yet-valid, wrong-algorithm,
+  bad-signature, audience-mismatched, or missing-claim tokens are rejected
+  before the WebSocket upgrade completes.
 - Local reducer and declared-read calls do not receive the dev-mode allow-all
   permission bypass by default.
 
