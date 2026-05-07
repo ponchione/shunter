@@ -60,8 +60,10 @@ Code reality as of this roadmap cleanup:
   from `docs/README.md`.
 - Protocol wire golden coverage now pins every stable v1 message family and the
   stable payload variants called out by the compatibility matrix.
-- Contract and TypeScript compatibility tests and a representative contract
-  fixture exist, but the matrix still needs a final contract JSON field audit.
+- Contract JSON golden coverage now pins every stable `ModuleContract` JSON
+  field and nested metadata object called out by the compatibility matrix.
+- TypeScript compatibility tests and committed fixtures cover the stable
+  generated-client output categories.
 - Generated TypeScript is a stable contract-generation target, not a full SDK.
 - Offline operations and migration hooks are preview/advanced in the matrix,
   even though helpers and CLI commands already exist.
@@ -113,6 +115,10 @@ Completed or partially complete:
   normalization and collision suffixes across emitted identifier categories.
 - Add dedicated protocol v1 wire golden coverage for every stable message family
   and stable payload variants, plus an explicit fixture coverage check.
+- Add dedicated contract JSON golden coverage for every stable `ModuleContract`
+  JSON field, including nested schema, read-policy, declaration,
+  visibility-filter, permission, read-model, migration, codegen, and nullable
+  column metadata.
 
 Remaining:
 
@@ -120,8 +126,6 @@ Remaining:
   next implementation slices land.
 - Keep package comments aligned with the compatibility matrix when support
   levels change.
-- Confirm contract JSON golden coverage for every stable `ModuleContract` field
-  in the matrix.
 - Keep generated TypeScript identifier normalization compatibility tests current
   as an ongoing maintenance item when codegen naming changes.
 

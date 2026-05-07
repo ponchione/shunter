@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -227,6 +228,75 @@ func TestV1CompatibilityModuleContractFixtureCoversStableArtifacts(t *testing.T)
 	assertV1FixtureMetadata(t, contract)
 }
 
+func TestV1CompatibilityModuleContractFixtureCoversStableJSONFields(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "v1_module_contract.json"))
+	if err != nil {
+		t.Fatalf("read v1 contract fixture: %v", err)
+	}
+
+	top := assertJSONObjectKeys(t, data, "contract", []string{
+		"contract_version",
+		"module",
+		"schema",
+		"queries",
+		"views",
+		"visibility_filters",
+		"permissions",
+		"read_model",
+		"migrations",
+		"codegen",
+	})
+	assertJSONObjectKeys(t, top["module"], "contract.module", []string{"name", "version", "metadata"})
+
+	schemaJSON := assertJSONObjectKeys(t, top["schema"], "contract.schema", []string{"version", "tables", "reducers"})
+	tables := assertJSONArrayObjects(t, schemaJSON["tables"], "contract.schema.tables")
+	messagesTable := findJSONObjectByStringField(t, tables, "name", "messages", "contract.schema.tables")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, messagesTable), "contract.schema.tables.messages", []string{"name", "columns", "indexes", "read_policy"})
+	columns := assertJSONArrayObjects(t, messagesTable["columns"], "contract.schema.tables.messages.columns")
+	topicColumn := findJSONObjectByStringField(t, columns, "name", "topic", "contract.schema.tables.messages.columns")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, topicColumn), "contract.schema.tables.messages.columns.topic", []string{"name", "type", "nullable"})
+	indexes := assertJSONArrayObjects(t, messagesTable["indexes"], "contract.schema.tables.messages.indexes")
+	pkIndex := findJSONObjectByStringField(t, indexes, "name", "pk", "contract.schema.tables.messages.indexes")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, pkIndex), "contract.schema.tables.messages.indexes.pk", []string{"name", "columns", "unique", "primary"})
+	assertJSONObjectKeys(t, messagesTable["read_policy"], "contract.schema.tables.messages.read_policy", []string{"access", "permissions"})
+	reducers := assertJSONArrayObjects(t, schemaJSON["reducers"], "contract.schema.reducers")
+	createMessageReducer := findJSONObjectByStringField(t, reducers, "name", "create_message", "contract.schema.reducers")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, createMessageReducer), "contract.schema.reducers.create_message", []string{"name", "lifecycle"})
+
+	queries := assertJSONArrayObjects(t, top["queries"], "contract.queries")
+	recentMessagesQuery := findJSONObjectByStringField(t, queries, "name", "recent_messages", "contract.queries")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, recentMessagesQuery), "contract.queries.recent_messages", []string{"name", "sql"})
+	views := assertJSONArrayObjects(t, top["views"], "contract.views")
+	projectionView := findJSONObjectByStringField(t, views, "name", "live_message_projection", "contract.views")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, projectionView), "contract.views.live_message_projection", []string{"name", "sql"})
+	filters := assertJSONArrayObjects(t, top["visibility_filters"], "contract.visibility_filters")
+	ownMessagesFilter := findJSONObjectByStringField(t, filters, "name", "own_messages", "contract.visibility_filters")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, ownMessagesFilter), "contract.visibility_filters.own_messages", []string{
+		"name",
+		"sql",
+		"return_table",
+		"return_table_id",
+		"uses_caller_identity",
+	})
+
+	permissions := assertJSONObjectKeys(t, top["permissions"], "contract.permissions", []string{"reducers", "queries", "views"})
+	for _, surface := range []string{"reducers", "queries", "views"} {
+		declarations := assertJSONArrayObjects(t, permissions[surface], "contract.permissions."+surface)
+		assertJSONObjectKeys(t, mustMarshalRawObject(t, declarations[0]), "contract.permissions."+surface+"[0]", []string{"name", "required"})
+	}
+	readModel := assertJSONObjectKeys(t, top["read_model"], "contract.read_model", []string{"declarations"})
+	readModelDeclarations := assertJSONArrayObjects(t, readModel["declarations"], "contract.read_model.declarations")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, readModelDeclarations[0]), "contract.read_model.declarations[0]", []string{"surface", "name", "tables", "tags"})
+
+	migrations := assertJSONObjectKeys(t, top["migrations"], "contract.migrations", []string{"module", "declarations"})
+	assertMigrationMetadataJSONKeys(t, migrations["module"], "contract.migrations.module")
+	migrationDeclarations := assertJSONArrayObjects(t, migrations["declarations"], "contract.migrations.declarations")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, migrationDeclarations[0]), "contract.migrations.declarations[0]", []string{"surface", "name", "metadata"})
+	assertMigrationMetadataJSONKeys(t, migrationDeclarations[0]["metadata"], "contract.migrations.declarations[0].metadata")
+
+	assertJSONObjectKeys(t, top["codegen"], "contract.codegen", []string{"contract_format", "contract_version", "default_snapshot_filename"})
+}
+
 func buildV1CompatibilityRuntime(t *testing.T) *Runtime {
 	t.Helper()
 
@@ -304,6 +374,7 @@ func v1CompatibilityMessagesTableDef() schema.TableDefinition {
 		Columns: []schema.ColumnDefinition{
 			{Name: "id", Type: types.KindUint64, PrimaryKey: true, AutoIncrement: true},
 			{Name: "sender", Type: types.KindString},
+			{Name: "topic", Type: types.KindString, Nullable: true},
 			{Name: "body", Type: types.KindString},
 			{Name: "sent_at", Type: types.KindTimestamp},
 		},
@@ -326,10 +397,13 @@ func assertV1FixtureTable(t *testing.T, contract ModuleContract) {
 		if len(table.ReadPolicy.Permissions) != 1 || table.ReadPolicy.Permissions[0] != "messages:read" {
 			t.Fatalf("messages read permissions = %#v, want [messages:read]", table.ReadPolicy.Permissions)
 		}
-		for _, column := range []string{"id", "sender", "body", "sent_at"} {
+		for _, column := range []string{"id", "sender", "topic", "body", "sent_at"} {
 			if !v1FixtureHasColumn(table.Columns, column) {
 				t.Fatalf("messages table missing column %q: %#v", column, table.Columns)
 			}
+		}
+		if !v1FixtureColumnNullable(table.Columns, "topic") {
+			t.Fatalf("messages.topic nullable = false, want true: %#v", table.Columns)
 		}
 		return
 	}
@@ -398,6 +472,15 @@ func v1FixtureHasColumn(columns []schema.ColumnExport, name string) bool {
 	for _, column := range columns {
 		if column.Name == name {
 			return true
+		}
+	}
+	return false
+}
+
+func v1FixtureColumnNullable(columns []schema.ColumnExport, name string) bool {
+	for _, column := range columns {
+		if column.Name == name {
+			return column.Nullable
 		}
 	}
 	return false
@@ -474,6 +557,93 @@ func v1FixtureHasString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func assertMigrationMetadataJSONKeys(t *testing.T, raw json.RawMessage, path string) {
+	t.Helper()
+	assertJSONObjectKeys(t, raw, path, []string{
+		"module_version",
+		"schema_version",
+		"contract_version",
+		"previous_version",
+		"compatibility",
+		"classifications",
+		"notes",
+	})
+}
+
+func assertJSONObjectKeys(t *testing.T, raw json.RawMessage, path string, want []string) map[string]json.RawMessage {
+	t.Helper()
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal %s object: %v\n%s", path, err, raw)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%s keys = %#v, want %#v", path, sortedJSONKeys(got), want)
+	}
+	for _, key := range want {
+		if _, ok := got[key]; !ok {
+			t.Fatalf("%s missing key %q; keys = %#v", path, key, sortedJSONKeys(got))
+		}
+	}
+	return got
+}
+
+func assertJSONArrayObjects(t *testing.T, raw json.RawMessage, path string) []map[string]json.RawMessage {
+	t.Helper()
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		t.Fatalf("Unmarshal %s array: %v\n%s", path, err, raw)
+	}
+	if len(items) == 0 {
+		t.Fatalf("%s is empty, want representative fixture entries", path)
+	}
+	out := make([]map[string]json.RawMessage, 0, len(items))
+	for i, item := range items {
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(item, &obj); err != nil {
+			t.Fatalf("Unmarshal %s[%d] object: %v\n%s", path, i, err, item)
+		}
+		out = append(out, obj)
+	}
+	return out
+}
+
+func findJSONObjectByStringField(t *testing.T, objects []map[string]json.RawMessage, field, want, path string) map[string]json.RawMessage {
+	t.Helper()
+	for _, obj := range objects {
+		raw, ok := obj[field]
+		if !ok {
+			continue
+		}
+		var got string
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("Unmarshal %s %s field: %v", path, field, err)
+		}
+		if got == want {
+			return obj
+		}
+	}
+	t.Fatalf("%s missing object with %s = %q", path, field, want)
+	return nil
+}
+
+func mustMarshalRawObject(t *testing.T, obj map[string]json.RawMessage) json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatalf("Marshal raw object: %v", err)
+	}
+	return data
+}
+
+func sortedJSONKeys(m map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func v1ContractJSONWithUnknownFields(t *testing.T, data []byte) []byte {

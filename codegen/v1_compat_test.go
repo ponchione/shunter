@@ -87,6 +87,7 @@ func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
 		`export interface MessagesRow {`,
 		`id: bigint;`,
 		`sender: string;`,
+		`topic: string | null;`,
 		`body: string;`,
 		`sentAt: bigint;`,
 		`export const tables = {`,

@@ -23,6 +23,7 @@ export type UUID = string;
 export interface MessagesRow {
   id: bigint;
   sender: string;
+  topic: string | null;
   body: string;
   sentAt: bigint;
 }

@@ -224,7 +224,14 @@ one-off query success/error variants. Protocol tests also pin the v1 token,
 version numbers, tag assignments, reserved tag policy, malformed-body handling,
 and trailing-byte rejection.
 
-Remaining coverage before cutting `v1.0.0`:
+Contract JSON coverage now has a representative v1 golden fixture and explicit
+raw-JSON key coverage for every stable `ModuleContract` field listed in this
+matrix, including nested module, schema, read-policy, declaration,
+visibility-filter, permission, read-model, migration, and codegen metadata.
+The fixture includes a nullable column so the conditional `nullable` column key
+is pinned when present.
 
-- Add or confirm contract JSON golden coverage for every stable
-  `ModuleContract` field in this document.
+Remaining v1 contract maintenance before cutting `v1.0.0`:
+
+- Re-audit root exports and lower-level package comments after later
+  implementation slices land.

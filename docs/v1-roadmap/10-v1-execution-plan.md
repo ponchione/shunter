@@ -69,7 +69,8 @@ Tasks:
   `docs/v1-compatibility.md`.
 - Keep protocol payload and generated TypeScript golden coverage current as
   stable shapes evolve.
-- Add or confirm golden coverage for every stable `ModuleContract` JSON field.
+- Keep contract JSON golden coverage current as stable `ModuleContract` fields
+  evolve.
 - Add or confirm negative tests for unsupported SQL classes listed in
   `09-sql-read-scope.md`; mutation-statement protocol admission is now covered
   for one-off raw SQL and raw subscriptions.
@@ -90,6 +91,9 @@ Completed in this phase:
   stable client-to-server and server-to-client message family, stable payload
   variants, tag assignments, reserved tag policy, malformed-body handling, and
   trailing-byte rejection.
+- Contract JSON golden coverage now has an explicit key-coverage guard for every
+  stable `ModuleContract` field and nested metadata object, including nullable
+  column JSON metadata.
 
 Exit criteria:
 
