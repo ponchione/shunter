@@ -193,11 +193,12 @@ raw subscription update callback plumbing, raw RowList splitting, optional raw
 RowList convenience fields on subscription updates, raw declared-query result
 helpers, reducer result envelope helpers, and server-acknowledged managed
 subscription handle return paths added; generated bindings now expose
-module-scoped aliases for reducer result and raw declared-query result
-envelopes; table subscriptions now support caller-supplied row decoders for
-decoded initial-row and update callbacks; declared-query results can now be
-decoded through caller-supplied table decoders. Schema-aware generated row
-decoding/cache behavior and reconnect behavior remain.
+module-scoped aliases and helper wrappers for reducer result envelopes plus raw
+declared-query result aliases; table subscriptions now support caller-supplied
+row decoders for decoded initial-row and update callbacks; declared-query
+results can now be decoded through caller-supplied table decoders.
+Schema-aware generated row decoding/cache behavior and reconnect behavior
+remain.
 
 Tasks:
 

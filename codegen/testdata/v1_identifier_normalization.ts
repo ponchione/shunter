@@ -10,9 +10,14 @@ import type {
   RawDeclaredQueryResult as ShunterRawDeclaredQueryResult,
   ReducerCaller as ShunterReducerCaller,
   ReducerCallResult as ShunterReducerCallResult,
+  ReducerCallResultRequestOptions as ShunterReducerCallResultRequestOptions,
   SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,
   TableSubscriber as ShunterTableSubscriber,
   ViewSubscriber as ShunterViewSubscriber,
+} from "@shunter/client";
+
+import {
+  callReducerWithResult as shunterCallReducerWithResult,
 } from "@shunter/client";
 
 export const shunterProtocol = {
@@ -26,6 +31,7 @@ export type ShunterSubprotocol = (typeof shunterProtocol.supportedSubprotocols)[
 
 export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;
 export type ReducerCallResult<Name extends ReducerName = ReducerName> = ShunterReducerCallResult<Name, Uint8Array>;
+export type ReducerCallResultOptions = ShunterReducerCallResultRequestOptions<Uint8Array>;
 export type QueryRunner = ShunterQueryRunner<Uint8Array>;
 export type ViewSubscriber = ShunterViewSubscriber;
 export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;
@@ -127,12 +133,24 @@ export function callSendMessage(callReducer: ReducerCaller, args: Uint8Array): P
   return callReducer("send_message", args);
 }
 
+export function callSendMessageResult(callReducer: ReducerCaller, args: Uint8Array, options: ReducerCallResultOptions = {}): Promise<ReducerCallResult<typeof reducers.sendMessage>> {
+  return shunterCallReducerWithResult(callReducer, "send_message", args, options);
+}
+
 export function callSendMessage2(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {
   return callReducer("send-message", args);
 }
 
+export function callSendMessage2Result(callReducer: ReducerCaller, args: Uint8Array, options: ReducerCallResultOptions = {}): Promise<ReducerCallResult<typeof reducers.sendMessage2>> {
+  return shunterCallReducerWithResult(callReducer, "send-message", args, options);
+}
+
 export function callDefault_(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {
   return callReducer("default", args);
+}
+
+export function callDefault_Result(callReducer: ReducerCaller, args: Uint8Array, options: ReducerCallResultOptions = {}): Promise<ReducerCallResult<typeof reducers.default_>> {
+  return shunterCallReducerWithResult(callReducer, "default", args, options);
 }
 
 export const lifecycleReducers = {

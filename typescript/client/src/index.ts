@@ -2319,11 +2319,31 @@ export interface ReducerCallResultOptions<Result = Uint8Array> {
   readonly decodeResult?: (update: TransactionUpdateMessage) => Result;
 }
 
+export interface ReducerCallResultRequestOptions<Result = Uint8Array> extends ReducerCallResultOptions<Result> {
+  readonly signal?: AbortSignal;
+}
+
 export type ReducerCaller<
   Name extends string = string,
   Args = Uint8Array,
   Result = Uint8Array,
 > = (name: Name, args: Args, options?: ReducerCallOptions) => Promise<Result>;
+
+export async function callReducerWithResult<Name extends string, Result = Uint8Array>(
+  callReducer: ReducerCaller<Name, Uint8Array, Uint8Array>,
+  name: Name,
+  args: Uint8Array,
+  options: ReducerCallResultRequestOptions<Result> = {},
+): Promise<ReducerCallResult<Name, Result>> {
+  const rawResult = await callReducer(name, args, {
+    requestId: options.requestId,
+    signal: options.signal,
+  });
+  return decodeReducerCallResult(name, rawResult, {
+    requestId: options.requestId,
+    decodeResult: options.decodeResult,
+  });
+}
 
 export function encodeReducerCallRequest<Name extends string>(
   name: Name,

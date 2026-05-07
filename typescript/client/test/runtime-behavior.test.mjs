@@ -22,6 +22,7 @@ import {
   ShunterProtocolMismatchError,
   ShunterValidationError,
   assertProtocolCompatible,
+  callReducerWithResult,
   checkProtocolCompatibility,
   createShunterClient,
   createSubscriptionHandle,
@@ -322,6 +323,20 @@ const decodedReducerResult = decodeReducerCallResult("send", committedUpdateFram
   decodeResult: (update) => update.reducerCall.args,
 });
 assert.deepEqual(decodedReducerResult.value, new Uint8Array([0xaa, 0xbb]));
+const wrappedReducerResult = await callReducerWithResult(
+  async (name, args, options) => {
+    assert.equal(name, "send");
+    assert.deepEqual(args, new Uint8Array([0xaa]));
+    assert.equal(options.requestId, 0x21222324);
+    assert.equal(options.noSuccessNotify, undefined);
+    return committedUpdateFrame;
+  },
+  "send",
+  new Uint8Array([0xaa]),
+  { requestId: 0x21222324 },
+);
+assert.equal(wrappedReducerResult.status, "committed");
+assert.deepEqual(wrappedReducerResult.rawResult, committedUpdateFrame);
 assert.throws(
   () => decodeReducerCallResult("other", committedUpdateFrame),
   ShunterProtocolError,

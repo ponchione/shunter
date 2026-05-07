@@ -22,8 +22,8 @@ runtime foundation at `typescript/client` published in-repo as
 `@shunter/client`. Generated TypeScript currently includes protocol metadata,
 row interfaces, table maps, reducer and declared-read constants/helpers,
 permission metadata, read-model metadata, value-kind mappings, module-scoped
-aliases for the reducer result and raw declared-query result envelopes, and
-runtime type imports for the shared SDK surface.
+aliases for the reducer result and raw declared-query result envelopes,
+reducer result helper wrappers, and runtime imports for the shared SDK surface.
 
 That is necessary but not sufficient for v1. The runtime package currently
 defines protocol constants, protocol compatibility helpers, connection state
@@ -37,7 +37,9 @@ the live v1 `CallReducerMsg` wire shape, plus minimal full-update
 raw-byte declared-query request path and `OneOffQueryResponse` correlation. It
 also has a reducer result helper that wraps heavy `TransactionUpdate` frames in
 a minimal committed/failed envelope while preserving the existing raw
-`callReducer()` behavior. It also has raw declared-view subscribe request
+`callReducer()` behavior. Generated TypeScript reducer helpers now include
+`callXResult` wrappers that call through that envelope helper while keeping the
+raw `callX` byte helper. It also has raw declared-view subscribe request
 encoding, `SubscribeMultiApplied` and `SubscriptionError` correlation, and an
 idempotent unsubscribe send path for `UnsubscribeMulti`. It also has raw table
 subscription request encoding,
@@ -164,6 +166,9 @@ Completed or partially complete:
 - Export generated TypeScript aliases for the runtime reducer result envelope
   and raw declared-query result envelope so module-specific helpers can type
   those surfaces without adding runtime imports.
+- Generate reducer result helper wrappers that preserve the raw byte
+  `callX(...)` helpers while adding `callXResult(...)` envelope helpers for
+  full-update reducer calls.
 - Add raw declared-view subscription request encoding for the live v1
   `SubscribeDeclaredView` wire shape, correlate `SubscribeMultiApplied` and
   `SubscriptionError` frames for acceptance/failure, and return an idempotent

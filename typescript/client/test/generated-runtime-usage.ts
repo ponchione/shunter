@@ -43,6 +43,7 @@ import type {
 } from "../src/index";
 import {
   callCreateMessage,
+  callCreateMessageResult,
   queryRecentMessages,
   queries,
   reducers,
@@ -58,6 +59,7 @@ import type {
   ExecutableViewName,
   MessagesRow,
   ReducerCaller,
+  ReducerCallResultOptions,
   ReducerCallResult as GeneratedReducerCallResult,
   ReducerName,
   RawDeclaredQueryResult as GeneratedRawDeclaredQueryResult,
@@ -191,6 +193,9 @@ async function exerciseGeneratedBindings(): Promise<void> {
     reducerCaller,
     new Uint8Array([1, 2, 3]),
   );
+  const reducerResultOptions: ReducerCallResultOptions = { requestId: 1 };
+  const generatedReducerResultPromise: Promise<GeneratedReducerCallResult<typeof reducers.createMessage>> =
+    callCreateMessageResult(reducerCaller, new Uint8Array([1, 2, 3]), reducerResultOptions);
   const reducerResult: ReducerCallResult<ReducerName> = {
     name: reducers.createMessage,
     requestId: 1,
@@ -305,6 +310,7 @@ async function exerciseGeneratedBindings(): Promise<void> {
   await unsubscribeTable();
 
   void reducerBytes;
+  void generatedReducerResultPromise;
   void reducerResult;
   void generatedReducerResult;
   void reducerResultDecoder;

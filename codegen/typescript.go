@@ -28,11 +28,13 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	}
 	b.WriteString("\n")
 	writeTypeScriptRuntimeImports(&b)
+	writeTypeScriptRuntimeValueImports(&b)
 	if err := writeTypeScriptProtocolMetadata(&b); err != nil {
 		return nil, err
 	}
 	b.WriteString("export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;\n")
 	b.WriteString("export type ReducerCallResult<Name extends ReducerName = ReducerName> = ShunterReducerCallResult<Name, Uint8Array>;\n")
+	b.WriteString("export type ReducerCallResultOptions = ShunterReducerCallResultRequestOptions<Uint8Array>;\n")
 	b.WriteString("export type QueryRunner = ShunterQueryRunner<Uint8Array>;\n")
 	b.WriteString("export type ViewSubscriber = ShunterViewSubscriber;\n")
 	b.WriteString("export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;\n")
@@ -102,6 +104,10 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 		fmt.Fprintf(&b, "export function %s(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {\n", functionName)
 		fmt.Fprintf(&b, "  return callReducer(%s, args);\n", strconv.Quote(reducer.name))
 		b.WriteString("}\n\n")
+		resultFunctionName := uniqueTypeScriptIdentifier(functionName+"Result", topLevelValueNames)
+		fmt.Fprintf(&b, "export function %s(callReducer: ReducerCaller, args: Uint8Array, options: ReducerCallResultOptions = {}): Promise<ReducerCallResult<typeof reducers.%s>> {\n", resultFunctionName, reducer.identifier)
+		fmt.Fprintf(&b, "  return shunterCallReducerWithResult(callReducer, %s, args, options);\n", strconv.Quote(reducer.name))
+		b.WriteString("}\n\n")
 	}
 	lifecycleReducerIdentifiers := uniqueTypeScriptIdentifiers(lifecycleReducerNames, typeScriptLifecycleIdentifier)
 	writeTypeScriptConstMap(&b, "lifecycleReducers", lifecycleReducerIdentifiers)
@@ -149,6 +155,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 
 func typeScriptTopLevelValueNames() map[string]int {
 	names := []string{
+		"shunterCallReducerWithResult",
 		"shunterProtocol",
 		"tables",
 		"tableReadPolicies",
@@ -178,9 +185,16 @@ func writeTypeScriptRuntimeImports(b *bytes.Buffer) {
 	b.WriteString("  RawDeclaredQueryResult as ShunterRawDeclaredQueryResult,\n")
 	b.WriteString("  ReducerCaller as ShunterReducerCaller,\n")
 	b.WriteString("  ReducerCallResult as ShunterReducerCallResult,\n")
+	b.WriteString("  ReducerCallResultRequestOptions as ShunterReducerCallResultRequestOptions,\n")
 	b.WriteString("  SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,\n")
 	b.WriteString("  TableSubscriber as ShunterTableSubscriber,\n")
 	b.WriteString("  ViewSubscriber as ShunterViewSubscriber,\n")
+	b.WriteString("} from \"@shunter/client\";\n\n")
+}
+
+func writeTypeScriptRuntimeValueImports(b *bytes.Buffer) {
+	b.WriteString("import {\n")
+	b.WriteString("  callReducerWithResult as shunterCallReducerWithResult,\n")
 	b.WriteString("} from \"@shunter/client\";\n\n")
 }
 

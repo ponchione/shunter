@@ -40,7 +40,9 @@ runtime interfaces consumed by generated bindings. It also exposes raw
 and a connected-client `callReducer` send path with minimal full-update
 `TransactionUpdate` response correlation. `decodeReducerCallResult()` wraps
 heavy reducer transaction updates in a minimal committed/failed result envelope
-while preserving the raw `callReducer()` result. It also exposes raw
+while preserving the raw `callReducer()` result, and generated reducer helpers
+now include `callXResult(...)` wrappers that use that envelope path for
+full-update calls. It also exposes raw
 declared-query request encoding for v1 `DeclaredQueryMsg` frames and correlates
 `OneOffQueryResponse` frames. It also exposes raw declared-view subscription
 request encoding for v1 `SubscribeDeclaredView` frames, correlates
@@ -133,9 +135,12 @@ and reject with a structured validation error on failed status. Calls made with
 `NoSuccessNotify` resolve after send because the server may intentionally
 suppress committed success echoes for that flag. `decodeReducerCallResult()`
 can wrap heavy `TransactionUpdate` frames in a reducer name/request ID/status
-envelope with an optional caller-supplied result decoder. Typed argument/result
-codecs and changing normal generated helpers away from raw bytes remain
-required v1 follow-ups.
+envelope with an optional caller-supplied result decoder.
+`callReducerWithResult()` calls the lower-level raw reducer caller, waits for
+the full-update frame, and returns that envelope. Generated bindings emit
+`callXResult(...)` helpers on top of it while leaving `callX(...)` as the raw
+`Uint8Array` helper. Typed argument/result codecs and changing normal generated
+helpers away from raw bytes remain required v1 follow-ups.
 
 Candidate v1 default:
 

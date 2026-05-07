@@ -10,9 +10,14 @@ import type {
   RawDeclaredQueryResult as ShunterRawDeclaredQueryResult,
   ReducerCaller as ShunterReducerCaller,
   ReducerCallResult as ShunterReducerCallResult,
+  ReducerCallResultRequestOptions as ShunterReducerCallResultRequestOptions,
   SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,
   TableSubscriber as ShunterTableSubscriber,
   ViewSubscriber as ShunterViewSubscriber,
+} from "@shunter/client";
+
+import {
+  callReducerWithResult as shunterCallReducerWithResult,
 } from "@shunter/client";
 
 export const shunterProtocol = {
@@ -26,6 +31,7 @@ export type ShunterSubprotocol = (typeof shunterProtocol.supportedSubprotocols)[
 
 export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;
 export type ReducerCallResult<Name extends ReducerName = ReducerName> = ShunterReducerCallResult<Name, Uint8Array>;
+export type ReducerCallResultOptions = ShunterReducerCallResultRequestOptions<Uint8Array>;
 export type QueryRunner = ShunterQueryRunner<Uint8Array>;
 export type ViewSubscriber = ShunterViewSubscriber;
 export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;
@@ -102,6 +108,10 @@ export type ReducerName = (typeof reducers)[keyof typeof reducers];
 
 export function callCreateMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {
   return callReducer("create_message", args);
+}
+
+export function callCreateMessageResult(callReducer: ReducerCaller, args: Uint8Array, options: ReducerCallResultOptions = {}): Promise<ReducerCallResult<typeof reducers.createMessage>> {
+  return shunterCallReducerWithResult(callReducer, "create_message", args, options);
 }
 
 export const lifecycleReducers = {
