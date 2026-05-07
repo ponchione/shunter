@@ -325,6 +325,109 @@ func TestMultiJoinAggregatesRegisterInitialRowsAndDeltas(t *testing.T) {
 	}
 }
 
+func TestMultiJoinAggregatesDeltaMatchesFreshEvaluationForIntermediateRelation(t *testing.T) {
+	s := multiJoinTestSchema()
+	pred := multiJoinTestPredicate()
+	deletedMiddle := types.ProductValue{types.NewUint64(21), types.NewUint64(20)}
+	insertedMiddle := types.ProductValue{types.NewUint64(23), types.NewUint64(20)}
+
+	aggregates := []multiJoinAggregateCase{
+		{queryID: 180, aggregate: countStarAggregate(), column: "n"},
+		{queryID: 181, aggregate: countMultiJoinRIDAggregate(), column: "n"},
+		{queryID: 182, aggregate: countDistinctMultiJoinTIDAggregate(), column: "n"},
+		{queryID: 183, aggregate: sumMultiJoinRIDAggregate(), column: "total"},
+	}
+	tests := []struct {
+		name      string
+		after     map[TableID][]types.ProductValue
+		changeset *store.Changeset
+		want      map[uint32]aggregateDelta
+	}{
+		{
+			name: "insert",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[2] = append(rows[2], insertedMiddle)
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 1,
+				Tables: map[TableID]*store.TableChangeset{
+					2: {Inserts: []types.ProductValue{insertedMiddle}},
+				},
+			},
+			want: map[uint32]aggregateDelta{
+				180: {before: 5, after: 7},
+				181: {before: 5, after: 7},
+				183: {before: 1300, after: 1900},
+			},
+		},
+		{
+			name: "delete",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[2] = []types.ProductValue{
+					{types.NewUint64(10), types.NewUint64(10)},
+					{types.NewUint64(22), types.NewUint64(20)},
+				}
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 2,
+				Tables: map[TableID]*store.TableChangeset{
+					2: {Deletes: []types.ProductValue{deletedMiddle}},
+				},
+			},
+			want: map[uint32]aggregateDelta{
+				180: {before: 5, after: 3},
+				181: {before: 5, after: 3},
+				183: {before: 1300, after: 700},
+			},
+		},
+		{
+			name: "same-key-replace",
+			after: func() map[TableID][]types.ProductValue {
+				rows := multiJoinBaseContents()
+				rows[2] = []types.ProductValue{
+					{types.NewUint64(10), types.NewUint64(10)},
+					{types.NewUint64(22), types.NewUint64(20)},
+					insertedMiddle,
+				}
+				return rows
+			}(),
+			changeset: &store.Changeset{
+				TxID: 3,
+				Tables: map[TableID]*store.TableChangeset{
+					2: {
+						Inserts: []types.ProductValue{insertedMiddle},
+						Deletes: []types.ProductValue{deletedMiddle},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := requireMultiJoinAggregateDeltasMatchFresh(t, s, pred, aggregates, buildMockCommitted(s, multiJoinBaseContents()), buildMockCommitted(s, tt.after), tt.changeset)
+			if len(got) != len(tt.want) {
+				t.Fatalf("aggregate update count = %d (%+v), want %d", len(got), got, len(tt.want))
+			}
+			for _, agg := range aggregates {
+				want, shouldChange := tt.want[agg.queryID]
+				update, changed := got[agg.queryID]
+				if !shouldChange {
+					if changed {
+						t.Fatalf("query %d emitted unchanged aggregate delta: %+v", agg.queryID, update)
+					}
+					continue
+				}
+				requireAggregateDelta(t, update, want.before, want.after, agg.column)
+			}
+		})
+	}
+}
+
 func TestMultiJoinRegisterInitialRowsAndDeltas(t *testing.T) {
 	s := multiJoinTestSchema()
 	inbox := make(chan FanOutMessage, 2)
@@ -1637,6 +1740,71 @@ func requireMultiJoinIncrementalMatchesFresh(t *testing.T, s *fakeSchema, pred M
 		t.Fatalf("incremental rows = %v, want fresh rows %v (delta inserts=%v deletes=%v)", incremental, freshRows, delta.inserts, delta.deletes)
 	}
 	return delta
+}
+
+type multiJoinAggregateCase struct {
+	queryID   uint32
+	aggregate *Aggregate
+	column    string
+}
+
+type aggregateDelta struct {
+	before uint64
+	after  uint64
+}
+
+func requireMultiJoinAggregateDeltasMatchFresh(
+	t *testing.T,
+	s *fakeSchema,
+	pred MultiJoin,
+	aggregates []multiJoinAggregateCase,
+	before, after *mockCommitted,
+	cs *store.Changeset,
+) map[uint32]SubscriptionUpdate {
+	t.Helper()
+	connID := types.ConnectionID{16}
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	initial := registerMultiJoinAggregateRowsByQueryID(t, mgr, connID, pred, aggregates, before)
+
+	mgr.EvalAndBroadcast(types.TxID(cs.TxID), cs, after, PostCommitMeta{})
+	msg := <-inbox
+	updates := aggregateUpdatesByQueryID(msg.Fanout[connID])
+
+	fresh := registerMultiJoinAggregateRowsByQueryID(t, NewManager(s, s), types.ConnectionID{17}, pred, aggregates, after)
+	for _, agg := range aggregates {
+		update := updates[agg.queryID]
+		incremental := applyDelta(initial[agg.queryID], update.Inserts, update.Deletes)
+		if !bagEqual(incremental, fresh[agg.queryID]) {
+			t.Fatalf("query %d aggregate rows = %v, want fresh rows %v (delta inserts=%v deletes=%v)", agg.queryID, incremental, fresh[agg.queryID], update.Inserts, update.Deletes)
+		}
+	}
+	return updates
+}
+
+func registerMultiJoinAggregateRowsByQueryID(
+	t *testing.T,
+	mgr *Manager,
+	connID types.ConnectionID,
+	pred MultiJoin,
+	aggregates []multiJoinAggregateCase,
+	view *mockCommitted,
+) map[uint32][]types.ProductValue {
+	t.Helper()
+	out := make(map[uint32][]types.ProductValue, len(aggregates))
+	for _, agg := range aggregates {
+		res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID:     connID,
+			QueryID:    agg.queryID,
+			Predicates: []Predicate{pred},
+			Aggregates: []*Aggregate{agg.aggregate},
+		}, view)
+		if err != nil {
+			t.Fatalf("RegisterSet multi-join aggregate queryID=%d: %v", agg.queryID, err)
+		}
+		out[agg.queryID] = rowsFromUpdates(res.Update)
+	}
+	return out
 }
 
 func multiJoinFreshRows(t *testing.T, s *fakeSchema, pred MultiJoin, view *mockCommitted) []types.ProductValue {
