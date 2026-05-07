@@ -70,6 +70,8 @@ Completed or partially complete:
 - Add benchmark coverage for protocol compression, commitlog snapshots,
   subscription evaluation/fanout, reducer commit round trips, scheduler scans,
   and one-off query common paths.
+- Add app-author schema and indexing guidance for primary indexes, secondary
+  index key order, indexed read paths, scan fallback, and write/memory costs.
 
 Remaining:
 
@@ -86,7 +88,8 @@ Remaining:
   - recovery from commitlog and snapshot
 - Add small/medium/large benchmark fixtures with deterministic data.
 - Add a performance envelope table under `docs/`.
-- Add schema/indexing guidance to the app-author docs.
+- Keep schema/indexing guidance current as benchmark envelopes and live-join
+  constraints become concrete.
 - Add benchmark runs for the reference app.
 
 ## Verification

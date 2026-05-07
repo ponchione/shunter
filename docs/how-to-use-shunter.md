@@ -105,6 +105,42 @@ Reducers run on the serialized executor path. Do not retain
 `*schema.ReducerContext`, use it from another goroutine, or do blocking
 network/disk/RPC work while holding the executor.
 
+## Schema And Indexing
+
+Primary-key columns synthesize a unique `pk` index. Secondary indexes are
+declared on `schema.TableDefinition.Indexes` with column names in key order.
+
+```go
+schema.TableDefinition{
+	Name: "messages",
+	Columns: []schema.ColumnDefinition{
+		{Name: "id", Type: types.KindUint64, PrimaryKey: true, AutoIncrement: true},
+		{Name: "channel", Type: types.KindString},
+		{Name: "owner", Type: types.KindBytes},
+		{Name: "created_at", Type: types.KindInt64},
+	},
+	Indexes: []schema.IndexDefinition{
+		{Name: "by_channel_created", Columns: []string{"channel", "created_at"}},
+		{Name: "by_owner", Columns: []string{"owner"}},
+	},
+}
+```
+
+Index columns should match the access paths your app depends on:
+
+- Add indexes for hot reducer lookups, local `SeekIndex` or `SeekIndexRange`
+  reads, raw or declared read predicates, subscription predicates, join keys,
+  and visibility-filter columns.
+- Put the most selective equality or join column first in composite indexes.
+  Key order is part of the schema contract.
+- Do not repeat a primary-key column in an explicit secondary index; the schema
+  builder already creates the primary-key index.
+- One-off raw SQL can fall back to scans for supported shapes, but large scans,
+  live joins, and high-fanout subscriptions should be treated as app design
+  issues until the published performance envelope says otherwise.
+- Indexes increase write cost and memory use, so index deliberate access paths
+  rather than every column.
+
 ## In-Process Trust Model
 
 Shunter v1 is an in-process Go runtime. Your reducers, lifecycle hooks,

@@ -247,8 +247,8 @@ Exit criteria:
 
 Goal: v1 users know the supported workload range.
 
-Status: benchmark baseline and coverage audit documented; fixture expansion,
-envelope table, and indexing guidance remain.
+Status: benchmark baseline, coverage audit, and schema/indexing guidance
+documented; fixture expansion and envelope table remain.
 
 Tasks:
 
@@ -259,7 +259,8 @@ Tasks:
   reference-app workloads.
 - Decide which thresholds fail CI and which are advisory release notes.
 - Publish a performance envelope table under `docs/`.
-- Add indexing guidance for scans, predicates, subscriptions, and joins.
+- Keep indexing guidance current for scans, predicates, subscriptions, and
+  joins as measured envelopes land.
 
 Exit criteria:
 
