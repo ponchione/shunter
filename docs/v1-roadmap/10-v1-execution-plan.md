@@ -271,8 +271,8 @@ Exit criteria:
 
 Goal: Shunter's execution boundary is clear and honest.
 
-Status: app-author trust-model docs added and confirmation tests audited;
-residual error wording and config decisions remain.
+Status: v1 app-trust model documented and confirmation tests audited; residual
+error wording remains.
 
 Tasks:
 
@@ -284,6 +284,8 @@ Tasks:
   failures, migration-hook failures, cancellation, and shutdown.
 - Keep `internal/processboundary` as internal/post-v1 unless a separate decision
   changes scope.
+- Do not add execution-limit configuration for v1 unless the runtime gains a
+  boundary it can enforce.
 
 Exit criteria:
 

@@ -1,7 +1,6 @@
 # Process Isolation And App Trust Model
 
-Status: open, app-trust docs and confirmation test audit added; residual error
-wording and config decisions remain
+Status: open, v1 app-trust model documented; residual error wording remains
 Owner: unassigned
 Scope: Shunter's execution trust boundary for Go modules, reducer behavior,
 side effects, global state, and future out-of-process isolation.
@@ -49,21 +48,23 @@ Current code reality:
   `migration_test.go`, and cancellation/shutdown behavior in `local_test.go`
   and `lifecycle_test.go`.
 
-## v1 Decisions To Make
+## Settled v1 Decisions
 
-1. Decide whether v1 explicitly uses an app-trust model.
-2. Decide which reducer rules are contractual:
-   - writes only through runtime transaction APIs
-   - no external side effects
-   - deterministic behavior where replay/recovery depends on it
-   - no long-running/blocking reducer work
-3. Decide whether lifecycle hooks and migration hooks have different side-effect
-   rules than reducers.
-4. Decide how panics are handled in reducers, hooks, and scheduler callbacks.
-5. Decide whether any timeout, cancellation, or worker-pool limits are required
-   for v1.
-6. Decide whether `internal/processboundary` remains experimental or becomes a
-   planned v2 direction.
+- v1 explicitly uses an app-trust model. App code runs in process and is trusted
+  not to exhaust memory, deadlock the process, or start unsafe goroutines.
+- Reducers should mutate Shunter state only through reducer transaction APIs,
+  keep replay-sensitive work deterministic, avoid external side effects, and
+  avoid long-running work on the serialized executor path.
+- Lifecycle hooks and scheduled reducers use the same in-process trust
+  boundary. Migration hooks are app-owned startup or offline maintenance work
+  and should be retryable from a known backup.
+- Reducer user errors and reducer panics roll back the reducer transaction and
+  are reported as failed reducer results. Scheduler, lifecycle, migration, and
+  shutdown behavior is covered by package and gauntlet tests.
+- v1 does not add timeout, cancellation, worker-pool, memory, WASM, plugin, or
+  process-isolation guarantees beyond what the current runtime can enforce.
+- `internal/processboundary` remains internal research/post-v1 planning, not a
+  v1 app-facing feature.
 
 ## Implementation Work
 
@@ -76,6 +77,8 @@ Completed or partially complete:
   shutdown, and failed migration-hook behavior.
 - Confirm the existing panic, cancellation, shutdown, and failed-hook tests that
   back the documented app-trust model.
+- Settle the v1 process-isolation policy as an explicit in-process app-trust
+  model with no new sandbox or timeout configuration.
 
 Remaining:
 
@@ -83,10 +86,6 @@ Remaining:
   failed-hook behavior changes.
 - Ensure errors clearly distinguish app failure from Shunter runtime failure
   across local and protocol surfaces.
-- Add optional configuration for execution limits only if the current runtime
-  has an enforceable boundary.
-- Keep out-of-process runner work separate from v1 unless this decision blocks
-  adoption.
 
 ## Verification
 
