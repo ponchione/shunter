@@ -42,7 +42,9 @@ and a connected-client `callReducer` send path with minimal full-update
 heavy reducer transaction updates in a minimal committed/failed result envelope
 while preserving the raw `callReducer()` result, and generated reducer helpers
 now include `callXResult(...)` wrappers that use that envelope path for
-full-update calls. It also exposes raw
+full-update calls. The runtime also defines explicit reducer argument encoder
+conventions (`ReducerArgEncoder`, `encodeReducerArgs()`, and typed-arg call
+helpers) for callers that already have module-local codecs. It also exposes raw
 declared-query request encoding for v1 `DeclaredQueryMsg` frames and correlates
 `OneOffQueryResponse` frames. It also exposes raw declared-view subscription
 request encoding for v1 `SubscribeDeclaredView` frames, correlates
@@ -122,9 +124,10 @@ Generated bindings should expose typed reducer helpers. The plain runtime can
 keep a lower-level byte-oriented escape hatch, but normal app code should call
 generated helpers.
 
-Open decision: reducer argument/result encoding. The Go runtime boundary is raw
-bytes. The SDK needs a documented app-facing convention before generated
-helpers are considered v1-stable.
+Open decision: generated reducer argument/result encoding. The Go runtime
+boundary is raw bytes. The runtime now has an explicit app-facing encoder hook
+convention, but generated schema-derived codecs are still required before
+typed reducer helpers are considered v1-stable.
 
 Current foundation: the runtime can encode and send the raw-byte
 `CallReducerMsg` shape used by the Go protocol: reducer name, raw args bytes,
@@ -139,8 +142,12 @@ envelope with an optional caller-supplied result decoder.
 `callReducerWithResult()` calls the lower-level raw reducer caller, waits for
 the full-update frame, and returns that envelope. Generated bindings emit
 `callXResult(...)` helpers on top of it while leaving `callX(...)` as the raw
-`Uint8Array` helper. Typed argument/result codecs and changing normal generated
-helpers away from raw bytes remain required v1 follow-ups.
+`Uint8Array` helper. `encodeReducerArgs()` clones raw `Uint8Array` args and
+requires a `ReducerArgEncoder` for typed args; `callReducerWithEncodedArgs()`
+and `callReducerWithEncodedArgsResult()` apply that convention before invoking
+the raw reducer path. Generated schema-aware argument/result codecs and
+changing normal generated helpers away from raw bytes remain required v1
+follow-ups.
 
 Candidate v1 default:
 

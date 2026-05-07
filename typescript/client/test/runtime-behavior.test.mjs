@@ -22,6 +22,8 @@ import {
   ShunterProtocolMismatchError,
   ShunterValidationError,
   assertProtocolCompatible,
+  callReducerWithEncodedArgs,
+  callReducerWithEncodedArgsResult,
   callReducerWithResult,
   checkProtocolCompatibility,
   createShunterClient,
@@ -32,6 +34,7 @@ import {
   decodeRawDeclaredQueryResult,
   decodeReducerCallResult,
   decodeRowList,
+  encodeReducerArgs,
   decodeSubscribeSingleAppliedFrame,
   decodeSubscribeMultiAppliedFrame,
   decodeSubscriptionErrorFrame,
@@ -220,6 +223,22 @@ assert.deepEqual(
   encodeReducerCallRequest("ping", new Uint8Array(), { requestId: 1 }).frame,
   bytesFromHex("030400000070696e67000000000100000000"),
 );
+const rawReducerArgs = new Uint8Array([0x01, 0x02]);
+const clonedReducerArgs = encodeReducerArgs(rawReducerArgs);
+rawReducerArgs[0] = 0xff;
+assert.deepEqual(clonedReducerArgs, new Uint8Array([0x01, 0x02]));
+assert.deepEqual(
+  encodeReducerArgs({ body: "hello" }, (args) => new TextEncoder().encode(args.body)),
+  new TextEncoder().encode("hello"),
+);
+assert.throws(
+  () => encodeReducerArgs({ body: "hello" }),
+  ShunterValidationError,
+);
+assert.throws(
+  () => encodeReducerArgs({ body: "hello" }, () => "hello"),
+  ShunterValidationError,
+);
 
 assert.throws(
   () => encodeReducerCallRequest("send", new Uint8Array(), { requestId: 0x1_0000_0000 }),
@@ -337,6 +356,37 @@ const wrappedReducerResult = await callReducerWithResult(
 );
 assert.equal(wrappedReducerResult.status, "committed");
 assert.deepEqual(wrappedReducerResult.rawResult, committedUpdateFrame);
+const encodedArgsReducerResult = await callReducerWithEncodedArgs(
+  async (name, args, options) => {
+    assert.equal(name, "send");
+    assert.deepEqual(args, new TextEncoder().encode("hello"));
+    assert.equal(options.noSuccessNotify, true);
+    return args;
+  },
+  "send",
+  { body: "hello" },
+  {
+    noSuccessNotify: true,
+    encodeArgs: (args) => new TextEncoder().encode(args.body),
+  },
+);
+assert.deepEqual(encodedArgsReducerResult, new TextEncoder().encode("hello"));
+const encodedArgsWrappedReducerResult = await callReducerWithEncodedArgsResult(
+  async (name, args, options) => {
+    assert.equal(name, "send");
+    assert.deepEqual(args, new TextEncoder().encode("hello"));
+    assert.equal(options.requestId, 0x21222324);
+    assert.equal(options.noSuccessNotify, undefined);
+    return committedUpdateFrame;
+  },
+  "send",
+  { body: "hello" },
+  {
+    requestId: 0x21222324,
+    encodeArgs: (args) => new TextEncoder().encode(args.body),
+  },
+);
+assert.equal(encodedArgsWrappedReducerResult.status, "committed");
 assert.throws(
   () => decodeReducerCallResult("other", committedUpdateFrame),
   ShunterProtocolError,

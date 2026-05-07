@@ -2292,6 +2292,15 @@ export interface ReducerCallOptions {
   readonly signal?: AbortSignal;
 }
 
+export type ReducerArgEncoder<Args = unknown> = (args: Args) => Uint8Array;
+
+export interface ReducerArgEncodingOptions<Args = unknown> {
+  readonly encodeArgs?: ReducerArgEncoder<Args>;
+}
+
+export interface EncodedReducerCallOptions<Args = unknown>
+  extends ReducerCallOptions, ReducerArgEncodingOptions<Args> {}
+
 export type ReducerCallFlags =
   | typeof SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE
   | typeof SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY;
@@ -2323,11 +2332,67 @@ export interface ReducerCallResultRequestOptions<Result = Uint8Array> extends Re
   readonly signal?: AbortSignal;
 }
 
+export interface EncodedReducerCallResultOptions<Args = unknown, Result = Uint8Array>
+  extends ReducerCallResultRequestOptions<Result>, ReducerArgEncodingOptions<Args> {}
+
 export type ReducerCaller<
   Name extends string = string,
   Args = Uint8Array,
   Result = Uint8Array,
 > = (name: Name, args: Args, options?: ReducerCallOptions) => Promise<Result>;
+
+export function encodeReducerArgs(args: Uint8Array): Uint8Array;
+export function encodeReducerArgs<Args>(args: Args, encodeArgs: ReducerArgEncoder<Args>): Uint8Array;
+export function encodeReducerArgs<Args>(
+  args: Args | Uint8Array,
+  encodeArgs?: ReducerArgEncoder<Args>,
+): Uint8Array {
+  if (encodeArgs === undefined) {
+    if (args instanceof Uint8Array) {
+      return new Uint8Array(args);
+    }
+    throw new ShunterValidationError("Reducer args require an encoder unless they are already Uint8Array.", {
+      code: "missing_reducer_arg_encoder",
+    });
+  }
+  const encoded = encodeArgs(args as Args);
+  if (!(encoded instanceof Uint8Array)) {
+    throw new ShunterValidationError("Reducer arg encoder must return Uint8Array.", {
+      code: "invalid_reducer_arg_encoder_result",
+    });
+  }
+  return new Uint8Array(encoded);
+}
+
+export function reducerCallOptions<Args>(options: EncodedReducerCallOptions<Args>): ReducerCallOptions {
+  return {
+    requestId: options.requestId,
+    noSuccessNotify: options.noSuccessNotify,
+    signal: options.signal,
+  };
+}
+
+export function reducerCallResultRequestOptions<Args, Result>(
+  options: EncodedReducerCallResultOptions<Args, Result>,
+): ReducerCallResultRequestOptions<Result> {
+  return {
+    requestId: options.requestId,
+    signal: options.signal,
+    decodeResult: options.decodeResult,
+  };
+}
+
+export async function callReducerWithEncodedArgs<Name extends string, Args>(
+  callReducer: ReducerCaller<Name, Uint8Array, Uint8Array>,
+  name: Name,
+  args: Args,
+  options: EncodedReducerCallOptions<Args> = {},
+): Promise<Uint8Array> {
+  const encodedArgs = options.encodeArgs === undefined
+    ? encodeReducerArgs(args as Uint8Array)
+    : encodeReducerArgs(args, options.encodeArgs);
+  return callReducer(name, encodedArgs, reducerCallOptions(options));
+}
 
 export async function callReducerWithResult<Name extends string, Result = Uint8Array>(
   callReducer: ReducerCaller<Name, Uint8Array, Uint8Array>,
@@ -2343,6 +2408,27 @@ export async function callReducerWithResult<Name extends string, Result = Uint8A
     requestId: options.requestId,
     decodeResult: options.decodeResult,
   });
+}
+
+export async function callReducerWithEncodedArgsResult<
+  Name extends string,
+  Args,
+  Result = Uint8Array,
+>(
+  callReducer: ReducerCaller<Name, Uint8Array, Uint8Array>,
+  name: Name,
+  args: Args,
+  options: EncodedReducerCallResultOptions<Args, Result> = {},
+): Promise<ReducerCallResult<Name, Result>> {
+  const encodedArgs = options.encodeArgs === undefined
+    ? encodeReducerArgs(args as Uint8Array)
+    : encodeReducerArgs(args, options.encodeArgs);
+  return callReducerWithResult(
+    callReducer,
+    name,
+    encodedArgs,
+    reducerCallResultRequestOptions(options),
+  );
 }
 
 export function encodeReducerCallRequest<Name extends string>(

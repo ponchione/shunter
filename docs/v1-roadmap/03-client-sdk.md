@@ -39,9 +39,12 @@ also has a reducer result helper that wraps heavy `TransactionUpdate` frames in
 a minimal committed/failed envelope while preserving the existing raw
 `callReducer()` behavior. Generated TypeScript reducer helpers now include
 `callXResult` wrappers that call through that envelope helper while keeping the
-raw `callX` byte helper. It also has raw declared-view subscribe request
-encoding, `SubscribeMultiApplied` and `SubscriptionError` correlation, and an
-idempotent unsubscribe send path for `UnsubscribeMulti`. It also has raw table
+raw `callX` byte helper. The runtime also defines reducer argument encoder
+types and helpers so generated code or app code can explicitly map typed
+arguments to raw `Uint8Array` payloads before schema-derived BSATN encoders
+exist. It also has raw declared-view subscribe request encoding,
+`SubscribeMultiApplied` and `SubscriptionError` correlation, and an idempotent
+unsubscribe send path for `UnsubscribeMulti`. It also has raw table
 subscription request encoding,
 `SubscribeSingleApplied` and `SubscriptionError` correlation, and an idempotent
 unsubscribe send path for `UnsubscribeSingle`. Accepted subscriptions are now
@@ -169,6 +172,9 @@ Completed or partially complete:
 - Generate reducer result helper wrappers that preserve the raw byte
   `callX(...)` helpers while adding `callXResult(...)` envelope helpers for
   full-update reducer calls.
+- Add reducer argument encoder conventions in the TypeScript runtime:
+  `ReducerArgEncoder`, `encodeReducerArgs()`, and call helpers that accept
+  typed args plus an explicit encoder before invoking the raw reducer path.
 - Add raw declared-view subscription request encoding for the live v1
   `SubscribeDeclaredView` wire shape, correlate `SubscribeMultiApplied` and
   `SubscriptionError` frames for acceptance/failure, and return an idempotent
@@ -204,8 +210,8 @@ Completed or partially complete:
 
 Remaining:
 
-- Decide and implement typed reducer argument/result encoding conventions
-  beyond the current raw `Uint8Array` request path.
+- Generate schema-aware reducer argument/result codecs beyond the current
+  explicit encoder hooks and raw `Uint8Array` request path.
 - Implement typed reducer result decoding beyond the current raw
   `TransactionUpdate` frame result, generated schema-aware declared-query/view
   row decoding, and subscription cache behavior on top of the WebSocket

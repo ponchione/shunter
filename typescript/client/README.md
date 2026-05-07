@@ -12,8 +12,11 @@ full-update `TransactionUpdate` response correlation. `decodeReducerCallResult()
 wraps heavy reducer `TransactionUpdate` frames in a minimal committed/failed
 result envelope without changing `callReducer()`'s raw-frame behavior.
 `callReducerWithResult()` lets generated helpers call through that envelope
-path for full-update reducer calls. It also includes raw declared-query request
-encoding and `OneOffQueryResponse`
+path for full-update reducer calls. `ReducerArgEncoder`, `encodeReducerArgs()`,
+`callReducerWithEncodedArgs()`, and `callReducerWithEncodedArgsResult()` define
+the explicit typed-argument-to-`Uint8Array` convention for callers that already
+have module-local codecs. It also includes raw declared-query request encoding
+and `OneOffQueryResponse`
 correlation, raw declared-view subscription request encoding,
 `SubscribeMultiApplied`/`SubscriptionError` correlation, an idempotent
 unsubscribe send path for `UnsubscribeMulti`, raw table subscription request
@@ -55,7 +58,9 @@ status. `NoSuccessNotify` calls resolve after send because successful server
 echoes may be suppressed. Generated helpers can use `decodeReducerCallResult()`
 or `callReducerWithResult()` to wrap heavy transaction update frames in a
 reducer name/request ID/status envelope while typed result decoding remains
-pending.
+pending. Typed reducer callers can use `encodeReducerArgs()` and
+`callReducerWithEncodedArgs()` when they provide their own argument encoder;
+generated schema-derived encoders remain pending.
 `runDeclaredQuery()` currently resolves with the raw `OneOffQueryResponse`
 frame on success and rejects on response errors. Consumers that want a typed raw
 envelope can pass that frame to `decodeRawDeclaredQueryResult()`.

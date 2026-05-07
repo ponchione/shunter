@@ -119,6 +119,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   table row decoders while preserving raw declared-query result helpers.
 - Generated TypeScript reducer helpers now include full-update result-envelope
   wrappers alongside the existing raw byte helpers.
+- The TypeScript runtime now defines explicit reducer argument encoder helpers
+  for callers that map typed reducer args to raw `Uint8Array` payloads.
 
 ## v0.1.0 - 2026-05-05
 

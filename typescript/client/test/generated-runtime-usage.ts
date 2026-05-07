@@ -1,6 +1,9 @@
 import {
   SHUNTER_SUBPROTOCOL_V1,
+  callReducerWithEncodedArgs,
+  callReducerWithEncodedArgsResult,
   decodeDeclaredQueryResult,
+  encodeReducerArgs,
   encodeDeclaredQueryRequest,
   encodeDeclaredViewSubscriptionRequest,
   encodeReducerCallRequest,
@@ -26,6 +29,9 @@ import type {
   RawDeclaredQueryResult,
   RawDeclaredQueryTable,
   RawSubscriptionUpdate,
+  EncodedReducerCallOptions,
+  EncodedReducerCallResultOptions,
+  ReducerArgEncoder,
   ReducerCallResult,
   DeclaredViewHandleSubscriber,
   DecodedDeclaredQueryResult,
@@ -189,6 +195,33 @@ async function exerciseGeneratedBindings(): Promise<void> {
   };
 
   const reducerCaller: ReducerCaller = async (_name, args) => args;
+  const createMessageArgEncoder: ReducerArgEncoder<{ body: string }> = (args) =>
+    new TextEncoder().encode(args.body);
+  const encodedCreateMessageArgs: Uint8Array = encodeReducerArgs(
+    { body: "hello" },
+    createMessageArgEncoder,
+  );
+  const encodedReducerOptions: EncodedReducerCallOptions<{ body: string }> = {
+    encodeArgs: createMessageArgEncoder,
+    noSuccessNotify: true,
+  };
+  const encodedReducerResultOptions: EncodedReducerCallResultOptions<{ body: string }> = {
+    encodeArgs: createMessageArgEncoder,
+    requestId: 1,
+  };
+  const typedReducerBytes: Uint8Array = await callReducerWithEncodedArgs(
+    reducerCaller,
+    reducers.createMessage,
+    { body: "hello" },
+    encodedReducerOptions,
+  );
+  const typedReducerEnvelope: ReducerCallResult<typeof reducers.createMessage> =
+    await callReducerWithEncodedArgsResult(
+      reducerCaller,
+      reducers.createMessage,
+      { body: "hello" },
+      encodedReducerResultOptions,
+    );
   const reducerBytes: Uint8Array = await callCreateMessage(
     reducerCaller,
     new Uint8Array([1, 2, 3]),
@@ -310,6 +343,9 @@ async function exerciseGeneratedBindings(): Promise<void> {
   await unsubscribeTable();
 
   void reducerBytes;
+  void encodedCreateMessageArgs;
+  void typedReducerBytes;
+  void typedReducerEnvelope;
   void generatedReducerResultPromise;
   void reducerResult;
   void generatedReducerResult;

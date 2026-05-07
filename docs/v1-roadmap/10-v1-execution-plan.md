@@ -194,11 +194,11 @@ RowList convenience fields on subscription updates, raw declared-query result
 helpers, reducer result envelope helpers, and server-acknowledged managed
 subscription handle return paths added; generated bindings now expose
 module-scoped aliases and helper wrappers for reducer result envelopes plus raw
-declared-query result aliases; table subscriptions now support caller-supplied
-row decoders for decoded initial-row and update callbacks; declared-query
-results can now be decoded through caller-supplied table decoders.
-Schema-aware generated row decoding/cache behavior and reconnect behavior
-remain.
+declared-query result aliases; the runtime now has explicit reducer argument
+encoder conventions; table subscriptions now support caller-supplied row
+decoders for decoded initial-row and update callbacks; declared-query results
+can now be decoded through caller-supplied table decoders. Schema-aware
+generated row/reducer codecs, cache behavior, and reconnect behavior remain.
 
 Tasks:
 
@@ -206,8 +206,8 @@ Tasks:
   a release-packaging decision explicitly moves it.
 - Keep `docs/v1-roadmap/typescript-sdk-contract.md` current as the runtime API
   target before generating more helpers.
-- Decide typed reducer argument/result encoding conventions beyond the current
-  raw `Uint8Array` request path.
+- Generate schema-aware typed reducer argument/result codecs beyond the current
+  explicit encoder hooks and raw `Uint8Array` request path.
 - Build typed reducer result decoding, schema-aware declared query/view/table
   row decoding, subscription cache behavior, typed row callback delivery, and
   unsubscribe acknowledgement integration with managed handles on top of the
