@@ -6591,28 +6591,40 @@ func TestHandleOneOffQuery_ShunterUint128NegativeRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ShunterDMLStatementRejected pins DML rejection on
+// TestHandleOneOffQuery_ShunterDMLStatementRejected pins mutation rejection on
 // OneOff admission.
 func TestHandleOneOffQuery_ShunterDMLStatementRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xB0},
-		QueryString: "DELETE FROM t",
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		{name: "insert", sql: "INSERT INTO t (u32) VALUES (1)"},
+		{name: "update", sql: "UPDATE t SET u32 = 2"},
+		{name: "delete", sql: "DELETE FROM t"},
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			sl := newMockSchema("t", 1,
+				schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+			)
+			snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+			stateAccess := &mockStateAccess{snap: snap}
 
-	result := drainOneOff(t, conn)
-	if result.Error == nil {
-		t.Fatal("expected error, got nil (success)")
-	}
-	if result.Error == nil || *result.Error == "" {
-		t.Error("expected non-empty error message")
+			msg := &OneOffQueryMsg{
+				MessageID:   []byte{0xB0, byte(i)},
+				QueryString: tt.sql,
+			}
+			handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+			result := drainOneOff(t, conn)
+			if result.Error == nil {
+				t.Fatal("expected error, got nil (success)")
+			}
+			if result.Error == nil || *result.Error == "" {
+				t.Error("expected non-empty error message")
+			}
+		})
 	}
 }
 

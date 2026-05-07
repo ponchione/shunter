@@ -4597,27 +4597,40 @@ func TestHandleSubscribeSingle_ShunterUint128NegativeRejected(t *testing.T) {
 // call (query/sql/parser.go:475-477). The pin promotes the rejection from
 // incidental to named Shunter contract.
 func TestHandleSubscribeSingle_ShunterDMLStatementRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   130,
-		QueryID:     131,
-		QueryString: "DELETE FROM t",
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		{name: "insert", sql: "INSERT INTO t (u32) VALUES (1)"},
+		{name: "update", sql: "UPDATE t SET u32 = 2"},
+		{name: "delete", sql: "DELETE FROM t"},
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			executor := &mockSubExecutor{}
+			sl := newMockSchema("t", 1,
+				schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+			)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 131, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on a DML statement")
+			queryID := uint32(131 + i*2)
+			msg := &SubscribeSingleMsg{
+				RequestID:   uint32(130 + i*2),
+				QueryID:     queryID,
+				QueryString: tt.sql,
+			}
+			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+			tag, decoded := drainServerMsgEventually(t, conn)
+			if tag != TagSubscriptionError {
+				t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+			}
+			se := decoded.(SubscriptionError)
+			requireOptionalUint32(t, se.QueryID, queryID, "QueryID")
+			if req := executor.getRegisterSetReq(); req != nil {
+				t.Error("executor should not be called on a DML statement")
+			}
+		})
 	}
 }
 

@@ -180,6 +180,8 @@ Completed or partially complete:
   compatibility coverage for the currently supported query/read surfaces.
 - Update app-author docs to match current declared-live-view projection,
   aggregate, order, limit, and offset behavior.
+- Add protocol admission coverage that rejects SQL mutation statements
+  (`INSERT`, `UPDATE`, and `DELETE`) on one-off raw SQL and raw subscriptions.
 
 Remaining:
 

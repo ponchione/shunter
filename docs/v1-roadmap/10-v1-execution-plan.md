@@ -69,7 +69,8 @@ Tasks:
 - Add or confirm golden coverage for every stable protocol payload,
   `ModuleContract` JSON field, and generated TypeScript category.
 - Add or confirm negative tests for unsupported SQL classes listed in
-  `09-sql-read-scope.md`.
+  `09-sql-read-scope.md`; mutation-statement protocol admission is now covered
+  for one-off raw SQL and raw subscriptions.
 - Make `contractdiff` and `contractworkflow` policy behavior line up with the
   final v1 compatibility rules.
 
