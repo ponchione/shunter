@@ -163,8 +163,8 @@ Exit criteria:
 Goal: strict auth is safe to configure and clear to operate.
 
 Status: current dev/strict auth behavior documented, issuer allowlists
-implemented, strict future-token handling tested, and v1 strict-auth policy
-documented; consistency audit and reference-app example remain.
+implemented, strict future-token handling tested, and v1 strict-auth policy and
+coverage audit documented; reference-app example remains.
 
 Tasks:
 
@@ -177,6 +177,8 @@ Tasks:
   documented as v1 policy.
 - Add startup/config validation for any newly required strict fields.
 - Keep `docs/authentication.md` current as structured dev/strict auth guidance.
+- Keep `docs/AUTH-COVERAGE.md` current as strict-auth consistency coverage
+  changes.
 - Keep tests current for missing signing config, invalid issuer, invalid
   audience, expired/future/malformed/wrong-algorithm tokens, missing
   permissions, and visibility-filtered reads across local and protocol paths.

@@ -1,7 +1,7 @@
 # Production Auth
 
 Status: open, strict HS256 issuer/audience/future-token support landed; v1
-policy documented; reference-app example remains
+policy and coverage audit documented; reference-app example remains
 Owner: unassigned
 Scope: production-ready authentication, principal derivation, permission
 mapping, and operational auth documentation for Shunter v1.
@@ -71,6 +71,7 @@ Completed or partially complete:
 - Document current dev/strict auth behavior, principal derivation, permission
   mapping, visibility-filter limits, key replacement, and production checklist
   in `docs/authentication.md`.
+- Document the strict-auth coverage audit in `docs/AUTH-COVERAGE.md`.
 - Add coverage for JWT validation, issuer and audience validation, expired,
   future-issued, not-yet-valid, malformed, wrong-algorithm, bad-signature, and
   missing-claim tokens, protocol upgrade auth, local strict permissions,
@@ -81,14 +82,6 @@ Completed or partially complete:
 
 Remaining:
 
-- Confirm any remaining tests needed to prove auth is enforced consistently
-  across:
-  - WebSocket reducer calls
-  - local `CallReducer`
-  - one-off raw SQL
-  - declared queries
-  - raw subscriptions
-  - declared views
 - Add examples to the reference app using realistic non-dev auth.
 
 ## Verification

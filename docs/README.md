@@ -18,6 +18,8 @@ Do not read broad specs by default.
 - `docs/authentication.md` — current dev/strict auth behavior, principal
   derivation, permission mapping, visibility, key replacement, and production
   checklist.
+- `docs/AUTH-COVERAGE.md` — audit of current strict-auth tests across protocol,
+  local reducers, read admission, subscriptions, and visibility filters.
 - `docs/PERFORMANCE-BENCHMARKS.md` — benchmark run instructions and current
   performance baselines for comparison across optimization work.
 - `docs/dependency-considerations.md` — adopted dependency policy, dependency
