@@ -81,6 +81,10 @@ Completed in this phase:
   v1 compatibility rules for stable `ModuleContract` fields, unknown additive
   JSON metadata, known-field type drift, read-surface metadata,
   permissions/read_model/migrations/codegen fields, and policy classification.
+- Generated TypeScript identifier normalization and collision suffix behavior
+  now has dedicated v1 golden coverage across table, column, reducer,
+  lifecycle, declared-read, visibility-filter, permission, and read-model
+  identifier categories.
 
 Exit criteria:
 

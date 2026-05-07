@@ -212,6 +212,10 @@ codegen metadata drift is reported as breaking in direct diffs, and reducer
 permission changes are classified by their runtime access impact instead of as
 passive metadata.
 
+Generated TypeScript identifier normalization and collision suffix behavior now
+has dedicated v1 golden coverage across table, column, reducer, lifecycle,
+declared-read, visibility-filter, permission, and read-model categories.
+
 Remaining coverage before cutting `v1.0.0`:
 
 - Add or confirm protocol, contract JSON, and TypeScript golden coverage for

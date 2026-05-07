@@ -150,6 +150,62 @@ func TestV1CompatibilityTypeScriptIdentifierNormalizationAndCollisions(t *testin
 	}
 }
 
+func TestV1CompatibilityTypeScriptIdentifierNormalizationGolden(t *testing.T) {
+	got, err := Generate(v1IdentifierNormalizationContract(), Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	assertCodegenGoldenBytes(t, filepath.Join("testdata", "v1_identifier_normalization.ts"), got)
+}
+
+func TestV1CompatibilityTypeScriptIdentifierNormalizationGoldenCoversRules(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "v1_identifier_normalization.ts"))
+	if err != nil {
+		t.Fatalf("read v1 identifier TypeScript fixture: %v", err)
+	}
+	ts := string(data)
+
+	for _, want := range []string{
+		`export interface _Row {`,
+		`export interface _1TableRow {`,
+		`export interface ClassRow {`,
+		`export interface Class2Row {`,
+		`bodyText: string;`,
+		`bodyText2: string;`,
+		`class_: bigint;`,
+		`_1Count: bigint;`,
+		`_: "!!!",`,
+		`_1Table: "1-table",`,
+		`class_: "class",`,
+		`class_2: "class!",`,
+		`sendMessage: "send_message",`,
+		`sendMessage2: "send-message",`,
+		`default_: "default",`,
+		`OnConnect: "OnConnect",`,
+		`OnConnect2: "on-connect",`,
+		`Default: "default!",`,
+		`recentMessages: "recent_messages",`,
+		`recentMessages2: "recent-messages",`,
+		`class_: "class",`,
+		`sQL: "sQL",`,
+		`export function querySQL2(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`,
+		`liveMessages: "live_messages",`,
+		`liveMessages2: "live messages",`,
+		`default_: "default",`,
+		`ownMessages: { sql: "SELECT * FROM messages WHERE body = 'own'", returnTable: "messages", returnTableId: 0, usesCallerIdentity: false },`,
+		`ownMessages2: { sql: "SELECT * FROM messages WHERE body = 'archived'", returnTable: "messages", returnTableId: 0, usesCallerIdentity: false },`,
+		`class_: { sql: "SELECT * FROM messages WHERE body = 'reserved'", returnTable: "messages", returnTableId: 0, usesCallerIdentity: false },`,
+		`sendMessage2: { required: ["messages:send-alt"] },`,
+		`recentMessages2: { required: ["messages:read-alt"] },`,
+		`liveMessages2: { required: ["messages:subscribe-alt"] },`,
+		`recentMessages2: { tables: ["messages"], tags: ["history-alt"] },`,
+		`liveMessages2: { tables: ["messages"], tags: ["realtime-alt"] },`,
+	} {
+		assertContains(t, ts, want)
+	}
+}
+
 func TestV1CompatibilityTypeScriptCoversCurrentValueKindMappings(t *testing.T) {
 	columns := []struct {
 		name  string
@@ -244,6 +300,120 @@ func TestV1CompatibilityTypeScriptIgnoresUnknownContractJSONFields(t *testing.T)
 	if !bytes.Equal(got, want) {
 		t.Fatalf("unknown contract JSON fields affected TypeScript output\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
+}
+
+func v1IdentifierNormalizationContract() shunter.ModuleContract {
+	contract := contractFixture()
+	contract.Schema.Tables = append(contract.Schema.Tables,
+		schema.TableExport{
+			Name: "!!!",
+			Columns: []schema.ColumnExport{
+				{Name: "id", Type: "uint64"},
+			},
+		},
+		schema.TableExport{
+			Name: "1-table",
+			Columns: []schema.ColumnExport{
+				{Name: "id", Type: "uint64"},
+			},
+		},
+		schema.TableExport{
+			Name: "class",
+			Columns: []schema.ColumnExport{
+				{Name: "body_text", Type: "string"},
+				{Name: "body-text", Type: "string"},
+				{Name: "class", Type: "uint64"},
+				{Name: "1-count", Type: "uint64"},
+			},
+		},
+		schema.TableExport{
+			Name: "class!",
+			Columns: []schema.ColumnExport{
+				{Name: "id", Type: "uint64"},
+			},
+		},
+	)
+	contract.Schema.Reducers = append(contract.Schema.Reducers,
+		schema.ReducerExport{Name: "send-message"},
+		schema.ReducerExport{Name: "default"},
+		schema.ReducerExport{Name: "on-connect", Lifecycle: true},
+		schema.ReducerExport{Name: "default!", Lifecycle: true},
+	)
+	contract.Queries = append(contract.Queries,
+		shunter.QueryDescription{Name: "recent-messages", SQL: "SELECT * FROM messages"},
+		shunter.QueryDescription{Name: "class", SQL: "SELECT * FROM messages"},
+		shunter.QueryDescription{Name: "sQL", SQL: "SELECT * FROM messages"},
+	)
+	contract.Views = append(contract.Views,
+		shunter.ViewDescription{Name: "live messages", SQL: "SELECT * FROM messages"},
+		shunter.ViewDescription{Name: "default", SQL: "SELECT * FROM messages"},
+	)
+	contract.VisibilityFilters = []shunter.VisibilityFilterDescription{
+		{
+			Name:          "own_messages",
+			SQL:           "SELECT * FROM messages WHERE body = 'own'",
+			ReturnTable:   "messages",
+			ReturnTableID: 0,
+		},
+		{
+			Name:          "own-messages",
+			SQL:           "SELECT * FROM messages WHERE body = 'archived'",
+			ReturnTable:   "messages",
+			ReturnTableID: 0,
+		},
+		{
+			Name:          "class",
+			SQL:           "SELECT * FROM messages WHERE body = 'reserved'",
+			ReturnTable:   "messages",
+			ReturnTableID: 0,
+		},
+	}
+	contract.Permissions.Reducers = append(contract.Permissions.Reducers,
+		shunter.PermissionContractDeclaration{Name: "send-message", Required: []string{"messages:send-alt"}},
+		shunter.PermissionContractDeclaration{Name: "default", Required: []string{"messages:send-default"}},
+	)
+	contract.Permissions.Queries = append(contract.Permissions.Queries,
+		shunter.PermissionContractDeclaration{Name: "recent-messages", Required: []string{"messages:read-alt"}},
+		shunter.PermissionContractDeclaration{Name: "class", Required: []string{"messages:read-class"}},
+		shunter.PermissionContractDeclaration{Name: "sQL", Required: []string{"messages:read-sql"}},
+	)
+	contract.Permissions.Views = append(contract.Permissions.Views,
+		shunter.PermissionContractDeclaration{Name: "live messages", Required: []string{"messages:subscribe-alt"}},
+		shunter.PermissionContractDeclaration{Name: "default", Required: []string{"messages:subscribe-default"}},
+	)
+	contract.ReadModel.Declarations = append(contract.ReadModel.Declarations,
+		shunter.ReadModelContractDeclaration{
+			Surface: shunter.ReadModelSurfaceQuery,
+			Name:    "recent-messages",
+			Tables:  []string{"messages"},
+			Tags:    []string{"history-alt"},
+		},
+		shunter.ReadModelContractDeclaration{
+			Surface: shunter.ReadModelSurfaceQuery,
+			Name:    "class",
+			Tables:  []string{"messages"},
+			Tags:    []string{"history-class"},
+		},
+		shunter.ReadModelContractDeclaration{
+			Surface: shunter.ReadModelSurfaceQuery,
+			Name:    "sQL",
+			Tables:  []string{"messages"},
+			Tags:    []string{"history-sql"},
+		},
+		shunter.ReadModelContractDeclaration{
+			Surface: shunter.ReadModelSurfaceView,
+			Name:    "live messages",
+			Tables:  []string{"messages"},
+			Tags:    []string{"realtime-alt"},
+		},
+		shunter.ReadModelContractDeclaration{
+			Surface: shunter.ReadModelSurfaceView,
+			Name:    "default",
+			Tables:  []string{"messages"},
+			Tags:    []string{"realtime-default"},
+		},
+	)
+	return contract
 }
 
 func v1ContractJSONWithUnknownFields(t *testing.T, data []byte) []byte {

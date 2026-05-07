@@ -67,6 +67,8 @@ Code reality as of this roadmap cleanup:
 - `contractdiff` and `contractworkflow` policy behavior now matches the final
   v1 matrix for stable contract fields, unknown JSON metadata, read-policy and
   permission changes, migration metadata, and codegen metadata drift.
+- Generated TypeScript identifier normalization and collision suffix behavior
+  now has a dedicated v1 golden fixture in `codegen/testdata/`.
 
 ## v1 Decisions To Make
 
@@ -106,6 +108,8 @@ Completed or partially complete:
 - Ensure `contractdiff` treats stable-field changes consistently with the final
   v1 compatibility policy, and verify the `contractworkflow` file wrappers use
   the same policy behavior.
+- Add dedicated v1 golden coverage for generated TypeScript identifier
+  normalization and collision suffixes across emitted identifier categories.
 
 Remaining:
 
@@ -116,7 +120,7 @@ Remaining:
 - Confirm protocol, contract JSON, and TypeScript golden coverage for every
   stable payload shape in the matrix.
 - Keep generated TypeScript identifier normalization compatibility tests current
-  when codegen naming changes.
+  as an ongoing maintenance item when codegen naming changes.
 
 ## Verification
 
