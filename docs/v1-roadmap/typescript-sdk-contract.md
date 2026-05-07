@@ -37,9 +37,14 @@ runtime interfaces consumed by generated bindings. It also exposes raw
 and a connected-client `callReducer` send path with minimal full-update
 `TransactionUpdate` response correlation. It also exposes raw declared-query
 request encoding for v1 `DeclaredQueryMsg` frames and correlates
-`OneOffQueryResponse` frames. Typed reducer argument/result encoding, declared
-query row decoding, view/subscription message plumbing, reconnect policy, and
-local cache implementation remain open.
+`OneOffQueryResponse` frames. It also exposes raw declared-view subscription
+request encoding for v1 `SubscribeDeclaredView` frames, correlates
+`SubscribeMultiApplied` and `SubscriptionError` responses, and returns an
+idempotent unsubscribe function that sends `UnsubscribeMulti`. Typed reducer
+argument/result encoding, declared query/view row decoding, declared-view
+delta/cache behavior, table-subscription message plumbing, unsubscribe
+acknowledgement handling, reconnect policy, and local cache implementation
+remain open.
 
 ## Runtime API
 
@@ -144,6 +149,15 @@ to expose it in the SDK.
 ## Declared Views And Subscriptions
 
 Generated bindings should expose typed declared view subscription helpers.
+
+Current foundation: the runtime can encode the named
+`SubscribeDeclaredView` shape used by the Go protocol and
+`createShunterClient().subscribeDeclaredView(...)` waits for the matching
+`SubscribeMultiApplied` response. `SubscriptionError` responses reject with a
+structured validation error. On acceptance, the method returns an idempotent
+unsubscribe function that sends `UnsubscribeMulti` for the accepted query ID.
+The unsubscribe helper does not yet wait for `UnsubscribeMultiApplied`, update
+local cache state, decode initial rows, or apply later row deltas.
 
 Subscription handles must provide:
 

@@ -1,6 +1,7 @@
 import {
   SHUNTER_SUBPROTOCOL_V1,
   encodeDeclaredQueryRequest,
+  encodeDeclaredViewSubscriptionRequest,
   encodeReducerCallRequest,
   ShunterAuthError,
   ShunterProtocolMismatchError,
@@ -10,6 +11,7 @@ import {
 import type {
   ConnectionState,
   EncodedDeclaredQueryRequest,
+  EncodedDeclaredViewSubscriptionRequest,
   EncodedReducerCallRequest,
   ProtocolMetadata,
   RuntimeBindings,
@@ -83,6 +85,7 @@ const client = createShunterClient({
 async function exerciseGeneratedBindings(): Promise<void> {
   const generatedClientReducerCaller: ReducerCaller = client.callReducer;
   const generatedClientDeclaredQueryRunner: DeclaredQueryRunner = client.runDeclaredQuery;
+  const generatedClientDeclaredViewSubscriber: DeclaredViewSubscriber = client.subscribeDeclaredView;
   const encodedRequest: EncodedReducerCallRequest<ReducerName> =
     encodeReducerCallRequest(reducers.createMessage, new Uint8Array([1, 2, 3]), {
       requestId: 9,
@@ -91,6 +94,12 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const encodedQueryRequest: EncodedDeclaredQueryRequest<ExecutableQueryName> =
     encodeDeclaredQueryRequest("recent_messages", { requestId: 10 });
   const encodedQueryFrame: Uint8Array = encodedQueryRequest.frame;
+  const encodedViewRequest: EncodedDeclaredViewSubscriptionRequest<ExecutableViewName> =
+    encodeDeclaredViewSubscriptionRequest("live_message_projection", {
+      requestId: 11,
+      queryId: 12,
+    });
+  const encodedViewFrame: Uint8Array = encodedViewRequest.frame;
 
   const reducerCaller: ReducerCaller = async (_name, args) => args;
   const reducerBytes: Uint8Array = await callCreateMessage(
@@ -117,7 +126,7 @@ async function exerciseGeneratedBindings(): Promise<void> {
   > = {
     callReducer: generatedClientReducerCaller,
     runDeclaredQuery: generatedClientDeclaredQueryRunner,
-    subscribeDeclaredView: declaredViewSubscriber,
+    subscribeDeclaredView: generatedClientDeclaredViewSubscriber,
     subscribeTable: runtimeTableSubscriber,
   };
   const unsubscribeFromBindings: SubscriptionUnsubscribe =
@@ -142,6 +151,7 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void reducerBytes;
   void encodedFrame;
   void encodedQueryFrame;
+  void encodedViewFrame;
   void queryBytes;
 }
 

@@ -64,9 +64,11 @@ Several original roadmap gaps now have partial implementation:
   exists at `typescript/client`, including protocol compatibility helpers, a
   WebSocket lifecycle shell with IdentityToken decoding, a subscription handle
   primitive, raw reducer request/response handling, and raw declared-query
-  request/response handling, but typed reducer codecs, declared-query row
-  decoding, view/subscription protocol message plumbing, reconnect/cache
-  behavior, and canary wiring are not complete.
+  request/response handling. It now also has raw declared-view subscribe
+  acceptance/error correlation and an unsubscribe send path, but typed reducer
+  codecs, declared query/view row decoding, declared-view delta/cache behavior,
+  table-subscription plumbing, reconnect behavior, and canary wiring are not
+  complete.
 - A release-candidate app workload exists in tests. The maintained v1
   canary/reference app is the external `opsboard-canary` repository; do not add
   a duplicate in-repo task-board app.

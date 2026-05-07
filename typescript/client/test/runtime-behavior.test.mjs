@@ -3,7 +3,11 @@ import {
   SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY,
   SHUNTER_CLIENT_MESSAGE_CALL_REDUCER,
   SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY,
+  SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW,
+  SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_MULTI,
   SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE,
+  SHUNTER_SERVER_MESSAGE_SUBSCRIBE_MULTI_APPLIED,
+  SHUNTER_SERVER_MESSAGE_SUBSCRIPTION_ERROR,
   SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE,
   SHUNTER_SUBPROTOCOL_V1,
   ShunterAuthError,
@@ -17,9 +21,13 @@ import {
   createSubscriptionHandle,
   decodeIdentityTokenFrame,
   decodeOneOffQueryResponseFrame,
+  decodeSubscribeMultiAppliedFrame,
+  decodeSubscriptionErrorFrame,
   decodeTransactionUpdateFrame,
   encodeDeclaredQueryRequest,
+  encodeDeclaredViewSubscriptionRequest,
   encodeReducerCallRequest,
+  encodeUnsubscribeMultiRequest,
   selectShunterSubprotocol,
   shunterProtocol,
 } from "../.tmp_runtime_test/src/index.js";
@@ -216,6 +224,23 @@ assert.deepEqual(
   bytesFromHex("070200000009080c000000726563656e745f7573657273"),
 );
 
+const encodedDeclaredView = encodeDeclaredViewSubscriptionRequest("live_users", {
+  requestId: 0x81828384,
+  queryId: 0x91929394,
+});
+assert.equal(encodedDeclaredView.name, "live_users");
+assert.equal(encodedDeclaredView.frame[0], SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW);
+assert.deepEqual(
+  encodedDeclaredView.frame,
+  bytesFromHex("0884838281949392910a0000006c6976655f7573657273"),
+);
+
+const encodedUnsubscribe = encodeUnsubscribeMultiRequest(0x71727374, {
+  requestId: 0x61626364,
+});
+assert.equal(encodedUnsubscribe.frame[0], SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_MULTI);
+assert.deepEqual(encodedUnsubscribe.frame, bytesFromHex("066463626174737271"));
+
 const committedUpdateFrame = bytesFromHex(
   "050001000000040302010500000075736572730f0000000200000002000000010201000000030200000004050807060504030201202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf0400000073656e641413121102000000aabb242322213837363534333231",
 );
@@ -264,6 +289,27 @@ const oneOffError = decodeOneOffQueryResponseFrame(oneOffErrorFrame);
 assert.deepEqual(oneOffError.messageId, new Uint8Array([0x03, 0x04]));
 assert.equal(oneOffError.error, "bad query");
 assert.equal(oneOffError.tables.length, 0);
+
+const subscribeAppliedFrame = bytesFromHex(
+  "094443424158575655545352516463626101000000040302010500000075736572730f000000020000000200000001020100000003020000000405",
+);
+const subscribeApplied = decodeSubscribeMultiAppliedFrame(subscribeAppliedFrame);
+assert.equal(subscribeAppliedFrame[0], SHUNTER_SERVER_MESSAGE_SUBSCRIBE_MULTI_APPLIED);
+assert.equal(subscribeApplied.requestId, 0x41424344);
+assert.equal(subscribeApplied.queryId, 0x61626364);
+assert.equal(subscribeApplied.totalHostExecutionDurationMicros, 0x5152535455565758n);
+assert.equal(subscribeApplied.updates.length, 1);
+assert.equal(subscribeApplied.updates[0].tableName, "users");
+
+const subscriptionErrorFrame = bytesFromHex(
+  "0408070605040302010144434241015453525101646362610600000064656e696564",
+);
+const subscriptionError = decodeSubscriptionErrorFrame(subscriptionErrorFrame);
+assert.equal(subscriptionErrorFrame[0], SHUNTER_SERVER_MESSAGE_SUBSCRIPTION_ERROR);
+assert.equal(subscriptionError.requestId, 0x41424344);
+assert.equal(subscriptionError.queryId, 0x51525354);
+assert.equal(subscriptionError.tableId, 0x61626364);
+assert.equal(subscriptionError.error, "denied");
 
 const clientStates = [];
 const client = createShunterClient({
@@ -328,6 +374,36 @@ const declaredQueryFailure = client.runDeclaredQuery("recent_users", {
 assert.equal(sockets[0].sent.length, 5);
 sockets[0].message(oneOffErrorFrame);
 await assert.rejects(declaredQueryFailure, ShunterValidationError);
+
+const declaredViewSubscription = client.subscribeDeclaredView("live_users", {
+  requestId: 0x41424344,
+  queryId: 0x61626364,
+});
+assert.equal(sockets[0].sent.length, 6);
+assert.deepEqual(
+  sockets[0].sent[5],
+  encodeDeclaredViewSubscriptionRequest("live_users", {
+    requestId: 0x41424344,
+    queryId: 0x61626364,
+  }).frame,
+);
+sockets[0].message(subscribeAppliedFrame);
+const unsubscribeDeclaredView = await declaredViewSubscription;
+await unsubscribeDeclaredView();
+await unsubscribeDeclaredView();
+assert.equal(sockets[0].sent.length, 7);
+assert.deepEqual(
+  sockets[0].sent[6],
+  encodeUnsubscribeMultiRequest(0x61626364, { requestId: 1 }).frame,
+);
+
+const deniedViewSubscription = client.subscribeDeclaredView("live_users", {
+  requestId: 0x41424344,
+  queryId: 0x51525354,
+});
+assert.equal(sockets[0].sent.length, 8);
+sockets[0].message(subscriptionErrorFrame);
+await assert.rejects(deniedViewSubscription, ShunterValidationError);
 
 await client.close();
 await client.close();
