@@ -398,7 +398,9 @@ err := rt.Read(ctx, func(view shunter.LocalReadView) error {
 
 Use declared reads when you want named app-owned read surfaces with SQL,
 permission metadata, read-model metadata, visibility filtering, and contract
-export.
+export. The exact SQL accepted by one-off raw SQL, raw subscriptions, declared
+queries, and declared live views is the read-surface matrix in
+`docs/v1-compatibility.md`.
 
 ```go
 result, err := rt.CallQuery(
@@ -538,8 +540,10 @@ visibility filters, permissions, read-model metadata, migration metadata, and
 codegen metadata.
 
 Generated TypeScript includes row interfaces, a `TableRows` table-name-to-row
-map, typed subscription helpers, declared read helper names, and protocol
-metadata.
+map, table subscription helper functions, executable declared-read name unions,
+SQL maps, byte-level declared-read helper functions, and protocol metadata.
+Typed decoding for declared query/view result rows belongs to the TypeScript
+client runtime track.
 
 The generic CLI operates on existing contract JSON files:
 

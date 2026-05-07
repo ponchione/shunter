@@ -197,6 +197,9 @@ Completed or partially complete:
 - Add contract/codegen compatibility coverage for declared query projection
   shape metadata, declared live-view projection shape metadata, and declared
   live-view aggregate shape metadata.
+- Clarify the app-author guide that declared-read SQL limits are governed by
+  the v1 compatibility matrix and generated TypeScript declared-read helpers
+  are byte-level until the client runtime adds typed decoding.
 
 Remaining:
 
