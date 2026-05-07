@@ -1,6 +1,6 @@
 # Runtime Hardening
 
-Status: open, command set documented; coverage expansion remains
+Status: open, command and race set documented; coverage expansion remains
 Owner: unassigned
 Scope: correctness proof for Shunter runtime behavior under concurrency,
 crashes, recovery, protocol traffic, visibility filtering, and malformed input.
@@ -69,6 +69,8 @@ Completed or partially complete:
 - Add fuzz targets for many parser/decoder and contract boundaries.
 - Document the current release-candidate command set in
   `docs/RUNTIME-HARDENING-GAUNTLET.md`.
+- Document the routinely runnable race command set and package ownership
+  guidance in `docs/RUNTIME-HARDENING-GAUNTLET.md`.
 
 Remaining:
 
@@ -76,8 +78,7 @@ Remaining:
   gauntlet, including snapshot, compaction, migration, and shutdown faults.
 - Add broader subscription correctness scenarios for joins, deletes, updates,
   and visibility changes under concurrent writes.
-- Expand race-enabled guidance beyond the current release-candidate command set
-  as package ownership changes.
+- Keep race-enabled guidance current as package ownership changes.
 - Add soak/load tests that can run outside the normal short test loop.
 - Record fixed seed sets, failing seeds, and regression scenarios in durable
   fixtures or corpus entries.

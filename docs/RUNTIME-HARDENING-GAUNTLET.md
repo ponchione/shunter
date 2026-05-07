@@ -209,6 +209,13 @@ rtk go test ./... -run 'RuntimeGauntlet|ReleaseCandidateExampleApp|ShortSoak' -c
 rtk go test -race . ./executor ./protocol ./subscription ./store ./commitlog -count=1
 ```
 
+Run the race set whenever a slice changes runtime concurrency, reducer
+execution, protocol connection lifecycle, subscription fanout/pruning, store
+index mutation, commitlog recovery, snapshot, or compaction behavior. Add a
+package to this command when it starts owning shared goroutines, shared mutable
+state, or durability coordination. Keep package-specific race runs separate
+from active fuzzing so failures are attributable.
+
 - fuzz corpus replay is part of normal `rtk go test ./...`; active fuzzing
   should run package-at-a-time so failures are easy to attribute. Start with
   the trust-boundary packages:

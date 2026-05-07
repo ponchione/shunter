@@ -218,8 +218,8 @@ Exit criteria:
 
 Goal: v1 release confidence comes from repeatable tests, not ad hoc confidence.
 
-Status: release-candidate command set documented; seed/corpus and coverage
-expansion remain.
+Status: release-candidate command set and targeted race guidance documented;
+seed/corpus and coverage expansion remain.
 
 Tasks:
 
@@ -230,8 +230,7 @@ Tasks:
   shutdown boundaries.
 - Expand subscription correctness scenarios beyond single-table happy paths:
   joins, deletes, updates, visibility changes, and concurrent writes.
-- Add race-enabled package guidance and at least one routinely runnable race
-  command set.
+- Keep race-enabled package guidance current as ownership changes.
 - Add soak/load tests outside the default short loop.
 
 Exit criteria:
