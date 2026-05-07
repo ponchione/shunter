@@ -406,6 +406,57 @@ func TestEvalAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) 
 	}
 }
 
+func TestEvalFilteredAggregateSuppressesUnmatchedDelta(t *testing.T) {
+	s := testSchema()
+	inbox := make(chan FanOutMessage, 2)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	connID := types.ConnectionID{1}
+	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(42), types.NewString("match")},
+		},
+	})
+	for _, req := range []struct {
+		queryID   uint32
+		aggregate *Aggregate
+	}{
+		{121, countStarAggregate()},
+		{122, sumIDAggregate()},
+	} {
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID:     connID,
+			QueryID:    req.queryID,
+			Predicates: []Predicate{pred},
+			Aggregates: []*Aggregate{req.aggregate},
+		}, before); err != nil {
+			t.Fatalf("RegisterSet aggregate queryID=%d: %v", req.queryID, err)
+		}
+	}
+
+	unmatched := types.ProductValue{types.NewUint64(7), types.NewString("skip")}
+	afterInsert := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(42), types.NewString("match")},
+			unmatched,
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), simpleChangeset(1, []types.ProductValue{unmatched}, nil), afterInsert, PostCommitMeta{})
+	if msg := <-inbox; len(msg.Fanout[connID]) != 0 {
+		t.Fatalf("unmatched aggregate insert fanout = %+v, want no updates", msg.Fanout)
+	}
+
+	afterDelete := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(42), types.NewString("match")},
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(2), simpleChangeset(1, nil, []types.ProductValue{unmatched}), afterDelete, PostCommitMeta{})
+	if msg := <-inbox; len(msg.Fanout[connID]) != 0 {
+		t.Fatalf("unmatched aggregate delete fanout = %+v, want no updates", msg.Fanout)
+	}
+}
+
 func TestEvalJoinCountAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) {
 	s := joinCountAggregateSchema()
 	inbox := make(chan FanOutMessage, 1)
