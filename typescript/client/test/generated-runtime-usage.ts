@@ -5,6 +5,7 @@ import {
   encodeReducerCallRequest,
   encodeSubscribeSingleRequest,
   encodeTableSubscriptionRequest,
+  decodeRawDeclaredQueryResult,
   decodeRowList,
   ShunterAuthError,
   ShunterProtocolMismatchError,
@@ -20,6 +21,8 @@ import type {
   EncodedTableSubscriptionRequest,
   ProtocolMetadata,
   RawRowList,
+  RawDeclaredQueryResult,
+  RawDeclaredQueryTable,
   RawSubscriptionUpdate,
   DeclaredViewHandleSubscriber,
   RuntimeBindings,
@@ -156,6 +159,19 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const declaredQueryRunner: DeclaredQueryRunner = async (name) =>
     new Uint8Array([name.length]);
   const queryBytes: Uint8Array = await queryRecentMessages(declaredQueryRunner);
+  const rawDeclaredQueryTable: RawDeclaredQueryTable = {
+    tableName: "messages",
+    rows: new Uint8Array([0]),
+    rowBytes: [new Uint8Array([0])],
+  };
+  const rawDeclaredQueryResult: RawDeclaredQueryResult<ExecutableQueryName> = {
+    name: "recent_messages",
+    messageId: new Uint8Array([1]),
+    tables: [rawDeclaredQueryTable],
+    totalHostExecutionDuration: 0n,
+    rawFrame: new Uint8Array([0]),
+  };
+  const rawDeclaredQueryDecoder: typeof decodeRawDeclaredQueryResult = decodeRawDeclaredQueryResult;
 
   const declaredViewSubscriber: DeclaredViewSubscriber = async (_name) => () => {};
   const unsubscribeView: SubscriptionUnsubscribe =
@@ -221,6 +237,8 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void encodedSubscribeSingleFrame;
   void encodedTableFrame;
   void queryBytes;
+  void rawDeclaredQueryResult;
+  void rawDeclaredQueryDecoder;
 }
 
 void connectedState;

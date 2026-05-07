@@ -1610,6 +1610,16 @@ export interface OneOffQueryResponseMessage {
   readonly rawFrame: Uint8Array;
 }
 
+export type RawDeclaredQueryTable = OneOffQueryTable;
+
+export interface RawDeclaredQueryResult<Name extends string = string> {
+  readonly name: Name;
+  readonly messageId: Uint8Array;
+  readonly tables: readonly RawDeclaredQueryTable[];
+  readonly totalHostExecutionDuration: bigint;
+  readonly rawFrame: Uint8Array;
+}
+
 export function decodeOneOffQueryResponseFrame(data: unknown): OneOffQueryResponseMessage {
   const frame = frameBytes(data);
   if (frame.length < 1 || frame[0] !== SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE) {
@@ -1637,6 +1647,30 @@ export function decodeOneOffQueryResponseFrame(data: unknown): OneOffQueryRespon
     tables,
     totalHostExecutionDuration,
     rawFrame: new Uint8Array(frame),
+  };
+}
+
+export function decodeRawDeclaredQueryResult<Name extends string>(
+  name: Name,
+  data: unknown,
+): RawDeclaredQueryResult<Name> {
+  const response = decodeOneOffQueryResponseFrame(data);
+  if (response.error !== undefined) {
+    throw new ShunterValidationError(response.error || "Declared query failed.", {
+      code: "declared_query_failed",
+      details: { name, response },
+    });
+  }
+  return {
+    name,
+    messageId: new Uint8Array(response.messageId),
+    tables: response.tables.map((table) => ({
+      tableName: table.tableName,
+      rows: new Uint8Array(table.rows),
+      rowBytes: table.rowBytes.map((row) => new Uint8Array(row)),
+    })),
+    totalHostExecutionDuration: response.totalHostExecutionDuration,
+    rawFrame: new Uint8Array(response.rawFrame),
   };
 }
 

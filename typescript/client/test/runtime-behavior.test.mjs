@@ -27,6 +27,7 @@ import {
   createSubscriptionHandle,
   decodeIdentityTokenFrame,
   decodeOneOffQueryResponseFrame,
+  decodeRawDeclaredQueryResult,
   decodeRowList,
   decodeSubscribeSingleAppliedFrame,
   decodeSubscribeMultiAppliedFrame,
@@ -351,6 +352,12 @@ assert.equal(oneOffSuccess.tables[0].tableName, "users");
 assert.deepEqual([...oneOffSuccess.tables[0].rows.slice(0, 4)], [0x02, 0x00, 0x00, 0x00]);
 assert.deepEqual(oneOffSuccess.tables[0].rowBytes.map((row) => [...row]), [[1, 2], [3]]);
 assert.equal(oneOffSuccess.totalHostExecutionDuration, 0x1112131415161718n);
+const rawDeclaredQueryResult = decodeRawDeclaredQueryResult("recent_users", oneOffSuccessFrame);
+assert.equal(rawDeclaredQueryResult.name, "recent_users");
+assert.deepEqual(rawDeclaredQueryResult.messageId, new Uint8Array([0x01, 0x02]));
+assert.equal(rawDeclaredQueryResult.tables[0].tableName, "users");
+assert.deepEqual(rawDeclaredQueryResult.tables[0].rowBytes.map((row) => [...row]), [[1, 2], [3]]);
+assert.deepEqual(rawDeclaredQueryResult.rawFrame, oneOffSuccessFrame);
 
 const oneOffErrorFrame = bytesFromHex(
   "060200000003040109000000626164207175657279000000002827262524232221",
@@ -359,6 +366,10 @@ const oneOffError = decodeOneOffQueryResponseFrame(oneOffErrorFrame);
 assert.deepEqual(oneOffError.messageId, new Uint8Array([0x03, 0x04]));
 assert.equal(oneOffError.error, "bad query");
 assert.equal(oneOffError.tables.length, 0);
+assert.throws(
+  () => decodeRawDeclaredQueryResult("recent_users", oneOffErrorFrame),
+  ShunterValidationError,
+);
 
 const subscribeSingleAppliedFrame = bytesFromHex(
   "02040302010807060504030201141312110500000075736572730f000000020000000200000001020100000003",

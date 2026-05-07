@@ -53,6 +53,9 @@ payload shape and includes raw per-row byte arrays on decoded one-off query
 tables, table initial rows, and optional table unsubscribe rows. Raw
 subscription updates now include optional `insertRowBytes` and `deleteRowBytes`
 arrays when their insert/delete payloads decode as RowList envelopes.
+`decodeRawDeclaredQueryResult()` wraps successful `OneOffQueryResponse` frames
+in a raw declared-query result envelope containing table names, raw RowList
+bytes, and split row byte arrays for generated helpers to type against.
 `subscribeDeclaredView()` and `subscribeTable()` can also opt into
 `returnHandle: true`, resolving with a managed subscription handle backed by the
 same server-acknowledged unsubscribe path. Table handles expose raw initial row
@@ -147,9 +150,10 @@ Current foundation: the runtime can encode the named `DeclaredQueryMsg` shape
 used by the Go protocol and `createShunterClient().runDeclaredQuery(...)` waits
 for a matching `OneOffQueryResponse`. Successful responses resolve with the raw
 response frame; server error responses reject with a structured validation
-error. Decoded `OneOffQueryResponse` helpers split RowList payloads into raw
-per-row bytes, but typed row decoding and table/view metadata extraction remain
-required v1 follow-ups.
+error. `decodeRawDeclaredQueryResult()` turns a successful raw response frame
+into a name-stamped result with table names, raw RowList bytes, split row byte
+slices, duration, message ID, and the raw frame. Typed row decoding and
+table/view metadata extraction remain required v1 follow-ups.
 
 Query calls should return:
 

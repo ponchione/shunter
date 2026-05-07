@@ -88,6 +88,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   rejecting on failed reducer updates.
 - Added raw TypeScript declared-query request encoding and
   `OneOffQueryResponse` correlation for byte-level generated query helpers.
+- Added a TypeScript raw declared-query result helper that exposes table names,
+  raw RowList bytes, split row byte arrays, message ID, duration, and raw frame.
 - Added raw TypeScript declared-view subscription request encoding,
   `SubscribeMultiApplied`/`SubscriptionError` correlation, and an idempotent
   `UnsubscribeMulti` send path.

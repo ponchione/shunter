@@ -23,10 +23,13 @@ live RowList payload shape and attaches raw per-row byte arrays to decoded
 one-off query table rows, table initial rows, and optional table unsubscribe
 rows. Raw subscription updates include optional `insertRowBytes` and
 `deleteRowBytes` arrays when their insert/delete payloads can be decoded as
-RowList envelopes. `subscribeDeclaredView()` and `subscribeTable()` also
-accept `returnHandle: true` to resolve with a managed subscription handle wired
-to the same server-acknowledged unsubscribe path. Table handles expose raw row
-bytes from the initial snapshot; declared-view handles are lifecycle-only until
+RowList envelopes. `decodeRawDeclaredQueryResult()` wraps successful
+`OneOffQueryResponse` frames in a raw declared-query result envelope containing
+table names, raw RowList bytes, and split row byte arrays.
+`subscribeDeclaredView()` and `subscribeTable()` also accept `returnHandle:
+true` to resolve with a managed subscription handle wired to the same
+server-acknowledged unsubscribe path. Table handles expose raw row bytes from
+the initial snapshot; declared-view handles are lifecycle-only until
 schema-aware view row decoding lands. It does not implement typed reducer
 argument/result encoding,
 schema-aware declared query/view/table row decoding, typed row callbacks,
@@ -42,7 +45,8 @@ Full-update `callReducer()` calls currently resolve with the raw
 status. `NoSuccessNotify` calls resolve after send because successful server
 echoes may be suppressed.
 `runDeclaredQuery()` currently resolves with the raw `OneOffQueryResponse`
-frame on success and rejects on response errors.
+frame on success and rejects on response errors. Consumers that want a typed raw
+envelope can pass that frame to `decodeRawDeclaredQueryResult()`.
 `subscribeDeclaredView()` currently resolves after `SubscribeMultiApplied`,
 rejects on `SubscriptionError`, and returns an unsubscribe function that sends
 one `UnsubscribeMulti` frame for repeated calls and resolves after the matching
