@@ -575,6 +575,74 @@ func TestMultiJoinDeltaMatchesFreshEvaluationForIntermediateRelation(t *testing.
 	}
 }
 
+func TestMultiJoinNonKeyPreservingPathDeltaMatchesFreshForSameTransactionRows(t *testing.T) {
+	s := dualIndexedMultiJoinTestSchema()
+	pred := splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate()
+	left := types.ProductValue{types.NewUint64(500), types.NewUint64(20)}
+	middle := types.ProductValue{types.NewUint64(30), types.NewUint64(20)}
+	right := types.ProductValue{types.NewUint64(100), types.NewUint64(30)}
+	empty := map[TableID][]types.ProductValue{
+		1: nil,
+		2: nil,
+		3: nil,
+	}
+	full := map[TableID][]types.ProductValue{
+		1: {left},
+		2: {middle},
+		3: {right},
+	}
+
+	tests := []struct {
+		name        string
+		before      map[TableID][]types.ProductValue
+		after       map[TableID][]types.ProductValue
+		changeset   *store.Changeset
+		wantInserts []uint64
+		wantDeletes []uint64
+	}{
+		{
+			name:   "inserted-path",
+			before: empty,
+			after:  full,
+			changeset: &store.Changeset{
+				TxID: 1,
+				Tables: map[TableID]*store.TableChangeset{
+					1: {Inserts: []types.ProductValue{left}},
+					2: {Inserts: []types.ProductValue{middle}},
+					3: {Inserts: []types.ProductValue{right}},
+				},
+			},
+			wantInserts: []uint64{500},
+		},
+		{
+			name:   "deleted-path",
+			before: full,
+			after:  empty,
+			changeset: &store.Changeset{
+				TxID: 2,
+				Tables: map[TableID]*store.TableChangeset{
+					1: {Deletes: []types.ProductValue{left}},
+					2: {Deletes: []types.ProductValue{middle}},
+					3: {Deletes: []types.ProductValue{right}},
+				},
+			},
+			wantDeletes: []uint64{500},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			delta := requireMultiJoinIncrementalMatchesFresh(t, s, pred, buildMockCommitted(s, tt.before), buildMockCommitted(s, tt.after), tt.changeset)
+			if !productRowsHaveUint64IDs(delta.inserts, tt.wantInserts...) {
+				t.Fatalf("insert ids = %v, want %v", delta.inserts, tt.wantInserts)
+			}
+			if !productRowsHaveUint64IDs(delta.deletes, tt.wantDeletes...) {
+				t.Fatalf("delete ids = %v, want %v", delta.deletes, tt.wantDeletes)
+			}
+		})
+	}
+}
+
 func TestMultiJoinPlacementUsesLocalFilterIndexesForDistinctTables(t *testing.T) {
 	idx := NewPruningIndexes()
 	pred := multiJoinTestPredicate()
