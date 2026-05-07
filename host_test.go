@@ -83,19 +83,17 @@ func TestHostRejectsOverlappingRoutePrefixes(t *testing.T) {
 	assertErrorMentions(t, err, "conflicts")
 }
 
-func TestHostRejectsSharedRuntimeDataDir(t *testing.T) {
+func TestBuildRejectsSharedRuntimeDataDirModuleMismatch(t *testing.T) {
 	dir := t.TempDir()
-	chat := buildHostTestRuntime(t, "chat", dir)
-	ops := buildHostTestRuntime(t, "ops", dir)
+	_ = buildHostTestRuntime(t, "chat", dir)
 
-	_, err := NewHost(
-		HostRuntime{Name: "chat", RoutePrefix: "/chat", Runtime: chat},
-		HostRuntime{Name: "ops", RoutePrefix: "/ops", Runtime: ops},
-	)
+	_, err := Build(NewModule("ops").SchemaVersion(1).TableDef(messagesTableDef()), Config{DataDir: dir, EnableProtocol: true})
 	if err == nil {
-		t.Fatal("NewHost succeeded with shared runtime data dir")
+		t.Fatal("Build succeeded with shared runtime data dir")
 	}
-	assertErrorMentions(t, err, "data")
+	assertErrorMentions(t, err, "data dir metadata module name")
+	assertErrorMentions(t, err, "chat")
+	assertErrorMentions(t, err, "ops")
 }
 
 func TestHostStartsInRegistrationOrderAndCleansPartialStart(t *testing.T) {

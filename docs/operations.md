@@ -39,6 +39,12 @@ Application startup may optionally call `CheckDataDirCompatibility` before
 building the runtime, but `Build` also validates the module schema against
 recovered durable state.
 
+Successful builds write `shunter.datadir.json` inside the data directory. This
+metadata records Shunter build metadata separately from app-owned module
+metadata. Shunter uses it as a guardrail against opening a data directory with a
+different module name, schema version, or contract metadata version; app module
+version changes are recorded but do not by themselves block startup.
+
 ### Normal Restart
 
 For a normal restart:
@@ -107,7 +113,7 @@ Recommended flow:
 3. Call `Runtime.Close` and wait for success.
 4. Copy the complete `DataDir` with `BackupDataDir` or `shunter backup`.
 5. Store the matching app contract, app module version, Shunter version, commit,
-   and backup timestamp next to the backup.
+   backup timestamp, and copied `shunter.datadir.json` next to the backup.
 
 Go helper:
 

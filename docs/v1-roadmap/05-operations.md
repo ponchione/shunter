@@ -28,6 +28,8 @@ Current code and docs now include:
   `RunDataDirMigrations`, and `RunModuleDataDirMigrations`.
 - App-author backup, restore, migration, contract plan, and versioning guidance
   in `docs/how-to-use-shunter.md`.
+- Durable `shunter.datadir.json` metadata that records Shunter build metadata
+  separately from app module metadata and blocks mismatched module/schema usage.
 
 The missing v1 work is turning those primitives into an opinionated operating
 model with tested failure behavior.
@@ -84,13 +86,14 @@ Completed or partially complete:
   linker-stamped build metadata to the operations runbook.
 - Add a guardrail test that Shunter build metadata stays separate from
   app-owned `Module.Version(...)` contract metadata.
+- Add durable data-dir metadata and compatibility tests for module-name
+  mismatches and app module version updates.
 
 Remaining:
 
 - Add or update tests for:
   - crash during reducer commit
   - crash during snapshot/compaction
-  - durable data-dir version metadata compatibility
 - Ensure CLI and library helpers return actionable errors across the full
   operator workflow.
 - Add backup/restore/migration flow to the reference app.

@@ -100,6 +100,9 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 	if err != nil {
 		return fail(fmt.Errorf("build hosted runtime declared reads: %w", err))
 	}
+	if err := validateDataDirMetadata(preview.dataDir, mod, registry); err != nil {
+		return fail(fmt.Errorf("build hosted runtime state: %w", err))
+	}
 
 	recoveryStart := time.Now()
 	state, recoveredTxID, resumePlan, recoveryReport, err := openOrBootstrapState(preview.dataDir, registry)
@@ -115,6 +118,9 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 	reducers, err := buildExecutorReducerRegistry(registry, mod.reducers)
 	if err != nil {
 		return fail(fmt.Errorf("build hosted runtime reducers: %w", err))
+	}
+	if err := writeDataDirMetadata(preview.dataDir, mod, registry); err != nil {
+		return fail(fmt.Errorf("write data dir metadata: %w", err))
 	}
 
 	rt := &Runtime{

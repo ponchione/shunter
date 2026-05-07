@@ -72,6 +72,90 @@ func TestBuildReopensExistingBootstrappedState(t *testing.T) {
 	}
 }
 
+func TestBuildWritesDataDirMetadata(t *testing.T) {
+	oldVersion := Version
+	oldCommit := Commit
+	oldDate := Date
+	Version = "v9.8.7"
+	Commit = "abc123"
+	Date = "2026-05-03T12:34:56Z"
+	defer func() {
+		Version = oldVersion
+		Commit = oldCommit
+		Date = oldDate
+	}()
+
+	dir := t.TempDir()
+	if _, err := Build(validChatModule().Version("v1.2.3"), Config{DataDir: dir}); err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	metadata, ok, err := readDataDirMetadata(dir)
+	if err != nil {
+		t.Fatalf("read data dir metadata: %v", err)
+	}
+	if !ok {
+		t.Fatal("data dir metadata missing")
+	}
+	if metadata.FormatVersion != dataDirMetadataFormatVersion {
+		t.Fatalf("metadata format_version = %d, want %d", metadata.FormatVersion, dataDirMetadataFormatVersion)
+	}
+	if metadata.ContractVersion != ModuleContractVersion {
+		t.Fatalf("metadata contract_version = %d, want %d", metadata.ContractVersion, ModuleContractVersion)
+	}
+	if metadata.Shunter.Version != "v9.8.7" || metadata.Shunter.Commit != "abc123" || metadata.Shunter.Date != "2026-05-03T12:34:56Z" {
+		t.Fatalf("metadata Shunter version = %+v, want linker-style build info", metadata.Shunter)
+	}
+	if metadata.Module.Name != "chat" || metadata.Module.Version != "v1.2.3" || metadata.Module.SchemaVersion != 1 {
+		t.Fatalf("metadata module version = %+v, want chat v1.2.3 schema 1", metadata.Module)
+	}
+}
+
+func TestBuildUpdatesDataDirModuleVersionMetadataWithoutBlocking(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Build(validChatModule().Version("v1.0.0"), Config{DataDir: dir}); err != nil {
+		t.Fatalf("first Build returned error: %v", err)
+	}
+	if _, err := Build(validChatModule().Version("v1.1.0"), Config{DataDir: dir}); err != nil {
+		t.Fatalf("second Build with updated module version returned error: %v", err)
+	}
+
+	metadata, ok, err := readDataDirMetadata(dir)
+	if err != nil {
+		t.Fatalf("read data dir metadata: %v", err)
+	}
+	if !ok {
+		t.Fatal("data dir metadata missing")
+	}
+	if metadata.Module.Version != "v1.1.0" {
+		t.Fatalf("metadata module version = %q, want updated app module version", metadata.Module.Version)
+	}
+}
+
+func TestDataDirMetadataRejectsDifferentModuleName(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Build(validChatModule(), Config{DataDir: dir}); err != nil {
+		t.Fatalf("initial Build returned error: %v", err)
+	}
+	other := NewModule("other").SchemaVersion(1).TableDef(messagesTableDef())
+
+	err := CheckDataDirCompatibility(other, Config{DataDir: dir})
+	if err == nil {
+		t.Fatal("CheckDataDirCompatibility returned nil, want metadata mismatch")
+	}
+	assertErrorContains(t, err, "data dir metadata module name")
+	assertErrorContains(t, err, "chat")
+	assertErrorContains(t, err, "other")
+
+	_, err = Build(other, Config{DataDir: dir})
+	if err == nil {
+		t.Fatal("Build returned nil, want metadata mismatch")
+	}
+	assertErrorContains(t, err, "data dir metadata module name")
+	assertErrorContains(t, err, "chat")
+	assertErrorContains(t, err, "other")
+}
+
 func TestBuildWithBlankDataDirNormalizesToRuntimeDefault(t *testing.T) {
 	workdir := t.TempDir()
 	t.Chdir(workdir)

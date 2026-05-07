@@ -133,6 +133,9 @@ func CheckDataDirCompatibility(mod *Module, cfg Config) error {
 	if !info.IsDir() {
 		return fmt.Errorf("data dir %s is not a directory", preview.dataDir)
 	}
+	if err := validateDataDirMetadata(preview.dataDir, mod, preview.registry); err != nil {
+		return fmt.Errorf("check data dir compatibility: %w", err)
+	}
 
 	_, _, _, _, err = commitlog.OpenAndRecoverWithReport(preview.dataDir, preview.registry)
 	if errors.Is(err, commitlog.ErrNoData) {
