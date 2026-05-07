@@ -243,10 +243,12 @@ Exit criteria:
 
 Goal: v1 users know the supported workload range.
 
+Status: benchmark baseline and coverage audit documented; fixture expansion,
+envelope table, and indexing guidance remain.
+
 Tasks:
 
-- Audit current benchmarks against the workload dimensions in
-  `07-performance-envelopes.md`.
+- Keep the benchmark coverage audit in `docs/PERFORMANCE-BENCHMARKS.md` current.
 - Add deterministic small/medium/large fixtures.
 - Add missing benchmarks for declared queries, raw subscriptions, declared live
   views, multi-way live joins, initial snapshots, fanout, replay, restore, and

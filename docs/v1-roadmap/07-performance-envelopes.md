@@ -1,6 +1,6 @@
 # Performance Envelopes
 
-Status: open, benchmark baseline exists
+Status: open, benchmark baseline and coverage audit exist
 Owner: unassigned
 Scope: benchmarked and documented workload limits for Shunter v1.
 
@@ -66,13 +66,13 @@ Measure and document at least:
 Completed or partially complete:
 
 - Add benchmark run guidance and a 2026-04-30 cleanup baseline under `docs/`.
+- Audit existing benchmarks against the v1 workload dimensions in this roadmap.
 - Add benchmark coverage for protocol compression, commitlog snapshots,
   subscription evaluation/fanout, reducer commit round trips, scheduler scans,
   and one-off query common paths.
 
 Remaining:
 
-- Audit existing benchmarks and identify missing v1 workflows.
 - Add or expand benchmarks for:
   - reducer write throughput
   - indexed lookup and range scans

@@ -25,6 +25,31 @@ go test -run '^$' -bench . -benchmem -count=10 ./protocol ./commitlog ./subscrip
 Record the exact command, CPU, OS/arch, and any relevant code changes. Treat
 single-run results as directional, not as release gates.
 
+## Coverage Audit
+
+Current benchmark coverage:
+
+| Workload area | Benchmarks | Status |
+| --- | --- | --- |
+| Protocol compression | `BenchmarkWrapCompressedGzip`, `BenchmarkUnwrapCompressedGzip` | covered |
+| Commitlog snapshot creation | `BenchmarkCreateSnapshotLarge` | covered for snapshot latency/allocation |
+| Reducer write path | `BenchmarkExecutorReducerCommitRoundTrip` | partial; needs throughput fixtures |
+| Scheduler scans | `BenchmarkSchedulerScanEnqueue` | covered for enqueue scan hot path |
+| One-off SQL | `BenchmarkExecuteCompiledSQLQueryCommonPaths` | partial; needs join and declared-query fixtures |
+| Subscription equality and lifecycle | `BenchmarkEvalEqualitySubs1K`, `BenchmarkEvalEqualitySubs10K`, `BenchmarkRegisterUnregister` | covered for core hot paths |
+| Subscription initial snapshots and fanout | `BenchmarkRegisterSetInitialQueryAllRows`, `BenchmarkProjectedRowsBeforeLargeBags`, `BenchmarkFanOut1KClientsSameQuery` | partial; needs protocol and declared-view coverage |
+| Subscription joins and candidate pruning | `BenchmarkJoinFragmentEval`, `BenchmarkDeltaIndexConstruction`, `BenchmarkCandidateCollection` | partial; needs multi-way live-join fixtures |
+
+Known benchmark gaps for v1 envelopes:
+
+- declared queries and declared live views
+- raw subscription end-to-end protocol workloads
+- multi-way live joins with deterministic small/medium/large fixtures
+- commitlog replay, snapshot recovery, and restore latency
+- fanout with varied query shapes across many clients
+- reference-app workload and backup/restore workflow
+- memory profiles for large joins and initial snapshots
+
 ## 2026-04-30 Performance Cleanup Baseline
 
 Command:
