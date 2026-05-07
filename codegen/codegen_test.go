@@ -50,8 +50,13 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `export type ViewSubscriber = ShunterViewSubscriber;`)
 	assertContains(t, ts, `export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;`)
 	assertContains(t, ts, `export type RawDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName> = ShunterRawDeclaredQueryResult<Name>;`)
+	assertContains(t, ts, `export type DeclaredQueryDecodeOptions<RowsByName extends object = TableRows> = ShunterDeclaredQueryDecodeOptions<RowsByName>;`)
+	assertContains(t, ts, `export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName, RowsByName extends object = TableRows> = ShunterDecodedDeclaredQueryResult<Name, RowsByName>;`)
 	assertContains(t, ts, `export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;`)
 	assertContains(t, ts, `export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;`)
+	assertContains(t, ts, `export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;`)
+	assertContains(t, ts, `export type TableRowDecoder<Name extends TableName> = ShunterTableRowDecoder<TableRows[Name]>;`)
+	assertContains(t, ts, `export type TableRowDecoders = ShunterTableRowDecoders<TableRows>;`)
 	assertContains(t, ts, `export const tableReadPolicies = {`)
 	assertContains(t, ts, `messages: { access: "private", permissions: [] },`)
 	assertContains(t, ts, `export const queries = {`)
@@ -61,6 +66,8 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `export type ExecutableQueryName = (typeof queries)[keyof typeof querySQL];`)
 	assertContains(t, ts, `export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
 	assertContains(t, ts, `return runDeclaredQuery("recent_messages");`)
+	assertContains(t, ts, `export function queryRecentMessagesResult<RowsByName extends object = TableRows>(data: unknown, options: DeclaredQueryDecodeOptions<RowsByName>): DecodedDeclaredQueryResult<typeof queries.recentMessages, RowsByName> {`)
+	assertContains(t, ts, `return shunterDecodeDeclaredQueryResult("recent_messages", data, options);`)
 	assertContains(t, ts, `export const views = {`)
 	assertContains(t, ts, `liveMessages: "live_messages",`)
 	assertContains(t, ts, `export const viewSQL = {`)
@@ -99,7 +106,7 @@ func TestGeneratorAcceptsModuleContractWithoutRuntime(t *testing.T) {
 	}
 
 	assertContains(t, string(out), `export interface MessagesRow {`)
-	assertContains(t, string(out), `export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, string(out), `export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>, onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}): Promise<SubscriptionUnsubscribe> {`)
 }
 
 func TestTypeScriptGeneratorMapsUUIDColumns(t *testing.T) {
@@ -832,7 +839,7 @@ func TestTypeScriptGeneratorAvoidsTableViewSubscribeHelperNameCollisions(t *test
 	}
 	ts := string(out)
 
-	assertContains(t, ts, `export function subscribeLiveMessages(subscribeTable: TableSubscriber<LiveMessagesRow>): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, ts, `export function subscribeLiveMessages(subscribeTable: TableSubscriber<LiveMessagesRow>, onRows?: (rows: LiveMessagesRow[]) => void, options: TableSubscriptionOptions<LiveMessagesRow> = {}): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `export function subscribeLiveMessages2(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {`)
 }
 
@@ -939,10 +946,10 @@ func TestTypeScriptGeneratorDisambiguatesFallbackAndReservedTableIdentifiers(t *
 	assertContains(t, ts, `"_": _2Row;`)
 	assertContains(t, ts, `"class": ClassRow;`)
 	assertContains(t, ts, `"class!": Class2Row;`)
-	assertContains(t, ts, `export function subscribe_(subscribeTable: TableSubscriber<_Row>): Promise<SubscriptionUnsubscribe> {`)
-	assertContains(t, ts, `export function subscribe_2(subscribeTable: TableSubscriber<_2Row>): Promise<SubscriptionUnsubscribe> {`)
-	assertContains(t, ts, `export function subscribeClass(subscribeTable: TableSubscriber<ClassRow>): Promise<SubscriptionUnsubscribe> {`)
-	assertContains(t, ts, `export function subscribeClass2(subscribeTable: TableSubscriber<Class2Row>): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, ts, `export function subscribe_(subscribeTable: TableSubscriber<_Row>, onRows?: (rows: _Row[]) => void, options: TableSubscriptionOptions<_Row> = {}): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, ts, `export function subscribe_2(subscribeTable: TableSubscriber<_2Row>, onRows?: (rows: _2Row[]) => void, options: TableSubscriptionOptions<_2Row> = {}): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, ts, `export function subscribeClass(subscribeTable: TableSubscriber<ClassRow>, onRows?: (rows: ClassRow[]) => void, options: TableSubscriptionOptions<ClassRow> = {}): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, ts, `export function subscribeClass2(subscribeTable: TableSubscriber<Class2Row>, onRows?: (rows: Class2Row[]) => void, options: TableSubscriptionOptions<Class2Row> = {}): Promise<SubscriptionUnsubscribe> {`)
 }
 
 func TestTypeScriptGeneratorDisambiguatesRowFieldIdentifierCollisions(t *testing.T) {

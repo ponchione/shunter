@@ -3,6 +3,8 @@
 // Module: v1_guardrails v1.0.0
 
 import type {
+  DecodedDeclaredQueryResult as ShunterDecodedDeclaredQueryResult,
+  DeclaredQueryDecodeOptions as ShunterDeclaredQueryDecodeOptions,
   DeclaredQueryRunner as ShunterDeclaredQueryRunner,
   DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,
   ProtocolMetadata as ShunterProtocolMetadata,
@@ -12,12 +14,16 @@ import type {
   ReducerCallResult as ShunterReducerCallResult,
   ReducerCallResultRequestOptions as ShunterReducerCallResultRequestOptions,
   SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,
+  TableRowDecoder as ShunterTableRowDecoder,
+  TableRowDecoders as ShunterTableRowDecoders,
   TableSubscriber as ShunterTableSubscriber,
+  TableSubscriptionOptions as ShunterTableSubscriptionOptions,
   ViewSubscriber as ShunterViewSubscriber,
 } from "@shunter/client";
 
 import {
   callReducerWithResult as shunterCallReducerWithResult,
+  decodeDeclaredQueryResult as shunterDecodeDeclaredQueryResult,
 } from "@shunter/client";
 
 export const shunterProtocol = {
@@ -36,10 +42,15 @@ export type QueryRunner = ShunterQueryRunner<Uint8Array>;
 export type ViewSubscriber = ShunterViewSubscriber;
 export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;
 export type RawDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName> = ShunterRawDeclaredQueryResult<Name>;
+export type DeclaredQueryDecodeOptions<RowsByName extends object = TableRows> = ShunterDeclaredQueryDecodeOptions<RowsByName>;
+export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName, RowsByName extends object = TableRows> = ShunterDecodedDeclaredQueryResult<Name, RowsByName>;
 export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;
 export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;
 export type TableRow<Name extends TableName> = TableRows[Name];
 export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;
+export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;
+export type TableRowDecoder<Name extends TableName> = ShunterTableRowDecoder<TableRows[Name]>;
+export type TableRowDecoders = ShunterTableRowDecoders<TableRows>;
 export type UUID = string;
 
 export interface MessagesRow {
@@ -88,16 +99,16 @@ export const visibilityFilters = {
   ownMessages: { sql: "SELECT * FROM messages WHERE sender = :sender", returnTable: "messages", returnTableId: 0, usesCallerIdentity: true },
 } as const;
 
-export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>): Promise<SubscriptionUnsubscribe> {
-  return subscribeTable("messages");
+export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>, onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}): Promise<SubscriptionUnsubscribe> {
+  return subscribeTable("messages", onRows, options);
 }
 
-export function subscribeSysClients(subscribeTable: TableSubscriber<SysClientsRow>): Promise<SubscriptionUnsubscribe> {
-  return subscribeTable("sys_clients");
+export function subscribeSysClients(subscribeTable: TableSubscriber<SysClientsRow>, onRows?: (rows: SysClientsRow[]) => void, options: TableSubscriptionOptions<SysClientsRow> = {}): Promise<SubscriptionUnsubscribe> {
+  return subscribeTable("sys_clients", onRows, options);
 }
 
-export function subscribeSysScheduled(subscribeTable: TableSubscriber<SysScheduledRow>): Promise<SubscriptionUnsubscribe> {
-  return subscribeTable("sys_scheduled");
+export function subscribeSysScheduled(subscribeTable: TableSubscriber<SysScheduledRow>, onRows?: (rows: SysScheduledRow[]) => void, options: TableSubscriptionOptions<SysScheduledRow> = {}): Promise<SubscriptionUnsubscribe> {
+  return subscribeTable("sys_scheduled", onRows, options);
 }
 
 export const reducers = {
@@ -134,6 +145,10 @@ export type ExecutableQueryName = (typeof queries)[keyof typeof querySQL];
 
 export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {
   return runDeclaredQuery("recent_messages");
+}
+
+export function queryRecentMessagesResult<RowsByName extends object = TableRows>(data: unknown, options: DeclaredQueryDecodeOptions<RowsByName>): DecodedDeclaredQueryResult<typeof queries.recentMessages, RowsByName> {
+  return shunterDecodeDeclaredQueryResult("recent_messages", data, options);
 }
 
 export const views = {

@@ -67,14 +67,18 @@ in a raw declared-query result envelope containing table names, raw RowList
 bytes, and split row byte arrays for generated helpers to type against.
 `decodeDeclaredQueryResult()` builds on that raw helper by mapping each returned
 table's row bytes through caller-provided table decoders or a table-name-aware
-fallback decoder.
+fallback decoder. Generated bindings expose module-scoped aliases for those
+decode options/results and emit `queryXResult(...)` wrappers for executable
+declared queries.
 `subscribeDeclaredView()` and `subscribeTable()` can also opt into
 `returnHandle: true`, resolving with a managed subscription handle backed by the
 same server-acknowledged unsubscribe path. Table handles expose raw initial row
 bytes; declared-view handles currently expose lifecycle state only.
 `subscribeTable()` also accepts a caller-supplied `decodeRow` hook that decodes
 raw RowList row bytes for `onRows`/`onInitialRows` and RowList insert/delete
-updates for `onUpdate`, leaving raw callbacks unchanged. Typed reducer
+updates for `onUpdate`, leaving raw callbacks unchanged. Generated table
+subscription helpers pass through optional row callbacks and subscription
+options, and expose module-scoped table decoder aliases. Typed reducer
 argument/result encoding, generated schema-aware declared query/view row decoding,
 subscription cache behavior, reconnect policy, and local cache implementation
 remain open.
@@ -226,7 +230,8 @@ responses, and returns an idempotent unsubscribe function that sends
 table-only `onRawRows` callback and raw delta bytes to `onRawUpdate`. When
 callers provide `decodeRow`, the runtime decodes split RowList row bytes for
 the table `onRows`/`onInitialRows` callbacks and decodes RowList insert/delete
-updates for `onUpdate`. It also
+updates for `onUpdate`; generated table helpers pass those arguments through
+without requiring callers to drop to the raw runtime API. It also
 splits table initial and optional unsubscribe RowList payloads into raw per-row
 bytes on the decoded message envelopes. It does not resolve the unsubscribe
 helper until `UnsubscribeSingleApplied` or a matching `SubscriptionError`. It

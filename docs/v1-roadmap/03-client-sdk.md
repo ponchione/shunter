@@ -23,7 +23,8 @@ runtime foundation at `typescript/client` published in-repo as
 row interfaces, table maps, reducer and declared-read constants/helpers,
 permission metadata, read-model metadata, value-kind mappings, module-scoped
 aliases for the reducer result and raw declared-query result envelopes,
-reducer result helper wrappers, and runtime imports for the shared SDK surface.
+reducer result helper wrappers, table row decoder aliases, declared-query
+decode wrappers, and runtime imports for the shared SDK surface.
 
 That is necessary but not sufficient for v1. The runtime package currently
 defines protocol constants, protocol compatibility helpers, connection state
@@ -60,6 +61,10 @@ successful `OneOffQueryResponse` frames in a name-stamped envelope with table
 names, raw RowList bytes, split row byte arrays, duration, message ID, and the
 raw frame. A decoded declared-query helper can map returned table row bytes
 through caller-supplied table decoders while preserving the raw result helper.
+Generated declared-query helpers now include `queryXResult(...)` wrappers over
+that decoded result path, and generated table subscription helpers pass through
+optional row callbacks and subscription options so caller-supplied row decoders
+can be used without dropping to the runtime API.
 Declared-view and table subscriptions can opt into managed subscription handles
 with `returnHandle: true`; those handles use the same server-acknowledged
 unsubscribe path, and table handles expose raw initial row bytes. Table
@@ -207,6 +212,10 @@ Completed or partially complete:
 - Add a decoded declared-query bridge that maps successful raw declared-query
   table RowList bytes through caller-supplied table decoders while keeping the
   raw result helper unchanged.
+- Generate module-scoped table row decoder aliases, table subscription option
+  aliases, declared-query decode option/result aliases, `queryXResult(...)`
+  decode wrappers, and optional row-callback/options pass-throughs on generated
+  table subscription helpers.
 
 Remaining:
 
@@ -214,10 +223,9 @@ Remaining:
   explicit encoder hooks and raw `Uint8Array` request path.
 - Implement typed reducer result decoding beyond the current raw
   `TransactionUpdate` frame result, generated schema-aware declared-query/view
-  row decoding, and subscription cache behavior on top of the WebSocket
+  row decoders, and subscription cache behavior on top of the WebSocket
   lifecycle shell.
-- Implement generated schema-aware row decoders for declared query/view results
-  and managed cache/update behavior.
+- Implement managed cache/update behavior for decoded table/query/view rows.
 - Implement reconnect, auth refresh, resubscription, and cache behavior.
 - Add client tests for:
   - connection state transitions

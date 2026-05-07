@@ -51,6 +51,7 @@ import {
   callCreateMessage,
   callCreateMessageResult,
   queryRecentMessages,
+  queryRecentMessagesResult,
   queries,
   reducers,
   shunterProtocol as generatedProtocol,
@@ -60,7 +61,9 @@ import {
 } from "../../../codegen/testdata/v1_module_contract";
 import type {
   DeclaredQueryRunner,
+  DeclaredQueryDecodeOptions as GeneratedDeclaredQueryDecodeOptions,
   DeclaredViewSubscriber,
+  DecodedDeclaredQueryResult as GeneratedDecodedDeclaredQueryResult,
   ExecutableQueryName,
   ExecutableViewName,
   MessagesRow,
@@ -71,8 +74,11 @@ import type {
   RawDeclaredQueryResult as GeneratedRawDeclaredQueryResult,
   SubscriptionUnsubscribe,
   TableName,
+  TableRowDecoder as GeneratedTableRowDecoder,
+  TableRowDecoders as GeneratedTableRowDecoders,
   TableRows,
   TableSubscriber,
+  TableSubscriptionOptions as GeneratedTableSubscriptionOptions,
 } from "../../../codegen/testdata/v1_module_contract";
 
 const generatedProtocolMetadata: ProtocolMetadata = generatedProtocol;
@@ -181,10 +187,21 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const tableRowDecoders: TableRowDecoders<TableRows> = {
     messages: messageRowDecoder,
   };
+  const generatedMessageRowDecoder: GeneratedTableRowDecoder<"messages"> = messageRowDecoder;
+  const generatedTableRowDecoders: GeneratedTableRowDecoders = {
+    messages: generatedMessageRowDecoder,
+  };
+  const generatedTableSubscriptionOptions: GeneratedTableSubscriptionOptions<MessagesRow> = {
+    decodeRow: generatedMessageRowDecoder,
+  };
   const declaredQueryRowDecoder: DeclaredQueryRowDecoder<MessagesRow> = (_tableName, row) =>
     messageRowDecoder(row);
   const declaredQueryDecodeOptions: DeclaredQueryDecodeOptions<TableRows> = {
     tableDecoders: tableRowDecoders,
+    decodeRow: declaredQueryRowDecoder,
+  };
+  const generatedDeclaredQueryDecodeOptions: GeneratedDeclaredQueryDecodeOptions<TableRows> = {
+    tableDecoders: generatedTableRowDecoders,
     decodeRow: declaredQueryRowDecoder,
   };
   const decodedUpdateHandler = (update: SubscriptionUpdate<MessagesRow>): void => {
@@ -270,7 +287,10 @@ async function exerciseGeneratedBindings(): Promise<void> {
     totalHostExecutionDuration: 0n,
     rawFrame: new Uint8Array([0]),
   };
+  const generatedDecodedDeclaredQueryResult: GeneratedDecodedDeclaredQueryResult<typeof queries.recentMessages, TableRows> =
+    decodedDeclaredQueryResult;
   const decodedDeclaredQueryDecoder: typeof decodeDeclaredQueryResult = decodeDeclaredQueryResult;
+  const generatedDecodedDeclaredQueryDecoder: typeof queryRecentMessagesResult = queryRecentMessagesResult;
 
   const declaredViewSubscriber: DeclaredViewSubscriber = async (_name) => () => {};
   const unsubscribeView: SubscriptionUnsubscribe =
@@ -341,6 +361,15 @@ async function exerciseGeneratedBindings(): Promise<void> {
   };
   const unsubscribeTable: SubscriptionUnsubscribe = await subscribeMessages(tableSubscriber);
   await unsubscribeTable();
+  const unsubscribeGeneratedDecodedTable: SubscriptionUnsubscribe = await subscribeMessages(
+    tableSubscriber,
+    (rows) => {
+      const firstBody: string | undefined = rows[0]?.body;
+      void firstBody;
+    },
+    generatedTableSubscriptionOptions,
+  );
+  await unsubscribeGeneratedDecodedTable();
 
   void reducerBytes;
   void encodedCreateMessageArgs;
@@ -360,9 +389,13 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void generatedRawDeclaredQueryResult;
   void rawDeclaredQueryDecoder;
   void decodedDeclaredQueryResult;
+  void generatedDecodedDeclaredQueryResult;
   void decodedDeclaredQueryDecoder;
+  void generatedDecodedDeclaredQueryDecoder;
+  void generatedDeclaredQueryDecodeOptions;
   void declaredQueryDecodeOptions;
   void tableRowDecoders;
+  void generatedTableRowDecoders;
 }
 
 void connectedState;

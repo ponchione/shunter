@@ -35,7 +35,8 @@ RowList envelopes. `decodeRawDeclaredQueryResult()` wraps successful
 table names, raw RowList bytes, and split row byte arrays.
 `decodeDeclaredQueryResult()` maps those raw table row bytes through
 caller-provided table decoders when consumers already have schema-aware row
-codecs.
+codecs. Generated bindings can expose `queryXResult(...)` wrappers and
+module-scoped decoded-query/table-decoder aliases over these runtime surfaces.
 `subscribeDeclaredView()` and `subscribeTable()` also accept `returnHandle:
 true` to resolve with a managed subscription handle wired to the same
 server-acknowledged unsubscribe path. Table handles expose raw row bytes from
@@ -83,7 +84,8 @@ or read `insertRowBytes`/`deleteRowBytes` from raw updates when present.
 Table subscriptions can also pass `decodeRow` when the caller already has a
 schema-aware row decoder; the runtime will call the table `onRows`/
 `onInitialRows` callbacks for accepted initial rows and `onUpdate` for RowList
-insert/delete deltas.
+insert/delete deltas. Generated table subscription helpers pass through those
+callbacks and options.
 Declared query consumers that want decoded rows can call
 `decodeDeclaredQueryResult()` with table-specific decoders; consumers that need
 raw RowList bytes can keep using `decodeRawDeclaredQueryResult()`.

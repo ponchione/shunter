@@ -39,10 +39,15 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	b.WriteString("export type ViewSubscriber = ShunterViewSubscriber;\n")
 	b.WriteString("export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;\n")
 	b.WriteString("export type RawDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName> = ShunterRawDeclaredQueryResult<Name>;\n")
+	b.WriteString("export type DeclaredQueryDecodeOptions<RowsByName extends object = TableRows> = ShunterDeclaredQueryDecodeOptions<RowsByName>;\n")
+	b.WriteString("export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName, RowsByName extends object = TableRows> = ShunterDecodedDeclaredQueryResult<Name, RowsByName>;\n")
 	b.WriteString("export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;\n")
 	b.WriteString("export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;\n")
 	b.WriteString("export type TableRow<Name extends TableName> = TableRows[Name];\n")
 	b.WriteString("export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;\n")
+	b.WriteString("export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;\n")
+	b.WriteString("export type TableRowDecoder<Name extends TableName> = ShunterTableRowDecoder<TableRows[Name]>;\n")
+	b.WriteString("export type TableRowDecoders = ShunterTableRowDecoders<TableRows>;\n")
 	b.WriteString("export type UUID = string;\n")
 	b.WriteString("\n")
 
@@ -82,8 +87,8 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	for i, table := range contract.Schema.Tables {
 		rowType := tableTypes[i].identifier + "Row"
 		functionName := uniqueTypeScriptIdentifier("subscribe"+tableTypes[i].identifier, topLevelValueNames)
-		fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>): Promise<SubscriptionUnsubscribe> {\n", functionName, rowType)
-		fmt.Fprintf(&b, "  return subscribeTable(%s);\n", strconv.Quote(table.Name))
+		fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>, onRows?: (rows: %s[]) => void, options: TableSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, rowType, rowType, rowType)
+		fmt.Fprintf(&b, "  return subscribeTable(%s, onRows, options);\n", strconv.Quote(table.Name))
 		b.WriteString("}\n\n")
 	}
 
@@ -128,6 +133,10 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 		fmt.Fprintf(&b, "export function %s(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {\n", functionName)
 		fmt.Fprintf(&b, "  return runDeclaredQuery(%s);\n", strconv.Quote(query.name))
 		b.WriteString("}\n\n")
+		resultFunctionName := uniqueTypeScriptIdentifier(functionName+"Result", topLevelValueNames)
+		fmt.Fprintf(&b, "export function %s<RowsByName extends object = TableRows>(data: unknown, options: DeclaredQueryDecodeOptions<RowsByName>): DecodedDeclaredQueryResult<typeof queries.%s, RowsByName> {\n", resultFunctionName, query.identifier)
+		fmt.Fprintf(&b, "  return shunterDecodeDeclaredQueryResult(%s, data, options);\n", strconv.Quote(query.name))
+		b.WriteString("}\n\n")
 	}
 
 	viewNames := make([]string, len(contract.Views))
@@ -156,6 +165,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 func typeScriptTopLevelValueNames() map[string]int {
 	names := []string{
 		"shunterCallReducerWithResult",
+		"shunterDecodeDeclaredQueryResult",
 		"shunterProtocol",
 		"tables",
 		"tableReadPolicies",
@@ -178,6 +188,8 @@ func typeScriptTopLevelValueNames() map[string]int {
 
 func writeTypeScriptRuntimeImports(b *bytes.Buffer) {
 	b.WriteString("import type {\n")
+	b.WriteString("  DecodedDeclaredQueryResult as ShunterDecodedDeclaredQueryResult,\n")
+	b.WriteString("  DeclaredQueryDecodeOptions as ShunterDeclaredQueryDecodeOptions,\n")
 	b.WriteString("  DeclaredQueryRunner as ShunterDeclaredQueryRunner,\n")
 	b.WriteString("  DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,\n")
 	b.WriteString("  ProtocolMetadata as ShunterProtocolMetadata,\n")
@@ -187,7 +199,10 @@ func writeTypeScriptRuntimeImports(b *bytes.Buffer) {
 	b.WriteString("  ReducerCallResult as ShunterReducerCallResult,\n")
 	b.WriteString("  ReducerCallResultRequestOptions as ShunterReducerCallResultRequestOptions,\n")
 	b.WriteString("  SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,\n")
+	b.WriteString("  TableRowDecoder as ShunterTableRowDecoder,\n")
+	b.WriteString("  TableRowDecoders as ShunterTableRowDecoders,\n")
 	b.WriteString("  TableSubscriber as ShunterTableSubscriber,\n")
+	b.WriteString("  TableSubscriptionOptions as ShunterTableSubscriptionOptions,\n")
 	b.WriteString("  ViewSubscriber as ShunterViewSubscriber,\n")
 	b.WriteString("} from \"@shunter/client\";\n\n")
 }
@@ -195,6 +210,7 @@ func writeTypeScriptRuntimeImports(b *bytes.Buffer) {
 func writeTypeScriptRuntimeValueImports(b *bytes.Buffer) {
 	b.WriteString("import {\n")
 	b.WriteString("  callReducerWithResult as shunterCallReducerWithResult,\n")
+	b.WriteString("  decodeDeclaredQueryResult as shunterDecodeDeclaredQueryResult,\n")
 	b.WriteString("} from \"@shunter/client\";\n\n")
 }
 
