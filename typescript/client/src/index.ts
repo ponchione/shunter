@@ -1382,12 +1382,18 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         suppressSocketCloseTransition = false;
         ws.binaryType = "arraybuffer";
         let selectedSubprotocol: string | undefined;
+        let cleanupConnectAbort: (() => void) | undefined;
+        const cleanupOpeningAbort = (): void => {
+          cleanupConnectAbort?.();
+          cleanupConnectAbort = undefined;
+        };
         const handlers = {
           open: (): void => {
             try {
               selectedSubprotocol = ws.protocol;
               assertProtocolCompatible(options.protocol, selectedSubprotocol);
             } catch (error) {
+              cleanupOpeningAbort();
               failConnecting(
                 isShunterError(error)
                   ? error
@@ -1412,6 +1418,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
                 identity: identityToken.identity,
                 connectionId: identityToken.connectionId,
               };
+              cleanupOpeningAbort();
               hasConnected = true;
               setState({ status: "connected", metadata });
               const resubscribeError = resubscribeActiveSubscriptions(ws);
@@ -1422,6 +1429,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
               }
               resolve(metadata);
             } catch (error) {
+              cleanupOpeningAbort();
               failConnecting(
                 isShunterError(error)
                   ? error
@@ -1431,6 +1439,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           },
           close: (event: CloseEvent): void => {
             cleanupSocketListeners(ws, handlers);
+            cleanupOpeningAbort();
             if (suppressSocketCloseTransition) {
               return;
             }
@@ -1462,6 +1471,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           },
           error: (event: Event): void => {
             if (state.status === "connecting") {
+              cleanupOpeningAbort();
               const error = new ShunterTransportError("WebSocket failed before opening.", {
                 details: event,
               });
@@ -1494,6 +1504,33 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
             }
           },
         };
+        const abortOpening = (): void => {
+          if (state.status !== "connecting" || socket !== ws) {
+            return;
+          }
+          const error = new ShunterClosedClientError("Connection aborted before opening.");
+          cleanupOpeningAbort();
+          cleanupSocketListeners(ws, handlers);
+          suppressSocketCloseTransition = true;
+          setState({ status: "failed", error });
+          reject(error);
+          try {
+            ws.close(closeNormalCode, "connection aborted");
+          } catch {
+            // The caller already aborted the opening handshake.
+          }
+          finishClose();
+        };
+        if (options.signal !== undefined) {
+          if (options.signal.aborted) {
+            abortOpening();
+            return;
+          }
+          options.signal.addEventListener("abort", abortOpening, { once: true });
+          cleanupConnectAbort = () => {
+            options.signal?.removeEventListener("abort", abortOpening);
+          };
+        }
         ws.addEventListener("open", handlers.open);
         ws.addEventListener("message", handlers.message);
         ws.addEventListener("close", handlers.close);

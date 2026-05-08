@@ -802,6 +802,34 @@ await assert.rejects(asyncAbortConnecting, ShunterClosedClientError);
 assert.equal(asyncAbortConnectClient.state.status, "failed");
 assert.equal(asyncAbortConnectFactoryCalls, 0);
 
+const abortHandshake = new AbortController();
+const abortHandshakeSockets = [];
+const abortHandshakeStates = [];
+const abortHandshakeClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  signal: abortHandshake.signal,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    abortHandshakeSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => abortHandshakeStates.push(current.status),
+});
+const abortHandshakeConnecting = abortHandshakeClient.connect();
+await nextTurn();
+assert.equal(abortHandshakeSockets.length, 1);
+abortHandshakeSockets[0].open();
+abortHandshake.abort();
+await rejectByNextTurn(abortHandshakeConnecting, (error) => {
+  assert(error instanceof ShunterClosedClientError);
+  assert.equal(error.kind, "closed");
+  assert.match(error.message, /Connection aborted before opening/);
+});
+assert.equal(abortHandshakeClient.state.status, "failed");
+assert.deepEqual(abortHandshakeSockets[0].closeCalls, [{ code: 1000, reason: "connection aborted" }]);
+assert.deepEqual(abortHandshakeStates, ["connecting", "failed"]);
+
 const reconnectTokenSockets = [];
 let reconnectTokenCallsForFailure = 0;
 const reconnectTokenClient = createShunterClient({
