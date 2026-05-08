@@ -1878,6 +1878,27 @@ const reusedSubscription = abortClient.subscribeTable("users", undefined, {
 abortSockets[0].message(subscribeSingleAppliedFrame);
 const reusedUnsubscribe = await reusedSubscription;
 assert.equal(typeof reusedUnsubscribe, "function");
+
+const viewSubscriptionAbort = new AbortController();
+const abortedViewSubscription = abortClient.subscribeDeclaredView("live_users", {
+  requestId: 0x41424344,
+  queryId: 0x61626364,
+  signal: viewSubscriptionAbort.signal,
+  returnHandle: true,
+});
+viewSubscriptionAbort.abort();
+await assert.rejects(abortedViewSubscription, ShunterClosedClientError);
+abortSockets[0].message(subscribeAppliedFrame);
+assert.equal(abortClient.state.status, "connected");
+const reusedViewSubscription = abortClient.subscribeDeclaredView("live_users", {
+  requestId: 0x41424344,
+  queryId: 0x61626364,
+  returnHandle: true,
+});
+abortSockets[0].message(subscribeAppliedFrame);
+const reusedViewHandle = await reusedViewSubscription;
+assert.equal(reusedViewHandle.queryId, 0x61626364);
+assert.deepEqual(reusedViewHandle.state, { status: "active", rows: [] });
 await abortClient.close();
 
 const reconnectSockets = [];
