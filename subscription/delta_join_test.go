@@ -210,6 +210,38 @@ func TestJoinCommittedProbeWithoutIndexMatchesIndexedProbe(t *testing.T) {
 	}
 }
 
+func TestJoinLeftKeyUpdateProducesDeleteAndInsertDelta(t *testing.T) {
+	postCommitted := newJoinCommitted()
+	postCommitted.addRow(joinLHS, 1, types.ProductValue{types.NewUint64(2), types.NewString("updated")})
+	postCommitted.addRow(joinRHS, 10, types.ProductValue{types.NewUint64(100), types.NewUint64(1)})
+	postCommitted.addRow(joinRHS, 11, types.ProductValue{types.NewUint64(200), types.NewUint64(2)})
+
+	cs := joinChangeset(
+		joinLHS,
+		[]types.ProductValue{{types.NewUint64(2), types.NewString("updated")}},
+		[]types.ProductValue{{types.NewUint64(1), types.NewString("old")}},
+		joinRHS, nil, nil,
+	)
+	dv := NewDeltaView(postCommitted, cs, map[TableID][]ColID{joinLHS: {joinLHSCol}, joinRHS: {joinRHSCol}})
+	defer dv.Release()
+
+	join := &Join{Left: joinLHS, Right: joinRHS, LeftCol: joinLHSCol, RightCol: joinRHSCol}
+	fragments := EvalJoinDeltaFragments(dv, join, newJoinResolver())
+	inserts, deletes := ReconcileJoinDelta(fragments.Inserts[:], fragments.Deletes[:])
+
+	wantInserts := []types.ProductValue{{
+		types.NewUint64(2), types.NewString("updated"),
+		types.NewUint64(200), types.NewUint64(2),
+	}}
+	wantDeletes := []types.ProductValue{{
+		types.NewUint64(1), types.NewString("old"),
+		types.NewUint64(100), types.NewUint64(1),
+	}}
+	if !sameRowBag(inserts, wantInserts) || !sameRowBag(deletes, wantDeletes) {
+		t.Fatalf("join key update delta inserts=%v deletes=%v, want inserts=%v deletes=%v", inserts, deletes, wantInserts, wantDeletes)
+	}
+}
+
 func TestJoinFragmentEqualsFullReEvaluation(t *testing.T) {
 	// Baseline: reconcile the 4+4 fragments via ReconcileJoinDelta and
 	// compare the resulting inserts/deletes to a full re-evaluation of the
