@@ -1623,6 +1623,72 @@ const reconnectNoReplayClosed = await reconnectNoReplayHandle.closed;
 assert.equal(reconnectNoReplayClosed.reason, "error");
 assert(reconnectNoReplayClosed.error instanceof ShunterClosedClientError);
 
+const reconnectZeroSockets = [];
+const reconnectZeroStates = [];
+let reconnectZeroTokenCalls = 0;
+const reconnectZeroClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => {
+    reconnectZeroTokenCalls += 1;
+    return `zero-token-${reconnectZeroTokenCalls}`;
+  },
+  reconnect: {
+    enabled: true,
+    maxAttempts: 0,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectZeroSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectZeroStates.push(current.status),
+});
+const reconnectZeroConnecting = reconnectZeroClient.connect();
+await nextTurn();
+reconnectZeroSockets[0].open();
+reconnectZeroSockets[0].message(identityTokenFrame().buffer);
+await reconnectZeroConnecting;
+assert.equal(reconnectZeroTokenCalls, 1);
+const reconnectZeroHandleSubscription = reconnectZeroClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectZeroSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectZeroHandle = await reconnectZeroHandleSubscription;
+assert.deepEqual(reconnectZeroHandle.state, { status: "active", rows: ["1-2", "3"] });
+const reconnectZeroReducer = reconnectZeroClient.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+});
+const reconnectZeroQuery = reconnectZeroClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x09, 0x08]),
+});
+reconnectZeroSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectZeroClient.state.status, "closed");
+const reconnectZeroError = reconnectZeroClient.state.error;
+assert(reconnectZeroError instanceof ShunterClosedClientError);
+assert.equal(reconnectZeroError.code, "1006");
+assert.equal(reconnectZeroTokenCalls, 1);
+assert.equal(reconnectZeroSockets.length, 1);
+const assertReconnectZeroError = (error) => {
+  assert.strictEqual(error, reconnectZeroError);
+  return true;
+};
+await assert.rejects(reconnectZeroReducer, assertReconnectZeroError);
+await assert.rejects(reconnectZeroQuery, assertReconnectZeroError);
+const reconnectZeroClosed = await reconnectZeroHandle.closed;
+assert.equal(reconnectZeroClosed.reason, "error");
+assert.strictEqual(reconnectZeroClosed.error, reconnectZeroError);
+assert.deepEqual(reconnectZeroHandle.state, {
+  status: "closed",
+  error: reconnectZeroError,
+});
+assert.deepEqual(reconnectZeroStates, ["connecting", "connected", "closed"]);
+
 const reconnectCloseSockets = [];
 const reconnectCloseStates = [];
 const reconnectCloseClient = createShunterClient({
