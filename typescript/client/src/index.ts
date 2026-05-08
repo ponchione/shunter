@@ -1330,6 +1330,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         case SHUNTER_SERVER_MESSAGE_SUBSCRIPTION_ERROR:
           {
             const response = decodeSubscriptionErrorFrame(frame);
+            if (response.requestId === undefined && response.queryId === undefined) {
+              failConnected(new ShunterValidationError(response.error || "Subscription evaluation failed.", {
+                code: "subscription_evaluation_failed",
+                details: response,
+              }));
+              return;
+            }
             settleSubscriptionError(response);
             settleUnsubscribeError(response);
           }

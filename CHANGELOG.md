@@ -139,6 +139,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   failures into failed result envelopes for generated helper callers.
 - The TypeScript runtime now treats missing or unsupported connected server
   message tags as protocol failures instead of silently ignoring them.
+- The TypeScript runtime now fails connected clients on unscoped subscription
+  evaluation errors so pending operations and live handles settle explicitly.
 - The TypeScript runtime now defines explicit reducer argument encoder helpers
   for callers that map typed reducer args to raw `Uint8Array` payloads.
 

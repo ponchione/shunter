@@ -698,12 +698,20 @@ const subscriptionErrorFrame = bytesFromHex(
 const reconnectSubscriptionErrorFrame = bytesFromHex(
   "04000000000000000001010000000114131211000d0000007265706c61792064656e696564",
 );
+const subscriptionEvaluationErrorFrame = bytesFromHex(
+  "049210000000000000000000180000007072656469636174652072657772697465206661696c6564",
+);
 const subscriptionError = decodeSubscriptionErrorFrame(subscriptionErrorFrame);
 assert.equal(subscriptionErrorFrame[0], SHUNTER_SERVER_MESSAGE_SUBSCRIPTION_ERROR);
 assert.equal(subscriptionError.requestId, 0x41424344);
 assert.equal(subscriptionError.queryId, 0x51525354);
 assert.equal(subscriptionError.tableId, 0x61626364);
 assert.equal(subscriptionError.error, "denied");
+const subscriptionEvaluationError = decodeSubscriptionErrorFrame(subscriptionEvaluationErrorFrame);
+assert.equal(subscriptionEvaluationError.requestId, undefined);
+assert.equal(subscriptionEvaluationError.queryId, undefined);
+assert.equal(subscriptionEvaluationError.tableId, undefined);
+assert.equal(subscriptionEvaluationError.error, "predicate rewrite failed");
 
 const clientStates = [];
 const encodedToken = "space token&equals=value/slash?";
@@ -2255,6 +2263,63 @@ assert.deepEqual(unknownFrameHandle.state, {
   error: unknownFrameError,
 });
 assert.deepEqual(unknownFrameStates, ["connecting", "connected", "failed"]);
+
+const subscriptionEvaluationSockets = [];
+const subscriptionEvaluationStates = [];
+const subscriptionEvaluationClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    subscriptionEvaluationSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => subscriptionEvaluationStates.push(current.status),
+});
+const subscriptionEvaluationConnecting = subscriptionEvaluationClient.connect();
+await nextTurn();
+subscriptionEvaluationSockets[0].open();
+subscriptionEvaluationSockets[0].message(identityTokenFrame().buffer);
+await subscriptionEvaluationConnecting;
+const subscriptionEvaluationHandleSubscription = subscriptionEvaluationClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+subscriptionEvaluationSockets[0].message(subscribeSingleAppliedFrame);
+const subscriptionEvaluationHandle = await subscriptionEvaluationHandleSubscription;
+assert.deepEqual(subscriptionEvaluationHandle.state, { status: "active", rows: ["1-2", "3"] });
+const subscriptionEvaluationReducer = subscriptionEvaluationClient.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+});
+const subscriptionEvaluationQuery = subscriptionEvaluationClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x09, 0x08]),
+});
+subscriptionEvaluationSockets[0].message(subscriptionEvaluationErrorFrame);
+assert.equal(subscriptionEvaluationClient.state.status, "failed");
+const subscriptionEvaluationFailure = subscriptionEvaluationClient.state.error;
+assert(subscriptionEvaluationFailure instanceof ShunterValidationError);
+assert.equal(subscriptionEvaluationFailure.kind, "validation");
+assert.equal(subscriptionEvaluationFailure.code, "subscription_evaluation_failed");
+assert.match(subscriptionEvaluationFailure.message, /predicate rewrite failed/);
+assert.equal(subscriptionEvaluationFailure.details.requestId, undefined);
+assert.equal(subscriptionEvaluationFailure.details.queryId, undefined);
+assert.deepEqual(subscriptionEvaluationSockets[0].closeCalls, [{ code: 1000, reason: "protocol failure" }]);
+const assertSubscriptionEvaluationFailure = (error) => {
+  assert.strictEqual(error, subscriptionEvaluationFailure);
+  return true;
+};
+await assert.rejects(subscriptionEvaluationReducer, assertSubscriptionEvaluationFailure);
+await assert.rejects(subscriptionEvaluationQuery, assertSubscriptionEvaluationFailure);
+const subscriptionEvaluationClosed = await subscriptionEvaluationHandle.closed;
+assert.equal(subscriptionEvaluationClosed.reason, "error");
+assert.strictEqual(subscriptionEvaluationClosed.error, subscriptionEvaluationFailure);
+assert.deepEqual(subscriptionEvaluationHandle.state, {
+  status: "closed",
+  error: subscriptionEvaluationFailure,
+});
+assert.deepEqual(subscriptionEvaluationStates, ["connecting", "connected", "failed"]);
 
 const emptyFrameSockets = [];
 const emptyFrameClient = createShunterClient({
