@@ -3,6 +3,7 @@ package commitlog
 import (
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -185,5 +186,68 @@ func TestSegmentReaderSeekToTxIDFallsBackOnMissingKey(t *testing.T) {
 	}
 	if rec.TxID != 20 {
 		t.Fatalf("landed on TxID %d, want 20", rec.TxID)
+	}
+}
+
+func TestSegmentReaderSeekToTxIDFallsBackOnInvalidIndexOffset(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		offset func(t *testing.T, dir string, entries []OffsetIndexEntry) uint64
+	}{
+		{
+			name: "offset-points-at-different-record",
+			offset: func(t *testing.T, dir string, entries []OffsetIndexEntry) uint64 {
+				t.Helper()
+				return entries[3].ByteOffset
+			},
+		},
+		{
+			name: "offset-past-segment-eof",
+			offset: func(t *testing.T, dir string, entries []OffsetIndexEntry) uint64 {
+				t.Helper()
+				info, err := os.Stat(filepath.Join(dir, SegmentFileName(10)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return uint64(info.Size()) + 1024
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			entries := buildSegmentWithTxIDs(t, dir, []uint64{10, 20, 30, 40, 50})
+
+			idxPath := filepath.Join(dir, OffsetIndexFileName(10))
+			mut, err := CreateOffsetIndex(idxPath, 4)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := mut.Append(entries[1].TxID, tc.offset(t, dir, entries)); err != nil {
+				_ = mut.Close()
+				t.Fatal(err)
+			}
+			if err := mut.Close(); err != nil {
+				t.Fatal(err)
+			}
+			idx, err := OpenOffsetIndex(idxPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer idx.Close()
+
+			sr := openSegmentReader(t, dir, 10)
+			defer sr.Close()
+
+			if err := sr.SeekToTxID(25, idx); err != nil {
+				t.Fatalf("SeekToTxID(25): %v", err)
+			}
+			rec, err := sr.Next()
+			if err != nil {
+				t.Fatalf("Next after seek: %v", err)
+			}
+			if rec.TxID != 30 {
+				t.Fatalf("landed on TxID %d, want 30 after linear fallback", rec.TxID)
+			}
+		})
 	}
 }
