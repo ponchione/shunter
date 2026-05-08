@@ -993,6 +993,140 @@ malformedSocket.message(new Uint8Array([1, 2, 3]));
 await assert.rejects(malformedConnecting, ShunterProtocolError);
 assert.equal(malformedClient.state.status, "failed");
 
+const pendingCloseSockets = [];
+const pendingCloseFactory = (url, protocols) => {
+  const socket = new FakeWebSocket(url, protocols);
+  pendingCloseSockets.push(socket);
+  return socket;
+};
+const pendingCloseClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: pendingCloseFactory,
+});
+const pendingCloseConnecting = pendingCloseClient.connect();
+await new Promise((resolve) => setTimeout(resolve, 0));
+pendingCloseSockets[0].open();
+pendingCloseSockets[0].message(identityTokenFrame().buffer);
+await pendingCloseConnecting;
+const pendingReducerClose = pendingCloseClient.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+});
+const pendingQueryClose = pendingCloseClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x01, 0x02]),
+});
+const pendingTableClose = pendingCloseClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+});
+assert.equal(pendingCloseSockets[0].sent.length, 3);
+const pendingClientClose = pendingCloseClient.close();
+await assert.rejects(pendingReducerClose, ShunterClosedClientError);
+await assert.rejects(pendingQueryClose, ShunterClosedClientError);
+await assert.rejects(pendingTableClose, ShunterClosedClientError);
+await pendingClientClose;
+assert.equal(pendingCloseClient.state.status, "closed");
+assert.equal(pendingCloseSockets[0].closeCalls.length, 1);
+
+const activeCloseSockets = [];
+const activeCloseFactory = (url, protocols) => {
+  const socket = new FakeWebSocket(url, protocols);
+  activeCloseSockets.push(socket);
+  return socket;
+};
+const activeCloseClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: activeCloseFactory,
+});
+const activeCloseConnecting = activeCloseClient.connect();
+await new Promise((resolve) => setTimeout(resolve, 0));
+activeCloseSockets[0].open();
+activeCloseSockets[0].message(identityTokenFrame().buffer);
+await activeCloseConnecting;
+const activeCloseHandleSubscription = activeCloseClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+});
+activeCloseSockets[0].message(subscribeSingleAppliedFrame);
+const activeCloseHandle = await activeCloseHandleSubscription;
+assert.equal(activeCloseHandle.state.status, "active");
+await activeCloseClient.close();
+const activeClosed = await activeCloseHandle.closed;
+assert.equal(activeClosed.reason, "error");
+assert(activeClosed.error instanceof ShunterClosedClientError);
+assert.deepEqual(activeCloseHandle.state, {
+  status: "closed",
+  error: activeClosed.error,
+});
+
+const abortSockets = [];
+const abortFactory = (url, protocols) => {
+  const socket = new FakeWebSocket(url, protocols);
+  abortSockets.push(socket);
+  return socket;
+};
+const abortClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: abortFactory,
+});
+const abortConnecting = abortClient.connect();
+await new Promise((resolve) => setTimeout(resolve, 0));
+abortSockets[0].open();
+abortSockets[0].message(identityTokenFrame().buffer);
+await abortConnecting;
+
+const reducerAbort = new AbortController();
+const abortedReducer = abortClient.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+  signal: reducerAbort.signal,
+});
+reducerAbort.abort();
+await assert.rejects(abortedReducer, ShunterClosedClientError);
+abortSockets[0].message(committedUpdateFrame);
+assert.equal(abortClient.state.status, "connected");
+const reusedReducerRequest = abortClient.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+});
+abortSockets[0].message(committedUpdateFrame);
+assert.deepEqual(await reusedReducerRequest, committedUpdateFrame);
+
+const queryAbort = new AbortController();
+const abortedQuery = abortClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x01, 0x02]),
+  signal: queryAbort.signal,
+});
+queryAbort.abort();
+await assert.rejects(abortedQuery, ShunterClosedClientError);
+abortSockets[0].message(oneOffSuccessFrame);
+assert.equal(abortClient.state.status, "connected");
+const reusedQueryRequest = abortClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x01, 0x02]),
+});
+abortSockets[0].message(oneOffSuccessFrame);
+assert.deepEqual(await reusedQueryRequest, oneOffSuccessFrame);
+
+const subscriptionAbort = new AbortController();
+const abortedSubscription = abortClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  signal: subscriptionAbort.signal,
+});
+subscriptionAbort.abort();
+await assert.rejects(abortedSubscription, ShunterClosedClientError);
+abortSockets[0].message(subscribeSingleAppliedFrame);
+assert.equal(abortClient.state.status, "connected");
+const reusedSubscription = abortClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+});
+abortSockets[0].message(subscribeSingleAppliedFrame);
+const reusedUnsubscribe = await reusedSubscription;
+assert.equal(typeof reusedUnsubscribe, "function");
+await abortClient.close();
+
 const reconnectSockets = [];
 const reconnectFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);
