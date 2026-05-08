@@ -1,87 +1,185 @@
-# Shunter v1 Roadmap Docs
+# Shunter v1 Roadmap
 
-Status: active planning backlog
-Scope: focused implementation tracks required before cutting a real `v1.0.0`.
+Status: active implementation driver
+Scope: remaining work required before cutting a real `v1.0.0`.
 
-These docs turn the current v1 gap analysis into agent-sized work areas. They
-are not a SpacetimeDB parity checklist. Use `reference/SpacetimeDB/` only as a
-research source for product and semantic lessons; keep Shunter's Go-native
-module model, native protocol, and reducer-owned write path as the baseline.
+Shunter v1 should stay focused on self-hosted Go applications with
+reducer-owned writes, durable state, typed clients, permission-aware reads, and
+reliable live updates. Do not broaden v1 into SpacetimeDB wire compatibility,
+cloud hosting, dynamic module upload, broad SQL compatibility, or
+multi-language client generation.
 
-## How To Use These Docs
+## Source Of Truth
 
-Each file is meant to be an entry point for one focused workstream:
+Use this file for remaining v1 implementation order. Use the focused current
+docs below for settled contracts and runbooks:
 
-1. Read `RTK.md`.
-2. Read this index.
-3. Read only the roadmap file for the workstream being assigned.
-4. Read package docs, code, tests, and narrow specs for the surface being
-   changed.
-5. Update the roadmap file when a decision becomes settled or a slice lands.
+- `docs/v1-compatibility.md` - stable API, protocol, contract JSON, generated
+  TypeScript, read-surface, and host support matrix.
+- `docs/authentication.md` and `docs/AUTH-COVERAGE.md` - strict/dev auth
+  behavior and current coverage.
+- `docs/operations.md` - operator workflow for data dirs, backup/restore,
+  migrations, upgrades, and release checklist.
+- `docs/RUNTIME-HARDENING-GAUNTLET.md` - release-candidate hardening command
+  set and test campaign.
+- `docs/PERFORMANCE-BENCHMARKS.md` - benchmark commands, baselines, and
+  coverage audit.
+- `typescript/client/README.md` - current `@shunter/client` runtime behavior.
 
-Do not treat any roadmap item as permission to broaden scope into unrelated
-features. Each workstream should produce code, tests, docs, or a concrete
-decision that can be reviewed independently.
+## Audit Result
 
-## Roadmap Files
+The previous roadmap folder was a mix of settled decisions, implementation
+logs, and stale handoffs. This cleanup deleted those files and folded only the
+live work back here.
 
-- [01-v1-contract.md](01-v1-contract.md) - freeze the supported v1 API,
-  protocol, contract, and SQL/read surfaces.
-- [02-reference-application.md](02-reference-application.md) - build and
-  maintain a realistic end-to-end Shunter application.
-- [03-client-sdk.md](03-client-sdk.md) - ship a production-credible TypeScript
-  client experience on top of generated contracts.
-- [04-production-auth.md](04-production-auth.md) - turn the current auth base
-  into a documented strict production mode.
-- [05-operations.md](05-operations.md) - define backup, restore, migration,
-  upgrade, and operator workflows.
-- [06-runtime-hardening.md](06-runtime-hardening.md) - prove correctness across
-  recovery, concurrency, fuzzing, visibility, and protocol scenarios.
-- [07-performance-envelopes.md](07-performance-envelopes.md) - publish and
-  enforce realistic v1 workload limits.
-- [08-process-isolation.md](08-process-isolation.md) - decide and document
-  Shunter's in-process trust model and future isolation boundary.
-- [09-sql-read-scope.md](09-sql-read-scope.md) - define the SQL/query depth
-  Shunter actually needs for v1.
-- [10-v1-execution-plan.md](10-v1-execution-plan.md) - ordered execution plan
-  for finishing the remaining v1 workstreams.
-- [11-subscription-parity.md](11-subscription-parity.md) - subscription
-  capability-parity roadmap for live-read planning, pruning, deltas, protocol,
-  and tests.
+- Contract freeze, SQL/read scope, production auth policy, operations runbook,
+  and in-process trust-model decisions are now owned by the current docs above.
+- The retired in-repo task-board app proposal is stale. The maintained v1
+  canary/reference app remains the external `opsboard-canary` repository.
+- Subscription support tracking is complete for the current v1 live-read
+  support matrix. Raw subscriptions remain narrower than declared live views,
+  unindexed live joins reject before registration, generic path traversal
+  pruning is internal, and remaining subscription work belongs to hardening,
+  client decoding, and performance envelopes below.
+- TypeScript handoff notes were deleted because `typescript/client/README.md`,
+  package tests, and this roadmap now carry the active state.
 
-## Current Reality Check
+## Current Baseline
 
-Several original roadmap gaps now have partial implementation:
+The repo already has the core runtime, storage, protocol, schema, subscription,
+SQL/read, auth, contract, codegen, backup/restore, migration-hook,
+observability, fuzz, benchmark, and gauntlet foundations.
 
-- `docs/v1-compatibility.md` is the current v1 support matrix.
-- Offline backup/restore helpers, CLI commands, migration hooks, snapshot, and
-  compaction helpers exist, but the operator runbook and upgrade policy are not
-  complete.
-- Runtime gauntlet, recovery, storage-fault, fuzz, and benchmark coverage exist,
-  but the release qualification command set and published performance envelopes
-  are not complete.
-- TypeScript codegen exists. A minimal in-repo TypeScript runtime foundation
-  exists at `typescript/client`, including protocol compatibility helpers, a
-  WebSocket lifecycle shell with IdentityToken decoding, a subscription handle
-  primitive, raw reducer request/response handling, and raw declared-query
-  request/response handling. It now also has raw declared-view subscribe
-  acceptance/error correlation, raw table subscription acceptance/error
-  correlation, unsubscribe acknowledgement correlation, and raw subscription
-  update callbacks, but typed reducer codecs, declared query/view/table row
-  decoding, subscription cache behavior, reconnect behavior, and canary wiring
-  are not complete.
-- A release-candidate app workload exists in tests. The maintained v1
-  canary/reference app is the external `opsboard-canary` repository; do not add
-  a duplicate in-repo task-board app.
+Current v1 decisions already settled:
 
-## v1 Product Thesis
+- `Host` is preview/advanced for v1, not required for normal app development.
+- Lower-level runtime packages remain implementation details unless the v1
+  compatibility matrix names a stable subset.
+- v1 protocol uses the Shunter-native `v1.bsatn.shunter` token and BSATN wire
+  frames.
+- v1 strict auth is HS256 JWT, issuer/audience allowlist capable,
+  restart-based for key replacement, and uses the `permissions` claim.
+- Backup and restore are offline-only for v1.
+- Shunter uses an in-process app-trust model for reducers, lifecycle hooks,
+  scheduled reducers, and migration hooks.
+- SQL writes, grouped aggregates, outer joins, subqueries, broad scalar
+  functions, and transaction-control SQL are out of scope for v1.
 
-Shunter v1 should be excellent at one job:
+## Remaining Drivers
 
-> Self-hosted Go applications with reducer-owned writes, durable state, typed
-> clients, permission-aware reads, and reliable live updates.
+### 1. TypeScript SDK Completion
 
-Features outside that thesis should be deferred unless they directly support
-the v1 contract. In particular, v1 should not chase SpacetimeDB wire
-compatibility, cloud hosting, multi-language module upload, broad SQL database
-compatibility, or a full framework/template ecosystem.
+The checked-in `typescript/client` runtime already covers connection state,
+token handling, IdentityToken decoding, raw reducer/query/view/table request
+plumbing, RowList splitting, generated table row decoders, managed table
+handles, declared-view row handles when RowList row bytes are available,
+acknowledged unsubscribe, opt-in reconnect with resubscription, generated
+reducer product codecs, and generated declared-read row decoders/helpers.
+
+Tasks:
+
+- Broaden SDK tests for state transitions, auth failure, reducer/query/view
+  success and failure, initial rows, deltas, unsubscribe, reconnect, close
+  during in-flight work, and protocol mismatch.
+- Wire the external canary app through the public SDK only.
+
+Verification:
+
+```bash
+rtk npm --prefix typescript/client run test
+rtk go test ./codegen ./...
+rtk go vet ./...
+```
+
+### 2. External Canary Release Gate
+
+The external `opsboard-canary` repository is the v1 proving ground. Do not add
+a duplicate in-repo reference app.
+
+Tasks:
+
+- Keep the canary on public Shunter APIs for normal operation.
+- Keep coverage for strict auth, permissions, private/public tables,
+  sender-based visibility, reducers, declared queries/views, raw SQL escape
+  hatches, subscriptions, restart/rollback, contract export, generated
+  TypeScript, offline backup/restore, and one app-owned migration path.
+- Replace handwritten client protocol helpers with the public TypeScript SDK
+  when the SDK typed surfaces are ready.
+- Add canary commands to the release qualification checklist and pin them to
+  the intended Shunter commit or tag.
+
+Verification from the canary checkout:
+
+```bash
+rtk make canary-quick
+rtk make canary-full
+```
+
+### 3. Hardening Qualification
+
+The hardening command set exists, but release readiness still needs durable
+coverage artifacts and broader fault scenarios.
+
+Tasks:
+
+- Add fixed seed sets and regression corpus entries for gauntlet workloads.
+- Extend crash/fault coverage across snapshot, compaction, migration, and
+  shutdown boundaries.
+- Expand subscription correctness scenarios for joins, deletes, updates,
+  visibility changes, caller-specific subscriptions, and concurrent writes.
+- Keep race-enabled package guidance current as ownership changes.
+- Add soak/load tests that run outside the normal short local loop.
+
+Release-candidate verification is owned by
+`docs/RUNTIME-HARDENING-GAUNTLET.md`. Keep this roadmap and that doc aligned
+when the command set changes.
+
+### 4. Performance Envelopes
+
+Benchmark coverage exists, but v1 still needs published workload limits.
+
+Tasks:
+
+- Add deterministic small/medium/large fixtures.
+- Add or expand benchmarks for reducer throughput, indexed lookup/range scans,
+  replay/recovery, restore latency, network-level subscription workloads,
+  varied-query fanout, large initial snapshots, memory profiles, and the
+  external canary workload.
+- Publish an envelope table under `docs/` with command, machine notes, data
+  size, commit hash, and whether each threshold is advisory or release-gating.
+- Keep app-author indexing guidance aligned with measured scan, predicate,
+  subscription, and join limits.
+
+Run raw benchmark commands directly as documented in `RTK.md` and
+`docs/PERFORMANCE-BENCHMARKS.md`.
+
+### 5. Release Candidate
+
+Tasks:
+
+- Run the release qualification command set, TypeScript SDK tests, and canary
+  gates.
+- Resolve or document residual risks with explicit workload limits or
+  non-goals.
+- Update `CHANGELOG.md` for release-facing behavior.
+- Move `VERSION` from `-dev` to the release version only for the release
+  commit.
+- Build release binaries with linker-stamped `Version`, `Commit`, and `Date`.
+- Tag released versions with `vX.Y.Z`.
+
+Exit criteria:
+
+- `README.md`, `docs/README.md`, `docs/v1-compatibility.md`,
+  `docs/operations.md`, this roadmap, and the external canary agree on the
+  supported v1 story.
+- Every stable protocol, contract JSON, generated TypeScript, auth, operation,
+  read, and live-update promise has tests, fixtures, or an explicit preview
+  boundary.
+
+## Maintenance Rules
+
+- Keep this document short and implementation-facing.
+- Delete stale handoffs instead of archiving them.
+- Update this file only when remaining v1 work changes.
+- Use live code and tests before roadmap prose when they disagree.
+- Keep `reference/SpacetimeDB/` read-only and research-only.

@@ -15,6 +15,14 @@ Do not read broad specs by default.
 
 ## Current Docs
 
+- `docs/getting-started.md` — first-pass app-author path for embedding
+  Shunter in a Go application.
+- `docs/concepts.md` — vocabulary and mental model for modules, runtimes,
+  reducers, reads, contracts, protocol serving, and durable state.
+- `docs/how-to/` — rough-draft task guides for module declarations, reducers,
+  reads, protocol serving, auth, persistence, contracts/codegen, and testing.
+- `docs/reference/` — compact reference notes for config, lifecycle, and read
+  surface choices that Go doc alone does not teach.
 - `docs/authentication.md` — current dev/strict auth behavior, principal
   derivation, permission mapping, visibility, key replacement, and production
   checklist.
@@ -33,11 +41,10 @@ Do not read broad specs by default.
   backup/restore, migrations, upgrades, and release checklist.
 - `docs/shunter-design-decisions.md` — consolidated current Shunter design
   decisions that code and tests still cite.
-- `docs/v1-compatibility.md` — initial v1 support matrix for root APIs,
+- `docs/v1-compatibility.md` — current v1 support matrix for root APIs,
   protocol, contract JSON, codegen, read surfaces, and host status.
-- `docs/v1-roadmap/` — focused v1 readiness workstreams for contract freeze,
-  reference app, client SDK, auth, operations, hardening, performance,
-  isolation, and SQL/read scope.
+- `docs/v1-roadmap/README.md` — single active roadmap for remaining v1
+  implementation drivers and release qualification.
 
 ## Baseline Specs
 
