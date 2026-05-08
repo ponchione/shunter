@@ -1093,6 +1093,42 @@ reconnectAsyncTokenSockets[1].message(bytesFromHex(
 assert.deepEqual(reconnectAsyncTokenHandle.state, { status: "active", rows: ["4-5"] });
 await reconnectAsyncTokenClient.close();
 
+const manualReconnectSockets = [];
+const manualReconnectClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 20,
+    maxDelayMs: 20,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    manualReconnectSockets.push(socket);
+    return socket;
+  },
+});
+const manualReconnectConnecting = manualReconnectClient.connect();
+await nextTurn();
+manualReconnectSockets[0].open();
+manualReconnectSockets[0].message(identityTokenFrame().buffer);
+await manualReconnectConnecting;
+manualReconnectSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(manualReconnectClient.state.status, "reconnecting");
+const manualReconnectRetry = manualReconnectClient.connect();
+await nextTurn();
+assert.equal(manualReconnectClient.state.status, "connecting");
+assert.equal(manualReconnectSockets.length, 2);
+manualReconnectSockets[1].open();
+manualReconnectSockets[1].message(identityTokenFrame({ token: "manual-reconnect-token" }).buffer);
+const manualReconnectMetadata = await manualReconnectRetry;
+assert.equal(manualReconnectMetadata.identityToken, "manual-reconnect-token");
+assert.equal(manualReconnectClient.state.status, "connected");
+await new Promise((resolve) => setTimeout(resolve, 30));
+assert.equal(manualReconnectSockets.length, 2);
+await manualReconnectClient.close();
+
 const client = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe?existing=1",
   protocol: shunterProtocol,
