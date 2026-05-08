@@ -1162,6 +1162,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         pending.onRawRows({
           ...response,
           rows: new Uint8Array(response.rows),
+          rowBytes: cloneRowBytes(response.rowBytes),
           rawFrame: new Uint8Array(response.rawFrame),
         });
       } catch (error) {

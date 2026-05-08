@@ -1539,6 +1539,39 @@ assert.deepEqual(rawTableCallbackRows[0].map((row) => [...row]), [[1, 2], [3]]);
 assert.deepEqual(rawTableCallbackInitialRows[0].map((row) => [...row]), [[1, 2], [3]]);
 await rawTableCallbackClient.close();
 
+const rawRowsIsolationSockets = [];
+const rawRowsIsolationInitialRows = [];
+const rawRowsIsolationClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    rawRowsIsolationSockets.push(socket);
+    return socket;
+  },
+});
+const rawRowsIsolationConnecting = rawRowsIsolationClient.connect();
+await nextTurn();
+rawRowsIsolationSockets[0].open();
+rawRowsIsolationSockets[0].message(identityTokenFrame().buffer);
+await rawRowsIsolationConnecting;
+const rawRowsIsolationSubscription = rawRowsIsolationClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  decodeRow: (row) => [...row].join("-"),
+  onRawRows: (message) => {
+    message.rows[0] = 0xff;
+    message.rowBytes[0][0] = 0xff;
+    message.rawFrame[0] = 0xff;
+  },
+  onInitialRows: (rows) => rawRowsIsolationInitialRows.push(rows),
+});
+rawRowsIsolationSockets[0].message(subscribeSingleAppliedFrame);
+const rawRowsIsolationUnsubscribe = await rawRowsIsolationSubscription;
+assert.equal(typeof rawRowsIsolationUnsubscribe, "function");
+assert.deepEqual(rawRowsIsolationInitialRows, [["1-2", "3"]]);
+await rawRowsIsolationClient.close();
+
 const duplicateQueryIdSockets = [];
 const duplicateQueryIdClient = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe",

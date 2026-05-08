@@ -105,7 +105,9 @@ acceptance and acknowledgement semantics while resolving with a
 Declared-view and table subscriptions can opt into raw row-list/update bytes
 with `onRawUpdate` and table-only `onRawRows` callbacks. Callback consumers can
 use `decodeRowList()` to split live RowList payloads into raw per-row bytes, or
-read `insertRowBytes`/`deleteRowBytes` from raw updates when present.
+read `insertRowBytes`/`deleteRowBytes` from raw updates when present. Raw row
+callbacks receive cloned row bytes so callback mutation cannot corrupt decoded
+initial rows or managed handles.
 Table subscriptions can also pass `decodeRow` when the caller already has a
 schema-aware row decoder; the runtime will call the table `onRows`/
 `onInitialRows` callbacks for accepted initial rows and `onUpdate` for RowList

@@ -150,6 +150,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   errors for already accepted subscriptions when no pending operation matches.
 - TypeScript reducer calls now reject explicit request IDs that would collide
   with an in-flight full-update reducer response.
+- TypeScript table `onRawRows` callbacks now receive cloned row bytes so raw
+  callback mutation cannot corrupt decoded initial rows or managed handles.
 - The TypeScript runtime now defines explicit reducer argument encoder helpers
   for callers that map typed reducer args to raw `Uint8Array` payloads.
 
