@@ -1901,6 +1901,69 @@ assert.equal(reusedViewHandle.queryId, 0x61626364);
 assert.deepEqual(reusedViewHandle.state, { status: "active", rows: [] });
 await abortClient.close();
 
+const subscriptionSendFailureSockets = [];
+const subscriptionSendFailureClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    subscriptionSendFailureSockets.push(socket);
+    return socket;
+  },
+});
+const subscriptionSendFailureConnecting = subscriptionSendFailureClient.connect();
+await nextTurn();
+subscriptionSendFailureSockets[0].open();
+subscriptionSendFailureSockets[0].message(identityTokenFrame().buffer);
+await subscriptionSendFailureConnecting;
+const originalSubscriptionSend = subscriptionSendFailureSockets[0].send.bind(subscriptionSendFailureSockets[0]);
+subscriptionSendFailureSockets[0].send = () => {
+  throw new Error("subscription send denied");
+};
+const failedViewSend = subscriptionSendFailureClient.subscribeDeclaredView("live_users", {
+  requestId: 0x41424344,
+  queryId: 0x61626364,
+  returnHandle: true,
+});
+await assert.rejects(failedViewSend, (error) => {
+  assert.equal(error.kind, "transport");
+  assert.match(error.message, /subscription send denied/);
+  return true;
+});
+subscriptionSendFailureSockets[0].send = originalSubscriptionSend;
+const recoveredViewSend = subscriptionSendFailureClient.subscribeDeclaredView("live_users", {
+  requestId: 0x41424344,
+  queryId: 0x61626364,
+  returnHandle: true,
+});
+subscriptionSendFailureSockets[0].message(subscribeAppliedFrame);
+const recoveredViewHandle = await recoveredViewSend;
+assert.deepEqual(recoveredViewHandle.state, { status: "active", rows: [] });
+subscriptionSendFailureSockets[0].send = () => {
+  throw new Error("subscription send denied");
+};
+const failedTableSend = subscriptionSendFailureClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+});
+await assert.rejects(failedTableSend, (error) => {
+  assert.equal(error.kind, "transport");
+  assert.match(error.message, /subscription send denied/);
+  return true;
+});
+subscriptionSendFailureSockets[0].send = originalSubscriptionSend;
+const recoveredTableSend = subscriptionSendFailureClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+});
+subscriptionSendFailureSockets[0].message(subscribeSingleAppliedFrame);
+const recoveredTableHandle = await recoveredTableSend;
+assert.equal(recoveredTableHandle.state.status, "active");
+assert.deepEqual(recoveredTableHandle.state.rows.map((row) => [...row]), [[1, 2], [3]]);
+await subscriptionSendFailureClient.close();
+
 const reconnectSockets = [];
 const reconnectFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);
