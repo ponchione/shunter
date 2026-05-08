@@ -236,6 +236,43 @@ func TestCompactionToleratesMissingSidecar(t *testing.T) {
 	assertFileMissing(t, seg1)
 }
 
+func TestRunCompactionWithoutSnapshotRetainsLogAndOffsetArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	seg2 := makeScanTestSegment(t, dir, 4, 4, 5)
+
+	idx1Path := filepath.Join(dir, OffsetIndexFileName(1))
+	orphanIdxPath := filepath.Join(dir, OffsetIndexFileName(2))
+	idx4Path := filepath.Join(dir, OffsetIndexFileName(4))
+	for _, path := range []string{idx1Path, orphanIdxPath, idx4Path} {
+		idx, err := CreateOffsetIndex(path, 4)
+		if err != nil {
+			t.Fatalf("CreateOffsetIndex(%s): %v", path, err)
+		}
+		if err := idx.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	syncCalls := 0
+	stubCompactionSyncDir(t, func(path string) error {
+		syncCalls++
+		return nil
+	})
+
+	if err := RunCompaction(dir, 0); err != nil {
+		t.Fatalf("RunCompaction without snapshot: %v", err)
+	}
+	if syncCalls != 0 {
+		t.Fatalf("syncDir calls = %d, want 0 without snapshot cleanup", syncCalls)
+	}
+	assertFileExists(t, seg1)
+	assertFileExists(t, seg2)
+	assertFileExists(t, idx1Path)
+	assertFileExists(t, orphanIdxPath)
+	assertFileExists(t, idx4Path)
+}
+
 func TestRunCompactionRemovesOrphanedCoveredSidecarOnRetry(t *testing.T) {
 	dir := t.TempDir()
 	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
