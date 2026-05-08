@@ -368,6 +368,7 @@ interface ActiveSubscription {
   readonly target: string;
   readonly queryId: QueryID;
   readonly tableName?: string;
+  readonly unsubscribeMode: "single" | "multi";
   readonly onRawRows?: (message: SubscribeSingleAppliedMessage) => void;
   readonly onRawUpdate?: RawSubscriptionUpdateCallback;
   readonly onRows?: (rows: readonly unknown[]) => void;
@@ -1107,14 +1108,25 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     };
   };
 
-  const declaredViewUnsubscribe = (queryId: QueryID): SubscriptionUnsubscribe =>
-    unsubscribeOnce(
-      "declared_view",
-      queryId,
-      encodeUnsubscribeMultiRequest,
-      "Cannot unsubscribe after the Shunter client is disconnected.",
-      "Unsubscribe request send failed",
-    );
+  const declaredViewUnsubscribe = (queryId: QueryID): SubscriptionUnsubscribe => {
+    let unsubscribe: SubscriptionUnsubscribe | undefined;
+    return () => {
+      if (unsubscribe === undefined) {
+        const active = activeSubscriptionsByQuery.get(queryId);
+        const encodeUnsubscribe = active?.unsubscribeMode === "single"
+          ? encodeUnsubscribeSingleRequest
+          : encodeUnsubscribeMultiRequest;
+        unsubscribe = unsubscribeOnce(
+          "declared_view",
+          queryId,
+          encodeUnsubscribe,
+          "Cannot unsubscribe after the Shunter client is disconnected.",
+          "Unsubscribe request send failed",
+        );
+      }
+      return unsubscribe();
+    };
+  };
 
   const tableSubscriptionUnsubscribe = (queryId: QueryID): SubscriptionUnsubscribe =>
     unsubscribeOnce(
@@ -1192,8 +1204,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     if (pending === undefined) {
       return;
     }
-    if (pending.kind !== "table" || pending.tableName !== response.tableName) {
-      failConnected(new ShunterProtocolError("SubscribeSingleApplied response did not match the pending table subscription.", {
+    if (
+      (pending.kind !== "table" && pending.kind !== "declared_view") ||
+      (pending.kind === "table" && pending.tableName !== response.tableName)
+    ) {
+      failConnected(new ShunterProtocolError("SubscribeSingleApplied response did not match the pending table or declared view subscription.", {
         details: {
           expectedKind: pending.kind,
           expectedTableName: pending.tableName,
@@ -1208,6 +1223,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       target: pending.target,
       queryId: response.queryId,
       tableName: response.tableName,
+      unsubscribeMode: "single",
       onRawRows: pending.onRawRows,
       onRawUpdate: pending.onRawUpdate,
       onRows: pending.onRows,
@@ -1268,7 +1284,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       }
     }
     cleanupPendingSubscription(pending);
-    pending.resolve(pending.handle ?? tableSubscriptionUnsubscribe(response.queryId));
+    pending.resolve(pending.handle ?? (
+      pending.kind === "declared_view"
+        ? declaredViewUnsubscribe(response.queryId)
+        : tableSubscriptionUnsubscribe(response.queryId)
+    ));
   };
 
   const settleDeclaredViewSubscriptionApplied = (response: SubscriptionSetAppliedMessage): void => {
@@ -1290,6 +1310,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       kind: pending.kind,
       target: pending.target,
       queryId: response.queryId,
+      unsubscribeMode: "multi",
       onRawUpdate: pending.onRawUpdate,
       onUpdate: pending.onUpdate,
       decodeRow: pending.decodeRow,
@@ -1374,16 +1395,16 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
 
   const settleUnsubscribeApplied = (
     response: { readonly requestId: RequestID; readonly queryId: QueryID },
-    kind: PendingUnsubscribe["kind"],
+    allowedKinds: readonly PendingUnsubscribe["kind"][],
     label: string,
   ): void => {
     const pending = pendingUnsubscribeForResponse(response.requestId, response.queryId, label);
     if (pending === undefined) {
       return;
     }
-    if (pending.kind !== kind) {
+    if (!allowedKinds.includes(pending.kind)) {
       failConnected(new ShunterProtocolError(`${label} response did not match the pending unsubscribe kind.`, {
-        details: { expectedKind: pending.kind, receivedKind: kind, response },
+        details: { expectedKind: pending.kind, allowedKinds, response },
       }));
       return;
     }
@@ -1419,7 +1440,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           settleTableSubscriptionApplied(decodeSubscribeSingleAppliedFrame(frame));
           return;
         case SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_SINGLE_APPLIED:
-          settleUnsubscribeApplied(decodeUnsubscribeSingleAppliedFrame(frame), "table", "UnsubscribeSingleApplied");
+          settleUnsubscribeApplied(decodeUnsubscribeSingleAppliedFrame(frame), ["table", "declared_view"], "UnsubscribeSingleApplied");
           return;
         case SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE:
           settleReducerResponse(decodeTransactionUpdateFrame(frame));
@@ -1451,7 +1472,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         case SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_MULTI_APPLIED:
           settleUnsubscribeApplied(
             decodeUnsubscribeMultiAppliedFrame(frame),
-            "declared_view",
+            ["declared_view"],
             "UnsubscribeMultiApplied",
           );
           return;

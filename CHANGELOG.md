@@ -162,6 +162,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   resolve to non-string values.
 - The TypeScript runtime now defines explicit reducer argument encoder helpers
   for callers that map typed reducer args to raw `Uint8Array` payloads.
+- TypeScript declared-view subscriptions now accept the server's single-table
+  initial acknowledgement shape used by table-returning declared views.
 
 ## v0.1.0 - 2026-05-05
 

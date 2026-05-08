@@ -1862,6 +1862,52 @@ await unsubscribeDeclaredViewHandle;
 assert.deepEqual(await declaredViewHandle.closed, { reason: "unsubscribed" });
 assert.deepEqual(declaredViewHandle.state, { status: "closed" });
 
+const declaredViewSingleAppliedSockets = [];
+const declaredViewSingleAppliedClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/query",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    declaredViewSingleAppliedSockets.push(socket);
+    return socket;
+  },
+});
+const declaredViewSingleAppliedConnecting = declaredViewSingleAppliedClient.connect();
+await nextTurn();
+declaredViewSingleAppliedSockets[0].open();
+declaredViewSingleAppliedSockets[0].message(identityTokenFrame().buffer);
+await declaredViewSingleAppliedConnecting;
+const declaredViewSingleInitialRows = [];
+const declaredViewSingleSubscription = declaredViewSingleAppliedClient.subscribeDeclaredView("live_users", {
+  requestId: 0x41424344,
+  queryId: 0x61626364,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+  onInitialRows: (rows) => declaredViewSingleInitialRows.push(rows),
+});
+assert.deepEqual(
+  declaredViewSingleAppliedSockets[0].sent[0],
+  encodeDeclaredViewSubscriptionRequest("live_users", {
+    requestId: 0x41424344,
+    queryId: 0x61626364,
+  }).frame,
+);
+declaredViewSingleAppliedSockets[0].message(subscribeSingleAppliedFrameFor({
+  requestId: 0x41424344,
+  queryId: 0x61626364,
+}));
+const declaredViewSingleHandle = await declaredViewSingleSubscription;
+assert.deepEqual(declaredViewSingleInitialRows, [["1-2", "3"]]);
+assert.deepEqual(declaredViewSingleHandle.state, { status: "active", rows: ["1-2", "3"] });
+const unsubscribeDeclaredViewSingle = declaredViewSingleHandle.unsubscribe();
+assert.deepEqual(
+  declaredViewSingleAppliedSockets[0].sent[1],
+  encodeUnsubscribeSingleRequest(0x61626364, { requestId: 1 }).frame,
+);
+declaredViewSingleAppliedSockets[0].message(bytesFromHex("030100000000000000000000006463626100"));
+await unsubscribeDeclaredViewSingle;
+assert.deepEqual(await declaredViewSingleHandle.closed, { reason: "unsubscribed" });
+
 const unsubscribeTableHandleAppliedFrame = bytesFromHex(
   "030500000000000000000000001413121100",
 );
