@@ -8,7 +8,7 @@ import (
 
 // TestCallerOutcomeShape pins the outcome-model forward-declared shape that
 // the protocol-side adapter consumes when assembling the heavy
-// `TransactionUpdate` envelope. See `docs/shunter-design-decisions.md#outcome-model`.
+// `TransactionUpdate` envelope. See `working-docs/shunter-design-decisions.md#outcome-model`.
 func TestCallerOutcomeShape(t *testing.T) {
 	outcome := CallerOutcome{
 		Kind:      CallerOutcomeFailed,

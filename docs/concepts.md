@@ -1,6 +1,6 @@
 # Shunter Concepts
 
-Status: rough draft
+Status: current v1 app-author guidance
 Scope: vocabulary and mental model for app authors.
 
 This page explains the core nouns used by Shunter docs. It is not a subsystem
@@ -32,6 +32,17 @@ Use `shunter.Build(mod, cfg)` to construct a runtime, then `Runtime.Start` or
 After `Build`, mutating the original `Module` value does not change the built
 runtime.
 
+## Application Shell
+
+The application shell is your Go process around Shunter. It owns dependency
+injection, service startup, HTTP routing outside Shunter, CLI commands,
+workers, tests, and deployment policy. The shell builds and starts runtimes,
+calls reducers or reads when it needs in-process access, and closes runtimes
+during shutdown.
+
+Shunter does not dynamically load module code into a separate process. Your app
+binary links the module and exports contracts from that binary.
+
 ## Reducer
 
 A reducer is the synchronous write boundary. Reducers run on Shunter's
@@ -43,6 +54,11 @@ executor.
 
 Reducer arguments and results are raw byte slices. Encoding is an application
 choice.
+
+Reducer errors roll back the reducer transaction. Reducer panics are recovered
+and reported as app reducer panics, but Shunter does not isolate arbitrary
+goroutines, deadlocks, memory exhaustion, or process-wide failures caused by
+application code.
 
 ## Table
 
@@ -89,6 +105,10 @@ before read evaluation or live delivery for caller-specific access.
 The current stable visibility parameter is `:sender`, derived from caller
 identity.
 
+Use permission metadata for surface-level admission decisions, such as whether
+a caller may use a reducer or read surface at all. Use visibility filters for
+row-level narrowing after admission.
+
 ## DataDir
 
 `Config.DataDir` is the runtime-owned directory for snapshots, commit log
@@ -114,6 +134,9 @@ served by `Runtime.ListenAndServe`.
 
 The v1 protocol is Shunter-native. It is not a promise of compatibility with
 another runtime's wire protocol.
+
+Use local runtime APIs for in-process workers, tests, CLIs, and app-owned HTTP
+handlers that do not need to speak the WebSocket protocol.
 
 ## Host
 

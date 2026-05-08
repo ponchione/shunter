@@ -1,6 +1,6 @@
 # Config Reference
 
-Status: rough draft
+Status: current v1 reference note
 Scope: app-facing `shunter.Config` fields and when to set them.
 
 Use Go doc for exact field types. This page explains practical app-author
@@ -31,8 +31,9 @@ runtime.
 | `AnonymousTokenAudience` | Development anonymous-token audience override. |
 | `AnonymousTokenTTL` | Development anonymous-token lifetime override. |
 
-See `docs/authentication.md` and `docs/how-to/configure-auth.md` before using
-strict mode in a public service.
+See [Authentication](../authentication.md) and
+[Configure auth](../how-to/configure-auth.md) before using strict mode in a
+public service.
 
 ## Protocol Field
 

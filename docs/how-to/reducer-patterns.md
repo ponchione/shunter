@@ -1,6 +1,6 @@
 # Reducer Patterns
 
-Status: rough draft
+Status: current v1 app-author guidance
 Scope: writing reducers for Shunter modules.
 
 Reducers are the only supported write boundary for normal Shunter apps. They
@@ -20,7 +20,13 @@ Reducer arguments and results are byte slices at the runtime boundary. Choose
 one encoding for each reducer and keep it documented near the reducer or in
 generated client bindings.
 
+Reducers run on the serialized executor path. Treat the reducer body as a
+transaction, not as a place for long-running service work.
+
 ## Insert Rows
+
+The snippets in this page assume a `messages` table shaped as
+`id, channel, body`.
 
 ```go
 _, err := ctx.DB.Insert(uint32(messagesTableID), types.ProductValue{
@@ -81,6 +87,15 @@ typed helpers exist for the app.
 Reducers can inspect caller metadata through the reducer context. Local callers
 provide equivalent metadata with options such as `WithIdentity`,
 `WithAuthPrincipal`, `WithConnectionID`, and `WithPermissions`.
+
+```go
+identity := ctx.Caller.Identity
+principal := ctx.Caller.Principal
+permissions := ctx.Caller.Permissions
+_ = identity
+_ = principal
+_ = permissions
+```
 
 Admission checks use the caller permission set propagated through the runtime
 path. Principal metadata is context for app code; it is not an admission bypass.

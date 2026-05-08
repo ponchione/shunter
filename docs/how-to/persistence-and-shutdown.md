@@ -1,6 +1,6 @@
 # Persistence And Shutdown
 
-Status: rough draft
+Status: current v1 app-author guidance
 Scope: `DataDir`, startup, shutdown, snapshots, compaction, backup, restore,
 and migrations.
 
@@ -19,7 +19,9 @@ rt, err := shunter.Build(app.Module(), shunter.Config{
 Use separate data directories for separate applications, modules, tenants, or
 incompatible schema lines.
 
-Do not run two runtimes against the same `DataDir`.
+A blank `DataDir` uses the runtime default `./shunter-data`. Set an explicit
+directory for real services and tests that need predictable ownership. Do not
+run two runtimes against the same `DataDir`.
 
 ## Startup
 
@@ -132,7 +134,9 @@ Restore refuses to merge into a non-empty destination.
 ## Compatibility Preflight
 
 Use `CheckDataDirCompatibility` in app-owned maintenance tools when you want a
-schema compatibility check before starting normal runtime services.
+schema compatibility check before starting normal runtime services. Missing or
+empty directories are compatible because `Build` can initialize fresh state
+there.
 
 ```go
 if err := shunter.CheckDataDirCompatibility(mod, shunter.Config{DataDir: "./data/chat"}); err != nil {
@@ -164,4 +168,5 @@ Take an offline backup before data-rewrite migrations.
 
 ## More Detail
 
-See `docs/operations.md` for the operator runbook and release checklist.
+See [Operations](../operations.md) for the operator runbook and release
+checklist.

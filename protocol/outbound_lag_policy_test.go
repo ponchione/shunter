@@ -4,7 +4,7 @@ import "testing"
 
 // TestShunterDefaultOutgoingBufferMatchesReference pins the outbound-lag
 // decision recorded in
-// `docs/shunter-design-decisions.md#outbound-lag-policy`: the per-connection outbound
+// `working-docs/shunter-design-decisions.md#outbound-lag-policy`: the per-connection outbound
 // queue default matches the reference SpacetimeDB constant
 // `CLIENT_CHANNEL_CAPACITY = 16 * KB` at
 // `reference/SpacetimeDB/crates/core/src/client/client_connection.rs:657`.

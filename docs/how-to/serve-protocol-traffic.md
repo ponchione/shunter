@@ -1,6 +1,6 @@
 # Serve Protocol Traffic
 
-Status: rough draft
+Status: current v1 app-author guidance
 Scope: serving Shunter's HTTP/WebSocket protocol from an app process.
 
 Enable protocol serving when external clients should talk to Shunter over its
@@ -58,6 +58,11 @@ return server.ListenAndServe()
 `HTTPHandler` does not start lifecycle by itself. Call `Start` before serving
 traffic.
 
+If the app-owned server needs its own middleware, route `rt.HTTPHandler()` under
+the desired mount point after the runtime has started. Keep using local
+`CallReducer`, `Read`, `CallQuery`, and `SubscribeView` for trusted in-process
+work that does not need WebSocket protocol behavior.
+
 ## Protocol Endpoint
 
 With protocol enabled, the runtime mounts the WebSocket protocol endpoint at
@@ -84,8 +89,9 @@ cfg := shunter.Config{
 }
 ```
 
-See `docs/authentication.md` for the full strict-mode contract and production
-checklist.
+See [Configure auth](configure-auth.md) for the app-author setup path and
+[Authentication](../authentication.md) for the full strict-mode contract and
+production checklist.
 
 ## Diagnostics
 

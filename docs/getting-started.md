@@ -1,7 +1,8 @@
 # Getting Started With Shunter
 
-Status: rough draft
-Scope: first orientation path for application authors embedding Shunter in Go.
+Status: current v1 app-author onboarding
+Scope: first orientation path for application authors embedding Shunter in a Go
+application.
 
 Shunter is a Go library for hosting stateful realtime application modules.
 An application defines a module, builds a runtime from that module, starts the
@@ -9,20 +10,27 @@ runtime, then writes through reducers and reads through committed read APIs,
 declared queries, declared views, or protocol clients.
 
 This page is intentionally short. Use it to learn the order of operations, then
-move to the task-specific guides under `docs/how-to/`.
+move to the task-specific guides under [docs/how-to](how-to/README.md).
 
 ## The Short Version
 
 The normal application flow is:
 
-1. Define a module with tables, reducers, reads, permissions, and metadata.
-2. Build a runtime with `shunter.Build`.
-3. Start the runtime with `Runtime.Start` or `Runtime.ListenAndServe`.
-4. Call reducers for writes.
-5. Read committed state with `Runtime.Read`, `Runtime.CallQuery`, or
+1. Add Shunter as a Go dependency and import the root package.
+2. Define a module with tables, reducers, reads, permissions, and metadata.
+3. Build a runtime with `shunter.Build`.
+4. Start the runtime with `Runtime.Start` or `Runtime.ListenAndServe`.
+5. Call reducers for writes.
+6. Read committed state with `Runtime.Read`, `Runtime.CallQuery`, or
    `Runtime.SubscribeView`.
-6. Close the runtime during shutdown.
-7. Export a contract when app-facing schema or read surfaces change.
+7. Close the runtime during shutdown.
+8. Export a contract when app-facing schema or read surfaces change.
+
+In an application module, add the dependency in the usual Go way:
+
+```bash
+go get github.com/ponchione/shunter
+```
 
 The root package is the main app-facing API:
 
@@ -30,10 +38,11 @@ The root package is the main app-facing API:
 import "github.com/ponchione/shunter"
 ```
 
-Lower-level packages such as `schema`, `types`, `bsatn`, and `codegen` are used
-when declaring schemas, constructing values, encoding payloads, or generating
-clients. Runtime implementation packages such as `store`, `executor`,
-`commitlog`, and `subscription` are not the normal app integration surface.
+Lower-level packages such as `schema`, `types`, `bsatn`, `contractworkflow`,
+and `codegen` are used when declaring schemas, constructing values, encoding
+payloads, exporting contracts, or generating clients. Runtime implementation
+packages such as `store`, `executor`, `commitlog`, and `subscription` are not
+the normal app integration surface.
 
 ## Define A Module
 
@@ -73,9 +82,10 @@ func Module() *shunter.Module {
 }
 ```
 
-Table IDs are assigned by the built schema. Until generated app helpers cover
-this path, keep table ID constants close to the corresponding table
-declarations and update them deliberately when table order changes.
+Table and index IDs are assigned by the built schema from declaration order.
+Until generated app helpers cover this path, keep handwritten ID constants next
+to the corresponding table declarations and update them deliberately when table
+or index order changes.
 
 ## Write Through Reducers
 
@@ -119,8 +129,8 @@ if err := rt.Start(ctx); err != nil {
 ```
 
 Use a durable `DataDir` for real applications. A blank `DataDir` uses the
-runtime default and is convenient for development, but production services
-should choose an explicit location owned by the app deployment.
+runtime default `./shunter-data`, which is convenient for local development but
+too implicit for production services.
 
 ## Call A Reducer Locally
 
@@ -208,7 +218,8 @@ If your application already owns the HTTP server, call `Runtime.Start` and mount
 
 Export a contract from an app-owned binary that links your module. Contract
 JSON is the review and codegen artifact for app-facing tables, reducers,
-queries, views, permissions, read models, and migration metadata.
+queries, views, permissions, read models, and migration metadata. Starting the
+runtime is not required for contract export.
 
 ```go
 if err := contractworkflow.ExportRuntimeFile(rt, "shunter.contract.json"); err != nil {
@@ -219,15 +230,18 @@ if err := contractworkflow.ExportRuntimeFile(rt, "shunter.contract.json"); err !
 The generic `cmd/shunter` CLI can diff, validate, plan, and generate from
 existing contract JSON files. It does not dynamically load your module code.
 
-## Next Pages
+## Continue
 
-- `docs/concepts.md` explains the terms used across the docs.
-- `docs/how-to/module-anatomy.md` covers module declarations.
-- `docs/how-to/reducer-patterns.md` covers reducer design.
-- `docs/how-to/reads-queries-views.md` covers reads and live views.
-- `docs/how-to/serve-protocol-traffic.md` covers HTTP and WebSocket serving.
-- `docs/how-to/persistence-and-shutdown.md` covers `DataDir`, snapshots, and
-  shutdown.
-- `docs/how-to/contract-export-and-codegen.md` covers contracts and generated
-  clients.
-- `docs/how-to/testing-shunter-modules.md` covers test patterns.
+- [Concepts](concepts.md) explains the terms used across the docs.
+- [Module anatomy](how-to/module-anatomy.md) covers module declarations.
+- [Reducer patterns](how-to/reducer-patterns.md) covers reducer design.
+- [Reads, queries, and views](how-to/reads-queries-views.md) covers reads and
+  live views.
+- [Serve protocol traffic](how-to/serve-protocol-traffic.md) covers HTTP and
+  WebSocket serving.
+- [Persistence and shutdown](how-to/persistence-and-shutdown.md) covers
+  `DataDir`, snapshots, backup, restore, and shutdown.
+- [Contract export and codegen](how-to/contract-export-and-codegen.md) covers
+  contracts and generated clients.
+- [Testing Shunter modules](how-to/testing-shunter-modules.md) covers test
+  patterns.

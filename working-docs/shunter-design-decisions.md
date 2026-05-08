@@ -51,7 +51,7 @@ Deferred unless Shunter clients need it:
 
 Authoritative pins:
 
-- `docs/specs/005-protocol/SPEC-005-protocol.md`
+- `working-docs/specs/005-protocol/SPEC-005-protocol.md`
 - `protocol/version_test.go`
 - `codegen/protocol_compat_test.go`
 - `protocol/golden_wire_test.go`
@@ -136,7 +136,7 @@ Authoritative pins:
 - `protocol/subscription_response_wire_test.go`
 - `protocol/message_family_contract_test.go`
 - `protocol/rowlist.go`
-- `docs/specs/005-protocol/SPEC-005-protocol.md`
+- `working-docs/specs/005-protocol/SPEC-005-protocol.md`
 
 ## Outbound Lag Policy
 
@@ -188,7 +188,7 @@ Current contract:
 
 Authoritative pins:
 
-- `docs/specs/001-store/SPEC-001-store.md`
+- `working-docs/specs/001-store/SPEC-001-store.md`
 - `store/snapshot.go`
 - `store/committed_state.go`
 - `store/audit_regression_test.go`

@@ -445,7 +445,7 @@ func TestOneOffQueryResponseError(t *testing.T) {
 // TagReducerCallResult is reserved in outcome-model. The decoder must
 // reject it as unknown so a future reintroduction cannot silently
 // collide with the removed shape. See
-// `docs/shunter-design-decisions.md#outcome-model`.
+// `working-docs/shunter-design-decisions.md#outcome-model`.
 func TestTagReducerCallResultIsReserved(t *testing.T) {
 	_, _, err := DecodeServerMessage([]byte{TagReducerCallResult})
 	if err == nil {

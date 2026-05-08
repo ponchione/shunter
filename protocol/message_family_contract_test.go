@@ -12,7 +12,7 @@ import (
 // current message-family shape so the divergence is either explicit or
 // closed. The Outcome-model decision flipped the
 // TransactionUpdate / ReducerCallResult pins to assert the new heavy /
-// light / `UpdateStatus` shape; see `docs/shunter-design-decisions.md#outcome-model`.
+// light / `UpdateStatus` shape; see `working-docs/shunter-design-decisions.md#outcome-model`.
 
 // TestShunterTransactionUpdateHeavyShape pins the Shunter-native heavy
 // `TransactionUpdate` envelope. The wire byte shape is pinned separately in

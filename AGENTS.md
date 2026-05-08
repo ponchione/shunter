@@ -12,8 +12,8 @@ when you are editing that document.
 ## Repo Reality
 
 - This repo is no longer docs-only. It contains substantial Go implementation across the core subsystem packages.
-- The numbered specs under `docs/specs/*/SPEC-*.md` are baseline contracts, but
-  they must be checked against live code.
+- The numbered specs under `working-docs/specs/*/SPEC-*.md` are baseline
+  contracts, but they must be checked against live code.
 - Do not act like there is no codebase; do not assume the docs are perfectly current either.
 
 ## Agent Rules

@@ -1,10 +1,10 @@
 # Configure Auth
 
-Status: rough draft
+Status: current v1 app-author guidance
 Scope: choosing dev or strict auth mode for local calls and protocol serving.
 
 This page is a short integration guide. The full current auth contract lives in
-`docs/authentication.md`.
+[Authentication](../authentication.md).
 
 ## Choose A Mode
 
@@ -73,6 +73,11 @@ Protocol strict-mode permissions come from the token's `permissions` claim.
 Local callers supply permissions with `WithPermissions` or
 `WithDeclaredReadPermissions`.
 
+In dev mode, local calls allow all permissions when no permission option is
+supplied. Once a local caller supplies an explicit permission set, Shunter
+checks that set against declared requirements. Strict mode does not provide the
+dev allow-all default.
+
 ## Caller Metadata For Local Calls
 
 Use local call options when an app-owned adapter has already authenticated a
@@ -93,6 +98,28 @@ res, err := rt.CallReducer(
 
 `WithAuthPrincipal` supplies caller context. It does not bypass permission
 checks.
+
+Declared reads use matching options:
+
+```go
+result, err := rt.CallQuery(
+	ctx,
+	"recent_messages",
+	shunter.WithDeclaredReadAuthPrincipal(shunter.AuthPrincipal{
+		Issuer:  "https://issuer.example",
+		Subject: "user-123",
+	}),
+	shunter.WithDeclaredReadPermissions("messages:read"),
+)
+if err != nil {
+	return err
+}
+_ = result
+```
+
+Use `WithDeclaredReadAllowAllPermissions` only in trusted tests or admin
+tooling. For reducer permission tests, pass explicit permissions so the runtime
+exercises the same admission path the app depends on.
 
 ## Visibility Filters
 

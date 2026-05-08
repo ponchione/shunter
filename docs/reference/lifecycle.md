@@ -1,6 +1,6 @@
 # Runtime Lifecycle Reference
 
-Status: rough draft
+Status: current v1 reference note
 Scope: lifecycle order for `Build`, `Start`, serving, reads, writes, and
 `Close`.
 
@@ -49,6 +49,7 @@ runtime if needed, serves `Runtime.HTTPHandler()` on `Config.ListenAddr`, and
 closes runtime ownership when the context is canceled.
 
 Use this when Shunter owns the HTTP server lifecycle.
+Set `Config.EnableProtocol` when external protocol clients should connect.
 
 ## HTTPHandler
 

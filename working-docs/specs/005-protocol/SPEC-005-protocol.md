@@ -353,7 +353,7 @@ Still rejected in protocol v1 (each as `SubscriptionError`):
 - the same `query_id` is already active **or pending** on the connection
 - the expression shape is not part of the v1 subset
 
-**Design decision — SQL in v1.** The structured-predicate shape was rejected once `SubscribeMulti` required carrying multiple queries under one envelope: a SQL string is a natural multi-element payload and gives Shunter clients one query language across subscribe and one-off reads. The original structured-predicate design is now superseded by the SQL wire surface. See `docs/shunter-design-decisions.md` and the parser doc comments on `SubscribeSingleMsg.QueryString` / `SubscribeMultiMsg.QueryStrings` / `OneOffQueryMsg.QueryString` in `protocol/client_messages.go` for current status.
+**Design decision — SQL in v1.** The structured-predicate shape was rejected once `SubscribeMulti` required carrying multiple queries under one envelope: a SQL string is a natural multi-element payload and gives Shunter clients one query language across subscribe and one-off reads. The original structured-predicate design is now superseded by the SQL wire surface. See `working-docs/shunter-design-decisions.md` and the parser doc comments on `SubscribeSingleMsg.QueryString` / `SubscribeMultiMsg.QueryStrings` / `OneOffQueryMsg.QueryString` in `protocol/client_messages.go` for current status.
 
 **Design decision — bounded joins in v1.** Equality / range predicates on one table remain the common hot-path subscription shape and map cleanly onto SPEC-004's pruning indexes. v1 also exposes the bounded two-relation join subset above because it lowers directly into the existing SPEC-004 `Join` / `CrossJoin` predicate model. Broader relational SQL remains out of scope.
 
@@ -410,7 +410,7 @@ args:          bytes            — BSATN-encoded ProductValue of reducer argume
 flags:         uint8            — CallReducerFlags byte (see below)
 ```
 
-**Response:** the caller receives the heavy `TransactionUpdate` (§8.5) carrying the reducer's `UpdateStatus`. No separate `ReducerCallResult` envelope exists on the wire — tag 7 is reserved (see §6, §8.7, and `docs/shunter-design-decisions.md#outcome-model`).
+**Response:** the caller receives the heavy `TransactionUpdate` (§8.5) carrying the reducer's `UpdateStatus`. No separate `ReducerCallResult` envelope exists on the wire — tag 7 is reserved (see §6, §8.7, and `working-docs/shunter-design-decisions.md#outcome-model`).
 
 The client is responsible for encoding `args` as a `ProductValue` matching the reducer's declared parameter types. Type mismatch is detected by the executor and returned as a heavy `TransactionUpdate` with `Status = StatusFailed{Error}`.
 
@@ -587,7 +587,7 @@ A single `Committed.update` (or `TransactionUpdateLight.update`) may contain ent
 
 **Important:** If the same row matches multiple subscriptions, it appears in the update for each matching subscription independently. There is no deduplication across subscriptions.
 
-**`tx_id` exposure.** The caller's commit TxID is **not** a standalone wire field on `TransactionUpdate` in v1. Clients recover commit identity through their `SubscribeSingleApplied` / `SubscribeMultiApplied` seeding and successive deltas; v1 provides no `resume_from_tx_id` mechanism. A client that disconnects must re-subscribe and rebuild state from a fresh `SubscribeSingleApplied` / `SubscribeMultiApplied`. (For rejection paths where no transaction was ever opened, the executor emits a synthetic heavy `TransactionUpdate` with `Status = Failed{Error}` and `ReducerCallInfo` populated from the request; the "no committed transaction" signal is implicit in the `Failed` arm. See `docs/shunter-design-decisions.md#outcome-model`.)
+**`tx_id` exposure.** The caller's commit TxID is **not** a standalone wire field on `TransactionUpdate` in v1. Clients recover commit identity through their `SubscribeSingleApplied` / `SubscribeMultiApplied` seeding and successive deltas; v1 provides no `resume_from_tx_id` mechanism. A client that disconnects must re-subscribe and rebuild state from a fresh `SubscribeSingleApplied` / `SubscribeMultiApplied`. (For rejection paths where no transaction was ever opened, the executor emits a synthetic heavy `TransactionUpdate` with `Status = Failed{Error}` and `ReducerCallInfo` populated from the request; the "no committed transaction" signal is implicit in the `Failed` arm. See `working-docs/shunter-design-decisions.md#outcome-model`.)
 
 **Dispatch rule:**
 - Caller always receives this heavy `TransactionUpdate` on `Committed` / `Failed`, subject to the `CallReducerFlags::NoSuccessNotify` opt-out on `Committed` (§7.3).
@@ -687,7 +687,7 @@ update:                             []SubscriptionUpdate    — one entry per em
 [not subscribed]
 ```
 
-State rules (see `docs/shunter-design-decisions.md` for the manager-authoritative admission rationale):
+State rules (see `working-docs/shunter-design-decisions.md` for the manager-authoritative admission rationale):
 - a `query_id` is reserved as soon as `SubscribeSingle` / `SubscribeMulti` is accepted for processing; a second subscribe with the same ID while pending or active MUST fail with `SubscriptionError` (manager-authoritative: rejected by the subscription manager's `(ConnID, QueryID)` registry, not a protocol-layer tracker)
 - `UnsubscribeSingle` / `UnsubscribeMulti` for a `query_id` that is not currently registered under the connection's live `(ConnID, QueryID)` set registry returns `ErrSubscriptionNotFound`
 - if the client disconnects while a subscription is pending, the registration result is discarded and the subscription never becomes active: the executor invokes the registration `Reply` closure synchronously, but the closure's `connOnlySender` short-circuits on a closed `<-conn.closed` channel and returns `ErrConnNotFound`; no Applied envelope ever reaches `OutboundCh`

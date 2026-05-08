@@ -13,7 +13,7 @@ import (
 // TestShunterRowsShapeEnvelopesFlatShape pins the current Shunter flat-
 // rows shape across every envelope that carries subscription row data.
 // See delta audit rows #1-#6 in
-// `docs/shunter-design-decisions.md#protocol-rows-shape`.
+// `working-docs/shunter-design-decisions.md#protocol-rows-shape`.
 func TestShunterRowsShapeEnvelopesFlatShape(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -165,8 +165,8 @@ func TestShunterSubscriptionUpdateInnerLayout(t *testing.T) {
 // TestShunterRowsShapeRowListFormatReference pins the per-row-length-
 // prefix EncodeRowList layout as the canonical Shunter rows-data
 // format. See SPEC-005 §3.4
-// (`docs/specs/005-protocol/SPEC-005-protocol.md:132-143`) and
-// delta #10 in `docs/shunter-design-decisions.md#protocol-rows-shape`. The reference
+// (`working-docs/specs/005-protocol/SPEC-005-protocol.md:132-143`) and
+// delta #10 in `working-docs/shunter-design-decisions.md#protocol-rows-shape`. The reference
 // `BsatnRowList { size_hint: RowSizeHint, rows_data: Bytes }` layout
 // is deliberately deferred to v2.
 func TestShunterRowsShapeRowListFormatReference(t *testing.T) {

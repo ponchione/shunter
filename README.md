@@ -143,8 +143,13 @@ Shunter tool/runtime release version.
 For human orientation, start with:
 
 1. `README.md` - project overview and current status
-2. `docs/README.md` - guide to the intentionally small docs tree
-3. `docs/shunter-design-decisions.md` - current design notes and tradeoffs
+2. `docs/README.md` - guide to the app-author and codebase docs tree
+3. `docs/getting-started.md` - first-pass app-author path for embedding
+   Shunter
+
+For implementation planning context, use `working-docs/README.md`,
+`working-docs/shunter-design-decisions.md`, and the narrow
+`working-docs/specs/` section for the surface being touched.
 
 For implementation work, inspect the active packages directly:
 
@@ -160,8 +165,9 @@ For implementation work, inspect the active packages directly:
 For automation or agent-driven work, follow `AGENTS.md` and `RTK.md` before
 running commands or editing files.
 
-Current implementation-facing docs live under `docs/`; prefer live code, tests,
-and the narrow spec section for the surface being touched.
+App-author and codebase docs live under `docs/`. Implementation planning,
+baseline specs, audits, and roadmaps live under `working-docs/`. Prefer live
+code, tests, and the narrow spec section for the surface being touched.
 
 ## Validation
 

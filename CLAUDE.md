@@ -6,8 +6,9 @@ Read `RTK.md` first for command rules.
 
 - `README.md` = product and repo orientation
 - `docs/README.md` = current docs guide
-- `docs/specs/*/SPEC-*.md` = numbered subsystem contracts
-- `docs/shunter-design-decisions.md` = current implementation-facing decisions
+- `working-docs/specs/*/SPEC-*.md` = numbered subsystem contracts
+- `working-docs/shunter-design-decisions.md` = current implementation-facing
+  decisions
 - `reference/SpacetimeDB/` = read-only research input only
 
 ## Rules

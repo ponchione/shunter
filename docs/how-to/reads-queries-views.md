@@ -1,6 +1,6 @@
 # Reads, Queries, And Views
 
-Status: rough draft
+Status: current v1 app-author guidance
 Scope: local committed reads, declared queries, and declared live views.
 
 Shunter has three app-facing read paths:
@@ -11,6 +11,10 @@ Shunter has three app-facing read paths:
 
 The protocol path exposes corresponding raw and declared read behavior to
 external clients when protocol serving is enabled.
+
+Use local reads for app-internal code. Use declared queries and views when the
+read surface is part of the app contract, should be permissioned by name, or
+should appear in generated clients.
 
 ## Local Committed Reads
 
@@ -119,7 +123,8 @@ clients receive ongoing transaction updates through the protocol path.
 Shunter's SQL surface is intentionally narrow. Do not treat it as broad SQL
 database compatibility.
 
-Use `docs/v1-compatibility.md` as the current support matrix for:
+Use [v1 compatibility](../v1-compatibility.md) as the current support matrix
+for:
 
 - one-off raw SQL
 - declared queries
@@ -139,6 +144,10 @@ declared-read permissions with `WithDeclaredReadPermissions`, or use
 In dev auth mode, local declared-read calls allow all permissions unless the
 caller explicitly supplies permissions. Strict mode removes that default
 allow-all behavior.
+
+Use `WithDeclaredReadAuthPrincipal`, `WithDeclaredReadIdentity`, and
+`WithDeclaredReadConnectionID` when a trusted in-process adapter has already
+authenticated the caller outside the protocol path.
 
 ## Visibility
 

@@ -1,6 +1,6 @@
 # Module Anatomy
 
-Status: rough draft
+Status: current v1 app-author guidance
 Scope: declaring app modules through the root `shunter` package.
 
 A Shunter module is the app-owned declaration that becomes a runtime. Keep the
@@ -40,6 +40,25 @@ The most common module methods are:
 
 Blank module names are allowed at construction time and rejected by `Build`.
 
+## Declaration Order And IDs
+
+The schema builder assigns table and index IDs from the validated module
+declaration. Handwritten code that calls reducer DB or local read APIs still
+needs those IDs.
+
+Keep table and index ID constants near their declarations until generated app
+helpers cover this path:
+
+```go
+const (
+	messagesTableID          schema.TableID = 0
+	messagesByChannelIndexID schema.IndexID = 1
+)
+```
+
+Update these constants deliberately when table or index order changes, and
+review the exported contract as part of the change.
+
 ## Tables
 
 Declare tables with `schema.TableDefinition`.
@@ -63,9 +82,9 @@ func messagesTable() schema.TableDefinition {
 }
 ```
 
-Primary-key columns synthesize a unique primary-key index. Do not repeat the
-same primary-key access path as a secondary index unless a future schema need
-explicitly requires it.
+Primary-key columns synthesize a unique primary-key index before declared
+secondary indexes. Do not repeat the same primary-key access path as a
+secondary index unless a future schema need explicitly requires it.
 
 Add secondary indexes for access paths that matter:
 
@@ -93,6 +112,19 @@ mod.Reducer("send_message", sendMessage, shunter.WithReducerPermissions(
 Permission metadata is passive until a runtime path checks it. Attach it during
 module declaration so contracts and generated clients see the intended access
 surface.
+
+## Lifecycle Hooks
+
+`OnConnect` and `OnDisconnect` register app callbacks for protocol connection
+lifecycle events. They receive a reducer context, so the same reducer rules
+apply: do not retain the context, do not use it from another goroutine, and do
+not run long blocking work on the executor path.
+
+`MigrationHook` registers startup migration code for the module. Hooks run as
+app-owned migrations during startup or through offline maintenance tooling; keep
+them idempotent and take backups before data-rewrite migrations. See
+[Persistence and shutdown](persistence-and-shutdown.md) for the operational
+flow.
 
 ## Declared Queries
 
@@ -150,6 +182,14 @@ mod.VisibilityFilter(shunter.VisibilityFilterDeclaration{
 Use visibility filters for data that should always be narrowed by caller
 identity. Use permission metadata for admission decisions such as "can this
 caller use this read surface at all?"
+
+## Metadata And Migrations
+
+`Metadata` stores app-owned string metadata in the exported contract.
+`Migration` and `TableMigration` attach descriptive migration metadata to the
+contract; they do not rewrite data by themselves. Use `MigrationHook` for
+app-owned migration code and the offline helpers in the persistence guide for
+preflight and migration runs.
 
 ## Build Snapshot
 

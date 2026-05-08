@@ -1,10 +1,11 @@
 # Read Surface Reference
 
-Status: rough draft
+Status: current v1 reference note
 Scope: choosing among Shunter's app-facing read surfaces.
 
-The authoritative support matrix is `docs/v1-compatibility.md`. This page is a
-short decision guide.
+The authoritative support matrix is
+[v1 compatibility](../v1-compatibility.md). This page is a short decision
+guide.
 
 ## Which Read Should I Use?
 
@@ -60,8 +61,13 @@ narrow which rows that caller can see.
 Use both when a surface should be admitted only for certain callers and then
 row-filtered by identity.
 
+Table read policies apply to external raw SQL table reads. Declared queries and
+views should carry their own `PermissionMetadata` when they are app-facing
+contract surfaces.
+
 ## SQL Compatibility
 
 Shunter's SQL support is intentionally narrow and read-oriented. Supported
-shapes differ by read surface. Check `docs/v1-compatibility.md` before relying
-on a SQL feature in an app contract.
+shapes differ by read surface. Check
+[v1 compatibility](../v1-compatibility.md) before relying on a SQL feature in
+an app contract.

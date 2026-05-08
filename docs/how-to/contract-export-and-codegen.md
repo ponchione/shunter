@@ -1,6 +1,6 @@
 # Contract Export And Codegen
 
-Status: rough draft
+Status: current v1 app-author guidance
 Scope: exporting module contracts, reviewing compatibility, and generating
 client bindings.
 
@@ -15,6 +15,7 @@ metadata, and codegen metadata.
 
 The generic Shunter CLI does not dynamically load app modules. Export contracts
 from a binary or test that links the app module and builds the runtime.
+Starting the runtime is not required for contract export.
 
 ```go
 rt, err := shunter.Build(app.Module(), shunter.Config{
@@ -77,6 +78,10 @@ rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --lan
 Generated TypeScript currently includes row interfaces, table metadata,
 declared-read constants and helpers, reducer helper functions, permission
 metadata, read-model metadata, and protocol metadata.
+
+Generated helpers are contract-driven client bindings. They do not replace the
+application's reducer argument/result encoding choice; keep that encoding
+consistent across local calls, protocol clients, and tests.
 
 ## What Contracts Are Good For
 

@@ -190,14 +190,13 @@ Explicitly out of scope for v1:
 
 Resolved in this slice:
 
-- The app-author guide said live views reject column projections and
-  aggregates. Current code and tests support declared live-view column
-  projections and narrow single-table `COUNT` aggregates
+- Current code and tests support declared live-view column projections and
+  narrow single-table `COUNT` aggregates
   (`declared_read.go`, `declared_read_catalog.go`,
   `subscription/projection.go`, `subscription/aggregate.go`,
-  `declared_read_test.go`, and `subscription/aggregate_test.go`), so
-  `docs/how-to-use-shunter.md` now documents that support and the remaining
-  rejections.
+  `declared_read_test.go`, and `subscription/aggregate_test.go`), so the
+  focused read docs now point readers to this support matrix for exact
+  accepted and rejected shapes.
 
 Current code and docs now agree that declared live views accept single-table
 `ORDER BY`, `LIMIT`, and `OFFSET` initial snapshots for table-shaped and

@@ -12,11 +12,6 @@ They are intended to cover the comparable engine kernel:
 - subscription evaluation and fan-out
 - client protocol / websocket delivery
 
-Application-driven generic follow-on work is tracked in
-`docs/specs/application-readiness-generic-capabilities.md`. That file is an
-implementation planning spec for reusable Shunter capabilities, not an
-application-specific roadmap.
-
 They do **not** attempt full SpacetimeDB product compatibility.
 
 Out of scope unless a spec says otherwise:

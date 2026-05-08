@@ -1,6 +1,6 @@
 # Testing Shunter Modules
 
-Status: rough draft
+Status: current v1 app-author guidance
 Scope: testing app modules that embed Shunter.
 
 Most Shunter app behavior can be tested through the root runtime API. Prefer
@@ -75,6 +75,10 @@ if len(result.Rows) != 1 {
 Attach permission metadata to reducers, queries, views, and tables. Then test
 allowed and denied callers through the same runtime path the app uses.
 
+In dev mode, local calls without explicit permissions allow all permissions.
+To test denial, pass an explicit permission set that does not satisfy the
+declared requirement.
+
 ```go
 _, err := rt.CallQuery(
 	ctx,
@@ -87,7 +91,8 @@ if err == nil {
 ```
 
 For strict auth behavior over the protocol path, configure `AuthModeStrict` and
-use real signed tokens in integration tests. See `docs/authentication.md`.
+use real signed tokens in integration tests. See
+[Authentication](../authentication.md).
 
 ## Test Contract Output
 
