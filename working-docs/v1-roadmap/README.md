@@ -194,7 +194,7 @@ Current benchmark coverage:
 | Workload area | Benchmarks | Status |
 | --- | --- | --- |
 | Protocol compression | `BenchmarkWrapCompressedGzip`, `BenchmarkUnwrapCompressedGzip` | covered |
-| Commitlog snapshot and log recovery | `BenchmarkCreateSnapshotLarge`, `BenchmarkReplayLogSegmentedLog`, `BenchmarkOpenAndRecoverSegmentedLog` | covered for snapshot creation plus segmented log replay/recovery without snapshots |
+| Commitlog snapshot and log recovery | `BenchmarkCreateSnapshotLarge`, `BenchmarkOpenAndRecoverSnapshotOnly`, `BenchmarkOpenAndRecoverSnapshotWithTailReplay`, `BenchmarkReplayLogSegmentedLog`, `BenchmarkOpenAndRecoverSegmentedLog` | covered for snapshot creation, snapshot-only recovery, snapshot-plus-tail recovery, and segmented log replay/recovery without snapshots |
 | Reducer write path | `BenchmarkExecutorReducerCommitRoundTrip` | partial; needs throughput fixtures |
 | Scheduler scans | `BenchmarkSchedulerScanEnqueue` | covered for enqueue scan hot path |
 | One-off SQL | `BenchmarkExecuteCompiledSQLQueryCommonPaths`, `BenchmarkExecuteCompiledSQLQueryJoinReadShapes` | covered for common single-table, join, multi-way aggregate, projection, ordering, and limit paths |
@@ -206,7 +206,6 @@ Current benchmark coverage:
 
 Known benchmark gaps for v1 envelopes:
 
-- snapshot recovery and restore latency
 - WebSocket network-level subscription workloads beyond handler admission
 - fanout with varied query shapes across many clients
 - external canary workload and backup/restore workflow
