@@ -860,6 +860,51 @@ await nextTurn();
 assert.equal(rejectAfterClosePendingTokenSockets.length, 0);
 assert.equal(rejectAfterClosePendingTokenClient.state.status, "closed");
 
+const reconnectWhileOldTokenPendingSockets = [];
+const reconnectWhileOldTokenPendingResolvers = [];
+let reconnectWhileOldTokenPendingCalls = 0;
+const reconnectWhileOldTokenPendingClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => {
+    reconnectWhileOldTokenPendingCalls += 1;
+    return new Promise((resolve) => {
+      reconnectWhileOldTokenPendingResolvers.push(resolve);
+    });
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectWhileOldTokenPendingSockets.push(socket);
+    return socket;
+  },
+});
+const staleTokenConnect = reconnectWhileOldTokenPendingClient.connect();
+await nextTurn();
+const staleTokenClosed = reconnectWhileOldTokenPendingClient.close(4002, "caller closed before token");
+await assert.rejects(
+  staleTokenConnect,
+  ShunterClosedClientError,
+);
+await staleTokenClosed;
+assert.equal(reconnectWhileOldTokenPendingClient.state.status, "closed");
+const freshTokenConnect = reconnectWhileOldTokenPendingClient.connect();
+await nextTurn();
+assert.equal(reconnectWhileOldTokenPendingCalls, 2);
+reconnectWhileOldTokenPendingResolvers[0]("stale-token");
+await nextTurn();
+assert.equal(reconnectWhileOldTokenPendingSockets.length, 0);
+assert.equal(reconnectWhileOldTokenPendingClient.state.status, "connecting");
+reconnectWhileOldTokenPendingResolvers[1]("fresh-token");
+await nextTurn();
+assert.equal(reconnectWhileOldTokenPendingSockets.length, 1);
+assert.equal(reconnectWhileOldTokenPendingSockets[0].url, "ws://127.0.0.1:3000/subscribe?token=fresh-token");
+reconnectWhileOldTokenPendingSockets[0].open();
+reconnectWhileOldTokenPendingSockets[0].message(identityTokenFrame({ token: "fresh-identity" }).buffer);
+const freshTokenMetadata = await freshTokenConnect;
+assert.equal(freshTokenMetadata.identityToken, "fresh-identity");
+assert.equal(reconnectWhileOldTokenPendingClient.state.status, "connected");
+await reconnectWhileOldTokenPendingClient.close();
+
 const disposePendingTokenSockets = [];
 let resolveDisposePendingToken;
 let disposePendingTokenCalls = 0;
