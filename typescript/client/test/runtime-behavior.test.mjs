@@ -1639,6 +1639,64 @@ assert.deepEqual(reconnectCloseHandle.state, {
 });
 assert.deepEqual(reconnectCloseStates, ["connecting", "connected", "reconnecting", "closing", "closed"]);
 
+const reconnectHandshakeCloseSockets = [];
+const reconnectHandshakeCloseStates = [];
+const reconnectHandshakeCloseClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectHandshakeCloseSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectHandshakeCloseStates.push(current.status),
+});
+const reconnectHandshakeCloseConnecting = reconnectHandshakeCloseClient.connect();
+await nextTurn();
+reconnectHandshakeCloseSockets[0].open();
+reconnectHandshakeCloseSockets[0].message(identityTokenFrame().buffer);
+await reconnectHandshakeCloseConnecting;
+const reconnectHandshakeCloseHandleSubscription = reconnectHandshakeCloseClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectHandshakeCloseSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectHandshakeCloseHandle = await reconnectHandshakeCloseHandleSubscription;
+assert.deepEqual(reconnectHandshakeCloseHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectHandshakeCloseSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+await nextTurn();
+assert.equal(reconnectHandshakeCloseClient.state.status, "connecting");
+assert.equal(reconnectHandshakeCloseSockets.length, 2);
+const observedHandshakeReconnect = reconnectHandshakeCloseClient.connect();
+const reconnectHandshakeClose = reconnectHandshakeCloseClient.close(4001, "caller stopped");
+await assert.rejects(observedHandshakeReconnect, ShunterClosedClientError);
+await reconnectHandshakeClose;
+assert.equal(reconnectHandshakeCloseClient.state.status, "closed");
+assert.deepEqual(reconnectHandshakeCloseSockets[1].closeCalls, [{ code: 4001, reason: "caller stopped" }]);
+const reconnectHandshakeClosed = await reconnectHandshakeCloseHandle.closed;
+assert.equal(reconnectHandshakeClosed.reason, "error");
+assert(reconnectHandshakeClosed.error instanceof ShunterClosedClientError);
+assert.deepEqual(reconnectHandshakeCloseHandle.state, {
+  status: "closed",
+  error: reconnectHandshakeClosed.error,
+});
+assert.deepEqual(reconnectHandshakeCloseStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "closing",
+  "closed",
+]);
+
 const reconnectUnsubscribeSockets = [];
 const reconnectUnsubscribeStates = [];
 const reconnectUnsubscribeClient = createShunterClient({
