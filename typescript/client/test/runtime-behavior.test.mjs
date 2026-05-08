@@ -758,6 +758,50 @@ await assert.rejects(asyncTokenFailureClient.connect(), (error) => {
 assert.equal(asyncTokenFailureClient.state.status, "failed");
 assert.equal(asyncTokenFailureFactoryCalls, 0);
 
+const preAbortedConnect = new AbortController();
+preAbortedConnect.abort();
+let preAbortedConnectFactoryCalls = 0;
+const preAbortedConnectClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  signal: preAbortedConnect.signal,
+  webSocketFactory: () => {
+    preAbortedConnectFactoryCalls += 1;
+    throw new Error("should not create socket");
+  },
+});
+await assert.rejects(preAbortedConnectClient.connect(), (error) => {
+  assert(error instanceof ShunterClosedClientError);
+  assert.equal(error.kind, "closed");
+  assert.match(error.message, /Connection aborted before opening/);
+  return true;
+});
+assert.equal(preAbortedConnectClient.state.status, "failed");
+assert.equal(preAbortedConnectFactoryCalls, 0);
+
+const asyncAbortConnect = new AbortController();
+let resolveAsyncAbortToken;
+let asyncAbortConnectFactoryCalls = 0;
+const asyncAbortConnectClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  signal: asyncAbortConnect.signal,
+  token: () => new Promise((resolve) => {
+    resolveAsyncAbortToken = resolve;
+  }),
+  webSocketFactory: () => {
+    asyncAbortConnectFactoryCalls += 1;
+    throw new Error("should not create socket");
+  },
+});
+const asyncAbortConnecting = asyncAbortConnectClient.connect();
+await nextTurn();
+asyncAbortConnect.abort();
+resolveAsyncAbortToken("too-late");
+await assert.rejects(asyncAbortConnecting, ShunterClosedClientError);
+assert.equal(asyncAbortConnectClient.state.status, "failed");
+assert.equal(asyncAbortConnectFactoryCalls, 0);
+
 const reconnectTokenSockets = [];
 let reconnectTokenCallsForFailure = 0;
 const reconnectTokenClient = createShunterClient({
