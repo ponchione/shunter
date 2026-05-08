@@ -142,8 +142,9 @@ Current gaps:
 - Fixed seed sets and regression corpus entries.
 - Broader crash/fault coverage across snapshot, compaction, migration, and
   shutdown boundaries.
-- More subscription correctness scenarios for joins, deletes, updates,
-  visibility changes, caller-specific subscriptions, and concurrent writes.
+- More subscription correctness scenarios for joins and concurrent writes.
+  Delete/update predicate deltas and caller-specific visibility transitions now
+  have root gauntlet coverage.
 - Soak/load tests that run outside the normal short local loop.
 - Maintained external reference-app workload in the release gate.
 

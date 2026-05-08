@@ -197,6 +197,92 @@ func TestRuntimeGauntletReadAuthorizationAllowAllBypassesPolicyAndVisibility(t *
 	assertReadAuthAuditRowsEqual(t, auditRows, []readAuthAuditRow{{ID: 1, Body: "audit seed"}}, "allow-all permissioned table")
 }
 
+func TestRuntimeGauntletReadAuthSubscriptionVisibilityTransitions(t *testing.T) {
+	signingKey := []byte("read-auth-gauntlet-signing-key")
+	rt := buildReadAuthGauntletRuntime(t, shunter.Config{
+		DataDir:        t.TempDir(),
+		AuthMode:       shunter.AuthModeStrict,
+		AuthSigningKey: signingKey,
+	})
+	defer rt.Close()
+
+	srv := httptest.NewServer(rt.HTTPHandler())
+	defer srv.Close()
+	url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/subscribe"
+
+	aliceQuery, aliceIdentity := dialReadAuthGauntletProtocol(t, url, signingKey, "alice")
+	defer aliceQuery.CloseNow()
+	bobQuery, bobIdentity := dialReadAuthGauntletProtocol(t, url, signingKey, "bob")
+	defer bobQuery.CloseNow()
+	aliceOwner := types.Identity(aliceIdentity.Identity).Hex()
+	bobOwner := types.Identity(bobIdentity.Identity).Hex()
+	seedReadAuthGauntletRows(t, rt, aliceOwner, bobOwner)
+
+	aliceSub, _ := dialReadAuthGauntletProtocol(t, url, signingKey, "alice")
+	defer aliceSub.CloseNow()
+	bobSub, _ := dialReadAuthGauntletProtocol(t, url, signingKey, "bob")
+	defer bobSub.CloseNow()
+
+	aliceInitial := subscribeReadAuthMessages(t, aliceSub, "SELECT * FROM messages", 301, 401, "visibility transition alice initial")
+	assertReadAuthMessageRowsEqual(t, aliceInitial, []readAuthMessageRow{
+		{ID: 2, Owner: aliceOwner, Channel: "shared", Body: "alice shared"},
+		{ID: 3, Owner: "public", Channel: "public", Body: "public notice"},
+	}, "visibility transition alice initial")
+	bobInitial := subscribeReadAuthMessages(t, bobSub, "SELECT * FROM messages", 302, 402, "visibility transition bob initial")
+	assertReadAuthMessageRowsEqual(t, bobInitial, []readAuthMessageRow{
+		{ID: 1, Owner: bobOwner, Channel: "shared", Body: "bob shared"},
+		{ID: 3, Owner: "public", Channel: "public", Body: "public notice"},
+	}, "visibility transition bob initial")
+
+	callReadAuthReducer(t, rt, "update_message_owner", "1", aliceOwner)
+	aliceDelta := readAuthSubscriptionDelta(t, aliceSub, 401, "messages", readAuthMessagesSchema(), "visibility transition bob to alice")
+	assertReadAuthMessageRowsEqual(t, readAuthMessageRowsFromValues(aliceDelta.inserts), []readAuthMessageRow{
+		{ID: 1, Owner: aliceOwner, Channel: "shared", Body: "bob shared"},
+	}, "visibility transition bob to alice alice inserts")
+	assertReadAuthMessageRowsEqual(t, readAuthMessageRowsFromValues(aliceDelta.deletes), []readAuthMessageRow{}, "visibility transition bob to alice alice deletes")
+	bobDelta := readAuthSubscriptionDelta(t, bobSub, 402, "messages", readAuthMessagesSchema(), "visibility transition bob to alice")
+	assertReadAuthMessageRowsEqual(t, readAuthMessageRowsFromValues(bobDelta.inserts), []readAuthMessageRow{}, "visibility transition bob to alice bob inserts")
+	assertReadAuthMessageRowsEqual(t, readAuthMessageRowsFromValues(bobDelta.deletes), []readAuthMessageRow{
+		{ID: 1, Owner: bobOwner, Channel: "shared", Body: "bob shared"},
+	}, "visibility transition bob to alice bob deletes")
+
+	callReadAuthReducer(t, rt, "update_message_owner", "2", "public")
+	aliceDelta = readAuthSubscriptionDelta(t, aliceSub, 401, "messages", readAuthMessagesSchema(), "visibility transition alice to public")
+	assertReadAuthMessageRowsEqual(t, readAuthMessageRowsFromValues(aliceDelta.inserts), []readAuthMessageRow{
+		{ID: 2, Owner: "public", Channel: "shared", Body: "alice shared"},
+	}, "visibility transition alice to public alice inserts")
+	assertReadAuthMessageRowsEqual(t, readAuthMessageRowsFromValues(aliceDelta.deletes), []readAuthMessageRow{
+		{ID: 2, Owner: aliceOwner, Channel: "shared", Body: "alice shared"},
+	}, "visibility transition alice to public alice deletes")
+	bobDelta = readAuthSubscriptionDelta(t, bobSub, 402, "messages", readAuthMessagesSchema(), "visibility transition alice to public")
+	assertReadAuthMessageRowsEqual(t, readAuthMessageRowsFromValues(bobDelta.inserts), []readAuthMessageRow{
+		{ID: 2, Owner: "public", Channel: "shared", Body: "alice shared"},
+	}, "visibility transition alice to public bob inserts")
+	assertReadAuthMessageRowsEqual(t, readAuthMessageRowsFromValues(bobDelta.deletes), []readAuthMessageRow{}, "visibility transition alice to public bob deletes")
+
+	callReadAuthReducer(t, rt, "delete_message", "3")
+	aliceDelta = readAuthSubscriptionDelta(t, aliceSub, 401, "messages", readAuthMessagesSchema(), "visibility transition delete public")
+	assertReadAuthMessageRowsEqual(t, readAuthMessageRowsFromValues(aliceDelta.inserts), []readAuthMessageRow{}, "visibility transition delete public alice inserts")
+	assertReadAuthMessageRowsEqual(t, readAuthMessageRowsFromValues(aliceDelta.deletes), []readAuthMessageRow{
+		{ID: 3, Owner: "public", Channel: "public", Body: "public notice"},
+	}, "visibility transition delete public alice deletes")
+	bobDelta = readAuthSubscriptionDelta(t, bobSub, 402, "messages", readAuthMessagesSchema(), "visibility transition delete public")
+	assertReadAuthMessageRowsEqual(t, readAuthMessageRowsFromValues(bobDelta.inserts), []readAuthMessageRow{}, "visibility transition delete public bob inserts")
+	assertReadAuthMessageRowsEqual(t, readAuthMessageRowsFromValues(bobDelta.deletes), []readAuthMessageRow{
+		{ID: 3, Owner: "public", Channel: "public", Body: "public notice"},
+	}, "visibility transition delete public bob deletes")
+
+	aliceFinal := queryReadAuthMessages(t, aliceQuery, "SELECT * FROM messages", []byte("visibility-transition-alice-final"), "visibility transition alice final")
+	assertReadAuthMessageRowsEqual(t, aliceFinal, []readAuthMessageRow{
+		{ID: 1, Owner: aliceOwner, Channel: "shared", Body: "bob shared"},
+		{ID: 2, Owner: "public", Channel: "shared", Body: "alice shared"},
+	}, "visibility transition alice final")
+	bobFinal := queryReadAuthMessages(t, bobQuery, "SELECT * FROM messages", []byte("visibility-transition-bob-final"), "visibility transition bob final")
+	assertReadAuthMessageRowsEqual(t, bobFinal, []readAuthMessageRow{
+		{ID: 2, Owner: "public", Channel: "shared", Body: "alice shared"},
+	}, "visibility transition bob final")
+}
+
 func buildReadAuthGauntletRuntime(t *testing.T, cfg shunter.Config) *shunter.Runtime {
 	t.Helper()
 	cfg.EnableProtocol = true
@@ -229,6 +315,8 @@ func buildReadAuthGauntletRuntime(t *testing.T, cfg shunter.Config) *shunter.Run
 			Permissions: shunter.PermissionMetadata{Required: []string{"secrets:subscribe"}},
 		}).
 		Reducer("insert_message", readAuthInsertMessageReducer).
+		Reducer("update_message_owner", readAuthUpdateMessageOwnerReducer).
+		Reducer("delete_message", readAuthDeleteMessageReducer).
 		Reducer("insert_secret", readAuthInsertSecretReducer).
 		Reducer("insert_audit", readAuthInsertAuditReducer).
 		Reducer("insert_profile", readAuthInsertProfileReducer)
@@ -449,6 +537,49 @@ func readAuthInsertMessageReducer(ctx *schema.ReducerContext, args []byte) ([]by
 		types.NewString(parts[3]),
 	})
 	return nil, err
+}
+
+func readAuthUpdateMessageOwnerReducer(ctx *schema.ReducerContext, args []byte) ([]byte, error) {
+	parts, err := readAuthParseArgs(args, 2)
+	if err != nil {
+		return nil, err
+	}
+	id, err := strconv.ParseUint(parts[0], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse message id: %w", err)
+	}
+	rowID, row, ok := findReadAuthMessage(ctx, id)
+	if !ok {
+		return nil, fmt.Errorf("message %d not found", id)
+	}
+	_, err = ctx.DB.Update(uint32(readAuthMessagesTableID), rowID, types.ProductValue{
+		types.NewUint64(id),
+		types.NewString(parts[1]),
+		types.NewString(row[2].AsString()),
+		types.NewString(row[3].AsString()),
+	})
+	return nil, err
+}
+
+func readAuthDeleteMessageReducer(ctx *schema.ReducerContext, args []byte) ([]byte, error) {
+	id, err := strconv.ParseUint(string(args), 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse message id: %w", err)
+	}
+	rowID, _, ok := findReadAuthMessage(ctx, id)
+	if !ok {
+		return nil, fmt.Errorf("message %d not found", id)
+	}
+	return nil, ctx.DB.Delete(uint32(readAuthMessagesTableID), rowID)
+}
+
+func findReadAuthMessage(ctx *schema.ReducerContext, id uint64) (types.RowID, types.ProductValue, bool) {
+	for rowID, row := range ctx.DB.ScanTable(uint32(readAuthMessagesTableID)) {
+		if row[0].AsUint64() == id {
+			return rowID, row.Copy(), true
+		}
+	}
+	return 0, nil, false
 }
 
 func readAuthInsertSecretReducer(ctx *schema.ReducerContext, args []byte) ([]byte, error) {
