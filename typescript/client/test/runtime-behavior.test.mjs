@@ -1264,6 +1264,60 @@ assert.deepEqual(activeCloseHandle.state, {
   error: activeClosed.error,
 });
 
+const unexpectedCloseSockets = [];
+const unexpectedCloseStates = [];
+const unexpectedCloseClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    unexpectedCloseSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => unexpectedCloseStates.push(current.status),
+});
+const unexpectedCloseConnecting = unexpectedCloseClient.connect();
+await nextTurn();
+unexpectedCloseSockets[0].open();
+unexpectedCloseSockets[0].message(identityTokenFrame().buffer);
+await unexpectedCloseConnecting;
+const unexpectedCloseHandleSubscription = unexpectedCloseClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+unexpectedCloseSockets[0].message(subscribeSingleAppliedFrame);
+const unexpectedCloseHandle = await unexpectedCloseHandleSubscription;
+assert.deepEqual(unexpectedCloseHandle.state, { status: "active", rows: ["1-2", "3"] });
+const unexpectedCloseReducer = unexpectedCloseClient.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+});
+const unexpectedCloseQuery = unexpectedCloseClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x09, 0x08]),
+});
+assert.equal(unexpectedCloseSockets[0].sent.length, 3);
+unexpectedCloseSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(unexpectedCloseClient.state.status, "closed");
+const unexpectedCloseError = unexpectedCloseClient.state.error;
+assert(unexpectedCloseError instanceof ShunterClosedClientError);
+assert.equal(unexpectedCloseError.code, "1006");
+assert.deepEqual(unexpectedCloseError.details, { reason: "lost", wasClean: false });
+const assertUnexpectedCloseError = (error) => {
+  assert.strictEqual(error, unexpectedCloseError);
+  return true;
+};
+await assert.rejects(unexpectedCloseReducer, assertUnexpectedCloseError);
+await assert.rejects(unexpectedCloseQuery, assertUnexpectedCloseError);
+const unexpectedClosed = await unexpectedCloseHandle.closed;
+assert.equal(unexpectedClosed.reason, "error");
+assert.strictEqual(unexpectedClosed.error, unexpectedCloseError);
+assert.deepEqual(unexpectedCloseHandle.state, {
+  status: "closed",
+  error: unexpectedCloseError,
+});
+assert.deepEqual(unexpectedCloseStates, ["connecting", "connected", "closed"]);
+
 const abortSockets = [];
 const abortFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);
