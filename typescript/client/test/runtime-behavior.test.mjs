@@ -2016,6 +2016,45 @@ requestSendFailureSockets[0].message(oneOffSuccessFrame);
 assert.deepEqual(await recoveredQuerySend, oneOffSuccessFrame);
 await requestSendFailureClient.close();
 
+const noNotifySendFailureSockets = [];
+const noNotifySendFailureClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    noNotifySendFailureSockets.push(socket);
+    return socket;
+  },
+});
+const noNotifySendFailureConnecting = noNotifySendFailureClient.connect();
+await nextTurn();
+noNotifySendFailureSockets[0].open();
+noNotifySendFailureSockets[0].message(identityTokenFrame().buffer);
+await noNotifySendFailureConnecting;
+const originalNoNotifySend = noNotifySendFailureSockets[0].send.bind(noNotifySendFailureSockets[0]);
+noNotifySendFailureSockets[0].send = () => {
+  throw new Error("no notify send denied");
+};
+await assert.rejects(
+  noNotifySendFailureClient.callReducer("send", new Uint8Array([0xaa]), {
+    requestId: 0x31323334,
+    noSuccessNotify: true,
+  }),
+  (error) => {
+    assert.equal(error.kind, "transport");
+    assert.match(error.message, /no notify send denied/);
+    return true;
+  },
+);
+assert.equal(noNotifySendFailureClient.state.status, "connected");
+noNotifySendFailureSockets[0].send = originalNoNotifySend;
+const recoveredNoNotifyReducerSend = noNotifySendFailureClient.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+});
+noNotifySendFailureSockets[0].message(committedUpdateFrame);
+assert.deepEqual(await recoveredNoNotifyReducerSend, committedUpdateFrame);
+await noNotifySendFailureClient.close();
+
 const reconnectSockets = [];
 const reconnectFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);
