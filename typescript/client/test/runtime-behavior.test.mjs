@@ -2201,6 +2201,81 @@ assert.deepEqual(transportErrorHandle.state, {
 });
 assert.deepEqual(transportErrorStates, ["connecting", "connected", "failed"]);
 
+const unknownFrameSockets = [];
+const unknownFrameStates = [];
+const unknownFrameClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    unknownFrameSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => unknownFrameStates.push(current.status),
+});
+const unknownFrameConnecting = unknownFrameClient.connect();
+await nextTurn();
+unknownFrameSockets[0].open();
+unknownFrameSockets[0].message(identityTokenFrame().buffer);
+await unknownFrameConnecting;
+const unknownFrameHandleSubscription = unknownFrameClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+unknownFrameSockets[0].message(subscribeSingleAppliedFrame);
+const unknownFrameHandle = await unknownFrameHandleSubscription;
+assert.deepEqual(unknownFrameHandle.state, { status: "active", rows: ["1-2", "3"] });
+const unknownFrameReducer = unknownFrameClient.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+});
+const unknownFrameQuery = unknownFrameClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x09, 0x08]),
+});
+unknownFrameSockets[0].message(new Uint8Array([0xff, 0x01]).buffer);
+assert.equal(unknownFrameClient.state.status, "failed");
+const unknownFrameError = unknownFrameClient.state.error;
+assert(unknownFrameError instanceof ShunterProtocolError);
+assert.equal(unknownFrameError.kind, "protocol");
+assert.equal(unknownFrameError.code, "unsupported_server_message");
+assert.deepEqual(unknownFrameError.details, { tag: 0xff });
+assert.deepEqual(unknownFrameSockets[0].closeCalls, [{ code: 1000, reason: "protocol failure" }]);
+const assertUnknownFrameError = (error) => {
+  assert.strictEqual(error, unknownFrameError);
+  return true;
+};
+await assert.rejects(unknownFrameReducer, assertUnknownFrameError);
+await assert.rejects(unknownFrameQuery, assertUnknownFrameError);
+const unknownFrameClosed = await unknownFrameHandle.closed;
+assert.equal(unknownFrameClosed.reason, "error");
+assert.strictEqual(unknownFrameClosed.error, unknownFrameError);
+assert.deepEqual(unknownFrameHandle.state, {
+  status: "closed",
+  error: unknownFrameError,
+});
+assert.deepEqual(unknownFrameStates, ["connecting", "connected", "failed"]);
+
+const emptyFrameSockets = [];
+const emptyFrameClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    emptyFrameSockets.push(socket);
+    return socket;
+  },
+});
+const emptyFrameConnecting = emptyFrameClient.connect();
+await nextTurn();
+emptyFrameSockets[0].open();
+emptyFrameSockets[0].message(identityTokenFrame().buffer);
+await emptyFrameConnecting;
+emptyFrameSockets[0].message(new Uint8Array().buffer);
+assert.equal(emptyFrameClient.state.status, "failed");
+assert(emptyFrameClient.state.error instanceof ShunterProtocolError);
+assert.equal(emptyFrameClient.state.error.code, "missing_server_message_tag");
+
 const abortSockets = [];
 const abortFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);

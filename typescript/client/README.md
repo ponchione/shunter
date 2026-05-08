@@ -65,6 +65,8 @@ injected WebSocket factory for Node tests or host-specific transports.
 `connect()` resolves after the first server frame is decoded as an
 `IdentityToken`. Passing `reconnect: { enabled: true }` reconnects unexpected
 transport failures with configurable bounded backoff.
+Unsupported or malformed connected server frames fail the client as protocol
+errors, rejecting pending operations and closing active managed handles.
 Full-update `callReducer()` calls currently resolve with the raw
 `TransactionUpdate` response frame on committed status and reject on failed
 status. `NoSuccessNotify` calls resolve after send because successful server

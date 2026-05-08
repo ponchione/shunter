@@ -1301,6 +1301,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       failConnected(isShunterError(error) ? error : toShunterError(error, "protocol", "Decode server frame failed"));
       return;
     }
+    if (frame.length === 0) {
+      failConnected(new ShunterProtocolError("Server frame did not include a message tag.", {
+        code: "missing_server_message_tag",
+      }));
+      return;
+    }
     try {
       switch (frame[0]) {
         case SHUNTER_SERVER_MESSAGE_SUBSCRIBE_SINGLE_APPLIED:
@@ -1336,6 +1342,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           );
           return;
         default:
+          failConnected(new ShunterProtocolError("Server sent an unsupported Shunter message.", {
+            code: "unsupported_server_message",
+            details: { tag: frame[0] },
+          }));
           return;
       }
     } catch (error) {
