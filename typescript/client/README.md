@@ -78,7 +78,8 @@ Full-update `callReducer()` calls currently resolve with the raw
 `TransactionUpdate` response frame on committed status and reject on failed
 status. `NoSuccessNotify` calls resolve after send because successful server
 echoes may be suppressed. Reducer calls reject explicit request IDs that are
-already awaiting a full-update response. Generated helpers can use `decodeReducerCallResult()`
+already awaiting a full-update response, and auto-generated reducer request IDs
+skip in-flight reducer requests. Generated helpers can use `decodeReducerCallResult()`
 or `callReducerWithResult()` to wrap heavy transaction update frames in a
 reducer name/request ID/status envelope; connected-client reducer failures are
 converted into failed result envelopes on that path. Typed reducer callers can use
@@ -89,6 +90,7 @@ exports those schemas.
 `runDeclaredQuery()` currently resolves with the raw `OneOffQueryResponse`
 frame on success and rejects on response errors. Consumers that want a typed raw
 envelope can pass that frame to `decodeRawDeclaredQueryResult()`.
+Auto-generated declared-query message IDs skip in-flight query responses.
 `subscribeDeclaredView()` currently resolves after `SubscribeMultiApplied`,
 rejects on `SubscriptionError`, and returns an unsubscribe function that sends
 one `UnsubscribeMulti` frame for repeated calls and resolves after the matching

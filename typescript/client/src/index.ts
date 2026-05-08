@@ -665,6 +665,32 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     return queryId;
   };
 
+  const allocateReducerRequestId = (): RequestID => {
+    const attempts = Math.min(maxUint32, pendingReducerCalls.size + 1);
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const requestId = allocateRequestId();
+      if (!pendingReducerCalls.has(requestId)) {
+        return requestId;
+      }
+    }
+    throw new ShunterValidationError("No reducer request IDs are available.", {
+      code: "reducer_request_ids_exhausted",
+    });
+  };
+
+  const allocateDeclaredQueryRequestId = (): RequestID => {
+    const attempts = Math.min(maxUint32, pendingDeclaredQueries.size + 1);
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const requestId = allocateRequestId();
+      if (!pendingDeclaredQueries.has(bytesKey(requestIdMessageId(requestId)))) {
+        return requestId;
+      }
+    }
+    throw new ShunterValidationError("No declared query message IDs are available.", {
+      code: "declared_query_message_ids_exhausted",
+    });
+  };
+
   const settleReducerResponse = (update: TransactionUpdateMessage): void => {
     const { requestId, name } = update.reducerCall;
     const pending = pendingReducerCalls.get(requestId);
@@ -1690,7 +1716,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       }
       const request = encodeReducerCallRequest(name, args, {
         ...options,
-        requestId: options.requestId ?? allocateRequestId(),
+        requestId: options.requestId ?? allocateReducerRequestId(),
       });
       if (pendingReducerCalls.has(request.requestId)) {
         throw new ShunterValidationError("Reducer request ID is already in flight.", {
@@ -1747,7 +1773,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       }
       const request = encodeDeclaredQueryRequest(name, {
         ...options,
-        requestId: options.messageId === undefined ? options.requestId ?? allocateRequestId() : options.requestId,
+        requestId: options.messageId === undefined
+          ? options.requestId ?? allocateDeclaredQueryRequestId()
+          : options.requestId,
       });
       const messageKey = bytesKey(request.messageId);
       if (pendingDeclaredQueries.has(messageKey)) {

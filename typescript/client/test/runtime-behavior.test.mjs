@@ -1394,6 +1394,39 @@ assert.equal(sockets[0].sent.length, 1);
 sockets[0].message(committedUpdateFrame);
 assert.deepEqual(await reducerResponse, committedUpdateFrame);
 
+const autoReducerIdSockets = [];
+const autoReducerIdClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/reducers",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    autoReducerIdSockets.push(socket);
+    return socket;
+  },
+});
+const autoReducerIdConnecting = autoReducerIdClient.connect();
+await nextTurn();
+autoReducerIdSockets[0].open();
+autoReducerIdSockets[0].message(identityTokenFrame().buffer);
+await autoReducerIdConnecting;
+const explicitLowReducerRequest = autoReducerIdClient.callReducer("send", new Uint8Array([0x01]), {
+  requestId: 1,
+});
+assert.deepEqual(
+  autoReducerIdSockets[0].sent[0],
+  encodeReducerCallRequest("send", new Uint8Array([0x01]), { requestId: 1 }).frame,
+);
+const autoAllocatedReducerRequest = autoReducerIdClient.callReducer("send", new Uint8Array([0x02]));
+assert.equal(autoReducerIdSockets[0].sent.length, 2);
+assert.deepEqual(
+  autoReducerIdSockets[0].sent[1],
+  encodeReducerCallRequest("send", new Uint8Array([0x02]), { requestId: 2 }).frame,
+);
+const autoReducerIdClosing = autoReducerIdClient.close();
+await assert.rejects(explicitLowReducerRequest, ShunterClosedClientError);
+await assert.rejects(autoAllocatedReducerRequest, ShunterClosedClientError);
+await autoReducerIdClosing;
+
 const reducerFailure = client.callReducer("send", new Uint8Array(), {
   requestId: 0x21222324,
 });
@@ -1446,6 +1479,40 @@ const declaredQueryFailure = client.runDeclaredQuery("recent_users", {
 assert.equal(sockets[0].sent.length, 6);
 sockets[0].message(oneOffErrorFrame);
 await assert.rejects(declaredQueryFailure, ShunterValidationError);
+
+const autoQueryIdSockets = [];
+const autoQueryIdClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/query",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    autoQueryIdSockets.push(socket);
+    return socket;
+  },
+});
+const autoQueryIdConnecting = autoQueryIdClient.connect();
+await nextTurn();
+autoQueryIdSockets[0].open();
+autoQueryIdSockets[0].message(identityTokenFrame().buffer);
+await autoQueryIdConnecting;
+const explicitLowMessageId = new Uint8Array([1, 0, 0, 0]);
+const explicitLowDeclaredQuery = autoQueryIdClient.runDeclaredQuery("recent_users", {
+  messageId: explicitLowMessageId,
+});
+assert.deepEqual(
+  autoQueryIdSockets[0].sent[0],
+  encodeDeclaredQueryRequest("recent_users", { messageId: explicitLowMessageId }).frame,
+);
+const autoAllocatedDeclaredQuery = autoQueryIdClient.runDeclaredQuery("recent_users");
+assert.equal(autoQueryIdSockets[0].sent.length, 2);
+assert.deepEqual(
+  autoQueryIdSockets[0].sent[1],
+  encodeDeclaredQueryRequest("recent_users", { requestId: 2 }).frame,
+);
+const autoQueryIdClosing = autoQueryIdClient.close();
+await assert.rejects(explicitLowDeclaredQuery, ShunterClosedClientError);
+await assert.rejects(autoAllocatedDeclaredQuery, ShunterClosedClientError);
+await autoQueryIdClosing;
 
 const declaredViewRawUpdates = [];
 const declaredViewSubscription = client.subscribeDeclaredView("live_users", {
