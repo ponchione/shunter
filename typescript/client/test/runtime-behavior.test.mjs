@@ -1709,3 +1709,66 @@ assert.deepEqual(reconnectAuthStates, [
   "failed",
   "closed",
 ]);
+
+const reconnectFactoryFailureSockets = [];
+const reconnectFactoryFailureStates = [];
+let reconnectFactoryFailureCalls = 0;
+const reconnectFactoryFailureClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    reconnectFactoryFailureCalls += 1;
+    if (reconnectFactoryFailureCalls > 1) {
+      throw new Error("factory offline");
+    }
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectFactoryFailureSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectFactoryFailureStates.push(current.status),
+});
+const reconnectFactoryFailureConnecting = reconnectFactoryFailureClient.connect();
+await nextTurn();
+reconnectFactoryFailureSockets[0].open();
+reconnectFactoryFailureSockets[0].message(identityTokenFrame().buffer);
+await reconnectFactoryFailureConnecting;
+const reconnectFactoryFailureHandleSubscription = reconnectFactoryFailureClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectFactoryFailureSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectFactoryFailureHandle = await reconnectFactoryFailureHandleSubscription;
+assert.deepEqual(reconnectFactoryFailureHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectFactoryFailureSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectFactoryFailureClient.state.status, "reconnecting");
+await nextTurn();
+await nextTurn();
+assert.equal(reconnectFactoryFailureCalls, 2);
+assert.equal(reconnectFactoryFailureSockets.length, 1);
+assert.equal(reconnectFactoryFailureClient.state.status, "closed");
+const reconnectFactoryFailureError = reconnectFactoryFailureClient.state.error;
+assert.equal(reconnectFactoryFailureError.kind, "transport");
+assert.match(reconnectFactoryFailureError.message, /factory offline/);
+const reconnectFactoryFailureClosed = await reconnectFactoryFailureHandle.closed;
+assert.equal(reconnectFactoryFailureClosed.reason, "error");
+assert.strictEqual(reconnectFactoryFailureClosed.error, reconnectFactoryFailureError);
+assert.deepEqual(reconnectFactoryFailureHandle.state, {
+  status: "closed",
+  error: reconnectFactoryFailureError,
+});
+assert.deepEqual(reconnectFactoryFailureStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "failed",
+  "closed",
+]);
