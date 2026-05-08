@@ -2278,6 +2278,91 @@ assert.deepEqual(reconnectPendingTokenDisposeStates, [
   "closed",
 ]);
 
+for (const shutdownMode of ["close", "dispose"]) {
+  const reconnectRejectedTokenShutdownSockets = [];
+  const reconnectRejectedTokenShutdownStates = [];
+  let reconnectRejectedTokenShutdownCalls = 0;
+  let rejectReconnectRefreshToken;
+  const reconnectRejectedTokenShutdownClient = createShunterClient({
+    url: "ws://127.0.0.1:3000/subscribe",
+    protocol: shunterProtocol,
+    token: () => {
+      reconnectRejectedTokenShutdownCalls += 1;
+      if (reconnectRejectedTokenShutdownCalls === 1) {
+        return "initial-token";
+      }
+      return new Promise((_, reject) => {
+        rejectReconnectRefreshToken = reject;
+      });
+    },
+    reconnect: {
+      enabled: true,
+      maxAttempts: 1,
+      initialDelayMs: 0,
+      maxDelayMs: 0,
+    },
+    webSocketFactory: (url, protocols) => {
+      const socket = new FakeWebSocket(url, protocols);
+      reconnectRejectedTokenShutdownSockets.push(socket);
+      return socket;
+    },
+    onStateChange: ({ current }) => reconnectRejectedTokenShutdownStates.push(current.status),
+  });
+  const reconnectRejectedTokenShutdownConnecting = reconnectRejectedTokenShutdownClient.connect();
+  await nextTurn();
+  assert.equal(reconnectRejectedTokenShutdownSockets[0].url, "ws://127.0.0.1:3000/subscribe?token=initial-token");
+  reconnectRejectedTokenShutdownSockets[0].open();
+  reconnectRejectedTokenShutdownSockets[0].message(identityTokenFrame().buffer);
+  await reconnectRejectedTokenShutdownConnecting;
+  const reconnectRejectedTokenShutdownHandleSubscription = reconnectRejectedTokenShutdownClient.subscribeTable(
+    "users",
+    undefined,
+    {
+      requestId: 0x01020304,
+      queryId: 0x11121314,
+      returnHandle: true,
+      decodeRow: (row) => [...row].join("-"),
+    },
+  );
+  reconnectRejectedTokenShutdownSockets[0].message(subscribeSingleAppliedFrame);
+  const reconnectRejectedTokenShutdownHandle = await reconnectRejectedTokenShutdownHandleSubscription;
+  assert.deepEqual(reconnectRejectedTokenShutdownHandle.state, { status: "active", rows: ["1-2", "3"] });
+  reconnectRejectedTokenShutdownSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+  assert.equal(reconnectRejectedTokenShutdownClient.state.status, "reconnecting");
+  await nextTurn();
+  assert.equal(reconnectRejectedTokenShutdownCalls, 2);
+  assert.equal(reconnectRejectedTokenShutdownClient.state.status, "connecting");
+  assert.equal(reconnectRejectedTokenShutdownSockets.length, 1);
+  const observedReconnectRejectedTokenShutdown = reconnectRejectedTokenShutdownClient.connect();
+  const reconnectRejectedTokenShutdownClosed = shutdownMode === "dispose"
+    ? reconnectRejectedTokenShutdownClient.dispose()
+    : reconnectRejectedTokenShutdownClient.close(4004, "caller stopped before token rejection");
+  await assert.rejects(observedReconnectRejectedTokenShutdown, ShunterClosedClientError);
+  await reconnectRejectedTokenShutdownClosed;
+  const reconnectRejectedTokenShutdownHandleClosed = await reconnectRejectedTokenShutdownHandle.closed;
+  assert.equal(reconnectRejectedTokenShutdownHandleClosed.reason, "error");
+  assert(reconnectRejectedTokenShutdownHandleClosed.error instanceof ShunterClosedClientError);
+  assert.deepEqual(reconnectRejectedTokenShutdownHandle.state, {
+    status: "closed",
+    error: reconnectRejectedTokenShutdownHandleClosed.error,
+  });
+  rejectReconnectRefreshToken(new Error("too-late refresh"));
+  await nextTurn();
+  assert.equal(reconnectRejectedTokenShutdownSockets.length, 1);
+  assert.equal(reconnectRejectedTokenShutdownClient.state.status, "closed");
+  if (shutdownMode === "dispose") {
+    await assert.rejects(reconnectRejectedTokenShutdownClient.connect(), ShunterClosedClientError);
+  }
+  assert.deepEqual(reconnectRejectedTokenShutdownStates, [
+    "connecting",
+    "connected",
+    "reconnecting",
+    "connecting",
+    "closing",
+    "closed",
+  ]);
+}
+
 const reconnectHandshakeCloseSockets = [];
 const reconnectHandshakeCloseStates = [];
 const reconnectHandshakeCloseClient = createShunterClient({
