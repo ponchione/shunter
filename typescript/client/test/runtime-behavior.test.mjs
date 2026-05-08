@@ -952,6 +952,30 @@ assert.equal(metadata.identityToken, "minted-token");
 assert.deepEqual([...metadata.identity.slice(0, 3)], [1, 2, 3]);
 assert.deepEqual([...metadata.connectionId.slice(0, 3)], [0xa0, 0xa1, 0xa2]);
 assert.equal(client.state.status, "connected");
+
+const concurrentConnectSockets = [];
+const concurrentConnectClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    concurrentConnectSockets.push(socket);
+    return socket;
+  },
+});
+const firstConcurrentConnect = concurrentConnectClient.connect();
+const secondConcurrentConnect = concurrentConnectClient.connect();
+await nextTurn();
+assert.equal(concurrentConnectSockets.length, 1);
+concurrentConnectSockets[0].open();
+concurrentConnectSockets[0].message(identityTokenFrame({ token: "concurrent-token" }).buffer);
+const firstConcurrentMetadata = await firstConcurrentConnect;
+const secondConcurrentMetadata = await secondConcurrentConnect;
+assert.strictEqual(firstConcurrentMetadata, secondConcurrentMetadata);
+assert.equal(firstConcurrentMetadata.identityToken, "concurrent-token");
+assert.strictEqual(await concurrentConnectClient.connect(), firstConcurrentMetadata);
+await concurrentConnectClient.close();
+
 const reducerResponse = client.callReducer("send", new Uint8Array([0xaa, 0xbb]), {
   requestId: 0x21222324,
 });
