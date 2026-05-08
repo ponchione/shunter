@@ -890,6 +890,35 @@ func TestRunCompactionRejectsSymlinkSegmentBeforeDeletingCoveredSegments(t *test
 	assertFileExists(t, targetPath)
 }
 
+func TestRunCompactionRejectsDirectoryFirstSegmentBeforeSync(t *testing.T) {
+	dir := t.TempDir()
+	directorySegment := filepath.Join(dir, SegmentFileName(1))
+	if err := os.Mkdir(directorySegment, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	syncCalls := 0
+	stubCompactionSyncDir(t, func(path string) error {
+		syncCalls++
+		return nil
+	})
+
+	err := RunCompaction(dir, 3)
+	if err == nil {
+		t.Fatal("expected directory segment to abort compaction")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("RunCompaction error = %v, want ErrOpen category", err)
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("RunCompaction error = %v, want regular-file rejection detail", err)
+	}
+	if syncCalls != 0 {
+		t.Fatalf("syncDir calls = %d, want 0 after scan failure", syncCalls)
+	}
+	assertDirectoryArtifactExists(t, directorySegment)
+}
+
 func TestRunCompactionDoesNotDeleteBoundarySegment(t *testing.T) {
 	dir := t.TempDir()
 	boundary := makeScanTestSegment(t, dir, 900, contiguousTxs(900, 1100)...)
