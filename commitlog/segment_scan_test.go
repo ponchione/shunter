@@ -332,6 +332,28 @@ func TestScanSegmentsDirectorySegmentFailsLoudly(t *testing.T) {
 	assertDirectoryArtifactExists(t, path)
 }
 
+func TestScanSegmentsIgnoresRolloverDirectoryArtifact(t *testing.T) {
+	dir := t.TempDir()
+	segment := makeScanTestSegment(t, dir, 1, 1, 2)
+	rollover := filepath.Join(dir, SegmentFileName(3))
+	if err := os.Mkdir(rollover, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	segments, horizon, err := ScanSegments(dir)
+	if err != nil {
+		t.Fatalf("ScanSegments() error = %v", err)
+	}
+	if horizon != 2 {
+		t.Fatalf("horizon = %d, want 2", horizon)
+	}
+	if len(segments) != 1 {
+		t.Fatalf("len(segments) = %d, want 1", len(segments))
+	}
+	assertSegmentInfo(t, segments[0], segment, 1, 2, true)
+	assertDirectoryArtifactExists(t, rollover)
+}
+
 func TestScanSegmentsCorruptActiveSegmentAfterValidPrefixUsesFreshNextSegment(t *testing.T) {
 	dir := t.TempDir()
 
