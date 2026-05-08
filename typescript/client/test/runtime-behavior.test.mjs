@@ -1334,6 +1334,20 @@ const reducerResponse = client.callReducer("send", new Uint8Array([0xaa, 0xbb]),
   requestId: 0x21222324,
 });
 assert.equal(sockets[0].sent.length, 1);
+await assert.rejects(
+  client.callReducer("send", new Uint8Array([0xcc]), {
+    requestId: 0x21222324,
+    noSuccessNotify: true,
+  }),
+  (error) => {
+    assert(error instanceof ShunterValidationError);
+    assert.equal(error.kind, "validation");
+    assert.equal(error.code, "reducer_request_id_in_use");
+    assert.deepEqual(error.details, { requestId: 0x21222324 });
+    return true;
+  },
+);
+assert.equal(sockets[0].sent.length, 1);
 sockets[0].message(committedUpdateFrame);
 assert.deepEqual(await reducerResponse, committedUpdateFrame);
 

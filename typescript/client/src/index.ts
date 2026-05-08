@@ -1656,8 +1656,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         ...options,
         requestId: options.requestId ?? allocateRequestId(),
       });
-      if (request.flags === SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE && pendingReducerCalls.has(request.requestId)) {
+      if (pendingReducerCalls.has(request.requestId)) {
         throw new ShunterValidationError("Reducer request ID is already in flight.", {
+          code: "reducer_request_id_in_use",
           details: { requestId: request.requestId },
         });
       }

@@ -75,7 +75,8 @@ no pending subscribe or unsubscribe matches them.
 Full-update `callReducer()` calls currently resolve with the raw
 `TransactionUpdate` response frame on committed status and reject on failed
 status. `NoSuccessNotify` calls resolve after send because successful server
-echoes may be suppressed. Generated helpers can use `decodeReducerCallResult()`
+echoes may be suppressed. Reducer calls reject explicit request IDs that are
+already awaiting a full-update response. Generated helpers can use `decodeReducerCallResult()`
 or `callReducerWithResult()` to wrap heavy transaction update frames in a
 reducer name/request ID/status envelope; connected-client reducer failures are
 converted into failed result envelopes on that path. Typed reducer callers can use
