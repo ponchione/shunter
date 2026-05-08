@@ -774,6 +774,53 @@ func TestOffsetIndexNonMonotonicTailIsIgnoredAndOverwritten(t *testing.T) {
 	}
 }
 
+func TestOpenOffsetIndexReadOnlyDoesNotClearIgnoredTail(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, OffsetIndexFileName(1))
+
+	idx, err := CreateOffsetIndex(path, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []OffsetIndexEntry{
+		{TxID: 10, ByteOffset: 100},
+		{TxID: 20, ByteOffset: 200},
+	} {
+		if err := idx.Append(e.TxID, e.ByteOffset); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	writeRawOffsetIndexEntry(t, path, 2, 15, 150)
+	ro, err := OpenOffsetIndex(path)
+	if err != nil {
+		t.Fatalf("OpenOffsetIndex: %v", err)
+	}
+	assertOffsetIndexViewMatchesModel(t, ro, []OffsetIndexEntry{
+		{TxID: 10, ByteOffset: 100},
+		{TxID: 20, ByteOffset: 200},
+	}, 0, 0, []string{"readonly-open"})
+	if err := ro.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	txID, byteOffset, err := readOffsetIndexEntryAt(f, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if txID != 15 || byteOffset != 150 {
+		t.Fatalf("ignored tail entry after read-only open = (%d,%d), want (15,150)", txID, byteOffset)
+	}
+}
+
 func TestOffsetIndexFixedSeedAppendTruncateReopenModel(t *testing.T) {
 	const capEntries = uint64(16)
 	seeds := []uint64{0x1d0ff51de, 0x51deca11, 0xc0ffee17}
