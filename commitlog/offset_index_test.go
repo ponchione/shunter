@@ -821,6 +821,50 @@ func TestOpenOffsetIndexReadOnlyDoesNotClearIgnoredTail(t *testing.T) {
 	}
 }
 
+func TestOpenOffsetIndexReadOnlyIgnoresShortPartialTrailingEntry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, OffsetIndexFileName(1))
+
+	idx, err := CreateOffsetIndex(path, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []OffsetIndexEntry{
+		{TxID: 10, ByteOffset: 100},
+		{TxID: 20, ByteOffset: 200},
+	} {
+		if err := idx.Append(e.TxID, e.ByteOffset); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	writeRawOffsetIndexEntry(t, path, 2, 30, 300)
+	if err := os.Truncate(path, int64(2*OffsetIndexEntrySize+offsetIndexValOff)); err != nil {
+		t.Fatal(err)
+	}
+
+	ro, err := OpenOffsetIndex(path)
+	if err != nil {
+		t.Fatalf("OpenOffsetIndex: %v", err)
+	}
+	defer ro.Close()
+	assertOffsetIndexViewMatchesModel(t, ro, []OffsetIndexEntry{
+		{TxID: 10, ByteOffset: 100},
+		{TxID: 20, ByteOffset: 200},
+	}, 0, 0, []string{"readonly-short-partial"})
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := int64(2*OffsetIndexEntrySize + offsetIndexValOff); info.Size() != want {
+		t.Fatalf("index file size after read-only open = %d, want %d", info.Size(), want)
+	}
+}
+
 func TestOffsetIndexFixedSeedAppendTruncateReopenModel(t *testing.T) {
 	const capEntries = uint64(16)
 	seeds := []uint64{0x1d0ff51de, 0x51deca11, 0xc0ffee17}
