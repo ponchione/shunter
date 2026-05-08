@@ -1594,3 +1594,71 @@ assert.deepEqual(reconnectProtocolStates, [
   "failed",
   "closed",
 ]);
+
+const reconnectAuthSockets = [];
+const reconnectAuthStates = [];
+let reconnectAuthTokenCalls = 0;
+const reconnectAuthClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => {
+    reconnectAuthTokenCalls += 1;
+    if (reconnectAuthTokenCalls === 1) {
+      return "initial-token";
+    }
+    throw new Error("refresh denied");
+  },
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectAuthSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectAuthStates.push(current.status),
+});
+const reconnectAuthConnecting = reconnectAuthClient.connect();
+await nextTurn();
+assert.equal(reconnectAuthSockets[0].url, "ws://127.0.0.1:3000/subscribe?token=initial-token");
+reconnectAuthSockets[0].open();
+reconnectAuthSockets[0].message(identityTokenFrame().buffer);
+await reconnectAuthConnecting;
+const reconnectAuthHandleSubscription = reconnectAuthClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectAuthSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectAuthHandle = await reconnectAuthHandleSubscription;
+assert.deepEqual(reconnectAuthHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectAuthSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectAuthClient.state.status, "reconnecting");
+await nextTurn();
+await nextTurn();
+assert.equal(reconnectAuthTokenCalls, 2);
+assert.equal(reconnectAuthSockets.length, 1);
+assert.equal(reconnectAuthClient.state.status, "closed");
+const reconnectAuthError = reconnectAuthClient.state.error;
+assert(reconnectAuthError instanceof ShunterAuthError);
+assert.equal(reconnectAuthError.kind, "auth");
+assert.match(reconnectAuthError.message, /Token provider failed/);
+const reconnectAuthClosed = await reconnectAuthHandle.closed;
+assert.equal(reconnectAuthClosed.reason, "error");
+assert.strictEqual(reconnectAuthClosed.error, reconnectAuthError);
+assert.deepEqual(reconnectAuthHandle.state, {
+  status: "closed",
+  error: reconnectAuthError,
+});
+assert.deepEqual(reconnectAuthStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "failed",
+  "closed",
+]);
