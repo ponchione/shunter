@@ -72,6 +72,8 @@ func (m *Module) Reducer(name string, h schema.ReducerHandler, opts ...ReducerOp
 	m.reducers = append(m.reducers, ReducerDeclaration{
 		Name:        name,
 		Permissions: copyPermissionMetadata(options.permissions),
+		Args:        copyProductSchemaPtr(options.args),
+		Result:      copyProductSchemaPtr(options.result),
 	})
 	m.builder.Reducer(name, h)
 	return m

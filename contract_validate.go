@@ -106,9 +106,27 @@ func validateContractTables(tables []schema.TableExport, errs *[]error) map[stri
 func validateContractReducers(reducers []schema.ReducerExport, errs *[]error) map[string]struct{} {
 	names := make(map[string]struct{}, len(reducers))
 	for _, reducer := range reducers {
-		validateContractName("schema.reducers", reducer.Name, names, errs)
+		if validateContractName("schema.reducers", reducer.Name, names, errs) {
+			validateProductSchema("schema.reducers."+reducer.Name+".args", reducer.Args, errs)
+			validateProductSchema("schema.reducers."+reducer.Name+".result", reducer.Result, errs)
+		}
 	}
 	return names
+}
+
+func validateProductSchema(path string, product *ProductSchema, errs *[]error) {
+	if product == nil {
+		return
+	}
+	columnNames := make(map[string]struct{}, len(product.Columns))
+	for _, column := range product.Columns {
+		validateContractName(path+".columns", column.Name, columnNames, errs)
+		if strings.TrimSpace(column.Type) == "" {
+			*errs = append(*errs, fmt.Errorf("%s.columns.%s type must not be empty", path, column.Name))
+		} else if _, ok := valueKindFromExportString(column.Type); !ok {
+			*errs = append(*errs, fmt.Errorf("%s.columns.%s type %q is invalid", path, column.Name, column.Type))
+		}
+	}
 }
 
 func validateContractReadDeclarations(queries []QueryDescription, views []ViewDescription, errs *[]error) (map[string]struct{}, map[string]struct{}) {
@@ -132,9 +150,11 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 	lookup := newContractSchemaLookup(schemaExport)
 	for _, query := range queries {
 		if strings.TrimSpace(query.SQL) == "" {
+			validateDeclaredReadMetadataAbsent("queries."+query.Name, query.RowSchema, query.ResultShape, errs)
 			continue
 		}
-		err := protocol.ValidateSQLQueryString(query.SQL, lookup, protocol.SQLQueryValidationOptions{
+		var caller types.Identity
+		compiled, err := protocol.CompileSQLQueryString(query.SQL, lookup, &caller, protocol.SQLQueryValidationOptions{
 			AllowLimit:      true,
 			AllowProjection: true,
 			AllowOrderBy:    true,
@@ -142,10 +162,13 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 		})
 		if err != nil {
 			*errs = append(*errs, fmt.Errorf("queries.%s.sql invalid: %v", query.Name, err))
+			continue
 		}
+		validateDeclaredReadMetadata("queries."+query.Name, compiled, lookup, query.RowSchema, query.ResultShape, errs)
 	}
 	for _, view := range views {
 		if strings.TrimSpace(view.SQL) == "" {
+			validateDeclaredReadMetadataAbsent("views."+view.Name, view.RowSchema, view.ResultShape, errs)
 			continue
 		}
 		var caller types.Identity
@@ -159,6 +182,7 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
 			continue
 		}
+		validateDeclaredReadMetadata("views."+view.Name, compiled, lookup, view.RowSchema, view.ResultShape, errs)
 		if aggregate := compiled.SubscriptionAggregate(); aggregate != nil {
 			if err := subscription.ValidateAggregate(compiled.Predicate(), aggregate, lookup); err != nil {
 				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
@@ -196,6 +220,53 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
 		}
 	}
+}
+
+func validateDeclaredReadMetadataAbsent(path string, rowSchema *ProductSchema, resultShape *ReadResultShape, errs *[]error) {
+	if rowSchema != nil {
+		*errs = append(*errs, fmt.Errorf("%s.row_schema must be omitted for metadata-only declarations", path))
+	}
+	if resultShape != nil {
+		*errs = append(*errs, fmt.Errorf("%s.result_shape must be omitted for metadata-only declarations", path))
+	}
+}
+
+func validateDeclaredReadMetadata(path string, compiled protocol.CompiledSQLQuery, lookup contractSchemaLookup, rowSchema *ProductSchema, resultShape *ReadResultShape, errs *[]error) {
+	if rowSchema == nil && resultShape == nil {
+		return
+	}
+	if rowSchema == nil {
+		*errs = append(*errs, fmt.Errorf("%s.row_schema must be present when result_shape is present", path))
+		return
+	}
+	if resultShape == nil {
+		*errs = append(*errs, fmt.Errorf("%s.result_shape must be present when row_schema is present", path))
+		return
+	}
+	validateProductSchema(path+".row_schema", rowSchema, errs)
+	expectedRow := productSchemaForColumnSchemas(compiled.ResultColumns(lookup))
+	if !productSchemasEqual(rowSchema, expectedRow) {
+		*errs = append(*errs, fmt.Errorf("%s.row_schema does not match compiled SQL result columns", path))
+	}
+	expectedShape := readResultShapeForCompiled(compiled)
+	if *resultShape != *expectedShape {
+		*errs = append(*errs, fmt.Errorf("%s.result_shape = %#v, want %#v", path, *resultShape, *expectedShape))
+	}
+}
+
+func productSchemasEqual(a, b *ProductSchema) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if len(a.Columns) != len(b.Columns) {
+		return false
+	}
+	for i := range a.Columns {
+		if a.Columns[i] != b.Columns[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func validateVisibilityFilterContract(filters []VisibilityFilterDescription, lookup contractSchemaLookup, errs *[]error) {

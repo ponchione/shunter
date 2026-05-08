@@ -8,6 +8,11 @@ type SchemaExport struct {
 	Reducers []ReducerExport `json:"reducers"`
 }
 
+// ProductSchemaExport is the exported shape of one BSATN product row.
+type ProductSchemaExport struct {
+	Columns []ColumnExport `json:"columns"`
+}
+
 // TableExport is the exported shape of one table.
 type TableExport struct {
 	Name       string         `json:"name"`
@@ -33,8 +38,10 @@ type IndexExport struct {
 
 // ReducerExport is the exported shape of one reducer.
 type ReducerExport struct {
-	Name      string `json:"name"`
-	Lifecycle bool   `json:"lifecycle"`
+	Name      string               `json:"name"`
+	Lifecycle bool                 `json:"lifecycle"`
+	Args      *ProductSchemaExport `json:"args,omitempty"`
+	Result    *ProductSchemaExport `json:"result,omitempty"`
 }
 
 // ExportSchema traverses the immutable registry and produces a detached value

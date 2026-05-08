@@ -143,7 +143,27 @@
     "reducers": [
       {
         "name": "create_message",
-        "lifecycle": false
+        "lifecycle": false,
+        "args": {
+          "columns": [
+            {
+              "name": "sender",
+              "type": "string"
+            },
+            {
+              "name": "body",
+              "type": "string"
+            }
+          ]
+        },
+        "result": {
+          "columns": [
+            {
+              "name": "message_id",
+              "type": "uint64"
+            }
+          ]
+        }
       },
       {
         "name": "OnConnect",
@@ -154,17 +174,65 @@
   "queries": [
     {
       "name": "recent_messages",
-      "sql": "SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25"
+      "sql": "SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25",
+      "row_schema": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uint64"
+          },
+          {
+            "name": "sender",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "type": "string"
+          }
+        ]
+      },
+      "result_shape": {
+        "kind": "projection",
+        "table": "messages"
+      }
     }
   ],
   "views": [
     {
       "name": "live_message_projection",
-      "sql": "SELECT id, body AS text FROM messages"
+      "sql": "SELECT id, body AS text FROM messages",
+      "row_schema": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uint64"
+          },
+          {
+            "name": "text",
+            "type": "string"
+          }
+        ]
+      },
+      "result_shape": {
+        "kind": "projection",
+        "table": "messages"
+      }
     },
     {
       "name": "live_message_count",
-      "sql": "SELECT COUNT(*) AS n FROM messages"
+      "sql": "SELECT COUNT(*) AS n FROM messages",
+      "row_schema": {
+        "columns": [
+          {
+            "name": "n",
+            "type": "uint64"
+          }
+        ]
+      },
+      "result_shape": {
+        "kind": "aggregate",
+        "table": "messages"
+      }
     }
   ],
   "visibility_filters": [

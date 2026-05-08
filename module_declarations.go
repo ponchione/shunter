@@ -84,10 +84,14 @@ type ReadModelMetadata struct {
 type ReducerDeclaration struct {
 	Name        string
 	Permissions PermissionMetadata
+	Args        *ProductSchema
+	Result      *ProductSchema
 }
 
 type reducerOptions struct {
 	permissions PermissionMetadata
+	args        *ProductSchema
+	result      *ProductSchema
 }
 
 // ReducerOption configures reducer declaration metadata.
@@ -97,6 +101,23 @@ type ReducerOption func(*reducerOptions)
 func WithReducerPermissions(metadata PermissionMetadata) ReducerOption {
 	return func(o *reducerOptions) {
 		o.permissions = copyPermissionMetadata(metadata)
+	}
+}
+
+// WithReducerArgs attaches the reducer argument product schema exported for
+// typed clients. Omit this option to keep the reducer raw-Uint8Array only.
+func WithReducerArgs(product ProductSchema) ReducerOption {
+	return func(o *reducerOptions) {
+		o.args = copyProductSchemaPtr(&product)
+	}
+}
+
+// WithReducerResult attaches the reducer result product schema exported for
+// typed clients. Omit this option to keep the reducer result raw-Uint8Array
+// only.
+func WithReducerResult(product ProductSchema) ReducerOption {
+	return func(o *reducerOptions) {
+		o.result = copyProductSchemaPtr(&product)
 	}
 }
 
@@ -192,6 +213,8 @@ func validateModuleMetadata(m *Module, reg schema.SchemaRegistry) error {
 	}
 	for _, reducer := range m.reducers {
 		validateAuthoredPermissionMetadata("permissions.reducer."+reducer.Name, reducer.Permissions, &errs)
+		validateProductSchema("reducers."+reducer.Name+".args", reducer.Args, &errs)
+		validateProductSchema("reducers."+reducer.Name+".result", reducer.Result, &errs)
 	}
 	for _, query := range m.queries {
 		validateAuthoredPermissionMetadata("permissions.query."+query.Name, query.Permissions, &errs)
@@ -354,9 +377,25 @@ func copyReducerDeclarations(in []ReducerDeclaration) []ReducerDeclaration {
 		out[i] = ReducerDeclaration{
 			Name:        reducer.Name,
 			Permissions: copyPermissionMetadata(reducer.Permissions),
+			Args:        copyProductSchemaPtr(reducer.Args),
+			Result:      copyProductSchemaPtr(reducer.Result),
 		}
 	}
 	return out
+}
+
+func copyProductSchemaPtr(in *ProductSchema) *ProductSchema {
+	if in == nil {
+		return nil
+	}
+	out := ProductSchema{
+		Columns: make([]ProductColumn, len(in.Columns)),
+	}
+	copy(out.Columns, in.Columns)
+	if out.Columns == nil {
+		out.Columns = []ProductColumn{}
+	}
+	return &out
 }
 
 func copyPermissionMetadata(in PermissionMetadata) PermissionMetadata {

@@ -19,6 +19,8 @@ type ModuleDescription struct {
 type QueryDescription struct {
 	Name        string             `json:"name"`
 	SQL         string             `json:"sql,omitempty"`
+	RowSchema   *ProductSchema     `json:"row_schema,omitempty"`
+	ResultShape *ReadResultShape   `json:"result_shape,omitempty"`
 	Permissions PermissionMetadata `json:"-"`
 	ReadModel   ReadModelMetadata  `json:"-"`
 	Migration   MigrationMetadata  `json:"-"`
@@ -29,9 +31,34 @@ type QueryDescription struct {
 type ViewDescription struct {
 	Name        string             `json:"name"`
 	SQL         string             `json:"sql,omitempty"`
+	RowSchema   *ProductSchema     `json:"row_schema,omitempty"`
+	ResultShape *ReadResultShape   `json:"result_shape,omitempty"`
 	Permissions PermissionMetadata `json:"-"`
 	ReadModel   ReadModelMetadata  `json:"-"`
 	Migration   MigrationMetadata  `json:"-"`
+}
+
+// ProductSchema is the exported shape of one BSATN product row.
+type ProductSchema = schema.ProductSchemaExport
+
+// ProductColumn is one exported product-schema column.
+type ProductColumn = schema.ColumnExport
+
+const (
+	// ReadResultShapeTable is a table-shaped declared read result.
+	ReadResultShapeTable = "table"
+	// ReadResultShapeProjection is a projection-shaped declared read result.
+	ReadResultShapeProjection = "projection"
+	// ReadResultShapeAggregate is a single-row aggregate declared read result.
+	ReadResultShapeAggregate = "aggregate"
+)
+
+// ReadResultShape records the typed row-shape class for an executable declared
+// query or view.
+type ReadResultShape struct {
+	Kind               string `json:"kind"`
+	Table              string `json:"table,omitempty"`
+	UsesCallerIdentity bool   `json:"uses_caller_identity,omitempty"`
 }
 
 // RuntimeDescription is a detached snapshot of V1 runtime diagnostics.
@@ -63,7 +90,9 @@ func (r *Runtime) ExportSchema() *schema.SchemaExport {
 	if r == nil || r.engine == nil {
 		return &schema.SchemaExport{}
 	}
-	return r.engine.ExportSchema()
+	out := copySchemaExport(r.engine.ExportSchema())
+	out = applyReducerProductSchemas(out, r.module.reducerDeclarations())
+	return &out
 }
 
 // Describe returns a detached snapshot of module identity and runtime health.

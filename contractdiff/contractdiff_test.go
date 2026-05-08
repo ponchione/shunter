@@ -277,6 +277,68 @@ func TestContractDiffClassifiesReducerPermissionChanges(t *testing.T) {
 	assertChange(t, report.Changes, ChangeKindAdditive, SurfacePermission, "reducer.send_message")
 }
 
+func TestContractDiffDetectsReducerProductSchemaChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Schema.Reducers[0].Args = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "body", Type: "string"}}}
+	current.Schema.Reducers[0].Result = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "message_id", Type: "uint64"}}}
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceReducer, "send_message")
+	if text := report.Text(); !strings.Contains(text, "reducer args schema added") || !strings.Contains(text, "reducer result schema added") {
+		t.Fatalf("Text() = %q, want reducer product schema additions", text)
+	}
+
+	old = current
+	current = contractFixture()
+	current.Schema.Reducers[0].Args = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "body", Type: "uint64"}}}
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceReducer, "send_message")
+	if text := report.Text(); !strings.Contains(text, "reducer args schema changed") ||
+		!strings.Contains(text, "reducer result schema removed") {
+		t.Fatalf("Text() = %q, want reducer product schema breaking changes", text)
+	}
+}
+
+func TestContractDiffDetectsDeclaredReadResultMetadataChanges(t *testing.T) {
+	old := contractFixture()
+	old.Queries[0].SQL = "SELECT id FROM messages"
+	old.Views[0].SQL = "SELECT id FROM messages"
+	current := contractFixture()
+	current.Queries[0].SQL = "SELECT id FROM messages"
+	current.Views[0].SQL = "SELECT id FROM messages"
+	current.Queries[0].RowSchema = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "id", Type: "uint64"}}}
+	current.Queries[0].ResultShape = &shunter.ReadResultShape{Kind: shunter.ReadResultShapeProjection, Table: "messages"}
+	current.Views[0].RowSchema = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "id", Type: "uint64"}}}
+	current.Views[0].ResultShape = &shunter.ReadResultShape{Kind: shunter.ReadResultShapeProjection, Table: "messages"}
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceQuery, "history")
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceView, "live")
+	if text := report.Text(); !strings.Contains(text, "query row schema added") ||
+		!strings.Contains(text, "view result shape added") {
+		t.Fatalf("Text() = %q, want declared-read metadata additions", text)
+	}
+
+	old = current
+	current = contractFixture()
+	current.Queries[0].SQL = "SELECT id FROM messages"
+	current.Views[0].SQL = "SELECT id FROM messages"
+	current.Queries[0].RowSchema = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "id", Type: "string"}}}
+	current.Queries[0].ResultShape = &shunter.ReadResultShape{Kind: shunter.ReadResultShapeProjection, Table: "messages"}
+	current.Views[0].RowSchema = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "id", Type: "uint64"}}}
+	current.Views[0].ResultShape = &shunter.ReadResultShape{Kind: shunter.ReadResultShapeTable, Table: "messages"}
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceQuery, "history")
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceView, "live")
+	if text := report.Text(); !strings.Contains(text, "query row schema changed") ||
+		!strings.Contains(text, "view result shape changed") {
+		t.Fatalf("Text() = %q, want declared-read metadata breaking changes", text)
+	}
+}
+
 func TestContractDiffIgnoresDeclaredReadPermissionOrder(t *testing.T) {
 	old := contractFixture()
 	old.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
@@ -522,6 +584,24 @@ func TestContractDiffJSONRejectsKnownFieldTypeChanges(t *testing.T) {
 	assertJSONEntryPointsRejectInvalidContract(t, oldData, currentData,
 		"current contract",
 		"contract_version",
+	)
+
+	current := contractFixture()
+	current.Schema.Reducers[0].Args = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "body", Type: "string"}}}
+	var raw map[string]any
+	if err := json.Unmarshal(mustContractJSON(t, current), &raw); err != nil {
+		t.Fatalf("Unmarshal current contract: %v", err)
+	}
+	reducer := mustObjectAt(t, mustArray(t, mustObject(t, raw, "schema"), "reducers"), 0)
+	reducer["args"] = "not an object"
+	currentData, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("Marshal invalid reducer args contract: %v", err)
+	}
+	assertJSONEntryPointsRejectInvalidContract(t, oldData, currentData,
+		"current contract",
+		"schema.reducers",
+		"args",
 	)
 }
 

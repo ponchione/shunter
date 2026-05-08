@@ -254,6 +254,8 @@ func compareReducers(out *Report, oldReducers, currentReducers []schema.ReducerE
 		if old.Lifecycle != current.Lifecycle {
 			out.add(ChangeKindBreaking, SurfaceReducer, name, fmt.Sprintf("lifecycle flag changed from %t to %t", old.Lifecycle, current.Lifecycle))
 		}
+		compareProductSchema(out, SurfaceReducer, name, "reducer args schema", old.Args, current.Args)
+		compareProductSchema(out, SurfaceReducer, name, "reducer result schema", old.Result, current.Result)
 	}
 	for name := range oldByName {
 		if _, ok := currentByName[name]; !ok {
@@ -272,6 +274,8 @@ func compareNamedQueries(out *Report, surface Surface, oldQueries, currentQuerie
 			continue
 		}
 		compareNamedReadSQL(out, ChangeKindAdditive, ChangeKindBreaking, surface, name, "query", old.SQL, current.SQL)
+		compareProductSchema(out, surface, name, "query row schema", old.RowSchema, current.RowSchema)
+		compareReadResultShape(out, surface, name, "query result shape", old.ResultShape, current.ResultShape)
 	}
 	for name := range oldByName {
 		if _, ok := currentByName[name]; !ok {
@@ -290,11 +294,39 @@ func compareNamedViews(out *Report, oldViews, currentViews []shunter.ViewDescrip
 			continue
 		}
 		compareNamedReadSQL(out, ChangeKindAdditive, ChangeKindBreaking, SurfaceView, name, "view", old.SQL, current.SQL)
+		compareProductSchema(out, SurfaceView, name, "view row schema", old.RowSchema, current.RowSchema)
+		compareReadResultShape(out, SurfaceView, name, "view result shape", old.ResultShape, current.ResultShape)
 	}
 	for name := range oldByName {
 		if _, ok := currentByName[name]; !ok {
 			out.add(ChangeKindBreaking, SurfaceView, name, "view removed")
 		}
+	}
+}
+
+func compareProductSchema(out *Report, surface Surface, name, label string, old, current *shunter.ProductSchema) {
+	switch {
+	case old == nil && current == nil:
+		return
+	case old == nil:
+		out.add(ChangeKindAdditive, surface, name, label+" added")
+	case current == nil:
+		out.add(ChangeKindBreaking, surface, name, label+" removed")
+	case !productSchemasEqual(old, current):
+		out.add(ChangeKindBreaking, surface, name, label+" changed")
+	}
+}
+
+func compareReadResultShape(out *Report, surface Surface, name, label string, old, current *shunter.ReadResultShape) {
+	switch {
+	case old == nil && current == nil:
+		return
+	case old == nil:
+		out.add(ChangeKindAdditive, surface, name, label+" added")
+	case current == nil:
+		out.add(ChangeKindBreaking, surface, name, label+" removed")
+	case *old != *current:
+		out.add(ChangeKindBreaking, surface, name, label+" changed")
 	}
 }
 
@@ -583,6 +615,21 @@ func migrationMetadataEqual(old, current shunter.MigrationMetadata) bool {
 		old.Compatibility == current.Compatibility &&
 		old.Notes == current.Notes &&
 		slices.Equal(old.Classifications, current.Classifications)
+}
+
+func productSchemasEqual(old, current *shunter.ProductSchema) bool {
+	if old == nil || current == nil {
+		return old == current
+	}
+	if len(old.Columns) != len(current.Columns) {
+		return false
+	}
+	for i := range old.Columns {
+		if old.Columns[i] != current.Columns[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func nonEmptyName(first, fallback string) string {

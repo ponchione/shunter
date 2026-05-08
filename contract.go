@@ -2,7 +2,9 @@ package shunter
 
 import (
 	"encoding/json"
+	"strings"
 
+	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
 )
 
@@ -97,6 +99,10 @@ func (r *Runtime) ExportContract() ModuleContract {
 	queries := copyQueryDescriptions(desc.Module.Queries)
 	views := copyViewDescriptions(desc.Module.Views)
 	schemaExport := copySchemaExport(r.ExportSchema())
+	reducers := r.module.reducerDeclarations()
+	schemaExport = applyReducerProductSchemas(schemaExport, reducers)
+	queries = withDeclaredReadResultMetadata(queries, declaredReadKindQuery, schemaExport)
+	views = withDeclaredViewResultMetadata(views, schemaExport)
 	return ModuleContract{
 		ContractVersion: ModuleContractVersion,
 		Module: ModuleContractIdentity{
@@ -108,7 +114,7 @@ func (r *Runtime) ExportContract() ModuleContract {
 		Queries:           queries,
 		Views:             views,
 		VisibilityFilters: normalizeVisibilityFilterDescriptions(desc.Module.VisibilityFilters),
-		Permissions:       buildPermissionContract(r.module.reducerDeclarations(), queries, views),
+		Permissions:       buildPermissionContract(reducers, queries, views),
 		ReadModel:         buildReadModelContract(queries, views),
 		Migrations:        buildMigrationContract(schemaExport, desc.Module.Migration, desc.Module.TableMigrations, queries, views),
 		Codegen:           defaultCodegenContractMetadata(),
@@ -139,8 +145,14 @@ func normalizeModuleContract(c ModuleContract) ModuleContract {
 	if c.Queries == nil {
 		c.Queries = []QueryDescription{}
 	}
+	for i := range c.Queries {
+		c.Queries[i] = copyQueryDescription(c.Queries[i])
+	}
 	if c.Views == nil {
 		c.Views = []ViewDescription{}
+	}
+	for i := range c.Views {
+		c.Views[i] = copyViewDescription(c.Views[i])
 	}
 	c.VisibilityFilters = normalizeVisibilityFilterDescriptions(c.VisibilityFilters)
 	if c.Permissions.Reducers == nil {
@@ -326,6 +338,102 @@ func defaultCodegenContractMetadata() CodegenContractMetadata {
 	}
 }
 
+func applyReducerProductSchemas(schemaExport schema.SchemaExport, reducers []ReducerDeclaration) schema.SchemaExport {
+	if len(reducers) == 0 || len(schemaExport.Reducers) == 0 {
+		return schemaExport
+	}
+	byName := make(map[string]ReducerDeclaration, len(reducers))
+	for _, reducer := range reducers {
+		byName[reducer.Name] = reducer
+	}
+	for i := range schemaExport.Reducers {
+		reducer := &schemaExport.Reducers[i]
+		if reducer.Lifecycle {
+			continue
+		}
+		declaration, ok := byName[reducer.Name]
+		if !ok {
+			continue
+		}
+		reducer.Args = copyProductSchemaPtr(declaration.Args)
+		reducer.Result = copyProductSchemaPtr(declaration.Result)
+	}
+	return schemaExport
+}
+
+func withDeclaredReadResultMetadata(queries []QueryDescription, kind declaredReadKind, schemaExport schema.SchemaExport) []QueryDescription {
+	if len(queries) == 0 {
+		return queries
+	}
+	lookup := newContractSchemaLookup(schemaExport)
+	out := make([]QueryDescription, len(queries))
+	for i, query := range queries {
+		out[i] = copyQueryDescription(query)
+		rowSchema, resultShape := declaredReadResultMetadata(query.SQL, kind, lookup)
+		out[i].RowSchema = rowSchema
+		out[i].ResultShape = resultShape
+	}
+	return out
+}
+
+func withDeclaredViewResultMetadata(views []ViewDescription, schemaExport schema.SchemaExport) []ViewDescription {
+	if len(views) == 0 {
+		return views
+	}
+	lookup := newContractSchemaLookup(schemaExport)
+	out := make([]ViewDescription, len(views))
+	for i, view := range views {
+		out[i] = copyViewDescription(view)
+		rowSchema, resultShape := declaredReadResultMetadata(view.SQL, declaredReadKindView, lookup)
+		out[i].RowSchema = rowSchema
+		out[i].ResultShape = resultShape
+	}
+	return out
+}
+
+func declaredReadResultMetadata(sqlText string, kind declaredReadKind, lookup contractSchemaLookup) (*ProductSchema, *ReadResultShape) {
+	if strings.TrimSpace(sqlText) == "" {
+		return nil, nil
+	}
+	compiled, err := compileDeclaredReadSQL(sqlText, lookup, validationOptionsForDeclaredRead(kind))
+	if err != nil {
+		return nil, nil
+	}
+	columns := compiled.ResultColumns(lookup)
+	rowSchema := productSchemaForColumnSchemas(columns)
+	return rowSchema, readResultShapeForCompiled(compiled)
+}
+
+func productSchemaForColumnSchemas(columns []schema.ColumnSchema) *ProductSchema {
+	product := &ProductSchema{Columns: make([]ProductColumn, len(columns))}
+	for i, column := range columns {
+		product.Columns[i] = ProductColumn{
+			Name:     column.Name,
+			Type:     schema.ValueKindExportString(column.Type),
+			Nullable: column.Nullable,
+		}
+	}
+	if product.Columns == nil {
+		product.Columns = []ProductColumn{}
+	}
+	return product
+}
+
+func readResultShapeForCompiled(compiled protocol.CompiledSQLQuery) *ReadResultShape {
+	kind := ReadResultShapeTable
+	switch {
+	case compiled.HasAggregate():
+		kind = ReadResultShapeAggregate
+	case len(compiled.SubscriptionProjection()) != 0:
+		kind = ReadResultShapeProjection
+	}
+	return &ReadResultShape{
+		Kind:               kind,
+		Table:              compiled.TableName(),
+		UsesCallerIdentity: compiled.UsesCallerIdentity(),
+	}
+}
+
 func copySchemaExport(in *schema.SchemaExport) schema.SchemaExport {
 	if in == nil {
 		return normalizeSchemaExport(schema.SchemaExport{})
@@ -339,7 +447,9 @@ func copySchemaExport(in *schema.SchemaExport) schema.SchemaExport {
 	for i, table := range in.Tables {
 		out.Tables[i] = copyTableExport(table)
 	}
-	copy(out.Reducers, in.Reducers)
+	for i, reducer := range in.Reducers {
+		out.Reducers[i] = copyReducerExport(reducer)
+	}
 	return out
 }
 
@@ -352,7 +462,9 @@ func normalizeSchemaExport(in schema.SchemaExport) schema.SchemaExport {
 	for i, table := range in.Tables {
 		out.Tables[i] = copyTableExport(table)
 	}
-	copy(out.Reducers, in.Reducers)
+	for i, reducer := range in.Reducers {
+		out.Reducers[i] = copyReducerExport(reducer)
+	}
 	if out.Tables == nil {
 		out.Tables = []schema.TableExport{}
 	}
@@ -391,6 +503,15 @@ func copyTableExport(in schema.TableExport) schema.TableExport {
 	return out
 }
 
+func copyReducerExport(in schema.ReducerExport) schema.ReducerExport {
+	return schema.ReducerExport{
+		Name:      in.Name,
+		Lifecycle: in.Lifecycle,
+		Args:      copyProductSchemaPtr(in.Args),
+		Result:    copyProductSchemaPtr(in.Result),
+	}
+}
+
 func normalizeSchemaReadPolicy(in schema.ReadPolicy) schema.ReadPolicy {
 	out := schema.ReadPolicy{
 		Access:      in.Access,
@@ -408,13 +529,7 @@ func copyQueryDescriptions(in []QueryDescription) []QueryDescription {
 	}
 	out := make([]QueryDescription, len(in))
 	for i, query := range in {
-		out[i] = QueryDescription{
-			Name:        query.Name,
-			SQL:         query.SQL,
-			Permissions: copyPermissionMetadata(query.Permissions),
-			ReadModel:   copyReadModelMetadata(query.ReadModel),
-			Migration:   copyMigrationMetadata(query.Migration),
-		}
+		out[i] = copyQueryDescription(query)
 	}
 	return out
 }
@@ -425,13 +540,39 @@ func copyViewDescriptions(in []ViewDescription) []ViewDescription {
 	}
 	out := make([]ViewDescription, len(in))
 	for i, view := range in {
-		out[i] = ViewDescription{
-			Name:        view.Name,
-			SQL:         view.SQL,
-			Permissions: copyPermissionMetadata(view.Permissions),
-			ReadModel:   copyReadModelMetadata(view.ReadModel),
-			Migration:   copyMigrationMetadata(view.Migration),
-		}
+		out[i] = copyViewDescription(view)
 	}
 	return out
+}
+
+func copyQueryDescription(query QueryDescription) QueryDescription {
+	return QueryDescription{
+		Name:        query.Name,
+		SQL:         query.SQL,
+		RowSchema:   copyProductSchemaPtr(query.RowSchema),
+		ResultShape: copyReadResultShapePtr(query.ResultShape),
+		Permissions: copyPermissionMetadata(query.Permissions),
+		ReadModel:   copyReadModelMetadata(query.ReadModel),
+		Migration:   copyMigrationMetadata(query.Migration),
+	}
+}
+
+func copyViewDescription(view ViewDescription) ViewDescription {
+	return ViewDescription{
+		Name:        view.Name,
+		SQL:         view.SQL,
+		RowSchema:   copyProductSchemaPtr(view.RowSchema),
+		ResultShape: copyReadResultShapePtr(view.ResultShape),
+		Permissions: copyPermissionMetadata(view.Permissions),
+		ReadModel:   copyReadModelMetadata(view.ReadModel),
+		Migration:   copyMigrationMetadata(view.Migration),
+	}
+}
+
+func copyReadResultShapePtr(in *ReadResultShape) *ReadResultShape {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }

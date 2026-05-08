@@ -96,6 +96,76 @@ func TestRuntimeExportContractIncludesPermissionAndReadModelMetadata(t *testing.
 	assertReadModelContractDeclaration(t, contract.ReadModel.Declarations, ReadModelSurfaceView, "live_messages", "messages", "realtime")
 }
 
+func TestRuntimeExportContractIncludesReducerProductSchemas(t *testing.T) {
+	mod := validChatModule().
+		Reducer("send_message", noopReducer,
+			WithReducerArgs(ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}}),
+			WithReducerResult(ProductSchema{Columns: []ProductColumn{
+				{Name: "message_id", Type: "uint64"},
+			}}),
+		)
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	contract := rt.ExportContract()
+	reducer := findReducerExport(t, contract.Schema.Reducers, "send_message")
+	assertProductSchema(t, reducer.Args, "body", "string")
+	assertProductSchema(t, reducer.Result, "message_id", "uint64")
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected reducer product schemas: %v", err)
+	}
+
+	schemaExport := rt.ExportSchema()
+	exportedReducer := findReducerExport(t, schemaExport.Reducers, "send_message")
+	assertProductSchema(t, exportedReducer.Args, "body", "string")
+	assertProductSchema(t, exportedReducer.Result, "message_id", "uint64")
+
+	contract.Schema.Reducers[0].Args.Columns[0].Name = "mutated"
+	again := rt.ExportContract()
+	assertProductSchema(t, findReducerExport(t, again.Schema.Reducers, "send_message").Args, "body", "string")
+}
+
+func TestRuntimeExportContractIncludesDeclaredReadResultMetadata(t *testing.T) {
+	mod := validChatModule().
+		Query(QueryDeclaration{
+			Name: "recent_messages",
+			SQL:  "SELECT id, body AS text FROM messages",
+		}).
+		View(ViewDeclaration{
+			Name: "live_message_count",
+			SQL:  "SELECT COUNT(*) AS n FROM messages",
+		})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	contract := rt.ExportContract()
+
+	query := findQueryDescription(t, contract.Queries, "recent_messages")
+	assertProductSchemaColumns(t, query.RowSchema, []ProductColumn{
+		{Name: "id", Type: "uint64"},
+		{Name: "text", Type: "string"},
+	})
+	if query.ResultShape == nil || query.ResultShape.Kind != ReadResultShapeProjection || query.ResultShape.Table != "messages" {
+		t.Fatalf("query result shape = %#v, want projection messages", query.ResultShape)
+	}
+
+	view := findViewDescription(t, contract.Views, "live_message_count")
+	assertProductSchemaColumns(t, view.RowSchema, []ProductColumn{{Name: "n", Type: "uint64"}})
+	if view.ResultShape == nil || view.ResultShape.Kind != ReadResultShapeAggregate || view.ResultShape.Table != "messages" {
+		t.Fatalf("view result shape = %#v, want aggregate messages", view.ResultShape)
+	}
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected declared-read result metadata: %v", err)
+	}
+}
+
 func TestRuntimeExportContractIncludesTableReadPolicyMetadata(t *testing.T) {
 	mod := NewModule("chat").
 		SchemaVersion(1).
@@ -263,6 +333,40 @@ func TestModuleContractValidationRejectsUnknownColumnType(t *testing.T) {
 	}
 }
 
+func TestModuleContractValidationRejectsInvalidReducerProductSchema(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Schema.Reducers[0].Args = &ProductSchema{Columns: []ProductColumn{
+		{Name: "arg", Type: "string"},
+		{Name: "arg", Type: "uint64"},
+	}}
+	contract.Schema.Reducers[0].Result = &ProductSchema{Columns: []ProductColumn{
+		{Name: "result", Type: "notAType"},
+	}}
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted invalid reducer product schema")
+	}
+	if !strings.Contains(err.Error(), `schema.reducers.send_message.args.columns name "arg" is duplicated`) ||
+		!strings.Contains(err.Error(), `schema.reducers.send_message.result.columns.result type "notAType" is invalid`) {
+		t.Fatalf("ValidateModuleContract error = %v, want reducer product schema contexts", err)
+	}
+}
+
+func TestBuildRejectsInvalidAuthoredReducerProductSchema(t *testing.T) {
+	mod := validChatModule().Reducer("send_message", noopReducer, WithReducerArgs(ProductSchema{Columns: []ProductColumn{
+		{Name: "arg", Type: "missing"},
+	}}))
+
+	_, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err == nil || !errors.Is(err, ErrInvalidModuleMetadata) {
+		t.Fatalf("expected ErrInvalidModuleMetadata, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `reducers.send_message.args.columns.arg type "missing" is invalid`) {
+		t.Fatalf("Build error = %v, want reducer product schema context", err)
+	}
+}
+
 func TestModuleContractValidationRejectsDuplicateCompositeIndexColumns(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Schema.Tables[0].Indexes = append(contract.Schema.Tables[0].Indexes, schema.IndexExport{
@@ -313,6 +417,53 @@ func TestModuleContractValidationAllowsProjectedViewSQL(t *testing.T) {
 
 	if err := ValidateModuleContract(contract); err != nil {
 		t.Fatalf("ValidateModuleContract rejected projected view SQL: %v", err)
+	}
+}
+
+func TestModuleContractValidationRejectsDeclaredReadResultMetadataDrift(t *testing.T) {
+	mod := validChatModule().
+		Query(QueryDeclaration{Name: "recent_messages", SQL: "SELECT id, body AS text FROM messages"}).
+		View(ViewDeclaration{Name: "live_message_count", SQL: "SELECT COUNT(*) AS n FROM messages"})
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	t.Run("query row schema", func(t *testing.T) {
+		contract := rt.ExportContract()
+		contract.Queries[0].RowSchema.Columns[1].Type = "uint64"
+		err := ValidateModuleContract(contract)
+		if err == nil || !strings.Contains(err.Error(), "queries.recent_messages.row_schema does not match compiled SQL result columns") {
+			t.Fatalf("ValidateModuleContract error = %v, want query row_schema drift", err)
+		}
+	})
+
+	t.Run("view result shape", func(t *testing.T) {
+		contract := rt.ExportContract()
+		contract.Views[0].ResultShape.Kind = ReadResultShapeTable
+		err := ValidateModuleContract(contract)
+		if err == nil || !strings.Contains(err.Error(), "views.live_message_count.result_shape") {
+			t.Fatalf("ValidateModuleContract error = %v, want view result_shape drift", err)
+		}
+	})
+
+	t.Run("metadata-only declarations reject result metadata", func(t *testing.T) {
+		contract := buildContractRuntime(t).ExportContract()
+		contract.Queries[0].RowSchema = &ProductSchema{Columns: []ProductColumn{}}
+		err := ValidateModuleContract(contract)
+		if err == nil || !strings.Contains(err.Error(), "queries.recent_messages.row_schema must be omitted") {
+			t.Fatalf("ValidateModuleContract error = %v, want metadata-only row_schema rejection", err)
+		}
+	})
+}
+
+func TestModuleContractValidationAllowsMissingDeclaredReadResultMetadata(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Queries = []QueryDescription{{Name: "recent_messages", SQL: "SELECT id FROM messages"}}
+	contract.Views = []ViewDescription{{Name: "live_messages", SQL: "SELECT id FROM messages"}}
+
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected older declared-read contract without result metadata: %v", err)
 	}
 }
 
@@ -1381,6 +1532,59 @@ func assertViewSQL(t *testing.T, views []ViewDescription, name, sql string) {
 		return
 	}
 	t.Fatalf("views = %#v, want %q", views, name)
+}
+
+func findReducerExport(t *testing.T, reducers []schema.ReducerExport, name string) schema.ReducerExport {
+	t.Helper()
+	for _, reducer := range reducers {
+		if reducer.Name == name {
+			return reducer
+		}
+	}
+	t.Fatalf("reducers = %#v, want %q", reducers, name)
+	return schema.ReducerExport{}
+}
+
+func findQueryDescription(t *testing.T, queries []QueryDescription, name string) QueryDescription {
+	t.Helper()
+	for _, query := range queries {
+		if query.Name == name {
+			return query
+		}
+	}
+	t.Fatalf("queries = %#v, want %q", queries, name)
+	return QueryDescription{}
+}
+
+func findViewDescription(t *testing.T, views []ViewDescription, name string) ViewDescription {
+	t.Helper()
+	for _, view := range views {
+		if view.Name == name {
+			return view
+		}
+	}
+	t.Fatalf("views = %#v, want %q", views, name)
+	return ViewDescription{}
+}
+
+func assertProductSchema(t *testing.T, product *ProductSchema, columnName, columnType string) {
+	t.Helper()
+	assertProductSchemaColumns(t, product, []ProductColumn{{Name: columnName, Type: columnType}})
+}
+
+func assertProductSchemaColumns(t *testing.T, product *ProductSchema, want []ProductColumn) {
+	t.Helper()
+	if product == nil {
+		t.Fatalf("product schema = nil, want %#v", want)
+	}
+	if len(product.Columns) != len(want) {
+		t.Fatalf("product columns = %#v, want %#v", product.Columns, want)
+	}
+	for i := range want {
+		if product.Columns[i] != want[i] {
+			t.Fatalf("product column %d = %#v, want %#v", i, product.Columns[i], want[i])
+		}
+	}
 }
 
 func assertCanonicalDeclarationKeys(t *testing.T, raw json.RawMessage, name, sql string) {

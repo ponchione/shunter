@@ -261,14 +261,20 @@ func TestV1CompatibilityModuleContractFixtureCoversStableJSONFields(t *testing.T
 	assertJSONObjectKeys(t, messagesTable["read_policy"], "contract.schema.tables.messages.read_policy", []string{"access", "permissions"})
 	reducers := assertJSONArrayObjects(t, schemaJSON["reducers"], "contract.schema.reducers")
 	createMessageReducer := findJSONObjectByStringField(t, reducers, "name", "create_message", "contract.schema.reducers")
-	assertJSONObjectKeys(t, mustMarshalRawObject(t, createMessageReducer), "contract.schema.reducers.create_message", []string{"name", "lifecycle"})
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, createMessageReducer), "contract.schema.reducers.create_message", []string{"name", "lifecycle", "args", "result"})
+	assertProductSchemaJSONKeys(t, createMessageReducer["args"], "contract.schema.reducers.create_message.args")
+	assertProductSchemaJSONKeys(t, createMessageReducer["result"], "contract.schema.reducers.create_message.result")
 
 	queries := assertJSONArrayObjects(t, top["queries"], "contract.queries")
 	recentMessagesQuery := findJSONObjectByStringField(t, queries, "name", "recent_messages", "contract.queries")
-	assertJSONObjectKeys(t, mustMarshalRawObject(t, recentMessagesQuery), "contract.queries.recent_messages", []string{"name", "sql"})
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, recentMessagesQuery), "contract.queries.recent_messages", []string{"name", "sql", "row_schema", "result_shape"})
+	assertProductSchemaJSONKeys(t, recentMessagesQuery["row_schema"], "contract.queries.recent_messages.row_schema")
+	assertJSONObjectKeys(t, recentMessagesQuery["result_shape"], "contract.queries.recent_messages.result_shape", []string{"kind", "table"})
 	views := assertJSONArrayObjects(t, top["views"], "contract.views")
 	projectionView := findJSONObjectByStringField(t, views, "name", "live_message_projection", "contract.views")
-	assertJSONObjectKeys(t, mustMarshalRawObject(t, projectionView), "contract.views.live_message_projection", []string{"name", "sql"})
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, projectionView), "contract.views.live_message_projection", []string{"name", "sql", "row_schema", "result_shape"})
+	assertProductSchemaJSONKeys(t, projectionView["row_schema"], "contract.views.live_message_projection.row_schema")
+	assertJSONObjectKeys(t, projectionView["result_shape"], "contract.views.live_message_projection.result_shape", []string{"kind", "table"})
 	filters := assertJSONArrayObjects(t, top["visibility_filters"], "contract.visibility_filters")
 	ownMessagesFilter := findJSONObjectByStringField(t, filters, "name", "own_messages", "contract.visibility_filters")
 	assertJSONObjectKeys(t, mustMarshalRawObject(t, ownMessagesFilter), "contract.visibility_filters.own_messages", []string{
@@ -320,12 +326,12 @@ func TestV1CompatibilityDeclaredReadResultShapeSQLMetadata(t *testing.T) {
 	}
 	queries := assertJSONArrayObjects(t, top["queries"], "contract.queries")
 	recentMessages := findJSONObjectByStringField(t, queries, "name", "recent_messages", "contract.queries")
-	assertJSONObjectKeys(t, mustMarshalRawObject(t, recentMessages), "contract.queries.recent_messages", []string{"name", "sql"})
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, recentMessages), "contract.queries.recent_messages", []string{"name", "sql", "row_schema", "result_shape"})
 	views := assertJSONArrayObjects(t, top["views"], "contract.views")
 	projectionView := findJSONObjectByStringField(t, views, "name", "live_message_projection", "contract.views")
-	assertJSONObjectKeys(t, mustMarshalRawObject(t, projectionView), "contract.views.live_message_projection", []string{"name", "sql"})
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, projectionView), "contract.views.live_message_projection", []string{"name", "sql", "row_schema", "result_shape"})
 	aggregateView := findJSONObjectByStringField(t, views, "name", "live_message_count", "contract.views")
-	assertJSONObjectKeys(t, mustMarshalRawObject(t, aggregateView), "contract.views.live_message_count", []string{"name", "sql"})
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, aggregateView), "contract.views.live_message_count", []string{"name", "sql", "row_schema", "result_shape"})
 }
 
 func buildV1CompatibilityRuntime(t *testing.T) *Runtime {
@@ -338,7 +344,12 @@ func buildV1CompatibilityRuntime(t *testing.T) *Runtime {
 		TableDef(v1CompatibilityMessagesTableDef(), schema.WithReadPermissions("messages:read")).
 		Reducer("create_message", noopReducer, WithReducerPermissions(PermissionMetadata{
 			Required: []string{"messages:write"},
-		})).
+		}), WithReducerArgs(ProductSchema{Columns: []ProductColumn{
+			{Name: "sender", Type: "string"},
+			{Name: "body", Type: "string"},
+		}}), WithReducerResult(ProductSchema{Columns: []ProductColumn{
+			{Name: "message_id", Type: "uint64"},
+		}})).
 		OnConnect(noopLifecycle).
 		VisibilityFilter(VisibilityFilterDeclaration{
 			Name: "own_messages",
@@ -603,6 +614,13 @@ func assertMigrationMetadataJSONKeys(t *testing.T, raw json.RawMessage, path str
 	})
 }
 
+func assertProductSchemaJSONKeys(t *testing.T, raw json.RawMessage, path string) {
+	t.Helper()
+	product := assertJSONObjectKeys(t, raw, path, []string{"columns"})
+	columns := assertJSONArrayObjects(t, product["columns"], path+".columns")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, columns[0]), path+".columns[0]", []string{"name", "type"})
+}
+
 func assertJSONObjectKeys(t *testing.T, raw json.RawMessage, path string, want []string) map[string]json.RawMessage {
 	t.Helper()
 	var got map[string]json.RawMessage
@@ -712,16 +730,28 @@ func v1ContractJSONWithUnknownFields(t *testing.T, data []byte) []byte {
 			new: "        \"read_policy\": {\n          \"future_read_policy_field\": \"ignored\",\n          \"access\": \"permissioned\",",
 		},
 		{
-			old: "      {\n        \"name\": \"create_message\",\n        \"lifecycle\": false\n      }",
-			new: "      {\n        \"future_reducer_field\": \"ignored\",\n        \"name\": \"create_message\",\n        \"lifecycle\": false\n      }",
+			old: "      {\n        \"name\": \"create_message\",\n        \"lifecycle\": false,",
+			new: "      {\n        \"future_reducer_field\": \"ignored\",\n        \"name\": \"create_message\",\n        \"lifecycle\": false,",
 		},
 		{
-			old: "    {\n      \"name\": \"recent_messages\",\n      \"sql\": \"SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25\"\n    }",
-			new: "    {\n      \"future_query_field\": \"ignored\",\n      \"name\": \"recent_messages\",\n      \"sql\": \"SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25\"\n    }",
+			old: "        \"args\": {\n          \"columns\": [",
+			new: "        \"args\": {\n          \"future_product_schema_field\": \"ignored\",\n          \"columns\": [",
 		},
 		{
-			old: "    {\n      \"name\": \"live_message_projection\",\n      \"sql\": \"SELECT id, body AS text FROM messages\"\n    }",
-			new: "    {\n      \"future_view_field\": \"ignored\",\n      \"name\": \"live_message_projection\",\n      \"sql\": \"SELECT id, body AS text FROM messages\"\n    }",
+			old: "    {\n      \"name\": \"recent_messages\",\n      \"sql\": \"SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25\",",
+			new: "    {\n      \"future_query_field\": \"ignored\",\n      \"name\": \"recent_messages\",\n      \"sql\": \"SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25\",",
+		},
+		{
+			old: "    {\n      \"name\": \"live_message_projection\",\n      \"sql\": \"SELECT id, body AS text FROM messages\",",
+			new: "    {\n      \"future_view_field\": \"ignored\",\n      \"name\": \"live_message_projection\",\n      \"sql\": \"SELECT id, body AS text FROM messages\",",
+		},
+		{
+			old: "      \"row_schema\": {\n        \"columns\": [",
+			new: "      \"row_schema\": {\n        \"future_row_schema_field\": \"ignored\",\n        \"columns\": [",
+		},
+		{
+			old: "      \"result_shape\": {\n        \"kind\": \"projection\",",
+			new: "      \"result_shape\": {\n        \"future_result_shape_field\": \"ignored\",\n        \"kind\": \"projection\",",
 		},
 		{
 			old: "    {\n      \"name\": \"own_messages\",\n      \"sql\": \"SELECT * FROM messages WHERE sender = :sender\",",
