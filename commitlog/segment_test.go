@@ -202,6 +202,13 @@ func TestSegmentReaderSeekToTxIDFallsBackOnInvalidIndexOffset(t *testing.T) {
 			},
 		},
 		{
+			name: "offset-before-segment-header",
+			offset: func(t *testing.T, dir string, entries []OffsetIndexEntry) uint64 {
+				t.Helper()
+				return SegmentHeaderSize - 1
+			},
+		},
+		{
 			name: "offset-past-segment-eof",
 			offset: func(t *testing.T, dir string, entries []OffsetIndexEntry) uint64 {
 				t.Helper()
