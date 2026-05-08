@@ -1655,6 +1655,37 @@ const tokenFailureClient = createShunterClient({
 await assert.rejects(tokenFailureClient.connect(), ShunterAuthError);
 assert.equal(tokenFailureClient.state.status, "failed");
 
+const tokenFailureRetrySockets = [];
+let tokenFailureRetryCalls = 0;
+const tokenFailureRetryClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => {
+    tokenFailureRetryCalls += 1;
+    if (tokenFailureRetryCalls === 1) {
+      throw new Error("no token yet");
+    }
+    return "recovered-token";
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    tokenFailureRetrySockets.push(socket);
+    return socket;
+  },
+});
+await assert.rejects(tokenFailureRetryClient.connect(), ShunterAuthError);
+assert.equal(tokenFailureRetryClient.state.status, "failed");
+const tokenFailureRetryConnecting = tokenFailureRetryClient.connect();
+await nextTurn();
+assert.equal(tokenFailureRetrySockets.length, 1);
+assert.equal(tokenFailureRetrySockets[0].url, "ws://127.0.0.1:3000/subscribe?token=recovered-token");
+tokenFailureRetrySockets[0].open();
+tokenFailureRetrySockets[0].message(identityTokenFrame({ token: "recovered-identity" }).buffer);
+const tokenFailureRetryMetadata = await tokenFailureRetryConnecting;
+assert.equal(tokenFailureRetryMetadata.identityToken, "recovered-identity");
+assert.equal(tokenFailureRetryClient.state.status, "connected");
+await tokenFailureRetryClient.close();
+
 const mismatchClient = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe",
   protocol: shunterProtocol,
