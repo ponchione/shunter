@@ -739,6 +739,25 @@ asyncTokenSockets[0].message(identityTokenFrame().buffer);
 await asyncTokenConnecting;
 await asyncTokenClient.close();
 
+let asyncTokenFailureFactoryCalls = 0;
+const asyncTokenFailureClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => Promise.reject(new Error("async token denied")),
+  webSocketFactory: () => {
+    asyncTokenFailureFactoryCalls += 1;
+    throw new Error("should not create socket");
+  },
+});
+await assert.rejects(asyncTokenFailureClient.connect(), (error) => {
+  assert(error instanceof ShunterAuthError);
+  assert.equal(error.kind, "auth");
+  assert.match(error.message, /Token provider failed/);
+  return true;
+});
+assert.equal(asyncTokenFailureClient.state.status, "failed");
+assert.equal(asyncTokenFailureFactoryCalls, 0);
+
 const reconnectTokenSockets = [];
 let reconnectTokenCallsForFailure = 0;
 const reconnectTokenClient = createShunterClient({
