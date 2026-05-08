@@ -3309,14 +3309,51 @@ export async function callReducerWithResult<Name extends string, Result = Uint8A
   args: Uint8Array,
   options: ReducerCallResultRequestOptions<Result> = {},
 ): Promise<ReducerCallResult<Name, Result>> {
-  const rawResult = await callReducer(name, args, {
-    requestId: options.requestId,
-    signal: options.signal,
-  });
+  let rawResult: Uint8Array;
+  try {
+    rawResult = await callReducer(name, args, {
+      requestId: options.requestId,
+      signal: options.signal,
+    });
+  } catch (error) {
+    const failedUpdate = reducerFailureUpdate(error);
+    if (
+      failedUpdate === undefined ||
+      failedUpdate.reducerCall.name !== name ||
+      (options.requestId !== undefined && failedUpdate.reducerCall.requestId !== options.requestId)
+    ) {
+      throw error;
+    }
+    rawResult = failedUpdate.rawFrame;
+  }
   return decodeReducerCallResult(name, rawResult, {
     requestId: options.requestId,
     decodeResult: options.decodeResult,
   });
+}
+
+function reducerFailureUpdate(error: unknown): TransactionUpdateMessage | undefined {
+  if (!(error instanceof ShunterValidationError) || error.code !== "reducer_failed") {
+    return undefined;
+  }
+  if (typeof error.details !== "object" || error.details === null) {
+    return undefined;
+  }
+  const details = error.details as {
+    readonly rawFrame?: unknown;
+    readonly reducerCall?: {
+      readonly name?: unknown;
+      readonly requestId?: unknown;
+    };
+  };
+  if (
+    !(details.rawFrame instanceof Uint8Array) ||
+    typeof details.reducerCall?.name !== "string" ||
+    typeof details.reducerCall.requestId !== "number"
+  ) {
+    return undefined;
+  }
+  return error.details as TransactionUpdateMessage;
 }
 
 export async function callReducerWithEncodedArgsResult<

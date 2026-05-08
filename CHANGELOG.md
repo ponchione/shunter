@@ -135,6 +135,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   as soon as caller unsubscribe begins, even before the server acknowledgement.
 - Generated TypeScript reducer helpers now include full-update result-envelope
   wrappers alongside the existing raw byte helpers.
+- TypeScript reducer result helpers now convert connected-client reducer
+  failures into failed result envelopes for generated helper callers.
 - The TypeScript runtime now defines explicit reducer argument encoder helpers
   for callers that map typed reducer args to raw `Uint8Array` payloads.
 

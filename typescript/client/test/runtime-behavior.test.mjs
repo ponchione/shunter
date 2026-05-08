@@ -1328,20 +1328,40 @@ assert.equal(sockets[0].sent.length, 2);
 sockets[0].message(failedUpdateFrame);
 await assert.rejects(reducerFailure, ShunterValidationError);
 
+const generatedReducerFailure = callReducerWithEncodedArgsResult(
+  client.callReducer,
+  "send",
+  { body: "boom" },
+  {
+    requestId: 0x21222324,
+    encodeArgs: (args) => new TextEncoder().encode(args.body),
+  },
+);
+assert.equal(sockets[0].sent.length, 3);
+sockets[0].message(failedUpdateFrame);
+const generatedReducerFailureResult = await generatedReducerFailure;
+assert.equal(generatedReducerFailureResult.name, "send");
+assert.equal(generatedReducerFailureResult.requestId, 0x21222324);
+assert.equal(generatedReducerFailureResult.status, "failed");
+assert.equal(generatedReducerFailureResult.error.kind, "validation");
+assert.equal(generatedReducerFailureResult.error.code, "reducer_failed");
+assert.deepEqual(generatedReducerFailureResult.rawResult, failedUpdateFrame);
+assert.equal(client.state.status, "connected");
+
 const sentReducer = await client.callReducer("send", new Uint8Array([0xaa, 0xbb]), {
   requestId: 0x31323334,
   noSuccessNotify: true,
 });
 assert.deepEqual(sentReducer, encodedReducer.frame);
-assert.equal(sockets[0].sent.length, 3);
-assert.deepEqual(sockets[0].sent[2], encodedReducer.frame);
+assert.equal(sockets[0].sent.length, 4);
+assert.deepEqual(sockets[0].sent[3], encodedReducer.frame);
 
 const declaredQueryResponse = client.runDeclaredQuery("recent_users", {
   messageId: new Uint8Array([0x01, 0x02]),
 });
-assert.equal(sockets[0].sent.length, 4);
+assert.equal(sockets[0].sent.length, 5);
 assert.deepEqual(
-  sockets[0].sent[3],
+  sockets[0].sent[4],
   encodeDeclaredQueryRequest("recent_users", { messageId: new Uint8Array([0x01, 0x02]) }).frame,
 );
 sockets[0].message(oneOffSuccessFrame);
@@ -1350,7 +1370,7 @@ assert.deepEqual(await declaredQueryResponse, oneOffSuccessFrame);
 const declaredQueryFailure = client.runDeclaredQuery("recent_users", {
   messageId: new Uint8Array([0x03, 0x04]),
 });
-assert.equal(sockets[0].sent.length, 5);
+assert.equal(sockets[0].sent.length, 6);
 sockets[0].message(oneOffErrorFrame);
 await assert.rejects(declaredQueryFailure, ShunterValidationError);
 
@@ -1360,9 +1380,9 @@ const declaredViewSubscription = client.subscribeDeclaredView("live_users", {
   queryId: 0x61626364,
   onRawUpdate: (update) => declaredViewRawUpdates.push(update),
 });
-assert.equal(sockets[0].sent.length, 6);
+assert.equal(sockets[0].sent.length, 7);
 assert.deepEqual(
-  sockets[0].sent[5],
+  sockets[0].sent[6],
   encodeDeclaredViewSubscriptionRequest("live_users", {
     requestId: 0x41424344,
     queryId: 0x61626364,
@@ -1377,9 +1397,9 @@ assert.equal(declaredViewRawUpdates.length, 2);
 assert.equal(declaredViewRawUpdates[1].tableName, "users");
 const unsubscribeDeclaredViewResult = unsubscribeDeclaredView();
 assert.equal(unsubscribeDeclaredView(), unsubscribeDeclaredViewResult);
-assert.equal(sockets[0].sent.length, 7);
+assert.equal(sockets[0].sent.length, 8);
 assert.deepEqual(
-  sockets[0].sent[6],
+  sockets[0].sent[7],
   encodeUnsubscribeMultiRequest(0x61626364, { requestId: 1 }).frame,
 );
 sockets[0].message(lightUpdateFrame);
@@ -1393,7 +1413,7 @@ const deniedViewSubscription = client.subscribeDeclaredView("live_users", {
   requestId: 0x41424344,
   queryId: 0x51525354,
 });
-assert.equal(sockets[0].sent.length, 8);
+assert.equal(sockets[0].sent.length, 9);
 sockets[0].message(subscriptionErrorFrame);
 await assert.rejects(deniedViewSubscription, ShunterValidationError);
 
@@ -1417,9 +1437,9 @@ const tableSubscription = client.subscribeTable("users", (rows) => tableInitialR
   onRawRows: (message) => tableRawRows.push(message),
   onRawUpdate: (update) => tableRawUpdates.push(update),
 });
-assert.equal(sockets[0].sent.length, 9);
+assert.equal(sockets[0].sent.length, 10);
 assert.deepEqual(
-  sockets[0].sent[8],
+  sockets[0].sent[9],
   encodeTableSubscriptionRequest("users", {
     requestId: 0x01020304,
     queryId: 0x11121314,
@@ -1442,9 +1462,9 @@ assert.deepEqual(tableDecodedUpdates[0].inserts, ["1-2", "3"]);
 assert.deepEqual(tableDecodedUpdates[0].deletes, ["4-5"]);
 const unsubscribeTableResult = unsubscribeTable();
 assert.equal(unsubscribeTable(), unsubscribeTableResult);
-assert.equal(sockets[0].sent.length, 10);
+assert.equal(sockets[0].sent.length, 11);
 assert.deepEqual(
-  sockets[0].sent[9],
+  sockets[0].sent[10],
   encodeUnsubscribeSingleRequest(0x11121314, { requestId: 2 }).frame,
 );
 sockets[0].message(tableLightUpdateFrame);
@@ -1460,7 +1480,7 @@ const deniedTableSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x41424344,
   queryId: 0x51525354,
 });
-assert.equal(sockets[0].sent.length, 11);
+assert.equal(sockets[0].sent.length, 12);
 sockets[0].message(subscriptionErrorFrame);
 await assert.rejects(deniedTableSubscription, ShunterValidationError);
 
@@ -1475,13 +1495,13 @@ const unsubscribeErrorSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x01020304,
   queryId: 0x31323334,
 });
-assert.equal(sockets[0].sent.length, 12);
+assert.equal(sockets[0].sent.length, 13);
 sockets[0].message(unsubscribeErrorSubscribeAppliedFrame);
 const unsubscribeWithError = await unsubscribeErrorSubscription;
 const unsubscribeErrorResult = unsubscribeWithError();
-assert.equal(sockets[0].sent.length, 13);
+assert.equal(sockets[0].sent.length, 14);
 assert.deepEqual(
-  sockets[0].sent[12],
+  sockets[0].sent[13],
   encodeUnsubscribeSingleRequest(0x31323334, { requestId: 3 }).frame,
 );
 sockets[0].message(unsubscribeErrorFrame);
@@ -1495,9 +1515,9 @@ const declaredViewHandleSubscription = client.subscribeDeclaredView("live_users"
   queryId: 0x61626364,
   returnHandle: true,
 });
-assert.equal(sockets[0].sent.length, 14);
+assert.equal(sockets[0].sent.length, 15);
 assert.deepEqual(
-  sockets[0].sent[13],
+  sockets[0].sent[14],
   encodeDeclaredViewSubscriptionRequest("live_users", {
     requestId: 0x41424344,
     queryId: 0x61626364,
@@ -1509,9 +1529,9 @@ assert.equal(declaredViewHandle.queryId, 0x61626364);
 assert.deepEqual(declaredViewHandle.state, { status: "active", rows: [] });
 const unsubscribeDeclaredViewHandle = declaredViewHandle.unsubscribe();
 void declaredViewHandle.unsubscribe();
-assert.equal(sockets[0].sent.length, 15);
+assert.equal(sockets[0].sent.length, 16);
 assert.deepEqual(
-  sockets[0].sent[14],
+  sockets[0].sent[15],
   encodeUnsubscribeMultiRequest(0x61626364, { requestId: 4 }).frame,
 );
 sockets[0].message(unsubscribeDeclaredViewHandleAppliedFrame);
@@ -1535,9 +1555,9 @@ const tableHandleSubscription = client.subscribeTable("users", undefined, {
   queryId: 0x11121314,
   returnHandle: true,
 });
-assert.equal(sockets[0].sent.length, 16);
+assert.equal(sockets[0].sent.length, 17);
 assert.deepEqual(
-  sockets[0].sent[15],
+  sockets[0].sent[16],
   encodeTableSubscriptionRequest("users", {
     requestId: 0x01020304,
     queryId: 0x11121314,
@@ -1553,9 +1573,9 @@ assert.equal(tableHandle.state.status, "active");
 assert.deepEqual(tableHandle.state.rows.map((row) => [...row]), [[3], [4, 5]]);
 const unsubscribeTableHandle = tableHandle.unsubscribe();
 void tableHandle.unsubscribe();
-assert.equal(sockets[0].sent.length, 17);
+assert.equal(sockets[0].sent.length, 18);
 assert.deepEqual(
-  sockets[0].sent[16],
+  sockets[0].sent[17],
   encodeUnsubscribeSingleRequest(0x11121314, { requestId: 5 }).frame,
 );
 sockets[0].message(unsubscribeTableHandleAppliedFrame);
@@ -1572,7 +1592,7 @@ const decodedTableHandleSubscription = client.subscribeTable("users", undefined,
   returnHandle: true,
   decodeRow: (row) => [...row].join("-"),
 });
-assert.equal(sockets[0].sent.length, 18);
+assert.equal(sockets[0].sent.length, 19);
 sockets[0].message(subscribeSingleAppliedFrame);
 const decodedTableHandle = await decodedTableHandleSubscription;
 assert.equal(decodedTableHandle.queryId, 0x11121314);
@@ -1580,9 +1600,9 @@ assert.deepEqual(decodedTableHandle.state, { status: "active", rows: ["1-2", "3"
 sockets[0].message(tableHandleCacheUpdateFrame);
 assert.deepEqual(decodedTableHandle.state, { status: "active", rows: ["3", "4-5"] });
 const unsubscribeDecodedTableHandle = decodedTableHandle.unsubscribe();
-assert.equal(sockets[0].sent.length, 19);
+assert.equal(sockets[0].sent.length, 20);
 assert.deepEqual(
-  sockets[0].sent[18],
+  sockets[0].sent[19],
   encodeUnsubscribeSingleRequest(0x11121314, { requestId: 6 }).frame,
 );
 sockets[0].message(unsubscribeDecodedTableHandleAppliedFrame);

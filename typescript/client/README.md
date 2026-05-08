@@ -12,7 +12,8 @@ full-update `TransactionUpdate` response correlation. `decodeReducerCallResult()
 wraps heavy reducer `TransactionUpdate` frames in a minimal committed/failed
 result envelope without changing `callReducer()`'s raw-frame behavior.
 `callReducerWithResult()` lets generated helpers call through that envelope
-path for full-update reducer calls. `ReducerArgEncoder`, `encodeReducerArgs()`,
+path for full-update reducer calls, including failed reducer updates surfaced
+by the connected client. `ReducerArgEncoder`, `encodeReducerArgs()`,
 `callReducerWithEncodedArgs()`, and `callReducerWithEncodedArgsResult()` define
 the explicit typed-argument-to-`Uint8Array` convention for callers that already
 have module-local codecs. It also includes raw declared-query request encoding
@@ -69,7 +70,8 @@ Full-update `callReducer()` calls currently resolve with the raw
 status. `NoSuccessNotify` calls resolve after send because successful server
 echoes may be suppressed. Generated helpers can use `decodeReducerCallResult()`
 or `callReducerWithResult()` to wrap heavy transaction update frames in a
-reducer name/request ID/status envelope. Typed reducer callers can use
+reducer name/request ID/status envelope; connected-client reducer failures are
+converted into failed result envelopes on that path. Typed reducer callers can use
 `encodeReducerArgs()` and `callReducerWithEncodedArgs()` when they provide
 their own argument encoder; generated bindings provide schema-derived argument
 encoders and standalone reducer result product decoders when the contract
