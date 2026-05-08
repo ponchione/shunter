@@ -669,6 +669,9 @@ const unsubscribeDeclaredViewAppliedFrame = bytesFromHex(
 const subscriptionErrorFrame = bytesFromHex(
   "0408070605040302010144434241015453525101646362610600000064656e696564",
 );
+const reconnectSubscriptionErrorFrame = bytesFromHex(
+  "04000000000000000001010000000114131211000d0000007265706c61792064656e696564",
+);
 const subscriptionError = decodeSubscriptionErrorFrame(subscriptionErrorFrame);
 assert.equal(subscriptionErrorFrame[0], SHUNTER_SERVER_MESSAGE_SUBSCRIPTION_ERROR);
 assert.equal(subscriptionError.requestId, 0x41424344);
@@ -2164,6 +2167,73 @@ assert.deepEqual(reconnectReplayFailureStates, [
   "failed",
   "closed",
 ]);
+
+const reconnectReplayErrorSockets = [];
+const reconnectReplayErrorStates = [];
+const reconnectReplayErrorClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectReplayErrorSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectReplayErrorStates.push(current.status),
+});
+const reconnectReplayErrorConnecting = reconnectReplayErrorClient.connect();
+await nextTurn();
+reconnectReplayErrorSockets[0].open();
+reconnectReplayErrorSockets[0].message(identityTokenFrame().buffer);
+await reconnectReplayErrorConnecting;
+const reconnectReplayErrorHandleSubscription = reconnectReplayErrorClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectReplayErrorSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectReplayErrorHandle = await reconnectReplayErrorHandleSubscription;
+assert.deepEqual(reconnectReplayErrorHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectReplayErrorSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectReplayErrorClient.state.status, "reconnecting");
+await nextTurn();
+const observedReplayErrorReconnect = reconnectReplayErrorClient.connect();
+reconnectReplayErrorSockets[1].open();
+reconnectReplayErrorSockets[1].message(identityTokenFrame().buffer);
+await observedReplayErrorReconnect;
+assert.equal(reconnectReplayErrorClient.state.status, "connected");
+assert.deepEqual(
+  reconnectReplayErrorSockets[1].sent[0],
+  encodeTableSubscriptionRequest("users", {
+    requestId: 1,
+    queryId: 0x11121314,
+  }).frame,
+);
+reconnectReplayErrorSockets[1].message(reconnectSubscriptionErrorFrame);
+assert.equal(reconnectReplayErrorClient.state.status, "connected");
+const reconnectReplayErrorClosed = await reconnectReplayErrorHandle.closed;
+assert.equal(reconnectReplayErrorClosed.reason, "error");
+assert(reconnectReplayErrorClosed.error instanceof ShunterValidationError);
+assert.equal(reconnectReplayErrorClosed.error.kind, "validation");
+assert.match(reconnectReplayErrorClosed.error.message, /replay denied/);
+assert.deepEqual(reconnectReplayErrorHandle.state, {
+  status: "closed",
+  error: reconnectReplayErrorClosed.error,
+});
+assert.deepEqual(reconnectReplayErrorStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "connected",
+]);
+await reconnectReplayErrorClient.close();
 
 const reconnectAuthSockets = [];
 const reconnectAuthStates = [];
