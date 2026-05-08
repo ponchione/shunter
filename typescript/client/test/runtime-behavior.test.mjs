@@ -1318,6 +1318,64 @@ assert.deepEqual(unexpectedCloseHandle.state, {
 });
 assert.deepEqual(unexpectedCloseStates, ["connecting", "connected", "closed"]);
 
+const transportErrorSockets = [];
+const transportErrorStates = [];
+const transportErrorClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    transportErrorSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => transportErrorStates.push(current.status),
+});
+const transportErrorConnecting = transportErrorClient.connect();
+await nextTurn();
+transportErrorSockets[0].open();
+transportErrorSockets[0].message(identityTokenFrame().buffer);
+await transportErrorConnecting;
+const transportErrorHandleSubscription = transportErrorClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+transportErrorSockets[0].message(subscribeSingleAppliedFrame);
+const transportErrorHandle = await transportErrorHandleSubscription;
+assert.deepEqual(transportErrorHandle.state, { status: "active", rows: ["1-2", "3"] });
+const transportErrorReducer = transportErrorClient.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+});
+const transportErrorQuery = transportErrorClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x09, 0x08]),
+});
+assert.equal(transportErrorSockets[0].sent.length, 3);
+transportErrorSockets[0].error();
+assert.equal(transportErrorClient.state.status, "failed");
+const transportError = transportErrorClient.state.error;
+assert(transportError instanceof ShunterTransportError);
+assert.equal(transportError.kind, "transport");
+assert.equal(transportErrorSockets[0].closeCalls.length, 1);
+assert.deepEqual(transportErrorSockets[0].closeCalls[0], {
+  code: 1000,
+  reason: "transport failure",
+});
+const assertTransportError = (error) => {
+  assert.strictEqual(error, transportError);
+  return true;
+};
+await assert.rejects(transportErrorReducer, assertTransportError);
+await assert.rejects(transportErrorQuery, assertTransportError);
+const transportErrorClosed = await transportErrorHandle.closed;
+assert.equal(transportErrorClosed.reason, "error");
+assert.strictEqual(transportErrorClosed.error, transportError);
+assert.deepEqual(transportErrorHandle.state, {
+  status: "closed",
+  error: transportError,
+});
+assert.deepEqual(transportErrorStates, ["connecting", "connected", "failed"]);
+
 const abortSockets = [];
 const abortFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);
