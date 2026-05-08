@@ -817,6 +817,74 @@ await rejectByNextTurn(observedTokenReconnect, (error) => {
 assert.equal(reconnectTokenClient.state.status, "closed");
 assert.equal(reconnectTokenCallsForFailure, 3);
 
+const reconnectAsyncTokenSockets = [];
+const reconnectAsyncTokenResolvers = [];
+let reconnectAsyncTokenCalls = 0;
+const reconnectAsyncTokenClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe?existing=1",
+  protocol: shunterProtocol,
+  token: () => {
+    reconnectAsyncTokenCalls += 1;
+    return new Promise((resolve) => {
+      reconnectAsyncTokenResolvers.push(resolve);
+    });
+  },
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectAsyncTokenSockets.push(socket);
+    return socket;
+  },
+});
+const reconnectAsyncTokenConnecting = reconnectAsyncTokenClient.connect();
+await nextTurn();
+assert.equal(reconnectAsyncTokenCalls, 1);
+assert.equal(reconnectAsyncTokenSockets.length, 0);
+reconnectAsyncTokenResolvers[0]("async-retry-token-1");
+await nextTurn();
+assertSingleTokenUrl(reconnectAsyncTokenSockets[0].url, "async-retry-token-1");
+reconnectAsyncTokenSockets[0].open();
+reconnectAsyncTokenSockets[0].message(identityTokenFrame().buffer);
+await reconnectAsyncTokenConnecting;
+const reconnectAsyncTokenHandleSubscription = reconnectAsyncTokenClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectAsyncTokenSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectAsyncTokenHandle = await reconnectAsyncTokenHandleSubscription;
+assert.deepEqual(reconnectAsyncTokenHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectAsyncTokenSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectAsyncTokenClient.state.status, "reconnecting");
+await nextTurn();
+assert.equal(reconnectAsyncTokenCalls, 2);
+assert.equal(reconnectAsyncTokenSockets.length, 1);
+reconnectAsyncTokenResolvers[1]("async-retry-token-2");
+await nextTurn();
+assert.equal(reconnectAsyncTokenSockets.length, 2);
+assertSingleTokenUrl(reconnectAsyncTokenSockets[1].url, "async-retry-token-2");
+reconnectAsyncTokenSockets[1].open();
+reconnectAsyncTokenSockets[1].message(identityTokenFrame().buffer);
+assert.equal(reconnectAsyncTokenClient.state.status, "connected");
+assert.deepEqual(
+  reconnectAsyncTokenSockets[1].sent[0],
+  encodeTableSubscriptionRequest("users", {
+    requestId: 1,
+    queryId: 0x11121314,
+  }).frame,
+);
+reconnectAsyncTokenSockets[1].message(bytesFromHex(
+  "02010000000000000000000000141312110500000075736572730a00000001000000020000000405",
+));
+assert.deepEqual(reconnectAsyncTokenHandle.state, { status: "active", rows: ["4-5"] });
+await reconnectAsyncTokenClient.close();
+
 const client = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe?existing=1",
   protocol: shunterProtocol,
