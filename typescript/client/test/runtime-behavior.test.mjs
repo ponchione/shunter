@@ -2586,6 +2586,54 @@ assert.deepEqual(reconnectCloseHandle.state, {
 });
 assert.deepEqual(reconnectCloseStates, ["connecting", "connected", "reconnecting", "closing", "closed"]);
 
+const reconnectDisposeSockets = [];
+const reconnectDisposeStates = [];
+const reconnectDisposeClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectDisposeSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectDisposeStates.push(current.status),
+});
+const reconnectDisposeConnecting = reconnectDisposeClient.connect();
+await nextTurn();
+reconnectDisposeSockets[0].open();
+reconnectDisposeSockets[0].message(identityTokenFrame().buffer);
+await reconnectDisposeConnecting;
+const reconnectDisposeHandleSubscription = reconnectDisposeClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectDisposeSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectDisposeHandle = await reconnectDisposeHandleSubscription;
+assert.deepEqual(reconnectDisposeHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectDisposeSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectDisposeClient.state.status, "reconnecting");
+await reconnectDisposeClient.dispose();
+await nextTurn();
+assert.equal(reconnectDisposeClient.state.status, "closed");
+assert.equal(reconnectDisposeSockets.length, 1);
+const reconnectDisposeClosed = await reconnectDisposeHandle.closed;
+assert.equal(reconnectDisposeClosed.reason, "error");
+assert(reconnectDisposeClosed.error instanceof ShunterClosedClientError);
+assert.deepEqual(reconnectDisposeHandle.state, {
+  status: "closed",
+  error: reconnectDisposeClosed.error,
+});
+await assert.rejects(reconnectDisposeClient.connect(), ShunterClosedClientError);
+assert.deepEqual(reconnectDisposeStates, ["connecting", "connected", "reconnecting", "closing", "closed"]);
+
 const reconnectPendingTokenCloseSockets = [];
 const reconnectPendingTokenCloseStates = [];
 let reconnectPendingTokenCloseCalls = 0;
