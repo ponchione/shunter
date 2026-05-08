@@ -178,6 +178,25 @@ const fakeFactory = (url, protocols) => {
 
 const nextTurn = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+async function rejectByNextTurn(promise, validate) {
+  let outcome = { status: "pending" };
+  promise.then(
+    (value) => {
+      outcome = { status: "fulfilled", value };
+    },
+    (error) => {
+      outcome = { status: "rejected", error };
+    },
+  );
+  await nextTurn();
+  if (outcome.status === "pending") {
+    assert.fail("Expected promise to reject before the next turn.");
+  }
+  assert.equal(outcome.status, "rejected");
+  validate?.(outcome.error);
+  return outcome.error;
+}
+
 function identityTokenFrame({ identityStart = 1, token = "server-token", connectionStart = 0xa0 } = {}) {
   const tokenBytes = new TextEncoder().encode(token);
   const frame = new Uint8Array(1 + 32 + 4 + tokenBytes.length + 16);
@@ -1272,3 +1291,90 @@ reconnectSockets[1].message(reconnectSubscribeSingleAppliedFrame);
 assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["4-5"] });
 assert.deepEqual(reconnectStates, ["connecting", "connected", "reconnecting", "connecting", "connected"]);
 await reconnectClient.close();
+
+const exhaustionSockets = [];
+const exhaustionFactory = (url, protocols) => {
+  const socket = new FakeWebSocket(url, protocols);
+  exhaustionSockets.push(socket);
+  return socket;
+};
+const exhaustionStates = [];
+let exhaustionTokenCalls = 0;
+const exhaustionClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => {
+    exhaustionTokenCalls += 1;
+    return `token-${exhaustionTokenCalls}`;
+  },
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: exhaustionFactory,
+  onStateChange: ({ current }) => exhaustionStates.push(current.status),
+});
+const exhaustionConnecting = exhaustionClient.connect();
+await nextTurn();
+exhaustionSockets[0].open();
+exhaustionSockets[0].message(identityTokenFrame({ token: "initial-token" }).buffer);
+await exhaustionConnecting;
+assert.equal(exhaustionTokenCalls, 1);
+assert.equal(exhaustionSockets[0].url, "ws://127.0.0.1:3000/subscribe?token=token-1");
+const exhaustionHandleSubscription = exhaustionClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+exhaustionSockets[0].message(subscribeSingleAppliedFrame);
+const exhaustionHandle = await exhaustionHandleSubscription;
+assert.deepEqual(exhaustionHandle.state, { status: "active", rows: ["1-2", "3"] });
+const exhaustionReducer = exhaustionClient.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+});
+const exhaustionQuery = exhaustionClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x09, 0x08]),
+});
+assert.equal(exhaustionSockets[0].sent.length, 3);
+exhaustionSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(exhaustionClient.state.status, "reconnecting");
+const assertInitialDisconnect = (error) => {
+  assert(error instanceof ShunterClosedClientError);
+  assert.equal(error.kind, "closed");
+  assert.equal(error.code, "1006");
+  assert.deepEqual(error.details, { reason: "lost", wasClean: false });
+  return true;
+};
+await assert.rejects(exhaustionReducer, assertInitialDisconnect);
+await assert.rejects(exhaustionQuery, assertInitialDisconnect);
+assert.deepEqual(exhaustionHandle.state, { status: "active", rows: ["1-2", "3"] });
+await nextTurn();
+assert.equal(exhaustionTokenCalls, 2);
+assert.equal(exhaustionSockets.length, 2);
+assert.equal(exhaustionSockets[1].url, "ws://127.0.0.1:3000/subscribe?token=token-2");
+const observedReconnect = exhaustionClient.connect();
+exhaustionSockets[1].open();
+exhaustionSockets[1].dispatch("close", {
+  code: 1006,
+  reason: "identity missing",
+  wasClean: false,
+});
+const exhaustionError = await rejectByNextTurn(observedReconnect, (error) => {
+  assert(error instanceof ShunterTransportError);
+  assert.equal(error.kind, "transport");
+  assert.equal(error.code, "1006");
+  assert.deepEqual(error.details, { reason: "identity missing", wasClean: false });
+});
+assert.equal(exhaustionClient.state.status, "closed");
+assert.strictEqual(exhaustionClient.state.error, exhaustionError);
+const exhaustionClosed = await exhaustionHandle.closed;
+assert.equal(exhaustionClosed.reason, "error");
+assert.strictEqual(exhaustionClosed.error, exhaustionError);
+assert.deepEqual(exhaustionHandle.state, {
+  status: "closed",
+  error: exhaustionError,
+});
+assert.deepEqual(exhaustionStates, ["connecting", "connected", "reconnecting", "connecting", "closed"]);

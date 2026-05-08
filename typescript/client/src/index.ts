@@ -579,6 +579,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return false;
     }
     if (reconnectAttempt >= reconnectOptions.maxAttempts) {
+      rejectConnect?.(error);
       rejectPendingOperations(error);
       setState({ status: "closed", error });
       finishClose();
