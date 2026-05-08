@@ -2055,6 +2055,70 @@ noNotifySendFailureSockets[0].message(committedUpdateFrame);
 assert.deepEqual(await recoveredNoNotifyReducerSend, committedUpdateFrame);
 await noNotifySendFailureClient.close();
 
+const preAbortedOperationSockets = [];
+const preAbortedOperationClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    preAbortedOperationSockets.push(socket);
+    return socket;
+  },
+});
+const preAbortedOperationConnecting = preAbortedOperationClient.connect();
+await nextTurn();
+preAbortedOperationSockets[0].open();
+preAbortedOperationSockets[0].message(identityTokenFrame().buffer);
+await preAbortedOperationConnecting;
+const preAbortedReducerSignal = new AbortController();
+preAbortedReducerSignal.abort();
+await assert.rejects(
+  preAbortedOperationClient.callReducer("send", new Uint8Array([0xaa]), {
+    requestId: 0x21222324,
+    signal: preAbortedReducerSignal.signal,
+  }),
+  ShunterClosedClientError,
+);
+const preAbortedQuerySignal = new AbortController();
+preAbortedQuerySignal.abort();
+await assert.rejects(
+  preAbortedOperationClient.runDeclaredQuery("recent_users", {
+    messageId: new Uint8Array([0x01, 0x02]),
+    signal: preAbortedQuerySignal.signal,
+  }),
+  ShunterClosedClientError,
+);
+const preAbortedViewSignal = new AbortController();
+preAbortedViewSignal.abort();
+await assert.rejects(
+  preAbortedOperationClient.subscribeDeclaredView("live_users", {
+    requestId: 0x41424344,
+    queryId: 0x61626364,
+    signal: preAbortedViewSignal.signal,
+    returnHandle: true,
+  }),
+  ShunterClosedClientError,
+);
+const preAbortedTableSignal = new AbortController();
+preAbortedTableSignal.abort();
+await assert.rejects(
+  preAbortedOperationClient.subscribeTable("users", undefined, {
+    requestId: 0x01020304,
+    queryId: 0x11121314,
+    signal: preAbortedTableSignal.signal,
+    returnHandle: true,
+  }),
+  ShunterClosedClientError,
+);
+assert.equal(preAbortedOperationSockets[0].sent.length, 0);
+assert.equal(preAbortedOperationClient.state.status, "connected");
+const recoveredPreAbortedOperationReducer = preAbortedOperationClient.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+});
+preAbortedOperationSockets[0].message(committedUpdateFrame);
+assert.deepEqual(await recoveredPreAbortedOperationReducer, committedUpdateFrame);
+await preAbortedOperationClient.close();
+
 const reconnectSockets = [];
 const reconnectFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);
