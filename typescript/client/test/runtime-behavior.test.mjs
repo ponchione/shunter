@@ -197,6 +197,12 @@ async function rejectByNextTurn(promise, validate) {
   return outcome.error;
 }
 
+function assertSingleTokenUrl(rawUrl, expectedToken) {
+  const parsed = new URL(rawUrl);
+  assert.deepEqual(parsed.searchParams.getAll("token"), [expectedToken]);
+  assert.equal(parsed.searchParams.get("existing"), "1");
+}
+
 function identityTokenFrame({ identityStart = 1, token = "server-token", connectionStart = 0xa0 } = {}) {
   const tokenBytes = new TextEncoder().encode(token);
   const frame = new Uint8Array(1 + 32 + 4 + tokenBytes.length + 16);
@@ -695,6 +701,65 @@ tokenQuerySockets[0].open();
 tokenQuerySockets[0].message(identityTokenFrame().buffer);
 await tokenQueryConnecting;
 await tokenQueryClient.close();
+
+const reconnectTokenSockets = [];
+let reconnectTokenCallsForFailure = 0;
+const reconnectTokenClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe?token=old-token&existing=1&token=stale-token",
+  protocol: shunterProtocol,
+  token: () => {
+    reconnectTokenCallsForFailure += 1;
+    return `retry-token-${reconnectTokenCallsForFailure}`;
+  },
+  reconnect: {
+    enabled: true,
+    maxAttempts: 2,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectTokenSockets.push(socket);
+    return socket;
+  },
+});
+const reconnectTokenConnecting = reconnectTokenClient.connect();
+await nextTurn();
+assertSingleTokenUrl(reconnectTokenSockets[0].url, "retry-token-1");
+reconnectTokenSockets[0].open();
+reconnectTokenSockets[0].message(identityTokenFrame().buffer);
+await reconnectTokenConnecting;
+reconnectTokenSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+await nextTurn();
+assert.equal(reconnectTokenClient.state.status, "connecting");
+assert.equal(reconnectTokenCallsForFailure, 2);
+assert.equal(reconnectTokenSockets.length, 2);
+assertSingleTokenUrl(reconnectTokenSockets[1].url, "retry-token-2");
+reconnectTokenSockets[1].open();
+reconnectTokenSockets[1].dispatch("close", {
+  code: 1006,
+  reason: "first retry failed",
+  wasClean: false,
+});
+await nextTurn();
+assert.equal(reconnectTokenClient.state.status, "connecting");
+assert.equal(reconnectTokenCallsForFailure, 3);
+assert.equal(reconnectTokenSockets.length, 3);
+assertSingleTokenUrl(reconnectTokenSockets[2].url, "retry-token-3");
+const observedTokenReconnect = reconnectTokenClient.connect();
+reconnectTokenSockets[2].open();
+reconnectTokenSockets[2].dispatch("close", {
+  code: 1006,
+  reason: "second retry failed",
+  wasClean: false,
+});
+await rejectByNextTurn(observedTokenReconnect, (error) => {
+  assert(error instanceof ShunterTransportError);
+  assert.equal(error.code, "1006");
+  assert.deepEqual(error.details, { reason: "second retry failed", wasClean: false });
+});
+assert.equal(reconnectTokenClient.state.status, "closed");
+assert.equal(reconnectTokenCallsForFailure, 3);
 
 const client = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe?existing=1",
