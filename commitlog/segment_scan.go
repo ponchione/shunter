@@ -63,6 +63,12 @@ func ScanSegments(dir string) ([]SegmentInfo, types.TxID, error) {
 		if err := rejectBootstrapSegmentStart(startTx, filepath.Join(dir, entry.Name())); err != nil {
 			return nil, 0, err
 		}
+		if entry.IsDir() {
+			if startTx == 1 {
+				return nil, 0, fmt.Errorf("%w: segment file %s is not a regular file", ErrOpen, filepath.Join(dir, entry.Name()))
+			}
+			continue
+		}
 		paths = append(paths, segmentPath{
 			path:    filepath.Join(dir, entry.Name()),
 			startTx: startTx,
