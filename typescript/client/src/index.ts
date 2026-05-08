@@ -1012,6 +1012,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
             activeSocket.send(request.frame);
           } catch (error) {
             cleanupPendingUnsubscribe(pendingUnsubscribe);
+            removeActiveSubscription(request.queryId);
             reject(toShunterError(error, "transport", sendMessage));
           }
         });

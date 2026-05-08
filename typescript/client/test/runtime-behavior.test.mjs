@@ -1518,6 +1518,46 @@ await unsubscribeDecodedTableHandle;
 assert.deepEqual(await decodedTableHandle.closed, { reason: "unsubscribed" });
 assert.deepEqual(decodedTableHandle.state, { status: "closed" });
 
+const unsubscribeSendFailureSockets = [];
+const unsubscribeSendFailureClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    unsubscribeSendFailureSockets.push(socket);
+    return socket;
+  },
+});
+const unsubscribeSendFailureConnecting = unsubscribeSendFailureClient.connect();
+await nextTurn();
+unsubscribeSendFailureSockets[0].open();
+unsubscribeSendFailureSockets[0].message(identityTokenFrame().buffer);
+await unsubscribeSendFailureConnecting;
+const failedUnsubscribeHandleSubscription = unsubscribeSendFailureClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+unsubscribeSendFailureSockets[0].message(subscribeSingleAppliedFrame);
+const failedUnsubscribeHandle = await failedUnsubscribeHandleSubscription;
+assert.deepEqual(failedUnsubscribeHandle.state, { status: "active", rows: ["1-2", "3"] });
+unsubscribeSendFailureSockets[0].send = () => {
+  throw new Error("unsubscribe send denied");
+};
+await failedUnsubscribeHandle.unsubscribe();
+const failedUnsubscribeClosed = await failedUnsubscribeHandle.closed;
+assert.equal(failedUnsubscribeClosed.reason, "error");
+assert.equal(failedUnsubscribeClosed.error.kind, "transport");
+assert.match(failedUnsubscribeClosed.error.message, /unsubscribe send denied/);
+unsubscribeSendFailureSockets[0].message(tableLightUpdateFrame);
+assert.equal(unsubscribeSendFailureClient.state.status, "connected");
+assert.deepEqual(failedUnsubscribeHandle.state, {
+  status: "closed",
+  error: failedUnsubscribeClosed.error,
+});
+await unsubscribeSendFailureClient.close();
+
 await client.close();
 await client.close();
 assert.equal(sockets[0].closeCalls.length, 1);
