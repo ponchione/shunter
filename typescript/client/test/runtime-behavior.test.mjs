@@ -998,6 +998,8 @@ const tableHandleCacheUpdateFrame = bytesFromHex(
 const reconnectSubscribeSingleAppliedFrame = bytesFromHex(
   "02010000000000000000000000141312110500000075736572730a00000001000000020000000405",
 );
+const secondReconnectSubscribeSingleAppliedFrame = new Uint8Array(reconnectSubscribeSingleAppliedFrame);
+secondReconnectSubscribeSingleAppliedFrame[1] = 2;
 const tableHandleSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x01020304,
   queryId: 0x11121314,
@@ -1541,7 +1543,33 @@ assert.deepEqual(
 );
 reconnectSockets[1].message(reconnectSubscribeSingleAppliedFrame);
 assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["4-5"] });
-assert.deepEqual(reconnectStates, ["connecting", "connected", "reconnecting", "connecting", "connected"]);
+await nextTurn();
+reconnectSockets[1].dispatch("close", { code: 1006, reason: "lost again", wasClean: false });
+assert.equal(reconnectClient.state.status, "reconnecting");
+await nextTurn();
+assert.equal(reconnectSockets.length, 3);
+reconnectSockets[2].open();
+reconnectSockets[2].message(identityTokenFrame({ token: "second-reconnected-token" }).buffer);
+assert.equal(reconnectClient.state.status, "connected");
+assert.deepEqual(
+  reconnectSockets[2].sent[0],
+  encodeTableSubscriptionRequest("users", {
+    requestId: 2,
+    queryId: 0x11121314,
+  }).frame,
+);
+reconnectSockets[2].message(secondReconnectSubscribeSingleAppliedFrame);
+assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["4-5"] });
+assert.deepEqual(reconnectStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "connected",
+]);
 await reconnectClient.close();
 
 const reconnectNoReplaySockets = [];
