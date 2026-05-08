@@ -20,6 +20,7 @@ import {
   ShunterClosedClientError,
   ShunterProtocolError,
   ShunterProtocolMismatchError,
+  ShunterTransportError,
   ShunterValidationError,
   assertProtocolCompatible,
   callReducerWithEncodedArgs,
@@ -174,6 +175,8 @@ const fakeFactory = (url, protocols) => {
   sockets.push(socket);
   return socket;
 };
+
+const nextTurn = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function identityTokenFrame({ identityStart = 1, token = "server-token", connectionStart = 0xa0 } = {}) {
   const tokenBytes = new TextEncoder().encode(token);
@@ -649,6 +652,31 @@ assert.equal(subscriptionError.tableId, 0x61626364);
 assert.equal(subscriptionError.error, "denied");
 
 const clientStates = [];
+const encodedToken = "space token&equals=value/slash?";
+const tokenQuerySockets = [];
+const tokenQueryClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe?token=old-token&existing=1&token=stale-token",
+  protocol: shunterProtocol,
+  token: encodedToken,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    tokenQuerySockets.push(socket);
+    return socket;
+  },
+});
+const tokenQueryConnecting = tokenQueryClient.connect();
+await nextTurn();
+const tokenQueryUrl = new URL(tokenQuerySockets[0].url);
+assert.deepEqual(tokenQueryUrl.searchParams.getAll("token"), [encodedToken]);
+assert.equal(tokenQueryUrl.searchParams.get("existing"), "1");
+assert.match(tokenQuerySockets[0].url, /token=space\+token%26equals%3Dvalue%2Fslash%3F/);
+assert(!tokenQuerySockets[0].url.includes("old-token"));
+assert(!tokenQuerySockets[0].url.includes("stale-token"));
+tokenQuerySockets[0].open();
+tokenQuerySockets[0].message(identityTokenFrame().buffer);
+await tokenQueryConnecting;
+await tokenQueryClient.close();
+
 const client = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe?existing=1",
   protocol: shunterProtocol,
@@ -657,7 +685,7 @@ const client = createShunterClient({
   onStateChange: ({ current }) => clientStates.push(current.status),
 });
 const connecting = client.connect();
-await new Promise((resolve) => setTimeout(resolve, 0));
+await nextTurn();
 assert.equal(sockets.length, 1);
 assert.equal(sockets[0].url, "ws://127.0.0.1:3000/subscribe?existing=1&token=test-token");
 assert.deepEqual(sockets[0].protocols, [SHUNTER_SUBPROTOCOL_V1]);
@@ -973,12 +1001,25 @@ const mismatchClient = createShunterClient({
   webSocketFactory: fakeFactory,
 });
 const mismatchConnecting = mismatchClient.connect();
-await new Promise((resolve) => setTimeout(resolve, 0));
+await nextTurn();
 const mismatchSocket = sockets.at(-1);
 mismatchSocket.open("v1.bsatn.spacetimedb");
 await assert.rejects(mismatchConnecting, ShunterProtocolMismatchError);
 assert.equal(mismatchClient.state.status, "failed");
 assert.equal(mismatchSocket.closeCalls.length, 1);
+
+const missingProtocolClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: fakeFactory,
+});
+const missingProtocolConnecting = missingProtocolClient.connect();
+await nextTurn();
+const missingProtocolSocket = sockets.at(-1);
+missingProtocolSocket.open("");
+await assert.rejects(missingProtocolConnecting, ShunterProtocolMismatchError);
+assert.equal(missingProtocolClient.state.status, "failed");
+assert.equal(missingProtocolSocket.closeCalls.length, 1);
 
 const malformedClient = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe",
@@ -986,12 +1027,57 @@ const malformedClient = createShunterClient({
   webSocketFactory: fakeFactory,
 });
 const malformedConnecting = malformedClient.connect();
-await new Promise((resolve) => setTimeout(resolve, 0));
+await nextTurn();
 const malformedSocket = sockets.at(-1);
 malformedSocket.open();
 malformedSocket.message(new Uint8Array([1, 2, 3]));
 await assert.rejects(malformedConnecting, ShunterProtocolError);
 assert.equal(malformedClient.state.status, "failed");
+
+const cleanPreIdentityStates = [];
+const cleanPreIdentityClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: fakeFactory,
+  onStateChange: ({ current }) => cleanPreIdentityStates.push(current.status),
+});
+const cleanPreIdentityConnecting = cleanPreIdentityClient.connect();
+await nextTurn();
+const cleanPreIdentitySocket = sockets.at(-1);
+cleanPreIdentitySocket.open();
+cleanPreIdentitySocket.close(1000, "server closed");
+await assert.rejects(cleanPreIdentityConnecting, (error) => {
+  assert(error instanceof ShunterTransportError);
+  assert.equal(error.kind, "transport");
+  assert.equal(error.code, "1000");
+  assert.deepEqual(error.details, { reason: "server closed", wasClean: true });
+  return true;
+});
+assert.equal(cleanPreIdentityClient.state.status, "failed");
+assert.deepEqual(cleanPreIdentityStates, ["connecting", "failed"]);
+
+const errorPreIdentityClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: fakeFactory,
+});
+const errorPreIdentityConnecting = errorPreIdentityClient.connect();
+await nextTurn();
+const errorPreIdentitySocket = sockets.at(-1);
+errorPreIdentitySocket.open();
+errorPreIdentitySocket.dispatch("close", {
+  code: 1006,
+  reason: "abnormal",
+  wasClean: false,
+});
+await assert.rejects(errorPreIdentityConnecting, (error) => {
+  assert(error instanceof ShunterTransportError);
+  assert.equal(error.kind, "transport");
+  assert.equal(error.code, "1006");
+  assert.deepEqual(error.details, { reason: "abnormal", wasClean: false });
+  return true;
+});
+assert.equal(errorPreIdentityClient.state.status, "failed");
 
 const pendingCloseSockets = [];
 const pendingCloseFactory = (url, protocols) => {
@@ -1005,7 +1091,7 @@ const pendingCloseClient = createShunterClient({
   webSocketFactory: pendingCloseFactory,
 });
 const pendingCloseConnecting = pendingCloseClient.connect();
-await new Promise((resolve) => setTimeout(resolve, 0));
+await nextTurn();
 pendingCloseSockets[0].open();
 pendingCloseSockets[0].message(identityTokenFrame().buffer);
 await pendingCloseConnecting;
@@ -1040,7 +1126,7 @@ const activeCloseClient = createShunterClient({
   webSocketFactory: activeCloseFactory,
 });
 const activeCloseConnecting = activeCloseClient.connect();
-await new Promise((resolve) => setTimeout(resolve, 0));
+await nextTurn();
 activeCloseSockets[0].open();
 activeCloseSockets[0].message(identityTokenFrame().buffer);
 await activeCloseConnecting;
@@ -1073,7 +1159,7 @@ const abortClient = createShunterClient({
   webSocketFactory: abortFactory,
 });
 const abortConnecting = abortClient.connect();
-await new Promise((resolve) => setTimeout(resolve, 0));
+await nextTurn();
 abortSockets[0].open();
 abortSockets[0].message(identityTokenFrame().buffer);
 await abortConnecting;
@@ -1152,7 +1238,7 @@ const reconnectClient = createShunterClient({
   onStateChange: ({ current }) => reconnectStates.push(current.status),
 });
 const reconnecting = reconnectClient.connect();
-await new Promise((resolve) => setTimeout(resolve, 0));
+await nextTurn();
 reconnectSockets[0].open();
 reconnectSockets[0].message(identityTokenFrame({ token: "initial-token" }).buffer);
 await reconnecting;
@@ -1169,7 +1255,7 @@ const reconnectHandle = await reconnectHandleSubscription;
 assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["1-2", "3"] });
 reconnectSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
 assert.equal(reconnectClient.state.status, "reconnecting");
-await new Promise((resolve) => setTimeout(resolve, 0));
+await nextTurn();
 assert.equal(reconnectSockets.length, 2);
 assert.equal(reconnectSockets[1].url, "ws://127.0.0.1:3000/subscribe?token=token-2");
 reconnectSockets[1].open();

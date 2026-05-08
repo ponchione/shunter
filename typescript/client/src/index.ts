@@ -1379,7 +1379,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         const handlers = {
           open: (): void => {
             try {
-              selectedSubprotocol = ws.protocol || offeredSubprotocol;
+              selectedSubprotocol = ws.protocol;
               assertProtocolCompatible(options.protocol, selectedSubprotocol);
             } catch (error) {
               failConnecting(
