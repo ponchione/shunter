@@ -702,18 +702,23 @@ type replayRecord struct {
 	rawPayload []byte
 }
 
-func buildReplayCommittedState(t *testing.T) (*store.CommittedState, schema.SchemaRegistry) {
+func buildReplayCommittedState(t testing.TB) (*store.CommittedState, schema.SchemaRegistry) {
 	t.Helper()
 	_, reg := testSchema()
+	return newReplayCommittedState(t, reg), reg
+}
+
+func newReplayCommittedState(t testing.TB, reg schema.SchemaRegistry) *store.CommittedState {
+	t.Helper()
 	committed := store.NewCommittedState()
 	for _, tableID := range reg.Tables() {
 		tableSchema, _ := reg.Table(tableID)
 		committed.RegisterTable(tableID, store.NewTable(tableSchema))
 	}
-	return committed, reg
+	return committed
 }
 
-func seedReplayState(t *testing.T, committed *store.CommittedState, rows map[uint64]string) {
+func seedReplayState(t testing.TB, committed *store.CommittedState, rows map[uint64]string) {
 	t.Helper()
 	table, ok := committed.Table(0)
 	if !ok {
@@ -731,7 +736,7 @@ func seedReplayState(t *testing.T, committed *store.CommittedState, rows map[uin
 	}
 }
 
-func writeReplaySegment(t *testing.T, root string, startTx uint64, records ...replayRecord) string {
+func writeReplaySegment(t testing.TB, root string, startTx uint64, records ...replayRecord) string {
 	t.Helper()
 	seg, err := CreateSegment(root, startTx)
 	if err != nil {
