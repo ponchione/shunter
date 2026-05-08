@@ -1444,6 +1444,53 @@ assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["4-5"] });
 assert.deepEqual(reconnectStates, ["connecting", "connected", "reconnecting", "connecting", "connected"]);
 await reconnectClient.close();
 
+const reconnectCloseSockets = [];
+const reconnectCloseStates = [];
+const reconnectCloseClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectCloseSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectCloseStates.push(current.status),
+});
+const reconnectCloseConnecting = reconnectCloseClient.connect();
+await nextTurn();
+reconnectCloseSockets[0].open();
+reconnectCloseSockets[0].message(identityTokenFrame().buffer);
+await reconnectCloseConnecting;
+const reconnectCloseHandleSubscription = reconnectCloseClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectCloseSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectCloseHandle = await reconnectCloseHandleSubscription;
+assert.deepEqual(reconnectCloseHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectCloseSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectCloseClient.state.status, "reconnecting");
+await reconnectCloseClient.close();
+await nextTurn();
+assert.equal(reconnectCloseClient.state.status, "closed");
+assert.equal(reconnectCloseSockets.length, 1);
+const reconnectCloseClosed = await reconnectCloseHandle.closed;
+assert.equal(reconnectCloseClosed.reason, "error");
+assert(reconnectCloseClosed.error instanceof ShunterClosedClientError);
+assert.deepEqual(reconnectCloseHandle.state, {
+  status: "closed",
+  error: reconnectCloseClosed.error,
+});
+assert.deepEqual(reconnectCloseStates, ["connecting", "connected", "reconnecting", "closing", "closed"]);
+
 const exhaustionSockets = [];
 const exhaustionFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);
