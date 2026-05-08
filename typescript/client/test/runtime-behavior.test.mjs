@@ -1558,6 +1558,49 @@ assert.deepEqual(failedUnsubscribeHandle.state, {
 });
 await unsubscribeSendFailureClient.close();
 
+const viewUnsubscribeSendFailureSockets = [];
+const viewUnsubscribeSendFailureUpdates = [];
+const viewUnsubscribeSendFailureClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    viewUnsubscribeSendFailureSockets.push(socket);
+    return socket;
+  },
+});
+const viewUnsubscribeSendFailureConnecting = viewUnsubscribeSendFailureClient.connect();
+await nextTurn();
+viewUnsubscribeSendFailureSockets[0].open();
+viewUnsubscribeSendFailureSockets[0].message(identityTokenFrame().buffer);
+await viewUnsubscribeSendFailureConnecting;
+const failedViewUnsubscribeHandleSubscription = viewUnsubscribeSendFailureClient.subscribeDeclaredView("live_users", {
+  requestId: 0x41424344,
+  queryId: 0x61626364,
+  returnHandle: true,
+  onRawUpdate: (update) => viewUnsubscribeSendFailureUpdates.push(update),
+});
+viewUnsubscribeSendFailureSockets[0].message(subscribeAppliedFrame);
+const failedViewUnsubscribeHandle = await failedViewUnsubscribeHandleSubscription;
+assert.deepEqual(failedViewUnsubscribeHandle.state, { status: "active", rows: [] });
+assert.equal(viewUnsubscribeSendFailureUpdates.length, 1);
+viewUnsubscribeSendFailureSockets[0].send = () => {
+  throw new Error("view unsubscribe send denied");
+};
+await failedViewUnsubscribeHandle.unsubscribe();
+const failedViewUnsubscribeClosed = await failedViewUnsubscribeHandle.closed;
+assert.equal(failedViewUnsubscribeClosed.reason, "error");
+assert.equal(failedViewUnsubscribeClosed.error.kind, "transport");
+assert.match(failedViewUnsubscribeClosed.error.message, /view unsubscribe send denied/);
+viewUnsubscribeSendFailureSockets[0].message(lightUpdateFrame);
+assert.equal(viewUnsubscribeSendFailureClient.state.status, "connected");
+assert.equal(viewUnsubscribeSendFailureUpdates.length, 1);
+assert.deepEqual(failedViewUnsubscribeHandle.state, {
+  status: "closed",
+  error: failedViewUnsubscribeClosed.error,
+});
+await viewUnsubscribeSendFailureClient.close();
+
 await client.close();
 await client.close();
 assert.equal(sockets[0].closeCalls.length, 1);
