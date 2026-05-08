@@ -1502,6 +1502,54 @@ assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["4-5"] });
 assert.deepEqual(reconnectStates, ["connecting", "connected", "reconnecting", "connecting", "connected"]);
 await reconnectClient.close();
 
+const reconnectNoReplaySockets = [];
+const reconnectNoReplayStates = [];
+const reconnectNoReplayClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+    resubscribe: false,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectNoReplaySockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectNoReplayStates.push(current.status),
+});
+const reconnectNoReplayConnecting = reconnectNoReplayClient.connect();
+await nextTurn();
+reconnectNoReplaySockets[0].open();
+reconnectNoReplaySockets[0].message(identityTokenFrame().buffer);
+await reconnectNoReplayConnecting;
+const reconnectNoReplayHandleSubscription = reconnectNoReplayClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectNoReplaySockets[0].message(subscribeSingleAppliedFrame);
+const reconnectNoReplayHandle = await reconnectNoReplayHandleSubscription;
+assert.deepEqual(reconnectNoReplayHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectNoReplaySockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectNoReplayClient.state.status, "reconnecting");
+await nextTurn();
+assert.equal(reconnectNoReplaySockets.length, 2);
+reconnectNoReplaySockets[1].open();
+reconnectNoReplaySockets[1].message(identityTokenFrame().buffer);
+assert.equal(reconnectNoReplayClient.state.status, "connected");
+assert.equal(reconnectNoReplaySockets[1].sent.length, 0);
+assert.deepEqual(reconnectNoReplayHandle.state, { status: "active", rows: ["1-2", "3"] });
+assert.deepEqual(reconnectNoReplayStates, ["connecting", "connected", "reconnecting", "connecting", "connected"]);
+await reconnectNoReplayClient.close();
+const reconnectNoReplayClosed = await reconnectNoReplayHandle.closed;
+assert.equal(reconnectNoReplayClosed.reason, "error");
+assert(reconnectNoReplayClosed.error instanceof ShunterClosedClientError);
+
 const reconnectCloseSockets = [];
 const reconnectCloseStates = [];
 const reconnectCloseClient = createShunterClient({
