@@ -248,6 +248,8 @@ Current performance read:
 
 ### 1. TypeScript SDK Completion
 
+Status: local SDK runtime/completion hardening pass is done.
+
 The checked-in `typescript/client` runtime already covers connection state,
 token handling, IdentityToken decoding, raw reducer/query/view/table request
 plumbing, RowList splitting, generated table row decoders, managed table
@@ -255,12 +257,11 @@ handles, declared-view row handles when RowList row bytes are available,
 acknowledged unsubscribe, opt-in reconnect with resubscription, generated
 reducer product codecs, and generated declared-read row decoders/helpers.
 
-Tasks:
+Maintenance tasks:
 
-- Broaden SDK tests for state transitions, auth failure, reducer/query/view
-  success and failure, initial rows, deltas, unsubscribe, reconnect, close
-  during in-flight work, and protocol mismatch.
-- Wire the external canary app through the public SDK only.
+- Keep public runtime behavior tests current as protocol and codegen surfaces
+  change.
+- Keep the external canary app wired through the public SDK only.
 
 Verification:
 
@@ -275,6 +276,11 @@ rtk go vet ./...
 The external `opsboard-canary` repository is the v1 proving ground. Do not add
 a duplicate in-repo reference app.
 
+Current release-gate coverage:
+
+- `opsboard-canary` has a public `@shunter/client` SDK smoke path in
+  `make sdk-smoke`, and `make canary-quick` runs it.
+
 Tasks:
 
 - Keep the canary on public Shunter APIs for normal operation.
@@ -282,8 +288,6 @@ Tasks:
   sender-based visibility, reducers, declared queries/views, raw SQL escape
   hatches, subscriptions, restart/rollback, contract export, generated
   TypeScript, offline backup/restore, and one app-owned migration path.
-- Replace handwritten client protocol helpers with the public TypeScript SDK
-  when the SDK typed surfaces are ready.
 - Add canary commands to the release qualification checklist and pin them to
   the intended Shunter commit or tag.
 
@@ -298,7 +302,8 @@ rtk make canary-full
 
 Tasks:
 
-- Add fixed seed sets and regression corpus entries for gauntlet workloads.
+- Continue adding regression corpus entries to the named gauntlet seed sets in
+  `gauntlet_seed_corpus_test.go` as new failures are found.
 - Extend crash/fault coverage across snapshot, compaction, migration, and
   shutdown boundaries.
 - Expand subscription correctness scenarios for joins, deletes, updates,

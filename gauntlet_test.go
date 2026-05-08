@@ -33,7 +33,7 @@ const (
 )
 
 func TestRuntimeGauntletSeededReducerReadModel(t *testing.T) {
-	for _, seed := range []int64{1, 17, 20260427} {
+	for _, seed := range gauntletCoreRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			rt := buildGauntletRuntime(t, t.TempDir())
 			defer rt.Close()
@@ -48,7 +48,7 @@ func TestRuntimeGauntletSeededReducerReadModel(t *testing.T) {
 }
 
 func TestRuntimeGauntletRestartEquivalence(t *testing.T) {
-	for _, seed := range []int64{1, 17, 20260427} {
+	for _, seed := range gauntletCoreRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			const steps = 64
 			trace := buildGauntletTrace(seed, steps)
@@ -1154,7 +1154,7 @@ func TestRuntimeGauntletScheduledFireSkipsUnsubscribedClient(t *testing.T) {
 func TestRuntimeGauntletSeededScheduledWorkload(t *testing.T) {
 	const steps = 8
 
-	for _, seed := range []int64{41, 20260428} {
+	for _, seed := range gauntletScheduledRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			rt := buildGauntletRuntime(t, t.TempDir())
 			defer rt.Close()
@@ -1202,7 +1202,7 @@ func TestRuntimeGauntletSeededScheduledWorkload(t *testing.T) {
 func TestRuntimeGauntletSeededRuntimeScheduledInterleaving(t *testing.T) {
 	const steps = 12
 
-	for _, seed := range []int64{73, 20260429} {
+	for _, seed := range gauntletRuntimeScheduledRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			rt := buildGauntletRuntime(t, t.TempDir())
 			defer rt.Close()
@@ -1486,7 +1486,7 @@ func TestRuntimeGauntletScheduledRepeatResumesAfterCleanRestart(t *testing.T) {
 }
 
 func TestRuntimeGauntletProtocolCallReducerRestartEquivalence(t *testing.T) {
-	for _, seed := range []int64{1, 17, 20260427} {
+	for _, seed := range gauntletCoreRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			const steps = 36
 			trace := buildGauntletTrace(seed, steps)
@@ -1536,7 +1536,7 @@ func TestRuntimeGauntletProtocolCallReducerRestartEquivalence(t *testing.T) {
 }
 
 func TestRuntimeGauntletProtocolCloseWithLiveClientsRestart(t *testing.T) {
-	for _, seed := range []int64{1, 17, 20260427} {
+	for _, seed := range gauntletCoreRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			dataDir := t.TempDir()
 			rt := buildGauntletRuntime(t, dataDir)
@@ -1585,7 +1585,7 @@ func TestRuntimeGauntletProtocolCloseWithLiveClientsRestart(t *testing.T) {
 }
 
 func TestRuntimeGauntletMixedSurfaceTrace(t *testing.T) {
-	for _, seed := range []int64{1, 17, 20260427} {
+	for _, seed := range gauntletCoreRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			rt := buildGauntletRuntime(t, t.TempDir())
 			defer rt.Close()
@@ -1663,7 +1663,7 @@ func TestRuntimeGauntletMixedSurfaceTrace(t *testing.T) {
 func TestRuntimeGauntletSeededMixedProtocolClientWorkload(t *testing.T) {
 	const steps = 32
 
-	for _, seed := range []int64{5, 29, 20260427} {
+	for _, seed := range gauntletMixedProtocolClientRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			rt := buildGauntletRuntime(t, t.TempDir())
 			defer rt.Close()
@@ -1680,7 +1680,7 @@ func TestRuntimeGauntletSeededMixedProtocolClientWorkload(t *testing.T) {
 func TestRuntimeGauntletMixedProtocolClientRestartEquivalence(t *testing.T) {
 	const steps = 24
 
-	for _, seed := range []int64{5, 29, 20260427} {
+	for _, seed := range gauntletMixedProtocolClientRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			workload := buildGauntletMixedProtocolClientWorkload(seed, steps)
 
@@ -2120,7 +2120,7 @@ func TestRuntimeGauntletProtocolSubscribeCycleMetamorphicTrace(t *testing.T) {
 }
 
 func TestRuntimeGauntletProtocolOneOffQueryModel(t *testing.T) {
-	for _, seed := range []int64{1, 17, 20260427} {
+	for _, seed := range gauntletCoreRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			rt := buildGauntletRuntime(t, t.TempDir())
 			defer rt.Close()
@@ -2234,7 +2234,7 @@ func TestRuntimeGauntletProtocolOneOffSameConnectionWithSubscription(t *testing.
 }
 
 func TestRuntimeGauntletProtocolSubscribeInitialMatchesOneOff(t *testing.T) {
-	for _, seed := range []int64{1, 17, 20260427} {
+	for _, seed := range gauntletCoreRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			rt := buildGauntletRuntime(t, t.TempDir())
 			defer rt.Close()
@@ -2252,7 +2252,7 @@ func TestRuntimeGauntletProtocolSubscribeInitialMatchesOneOff(t *testing.T) {
 }
 
 func TestRuntimeGauntletProtocolSubscribeInitialModel(t *testing.T) {
-	for _, seed := range []int64{1, 17, 20260427} {
+	for _, seed := range gauntletCoreRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			rt := buildGauntletRuntime(t, t.TempDir())
 			defer rt.Close()
@@ -2270,7 +2270,7 @@ func TestRuntimeGauntletProtocolSubscribeInitialModel(t *testing.T) {
 }
 
 func TestRuntimeGauntletProtocolSubscribeAllRowsDeltas(t *testing.T) {
-	for _, seed := range []int64{1, 17, 20260427} {
+	for _, seed := range gauntletCoreRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			const (
 				requestID = uint32(7001)
@@ -2303,7 +2303,7 @@ func TestRuntimeGauntletProtocolSubscribeAllRowsDeltas(t *testing.T) {
 }
 
 func TestRuntimeGauntletProtocolMultiSubscriberFanoutContract(t *testing.T) {
-	for _, seed := range []int64{1, 17, 20260427} {
+	for _, seed := range gauntletCoreRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			const (
 				primaryRequestID    = uint32(8921)
@@ -3008,7 +3008,7 @@ func TestRuntimeGauntletReservedLifecycleReducerDoesNotMutateOrFanout(t *testing
 }
 
 func TestRuntimeGauntletProtocolUnsubscribeStopsUpdates(t *testing.T) {
-	for _, seed := range []int64{1, 17, 20260427} {
+	for _, seed := range gauntletCoreRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			const (
 				subscribeRequestID   = uint32(7201)
@@ -3150,7 +3150,7 @@ func TestRuntimeGauntletProtocolUnknownUnsubscribePreservesSameConnectionSubscri
 }
 
 func TestRuntimeGauntletProtocolCallReducerModel(t *testing.T) {
-	for _, seed := range []int64{1, 17, 20260427} {
+	for _, seed := range gauntletCoreRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			rt := buildGauntletRuntime(t, t.TempDir())
 			defer rt.Close()
@@ -3168,7 +3168,7 @@ func TestRuntimeGauntletProtocolCallReducerModel(t *testing.T) {
 }
 
 func TestRuntimeGauntletProtocolCallReducerOneOffReadYourWrites(t *testing.T) {
-	for _, seed := range []int64{1, 17, 20260427} {
+	for _, seed := range gauntletCoreRegressionSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			rt := buildGauntletRuntime(t, t.TempDir())
 			defer rt.Close()

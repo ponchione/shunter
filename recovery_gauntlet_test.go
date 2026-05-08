@@ -436,7 +436,7 @@ func TestRuntimeGauntletDeterministicConcurrentReadShortSoak(t *testing.T) {
 		readerCount = 3
 	)
 
-	for _, seed := range []int64{20260430, 20260501} {
+	for _, seed := range gauntletConcurrentReadShortSoakSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			rt := buildGauntletRuntime(t, t.TempDir())
 			defer rt.Close()
@@ -502,7 +502,7 @@ func TestRuntimeGauntletProtocolRestartLoopShortSoak(t *testing.T) {
 		restartEvery = 3
 	)
 
-	for _, seed := range []int64{20260502, 20260503} {
+	for _, seed := range gauntletProtocolRestartLoopShortSoakSeeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			dataDir := t.TempDir()
 			rt := buildGauntletRuntime(t, dataDir)
