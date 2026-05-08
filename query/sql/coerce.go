@@ -43,9 +43,7 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		}
 		// Preserve both raw bytes and hex source text so :sender follows the
 		// same coercion paths as a parsed hex literal.
-		buf := make([]byte, len(caller))
-		copy(buf, caller[:])
-		resolved := Literal{Kind: LitBytes, Bytes: buf, Text: hex.EncodeToString(caller[:])}
+		resolved := Literal{Kind: LitBytes, Bytes: caller[:], Text: hex.EncodeToString(caller[:])}
 		return coerceValue(resolved, kind, nil)
 	}
 	// Numeric columns parse string/hex source text first, then reuse the normal
@@ -254,7 +252,7 @@ func coerceWideUnsigned(
 func mismatch(lit Literal, kind types.ValueKind) error {
 	// Bool mismatches use the reference UnexpectedType shape.
 	if lit.Kind == LitBool && kind != types.KindBool {
-		return UnexpectedTypeError{Expected: "Bool", Inferred: algebraicName(kind)}
+		return UnexpectedTypeError{Expected: "Bool", Inferred: AlgebraicName(kind)}
 	}
 	// Float-to-integer mismatches report InvalidLiteral with preserved text.
 	if lit.Kind == LitFloat && isIntegerKind(kind) {
@@ -286,7 +284,7 @@ func invalidLiteralFromSource(lit Literal, kind types.ValueKind) error {
 }
 
 func invalidLiteralText(text string, kind types.ValueKind) error {
-	return InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+	return InvalidLiteralError{Literal: text, Type: AlgebraicName(kind)}
 }
 
 // renderLiteralSourceText returns preserved parser text when available, then
@@ -459,11 +457,6 @@ func (e UnsupportedFeatureError) Unwrap() error { return ErrUnsupportedSQL }
 
 // AlgebraicName returns the wire/error short name for a ValueKind.
 func AlgebraicName(k types.ValueKind) string {
-	return algebraicName(k)
-}
-
-// algebraicName returns the protocol/error short name for a ValueKind.
-func algebraicName(k types.ValueKind) string {
 	switch k {
 	case types.KindBool:
 		return "Bool"

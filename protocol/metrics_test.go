@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -78,7 +79,7 @@ func (o *protocolMetricObserver) requireActive(t *testing.T, want int) {
 				return
 			}
 		}
-		snapshot := append([]int(nil), o.active...)
+		snapshot := slices.Clone(o.active)
 		o.mu.Unlock()
 		select {
 		case <-deadline:
@@ -93,7 +94,7 @@ func (o *protocolMetricObserver) requireConnectionResults(t *testing.T, want ...
 	deadline := time.After(2 * time.Second)
 	for {
 		o.mu.Lock()
-		got := append([]string(nil), o.connResults...)
+		got := slices.Clone(o.connResults)
 		o.mu.Unlock()
 		if sameStringMultiset(got, want) {
 			return

@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -29,9 +30,7 @@ func (r *recorder) add(ev string) {
 func (r *recorder) snapshot() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]string, len(r.events))
-	copy(out, r.events)
-	return out
+	return slices.Clone(r.events)
 }
 
 // fakeDurability records every EnqueueCommitted call.
@@ -121,7 +120,7 @@ func (f *fakeSubs) EvalAndBroadcast(txID types.TxID, cs *store.Changeset, view s
 }
 
 func (f *fakeSubs) DrainDroppedClients() []types.ConnectionID {
-	out := append([]types.ConnectionID(nil), f.dropped...)
+	out := slices.Clone(f.dropped)
 	f.dropped = nil
 	return out
 }
@@ -454,7 +453,7 @@ func TestPostCommitDrainsDroppedClients(t *testing.T) {
 	_ = submit(t, h.exec, "InsertPlayer")
 
 	h.subs.mu.Lock()
-	got := append([]types.ConnectionID(nil), h.subs.disconns...)
+	got := slices.Clone(h.subs.disconns)
 	h.subs.mu.Unlock()
 	want := []types.ConnectionID{{1}, {2}, {3}}
 	if len(got) != len(want) {
@@ -984,11 +983,11 @@ func TestPostCommitTxIDPropagation(t *testing.T) {
 		t.Fatalf("status = %d err=%v", resp.Status, resp.Error)
 	}
 	h.dur.mu.Lock()
-	durTxs := append([]types.TxID(nil), h.dur.txIDs...)
-	durPayloads := append([]*store.Changeset(nil), h.dur.payloads...)
+	durTxs := slices.Clone(h.dur.txIDs)
+	durPayloads := slices.Clone(h.dur.payloads)
 	h.dur.mu.Unlock()
 	h.subs.mu.Lock()
-	subsTxs := append([]types.TxID(nil), h.subs.txIDs...)
+	subsTxs := slices.Clone(h.subs.txIDs)
 	h.subs.mu.Unlock()
 
 	if len(durTxs) != 1 || durTxs[0] != resp.TxID {

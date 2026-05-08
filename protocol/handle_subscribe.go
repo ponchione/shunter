@@ -187,7 +187,7 @@ func (q CompiledSQLQuery) ResultColumns(sl SchemaLookup) []schema.ColumnSchema {
 	if !ok || table == nil {
 		return nil
 	}
-	return append([]schema.ColumnSchema(nil), table.Columns...)
+	return slices.Clone(table.Columns)
 }
 
 // SubscriptionOrderBy returns optional initial-snapshot ordering metadata for
@@ -263,9 +263,7 @@ func (q CompiledSQLQuery) ReferencedTables() []schema.TableID {
 		return nil
 	}
 	tables := q.query.Predicate.Tables()
-	out := make([]schema.TableID, len(tables))
-	copy(out, tables)
-	return out
+	return slices.Clone(tables)
 }
 
 // PredicateHashIdentity returns the hash identity needed for :sender-aware

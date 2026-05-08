@@ -795,7 +795,7 @@ func v1ContractJSONWithUnknownFields(t *testing.T, data []byte) []byte {
 		},
 	}
 
-	out := append([]byte(nil), data...)
+	out := bytes.Clone(data)
 	for _, replacement := range replacements {
 		next := bytes.Replace(out, []byte(replacement.old), []byte(replacement.new), 1)
 		if bytes.Equal(next, out) {

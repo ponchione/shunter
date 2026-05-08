@@ -56,6 +56,17 @@ func requireOptionalUint32(t *testing.T, got *uint32, want uint32, field string)
 	}
 }
 
+func requireSubscribeError(t *testing.T, conn *Conn, queryID uint32) SubscriptionError {
+	t.Helper()
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, queryID, "QueryID")
+	return se
+}
+
 // --- Test mocks ---
 
 type mockSchemaLookup struct {
@@ -3742,12 +3753,7 @@ func TestHandleSubscribeSingle_ShunterUnknownTableRejected(t *testing.T) {
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 85, "QueryID")
+	requireSubscribeError(t, conn, 85)
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when the FROM table is unknown")
 	}
@@ -3774,12 +3780,7 @@ func TestHandleSubscribeSingle_ShunterUnknownColumnRejected(t *testing.T) {
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 87, "QueryID")
+	requireSubscribeError(t, conn, 87)
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when a qualified WHERE column is unknown")
 	}
@@ -3808,12 +3809,7 @@ func TestHandleSubscribeSingle_ShunterAliasedUnknownColumnRejected(t *testing.T)
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 89, "QueryID")
+	requireSubscribeError(t, conn, 89)
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when an alias-qualified WHERE column is unknown")
 	}
@@ -3842,12 +3838,7 @@ func TestHandleSubscribeSingle_ShunterBaseTableQualifierAfterAliasRejected(t *te
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 91, "QueryID")
+	requireSubscribeError(t, conn, 91)
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when the base-table qualifier is out of scope after an AS alias")
 	}
@@ -3874,12 +3865,7 @@ func TestHandleSubscribeSingle_ShunterBareColumnProjectionRejected(t *testing.T)
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 93, "QueryID")
+	requireSubscribeError(t, conn, 93)
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called on a bare column projection")
 	}
@@ -3899,12 +3885,7 @@ func TestHandleSubscribeSingle_UnquotedNullWhereRejectedBeforeRegistration(t *te
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 94, "QueryID")
+	requireSubscribeError(t, conn, 94)
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when unquoted NULL appears in column position")
 	}
@@ -3931,12 +3912,7 @@ func TestHandleSubscribeSingle_ShunterJoinWithoutQualifiedProjectionRejected(t *
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 95, "QueryID")
+	requireSubscribeError(t, conn, 95)
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when a join query lacks a qualified projection")
 	}
@@ -3969,11 +3945,7 @@ func TestHandleSubscribeSingle_ShunterJoinStarProjectionRejectText(t *testing.T)
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, registrySchemaLookup{reg: eng.Registry()})
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
+	se := requireSubscribeError(t, conn, 221)
 	want := "SELECT * is not supported for joins, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
@@ -4004,12 +3976,7 @@ func TestHandleSubscribeSingle_ShunterSelfJoinWithoutAliasesRejected(t *testing.
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 97, "QueryID")
+	requireSubscribeError(t, conn, 97)
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called for a self-join without aliases")
 	}
@@ -4031,12 +3998,7 @@ func TestHandleSubscribeSingle_ShunterForwardAliasReferenceRejected(t *testing.T
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 99, "QueryID")
+	requireSubscribeError(t, conn, 99)
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when a join references an alias declared later")
 	}
@@ -4065,12 +4027,7 @@ func TestHandleSubscribeSingle_ShunterLimitClauseRejected(t *testing.T) {
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 101, "QueryID")
+	se := requireSubscribeError(t, conn, 101)
 	want := "Unsupported: " + sqlText + ", executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q (LIMIT-in-subscription must emit SubscriptionUnsupported::Feature)", se.Error, want)
@@ -4095,12 +4052,7 @@ func TestHandleSubscribeSingle_OrderByRejected(t *testing.T) {
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 103, "QueryID")
+	se := requireSubscribeError(t, conn, 103)
 	want := "Unsupported: " + sqlText + ", executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
@@ -4126,12 +4078,7 @@ func TestHandleSubscribeSingle_MultiColumnOrderByRejected(t *testing.T) {
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 107, "QueryID")
+	se := requireSubscribeError(t, conn, 107)
 	want := "Unsupported: " + sqlText + ", executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
@@ -4156,12 +4103,7 @@ func TestHandleSubscribeSingle_OrderByProjectionAliasRejected(t *testing.T) {
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 105, "QueryID")
+	se := requireSubscribeError(t, conn, 105)
 	want := "Unsupported: " + sqlText + ", executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
@@ -4186,12 +4128,7 @@ func TestHandleSubscribeSingle_OffsetRejected(t *testing.T) {
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 105, "QueryID")
+	se := requireSubscribeError(t, conn, 105)
 	want := "Unsupported: " + sqlText + ", executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)

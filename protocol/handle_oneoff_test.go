@@ -266,6 +266,18 @@ func drainOneOff(t *testing.T, conn *Conn) OneOffQueryResponse {
 	}
 }
 
+func requireAnyOneOffError(t *testing.T, conn *Conn) OneOffQueryResponse {
+	t.Helper()
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	if *result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+	return result
+}
+
 // firstTableRows returns the Rows payload of the first OneOffTable, or
 // nil if Tables is empty. Most one-off message-id handler tests populate
 // exactly one table matching `compiled.TableName`.
@@ -305,6 +317,17 @@ func assertProductRowsEqual(t *testing.T, got, want []types.ProductValue) {
 			t.Fatalf("row[%d] = %v, want %v", i, got[i], want[i])
 		}
 	}
+}
+
+func assertProductRowGroupsEqual(t *testing.T, groups ...[]types.ProductValue) {
+	t.Helper()
+	for i := 1; i < len(groups); i++ {
+		assertProductRowsEqual(t, groups[i], groups[0])
+	}
+}
+
+func identityBytes(identity types.Identity) []byte {
+	return slices.Clone(identity[:])
 }
 
 func mustUUIDValue(t *testing.T, s string) types.Value {
@@ -3885,19 +3908,7 @@ func TestHandleOneOffQuery_AliasedSelfJoinFilterChildOrderVisibleRowsMatch(t *te
 		}
 		decoded = append(decoded, rows)
 	}
-	if len(decoded[0]) != len(decoded[1]) {
-		t.Fatalf("row counts differ: %d vs %d", len(decoded[0]), len(decoded[1]))
-	}
-	for i := range decoded[0] {
-		if len(decoded[0][i]) != len(decoded[1][i]) {
-			t.Fatalf("row %d column counts differ: %d vs %d", i, len(decoded[0][i]), len(decoded[1][i]))
-		}
-		for j := range decoded[0][i] {
-			if !decoded[0][i][j].Equal(decoded[1][i][j]) {
-				t.Fatalf("row %d col %d differs: %v vs %v", i, j, decoded[0][i][j], decoded[1][i][j])
-			}
-		}
-	}
+	assertProductRowGroupsEqual(t, decoded...)
 }
 
 func TestHandleOneOffQuery_AliasedSelfJoinFilterDuplicateLeafVisibleRowsMatch(t *testing.T) {
@@ -3943,22 +3954,7 @@ func TestHandleOneOffQuery_AliasedSelfJoinFilterDuplicateLeafVisibleRowsMatch(t 
 		}
 		decoded = append(decoded, rows)
 	}
-	if len(decoded[0]) != len(decoded[1]) || len(decoded[0]) != len(decoded[2]) {
-		t.Fatalf("row counts differ: %d vs %d vs %d", len(decoded[0]), len(decoded[1]), len(decoded[2]))
-	}
-	for i := range decoded[0] {
-		if len(decoded[0][i]) != len(decoded[1][i]) || len(decoded[0][i]) != len(decoded[2][i]) {
-			t.Fatalf("row %d column counts differ: %d vs %d vs %d", i, len(decoded[0][i]), len(decoded[1][i]), len(decoded[2][i]))
-		}
-		for j := range decoded[0][i] {
-			if !decoded[0][i][j].Equal(decoded[1][i][j]) {
-				t.Fatalf("row %d col %d differs between base and duplicate-and: %v vs %v", i, j, decoded[0][i][j], decoded[1][i][j])
-			}
-			if !decoded[0][i][j].Equal(decoded[2][i][j]) {
-				t.Fatalf("row %d col %d differs between base and duplicate-or: %v vs %v", i, j, decoded[0][i][j], decoded[2][i][j])
-			}
-		}
-	}
+	assertProductRowGroupsEqual(t, decoded...)
 }
 
 func TestHandleOneOffQuery_AliasedSelfJoinFilterAbsorptionVisibleRowsMatch(t *testing.T) {
@@ -4004,22 +4000,7 @@ func TestHandleOneOffQuery_AliasedSelfJoinFilterAbsorptionVisibleRowsMatch(t *te
 		}
 		decoded = append(decoded, rows)
 	}
-	if len(decoded[0]) != len(decoded[1]) || len(decoded[0]) != len(decoded[2]) {
-		t.Fatalf("row counts differ: %d vs %d vs %d", len(decoded[0]), len(decoded[1]), len(decoded[2]))
-	}
-	for i := range decoded[0] {
-		if len(decoded[0][i]) != len(decoded[1][i]) || len(decoded[0][i]) != len(decoded[2][i]) {
-			t.Fatalf("row %d column counts differ: %d vs %d vs %d", i, len(decoded[0][i]), len(decoded[1][i]), len(decoded[2][i]))
-		}
-		for j := range decoded[0][i] {
-			if !decoded[0][i][j].Equal(decoded[1][i][j]) {
-				t.Fatalf("row %d col %d differs between base and absorbed-or: %v vs %v", i, j, decoded[0][i][j], decoded[1][i][j])
-			}
-			if !decoded[0][i][j].Equal(decoded[2][i][j]) {
-				t.Fatalf("row %d col %d differs between base and absorbed-and: %v vs %v", i, j, decoded[0][i][j], decoded[2][i][j])
-			}
-		}
-	}
+	assertProductRowGroupsEqual(t, decoded...)
 }
 
 func TestHandleOneOffQuery_AliasedSelfJoinFilterAssociativeGroupingVisibleRowsMatch(t *testing.T) {
@@ -4064,19 +4045,7 @@ func TestHandleOneOffQuery_AliasedSelfJoinFilterAssociativeGroupingVisibleRowsMa
 		}
 		decoded = append(decoded, rows)
 	}
-	if len(decoded[0]) != len(decoded[1]) {
-		t.Fatalf("row counts differ: %d vs %d", len(decoded[0]), len(decoded[1]))
-	}
-	for i := range decoded[0] {
-		if len(decoded[0][i]) != len(decoded[1][i]) {
-			t.Fatalf("row %d column counts differ: %d vs %d", i, len(decoded[0][i]), len(decoded[1][i]))
-		}
-		for j := range decoded[0][i] {
-			if !decoded[0][i][j].Equal(decoded[1][i][j]) {
-				t.Fatalf("row %d col %d differs: %v vs %v", i, j, decoded[0][i][j], decoded[1][i][j])
-			}
-		}
-	}
+	assertProductRowGroupsEqual(t, decoded...)
 }
 
 // self-join projection contract: one-off self-join RHS projection (`SELECT b.*`) must
@@ -4539,8 +4508,7 @@ func TestHandleOneOffQuery_SenderParameterOnBytesColumn(t *testing.T) {
 	}
 	sl := newMockSchema("s", 1, ts.Columns...)
 
-	callerBytes := make([]byte, 32)
-	copy(callerBytes, conn.Identity[:])
+	callerBytes := identityBytes(conn.Identity)
 	otherBytes := make([]byte, 32)
 	otherBytes[0] = 0xFF
 	snap := &mockSnapshot{
@@ -4585,8 +4553,7 @@ func TestHandleOneOffQuery_SenderParameterOnIdentityColumn(t *testing.T) {
 	}
 	sl := newMockSchema("s", 1, ts.Columns...)
 
-	callerBytes := make([]byte, 32)
-	copy(callerBytes, conn.Identity[:])
+	callerBytes := identityBytes(conn.Identity)
 	otherBytes := make([]byte, 32)
 	otherBytes[31] = 0xAA
 	snap := &mockSnapshot{
@@ -4680,8 +4647,7 @@ func TestHandleOneOffQuery_SenderParameterOnAliasedSingleTable(t *testing.T) {
 	}
 	sl := newMockSchema("s", 1, ts.Columns...)
 
-	callerBytes := make([]byte, 32)
-	copy(callerBytes, conn.Identity[:])
+	callerBytes := identityBytes(conn.Identity)
 	otherBytes := make([]byte, 32)
 	otherBytes[0] = 0xFF
 	snap := &mockSnapshot{
@@ -4747,8 +4713,7 @@ func TestHandleOneOffQuery_SenderParameterInJoinFilter(t *testing.T) {
 	tTS := &schema.TableSchema{ID: tReg.ID, Name: "t", Columns: tReg.Columns}
 	sl := registrySchemaLookup{reg: eng.Registry()}
 
-	callerBytes := make([]byte, 32)
-	copy(callerBytes, conn.Identity[:])
+	callerBytes := identityBytes(conn.Identity)
 	otherBytes := make([]byte, 32)
 	otherBytes[31] = 0xAA
 	snap := &mockSnapshot{
@@ -4804,14 +4769,7 @@ func TestHandleOneOffQuery_StringLiteralOnIntegerColumnRejected(t *testing.T) {
 		QueryString: "SELECT * FROM t WHERE u32 = 'str'",
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error == nil {
-		t.Fatal("expected error, got nil (success)")
-	}
-	if result.Error == nil || *result.Error == "" {
-		t.Error("expected non-empty error message")
-	}
+	requireAnyOneOffError(t, conn)
 }
 
 // TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected pins the
@@ -4833,14 +4791,7 @@ func TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected(t *testing.T) {
 		QueryString: "SELECT * FROM t WHERE t.u32 = 1.3",
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error == nil {
-		t.Fatal("expected error, got nil (success)")
-	}
-	if result.Error == nil || *result.Error == "" {
-		t.Error("expected non-empty error message")
-	}
+	requireAnyOneOffError(t, conn)
 }
 
 // TestHandleOneOffQuery_ShunterStringDigitsOnIntegerColumnWidens pins the
@@ -5115,14 +5066,7 @@ func TestHandleOneOffQuery_ShunterUnknownTableRejected(t *testing.T) {
 		QueryString: "SELECT * FROM r",
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error == nil {
-		t.Fatal("expected error, got nil (success)")
-	}
-	if result.Error == nil || *result.Error == "" {
-		t.Error("expected non-empty error message")
-	}
+	requireAnyOneOffError(t, conn)
 }
 
 // TestHandleOneOffQuery_ShunterUnknownColumnRejected pins the reference type-
@@ -5143,14 +5087,7 @@ func TestHandleOneOffQuery_ShunterUnknownColumnRejected(t *testing.T) {
 		QueryString: "SELECT * FROM t WHERE t.a = 1",
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error == nil {
-		t.Fatal("expected error, got nil (success)")
-	}
-	if result.Error == nil || *result.Error == "" {
-		t.Error("expected non-empty error message")
-	}
+	requireAnyOneOffError(t, conn)
 }
 
 // TestHandleOneOffQuery_ShunterAliasedUnknownColumnRejected pins the
@@ -5174,14 +5111,7 @@ func TestHandleOneOffQuery_ShunterAliasedUnknownColumnRejected(t *testing.T) {
 		QueryString: "SELECT * FROM t AS r WHERE r.a = 1",
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error == nil {
-		t.Fatal("expected error, got nil (success)")
-	}
-	if result.Error == nil || *result.Error == "" {
-		t.Error("expected non-empty error message")
-	}
+	requireAnyOneOffError(t, conn)
 }
 
 // TestHandleOneOffQuery_ShunterBaseTableQualifierAfterAliasRejected pins the
@@ -5202,14 +5132,7 @@ func TestHandleOneOffQuery_ShunterBaseTableQualifierAfterAliasRejected(t *testin
 		QueryString: "SELECT * FROM t AS r WHERE t.u32 = 5",
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error == nil {
-		t.Fatal("expected error, got nil (success)")
-	}
-	if result.Error == nil || *result.Error == "" {
-		t.Error("expected non-empty error message")
-	}
+	requireAnyOneOffError(t, conn)
 }
 
 // TestHandleOneOffQuery_ShunterBareColumnProjectionReturnsProjectedRows pins the
@@ -5277,11 +5200,7 @@ func TestHandleOneOffQuery_UnquotedLiteralKeywordProjectionRejectedBeforeColumnL
 				QueryString: query,
 			}
 			handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-			result := drainOneOff(t, conn)
-			if result.Error == nil {
-				t.Fatal("expected error, got nil (success)")
-			}
+			requireAnyOneOffError(t, conn)
 		})
 	}
 }
@@ -5301,11 +5220,7 @@ func TestHandleOneOffQuery_UnquotedNullWhereRejectedBeforeColumnLookup(t *testin
 		QueryString: "SELECT * FROM t WHERE NULL = 1",
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error == nil {
-		t.Fatal("expected error, got nil (success)")
-	}
+	requireAnyOneOffError(t, conn)
 }
 
 func TestHandleOneOffQuery_ShunterMultiColumnProjectionReturnsProjectedRows(t *testing.T) {

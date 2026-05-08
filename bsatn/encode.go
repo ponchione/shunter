@@ -213,12 +213,11 @@ func EncodedValueSize(v types.Value) int {
 
 // EncodeProductValue writes all columns in order.
 func EncodeProductValue(w io.Writer, pv types.ProductValue) error {
-	for _, v := range pv {
-		if err := EncodeValue(w, v); err != nil {
-			return err
-		}
+	encoded, err := AppendProductValue(nil, pv)
+	if err != nil {
+		return err
 	}
-	return nil
+	return writeAll(w, encoded)
 }
 
 // EncodeProductValueForSchema writes all columns using nullable metadata from ts.

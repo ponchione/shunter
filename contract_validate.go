@@ -154,12 +154,7 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			continue
 		}
 		var caller types.Identity
-		compiled, err := protocol.CompileSQLQueryString(query.SQL, lookup, &caller, protocol.SQLQueryValidationOptions{
-			AllowLimit:      true,
-			AllowProjection: true,
-			AllowOrderBy:    true,
-			AllowOffset:     true,
-		})
+		compiled, err := protocol.CompileSQLQueryString(query.SQL, lookup, &caller, declaredReadSQLValidation)
 		if err != nil {
 			*errs = append(*errs, fmt.Errorf("queries.%s.sql invalid: %v", query.Name, err))
 			continue
@@ -172,21 +167,14 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			continue
 		}
 		var caller types.Identity
-		compiled, err := protocol.CompileSQLQueryString(view.SQL, lookup, &caller, protocol.SQLQueryValidationOptions{
-			AllowLimit:      true,
-			AllowProjection: true,
-			AllowOrderBy:    true,
-			AllowOffset:     true,
-		})
+		compiled, err := protocol.CompileSQLQueryString(view.SQL, lookup, &caller, declaredReadSQLValidation)
 		if err != nil {
 			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
 			continue
 		}
 		validateDeclaredReadMetadata("views."+view.Name, compiled, lookup, view.RowSchema, view.ResultShape, errs)
 		if aggregate := compiled.SubscriptionAggregate(); aggregate != nil {
-			if err := subscription.ValidateAggregate(compiled.Predicate(), aggregate, lookup); err != nil {
-				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
-			}
+			appendViewSQLValidationError(errs, view.Name, subscription.ValidateAggregate(compiled.Predicate(), aggregate, lookup))
 			if compiled.HasOrderBy() {
 				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, fmt.Errorf("%w: live ORDER BY views do not support aggregate views", subscription.ErrInvalidPredicate)))
 			}
@@ -196,29 +184,21 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			if compiled.HasOffset() {
 				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, fmt.Errorf("%w: live OFFSET views do not support aggregate views", subscription.ErrInvalidPredicate)))
 			}
-			if err := subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), aggregate, lookup); err != nil {
-				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
-			}
-			if err := subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), aggregate, lookup); err != nil {
-				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
-			}
-			if err := subscription.ValidateOffset(compiled.Predicate(), compiled.SubscriptionOffset(), aggregate, lookup); err != nil {
-				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
-			}
+			appendViewSQLValidationError(errs, view.Name, subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), aggregate, lookup))
+			appendViewSQLValidationError(errs, view.Name, subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), aggregate, lookup))
+			appendViewSQLValidationError(errs, view.Name, subscription.ValidateOffset(compiled.Predicate(), compiled.SubscriptionOffset(), aggregate, lookup))
 			continue
 		}
-		if err := subscription.ValidateProjection(compiled.Predicate(), compiled.SubscriptionProjection(), lookup); err != nil {
-			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
-		}
-		if err := subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), compiled.SubscriptionAggregate(), lookup); err != nil {
-			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
-		}
-		if err := subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), compiled.SubscriptionAggregate(), lookup); err != nil {
-			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
-		}
-		if err := subscription.ValidateOffset(compiled.Predicate(), compiled.SubscriptionOffset(), compiled.SubscriptionAggregate(), lookup); err != nil {
-			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
-		}
+		appendViewSQLValidationError(errs, view.Name, subscription.ValidateProjection(compiled.Predicate(), compiled.SubscriptionProjection(), lookup))
+		appendViewSQLValidationError(errs, view.Name, subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), compiled.SubscriptionAggregate(), lookup))
+		appendViewSQLValidationError(errs, view.Name, subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), compiled.SubscriptionAggregate(), lookup))
+		appendViewSQLValidationError(errs, view.Name, subscription.ValidateOffset(compiled.Predicate(), compiled.SubscriptionOffset(), compiled.SubscriptionAggregate(), lookup))
+	}
+}
+
+func appendViewSQLValidationError(errs *[]error, viewName string, err error) {
+	if err != nil {
+		*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", viewName, err))
 	}
 }
 
@@ -392,24 +372,18 @@ func validateMigrationMetadata(path string, metadata MigrationMetadata, errs *[]
 }
 
 func validateContractName(path, name string, seen map[string]struct{}, errs *[]error) bool {
-	if strings.TrimSpace(name) == "" {
-		*errs = append(*errs, fmt.Errorf("%s name must not be empty", path))
-		return false
-	}
-	if _, ok := seen[name]; ok {
-		*errs = append(*errs, fmt.Errorf("%s name %q is duplicated", path, name))
-		return false
-	}
-	seen[name] = struct{}{}
-	return true
+	return validateContractKeyedName(path, name, name, seen, errs)
 }
 
 func validateContractSurfaceName(path, surface, name string, seen map[string]struct{}, errs *[]error) bool {
+	return validateContractKeyedName(path, name, surface+"\x00"+name, seen, errs)
+}
+
+func validateContractKeyedName(path, name, key string, seen map[string]struct{}, errs *[]error) bool {
 	if strings.TrimSpace(name) == "" {
 		*errs = append(*errs, fmt.Errorf("%s name must not be empty", path))
 		return false
 	}
-	key := surface + "\x00" + name
 	if _, ok := seen[key]; ok {
 		*errs = append(*errs, fmt.Errorf("%s name %q is duplicated", path, name))
 		return false

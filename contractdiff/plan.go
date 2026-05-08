@@ -3,6 +3,7 @@ package contractdiff
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -449,9 +450,7 @@ func copyPlanClassifications(in []shunter.MigrationClassification) []shunter.Mig
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]shunter.MigrationClassification, len(in))
-	copy(out, in)
-	return out
+	return slices.Clone(in)
 }
 
 func normalizePlanClassifications(in []shunter.MigrationClassification) []shunter.MigrationClassification {

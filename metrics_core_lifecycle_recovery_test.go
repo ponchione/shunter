@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -450,7 +451,5 @@ func (r *panicRecordingMetricsRecorder) ObserveHistogram(name MetricName, labels
 func (r *panicRecordingMetricsRecorder) snapshot() []metricObservation {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]metricObservation, len(r.observations))
-	copy(out, r.observations)
-	return out
+	return slices.Clone(r.observations)
 }

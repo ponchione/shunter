@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/ponchione/shunter/commitlog"
 	"github.com/ponchione/shunter/schema"
@@ -88,9 +89,7 @@ func copyMigrationHooks(in []MigrationHook) []MigrationHook {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]MigrationHook, len(in))
-	copy(out, in)
-	return out
+	return slices.Clone(in)
 }
 
 // RunDataDirMigrations runs app-owned migration hooks against cfg.DataDir

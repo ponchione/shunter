@@ -166,9 +166,7 @@ func NewString(x string) Value {
 }
 
 func NewBytes(x []byte) Value {
-	cp := make([]byte, len(x))
-	copy(cp, x)
-	return Value{kind: KindBytes, buf: cp}
+	return Value{kind: KindBytes, buf: slices.Clone(x)}
 }
 
 // NewBytesOwned builds a Bytes value by taking ownership of x.
@@ -258,9 +256,7 @@ func NewDurationFromTime(d time.Duration) Value {
 // The input slice is copied defensively so the resulting Value does not
 // alias caller storage.
 func NewArrayString(xs []string) Value {
-	cp := make([]string, len(xs))
-	copy(cp, xs)
-	return Value{kind: KindArrayString, strArr: cp}
+	return Value{kind: KindArrayString, strArr: slices.Clone(xs)}
 }
 
 // NewArrayStringOwned builds an ArrayString value by taking ownership of xs.
@@ -365,9 +361,7 @@ func (v Value) AsString() string {
 
 func (v Value) AsBytes() []byte {
 	v.mustKind(KindBytes)
-	cp := make([]byte, len(v.buf))
-	copy(cp, v.buf)
-	return cp
+	return slices.Clone(v.buf)
 }
 
 // BytesView returns the Bytes payload without copying.
@@ -450,9 +444,7 @@ func (v Value) AsDuration() time.Duration {
 // AsArrayString returns a defensive copy of the string-array payload.
 func (v Value) AsArrayString() []string {
 	v.mustKind(KindArrayString)
-	cp := make([]string, len(v.strArr))
-	copy(cp, v.strArr)
-	return cp
+	return slices.Clone(v.strArr)
 }
 
 // ArrayStringView returns the ArrayString payload without copying.
@@ -465,9 +457,7 @@ func (v Value) ArrayStringView() []string {
 // AsJSON returns a defensive copy of the canonical JSON payload.
 func (v Value) AsJSON() []byte {
 	v.mustKind(KindJSON)
-	cp := make([]byte, len(v.buf))
-	copy(cp, v.buf)
-	return cp
+	return slices.Clone(v.buf)
 }
 
 // JSONView returns the canonical JSON payload without copying.

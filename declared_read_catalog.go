@@ -2,6 +2,7 @@ package shunter
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/ponchione/shunter/protocol"
@@ -44,6 +45,13 @@ type declaredReadSpec struct {
 	Validation  protocol.SQLQueryValidationOptions
 }
 
+var declaredReadSQLValidation = protocol.SQLQueryValidationOptions{
+	AllowLimit:      true,
+	AllowProjection: true,
+	AllowOrderBy:    true,
+	AllowOffset:     true,
+}
+
 func newDeclaredReadCatalog(queries []QueryDeclaration, views []ViewDeclaration, sl protocol.SchemaLookup) (*declaredReadCatalog, error) {
 	catalog := &declaredReadCatalog{entries: make(map[string]declaredReadEntry, len(queries)+len(views))}
 	for _, spec := range declaredReadSpecs(queries, views) {
@@ -66,12 +74,7 @@ func declaredReadSpecs(queries []QueryDeclaration, views []ViewDeclaration) []de
 			Permissions: query.Permissions,
 			ReadModel:   query.ReadModel,
 			Migration:   query.Migration,
-			Validation: protocol.SQLQueryValidationOptions{
-				AllowLimit:      true,
-				AllowProjection: true,
-				AllowOrderBy:    true,
-				AllowOffset:     true,
-			},
+			Validation:  declaredReadSQLValidation,
 		})
 	}
 	for _, view := range views {
@@ -82,12 +85,7 @@ func declaredReadSpecs(queries []QueryDeclaration, views []ViewDeclaration) []de
 			Permissions: view.Permissions,
 			ReadModel:   view.ReadModel,
 			Migration:   view.Migration,
-			Validation: protocol.SQLQueryValidationOptions{
-				AllowLimit:      true,
-				AllowProjection: true,
-				AllowOrderBy:    true,
-				AllowOffset:     true,
-			},
+			Validation:  declaredReadSQLValidation,
 		})
 	}
 	return specs
@@ -185,7 +183,5 @@ func copyTableIDSlice(in []schema.TableID) []schema.TableID {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]schema.TableID, len(in))
-	copy(out, in)
-	return out
+	return slices.Clone(in)
 }

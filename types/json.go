@@ -98,7 +98,7 @@ func appendCanonicalJSONObject(out *bytes.Buffer, dec *json.Decoder) error {
 		if err := appendCanonicalJSONValue(&value, dec); err != nil {
 			return err
 		}
-		members = append(members, jsonMember{key: key, value: append([]byte(nil), value.Bytes()...)})
+		members = append(members, jsonMember{key: key, value: value.Bytes()})
 	}
 	end, err := dec.Token()
 	if err != nil {

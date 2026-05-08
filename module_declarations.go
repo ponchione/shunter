@@ -3,6 +3,7 @@ package shunter
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/ponchione/shunter/protocol"
@@ -388,13 +389,7 @@ func copyProductSchemaPtr(in *ProductSchema) *ProductSchema {
 	if in == nil {
 		return nil
 	}
-	out := ProductSchema{
-		Columns: make([]ProductColumn, len(in.Columns)),
-	}
-	copy(out.Columns, in.Columns)
-	if out.Columns == nil {
-		out.Columns = []ProductColumn{}
-	}
+	out := ProductSchema{Columns: append([]ProductColumn{}, in.Columns...)}
 	return &out
 }
 
@@ -425,9 +420,7 @@ func copyMigrationClassifications(in []MigrationClassification) []MigrationClass
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]MigrationClassification, len(in))
-	copy(out, in)
-	return out
+	return slices.Clone(in)
 }
 
 func copyMigrationMetadataMap(in map[string]MigrationMetadata) map[string]MigrationMetadata {
@@ -463,9 +456,7 @@ func copyStringSlice(in []string) []string {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]string, len(in))
-	copy(out, in)
-	return out
+	return slices.Clone(in)
 }
 
 func normalizeStringSlice(in []string) []string {

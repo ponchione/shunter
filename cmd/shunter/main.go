@@ -75,18 +75,8 @@ func runContractDiff(stdout, stderr io.Writer, args []string) int {
 	if code, stop := parseFlags(fs, args); stop {
 		return code
 	}
-	if code := requireNoArgs(stderr, fs); code != 0 {
+	if code := validateContractReadFlags(stderr, fs, *previousPath, *currentPath, *format); code != 0 {
 		return code
-	}
-	if code := requirePath(stderr, "previous", *previousPath); code != 0 {
-		return code
-	}
-	if code := requirePath(stderr, "current", *currentPath); code != 0 {
-		return code
-	}
-	if err := contractworkflow.ValidateFormat(*format); err != nil {
-		writeCLIError(stderr, err)
-		return 2
 	}
 
 	report, err := contractworkflow.CompareFiles(*previousPath, *currentPath)
@@ -116,18 +106,8 @@ func runContractPolicy(stdout, stderr io.Writer, args []string) int {
 	if code, stop := parseFlags(fs, args); stop {
 		return code
 	}
-	if code := requireNoArgs(stderr, fs); code != 0 {
+	if code := validateContractReadFlags(stderr, fs, *previousPath, *currentPath, *format); code != 0 {
 		return code
-	}
-	if code := requirePath(stderr, "previous", *previousPath); code != 0 {
-		return code
-	}
-	if code := requirePath(stderr, "current", *currentPath); code != 0 {
-		return code
-	}
-	if err := contractworkflow.ValidateFormat(*format); err != nil {
-		writeCLIError(stderr, err)
-		return 2
 	}
 
 	result, err := contractworkflow.CheckPolicyFiles(*previousPath, *currentPath, contractdiff.PolicyOptions{
@@ -164,18 +144,8 @@ func runContractPlan(stdout, stderr io.Writer, args []string) int {
 	if code, stop := parseFlags(fs, args); stop {
 		return code
 	}
-	if code := requireNoArgs(stderr, fs); code != 0 {
+	if code := validateContractReadFlags(stderr, fs, *previousPath, *currentPath, *format); code != 0 {
 		return code
-	}
-	if code := requirePath(stderr, "previous", *previousPath); code != 0 {
-		return code
-	}
-	if code := requirePath(stderr, "current", *currentPath); code != 0 {
-		return code
-	}
-	if err := contractworkflow.ValidateFormat(*format); err != nil {
-		writeCLIError(stderr, err)
-		return 2
 	}
 
 	plan, err := contractworkflow.PlanFiles(*previousPath, *currentPath, contractdiff.PlanOptions{
@@ -260,6 +230,23 @@ func requirePath(stderr io.Writer, name, value string) int {
 	}
 	writeCLIErrorf(stderr, "--%s is required\n", name)
 	return 2
+}
+
+func validateContractReadFlags(stderr io.Writer, fs *flag.FlagSet, previousPath, currentPath, format string) int {
+	if code := requireNoArgs(stderr, fs); code != 0 {
+		return code
+	}
+	if code := requirePath(stderr, "previous", previousPath); code != 0 {
+		return code
+	}
+	if code := requirePath(stderr, "current", currentPath); code != 0 {
+		return code
+	}
+	if err := contractworkflow.ValidateFormat(format); err != nil {
+		writeCLIError(stderr, err)
+		return 2
+	}
+	return 0
 }
 
 func writeCLIError(stderr io.Writer, err error) {

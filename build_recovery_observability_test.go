@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 
@@ -319,9 +320,7 @@ func (s *recordingLogState) logger() *slog.Logger {
 func (s *recordingLogState) records() []recordedLog {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]recordedLog, len(s.entries))
-	copy(out, s.entries)
-	return out
+	return slices.Clone(s.entries)
 }
 
 type recordingSlogHandler struct {
@@ -351,7 +350,7 @@ func (h recordingSlogHandler) Handle(_ context.Context, record slog.Record) erro
 }
 
 func (h recordingSlogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	out := recordingSlogHandler{state: h.state, attrs: append([]slog.Attr(nil), h.attrs...)}
+	out := recordingSlogHandler{state: h.state, attrs: slices.Clone(h.attrs)}
 	out.attrs = append(out.attrs, attrs...)
 	return out
 }
@@ -392,9 +391,7 @@ func (r *recordingMetricsRecorder) ObserveHistogram(name MetricName, labels Metr
 func (r *recordingMetricsRecorder) snapshot() []metricObservation {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]metricObservation, len(r.observations))
-	copy(out, r.observations)
-	return out
+	return slices.Clone(r.observations)
 }
 
 func (r *recordingMetricsRecorder) requireCounter(t *testing.T, name MetricName, labels MetricLabels, delta uint64) {

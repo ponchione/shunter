@@ -465,8 +465,6 @@ func reducerFailureText(resp ReducerResponse) string {
 		return "app reducer panic: " + detail
 	case StatusFailedPermission:
 		return "permission denied: " + detail
-	case StatusFailedInternal:
-		return "shunter runtime error: " + detail
 	default:
 		return "shunter runtime error: " + detail
 	}

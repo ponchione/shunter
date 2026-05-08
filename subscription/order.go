@@ -23,9 +23,7 @@ func copyOrderByColumns(in []OrderByColumn) []OrderByColumn {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]OrderByColumn, len(in))
-	copy(out, in)
-	return out
+	return slices.Clone(in)
 }
 
 // ValidateOrderBy checks the narrow executable live ORDER BY surface.

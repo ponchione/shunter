@@ -234,7 +234,7 @@ func oneOffResultColumns(query compiledSQLQuery, fallback *schema.TableSchema) [
 	if fallback == nil {
 		return nil
 	}
-	return append([]schema.ColumnSchema(nil), fallback.Columns...)
+	return slices.Clone(fallback.Columns)
 }
 
 // sendOneOffError emits a failure OneOffQueryResponse matching reference

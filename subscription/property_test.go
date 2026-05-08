@@ -3,6 +3,7 @@ package subscription
 import (
 	"fmt"
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	"github.com/ponchione/shunter/store"
@@ -77,8 +78,7 @@ func pickRandomRows(r *rand.Rand, existing []types.ProductValue, n int) []types.
 	if len(existing) == 0 || n == 0 {
 		return nil
 	}
-	pool := make([]types.ProductValue, len(existing))
-	copy(pool, existing)
+	pool := slices.Clone(existing)
 	r.Shuffle(len(pool), func(i, j int) { pool[i], pool[j] = pool[j], pool[i] })
 	if n > len(pool) {
 		n = len(pool)

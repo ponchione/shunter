@@ -107,16 +107,6 @@ func OrderByColumns(stmt sql.Statement) []sql.OrderByColumn {
 // the original predicate tree for schema/type validation.
 func NormalizePredicate(pred sql.Predicate) sql.Predicate {
 	switch p := pred.(type) {
-	case nil:
-		return nil
-	case sql.TruePredicate:
-		return p
-	case sql.FalsePredicate:
-		return p
-	case sql.ComparisonPredicate:
-		return p
-	case sql.NullPredicate:
-		return p
 	case sql.AndPredicate:
 		left := NormalizePredicate(p.Left)
 		right := NormalizePredicate(p.Right)
@@ -165,16 +155,8 @@ func isSQLFalsePredicate(pred sql.Predicate) bool {
 // depends on the :sender caller identity placeholder.
 func PredicateUsesCallerIdentity(pred sql.Predicate) bool {
 	switch p := pred.(type) {
-	case nil:
-		return false
-	case sql.TruePredicate:
-		return false
-	case sql.FalsePredicate:
-		return false
 	case sql.ComparisonPredicate:
 		return p.Filter.Literal.Kind == sql.LitSender
-	case sql.NullPredicate:
-		return false
 	case sql.AndPredicate:
 		return PredicateUsesCallerIdentity(p.Left) || PredicateUsesCallerIdentity(p.Right)
 	case sql.OrPredicate:

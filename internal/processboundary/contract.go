@@ -159,10 +159,7 @@ func ValidateInvocationResponse(resp InvocationResponse) error {
 			expectedFailure,
 		)
 	}
-	if err := validateTransactionOutcome(resp.Transaction); err != nil {
-		return err
-	}
-	return nil
+	return validateTransactionOutcome(resp.Transaction)
 }
 
 func failureClassForInvocationStatus(status InvocationStatus) (FailureClass, bool) {
@@ -266,8 +263,7 @@ func DefaultContract() Contract {
 			},
 		},
 		Subscriptions: SubscriptionPolicy{
-			UpdateSource:                SubscriptionUpdateSourceCommittedState,
-			ProcessMessagesMayBroadcast: false,
+			UpdateSource: SubscriptionUpdateSourceCommittedState,
 		},
 		Reason: "out-of-process module execution is deferred until transaction mutation and subscription semantics have a dedicated design",
 	}
@@ -287,10 +283,7 @@ func ValidateContract(contract Contract) error {
 		contract.Subscriptions.ProcessMessagesMayBroadcast {
 		return ErrUnsupportedSubscriptionSemantics
 	}
-	if err := validateLifecycle(contract.Lifecycle); err != nil {
-		return err
-	}
-	return nil
+	return validateLifecycle(contract.Lifecycle)
 }
 
 func validateLifecycle(lifecycle map[LifecycleHook]LifecycleContract) error {

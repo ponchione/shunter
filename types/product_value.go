@@ -59,7 +59,7 @@ func (pv ProductValue) Copy() ProductValue {
 		case KindBytes:
 			cp[i] = NewBytes(v.buf)
 		case KindJSON:
-			cp[i] = Value{kind: KindJSON, buf: append([]byte(nil), v.buf...)}
+			cp[i] = Value{kind: KindJSON, buf: slices.Clone(v.buf)}
 		case KindArrayString:
 			cp[i] = NewArrayString(v.strArr)
 		default:

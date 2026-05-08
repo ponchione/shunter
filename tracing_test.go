@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -297,7 +298,7 @@ func (t *recordingTracer) spanCount() int {
 
 func (t *recordingTracer) snapshot() []recordedTraceSpan {
 	t.mu.Lock()
-	spans := append([]*recordingSpan(nil), t.spans...)
+	spans := slices.Clone(t.spans)
 	t.mu.Unlock()
 	out := make([]recordedTraceSpan, 0, len(spans))
 	for _, span := range spans {
@@ -351,8 +352,7 @@ func (s *recordingSpan) snapshot() recordedTraceSpan {
 	for key, value := range s.attrs {
 		attrs[key] = value
 	}
-	events := make([]recordedTraceEvent, len(s.events))
-	copy(events, s.events)
+	events := slices.Clone(s.events)
 	return recordedTraceSpan{
 		name:   s.name,
 		attrs:  attrs,

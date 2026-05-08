@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/ponchione/shunter/types"
@@ -186,9 +187,7 @@ func (r *schemaRegistry) indexIDForColumn(table TableID, col types.ColID) (Index
 }
 
 func (r *schemaRegistry) Tables() []TableID {
-	out := make([]TableID, len(r.tableIDs))
-	copy(out, r.tableIDs)
-	return out
+	return slices.Clone(r.tableIDs)
 }
 
 func (r *schemaRegistry) Reducer(name string) (ReducerHandler, bool) {
@@ -197,9 +196,7 @@ func (r *schemaRegistry) Reducer(name string) (ReducerHandler, bool) {
 }
 
 func (r *schemaRegistry) Reducers() []string {
-	out := make([]string, len(r.reducerNames))
-	copy(out, r.reducerNames)
-	return out
+	return slices.Clone(r.reducerNames)
 }
 
 func (r *schemaRegistry) OnConnect() func(*ReducerContext) error {
@@ -216,11 +213,11 @@ func (r *schemaRegistry) Version() uint32 {
 
 func cloneTableSchema(ts TableSchema) TableSchema {
 	clone := ts
-	clone.Columns = append([]ColumnSchema(nil), ts.Columns...)
+	clone.Columns = slices.Clone(ts.Columns)
 	clone.Indexes = make([]IndexSchema, len(ts.Indexes))
 	for i, idx := range ts.Indexes {
 		idxClone := idx
-		idxClone.Columns = append([]int(nil), idx.Columns...)
+		idxClone.Columns = slices.Clone(idx.Columns)
 		clone.Indexes[i] = idxClone
 	}
 	clone.ReadPolicy = copyReadPolicy(ts.ReadPolicy)

@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
@@ -20,9 +21,7 @@ func copyProjectionColumns(in []ProjectionColumn) []ProjectionColumn {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]ProjectionColumn, len(in))
-	copy(out, in)
-	return out
+	return slices.Clone(in)
 }
 
 // ValidateProjection checks that a live row projection can be applied to the

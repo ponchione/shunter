@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -321,9 +322,7 @@ func (h *Host) snapshotModules() []hostRuntimeMount {
 	if h == nil || len(h.modules) == 0 {
 		return []hostRuntimeMount{}
 	}
-	out := make([]hostRuntimeMount, len(h.modules))
-	copy(out, h.modules)
-	return out
+	return slices.Clone(h.modules)
 }
 
 func closeHostModulesReverse(modules []hostRuntimeMount) error {
