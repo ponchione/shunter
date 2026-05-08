@@ -1467,6 +1467,31 @@ func TestOpenAndRecoverSymlinkSegmentFailsLoudly(t *testing.T) {
 	assertZeroRecoveryReport(t, report)
 }
 
+func TestOpenAndRecoverDirectorySegmentFailsLoudly(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	path := filepath.Join(root, SegmentFileName(1))
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err == nil {
+		t.Fatal("expected directory segment to fail recovery loudly")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("recovery error = %v, want ErrOpen category", err)
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("recovery error = %v, want regular-file rejection detail", err)
+	}
+	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+		t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+	}
+	assertZeroRecoveryReport(t, report)
+	assertDirectoryArtifactExists(t, path)
+}
+
 func TestOpenAndRecoverSnapshotSchemaMismatchFailsLoudly(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()

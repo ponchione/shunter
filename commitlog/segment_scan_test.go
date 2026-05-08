@@ -309,6 +309,29 @@ func TestScanSegmentsSymlinkSegmentFailsLoudly(t *testing.T) {
 	}
 }
 
+func TestScanSegmentsDirectorySegmentFailsLoudly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, SegmentFileName(1))
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	segments, horizon, err := ScanSegments(dir)
+	if err == nil {
+		t.Fatal("expected directory segment to fail loudly")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("ScanSegments error = %v, want ErrOpen category", err)
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("ScanSegments error = %v, want regular-file rejection detail", err)
+	}
+	if len(segments) != 0 || horizon != 0 {
+		t.Fatalf("partial scan = (%+v, %d), want no segments or horizon", segments, horizon)
+	}
+	assertDirectoryArtifactExists(t, path)
+}
+
 func TestScanSegmentsCorruptActiveSegmentAfterValidPrefixUsesFreshNextSegment(t *testing.T) {
 	dir := t.TempDir()
 

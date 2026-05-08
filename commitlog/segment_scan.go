@@ -53,7 +53,7 @@ func ScanSegments(dir string) ([]SegmentInfo, types.TxID, error) {
 
 	paths := make([]segmentPath, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".log" {
+		if filepath.Ext(entry.Name()) != ".log" {
 			continue
 		}
 		startTx, err := parseSegmentFileStartTx(entry.Name())
