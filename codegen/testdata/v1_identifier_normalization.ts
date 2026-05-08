@@ -7,7 +7,11 @@ import type {
   DecodedDeclaredQueryResult as ShunterDecodedDeclaredQueryResult,
   DeclaredQueryDecodeOptions as ShunterDeclaredQueryDecodeOptions,
   DeclaredQueryRunner as ShunterDeclaredQueryRunner,
+  DeclaredViewHandleSubscriber as ShunterDeclaredViewHandleSubscriber,
   DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,
+  DeclaredViewSubscriptionOptions as ShunterDeclaredViewSubscriptionOptions,
+  EncodedReducerCallOptions as ShunterEncodedReducerCallOptions,
+  EncodedReducerCallResultOptions as ShunterEncodedReducerCallResultOptions,
   ProtocolMetadata as ShunterProtocolMetadata,
   QueryRunner as ShunterQueryRunner,
   RawDeclaredQueryResult as ShunterRawDeclaredQueryResult,
@@ -15,6 +19,8 @@ import type {
   ReducerCallResult as ShunterReducerCallResult,
   ReducerCallResultRequestOptions as ShunterReducerCallResultRequestOptions,
   SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,
+  SubscriptionHandle as ShunterSubscriptionHandle,
+  SubscriptionHandleReturnOptions as ShunterSubscriptionHandleReturnOptions,
   TableRowDecoder as ShunterTableRowDecoder,
   TableRowDecoders as ShunterTableRowDecoders,
   TableSubscriber as ShunterTableSubscriber,
@@ -23,9 +29,11 @@ import type {
 } from "@shunter/client";
 
 import {
+  callReducerWithEncodedArgs as shunterCallReducerWithEncodedArgs,
   callReducerWithResult as shunterCallReducerWithResult,
   decodeBsatnProduct as shunterDecodeBsatnProduct,
   decodeDeclaredQueryResult as shunterDecodeDeclaredQueryResult,
+  encodeBsatnProduct as shunterEncodeBsatnProduct,
 } from "@shunter/client";
 
 export const shunterProtocol = {
@@ -38,7 +46,9 @@ export const shunterProtocol = {
 export type ShunterSubprotocol = (typeof shunterProtocol.supportedSubprotocols)[number];
 
 export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;
-export type ReducerCallResult<Name extends ReducerName = ReducerName> = ShunterReducerCallResult<Name, Uint8Array>;
+export type EncodedReducerCallOptions<Args = unknown> = ShunterEncodedReducerCallOptions<Args>;
+export type EncodedReducerCallResultOptions<Args = unknown, Result = Uint8Array> = ShunterEncodedReducerCallResultOptions<Args, Result>;
+export type ReducerCallResult<Name extends ReducerName = ReducerName, Result = Uint8Array> = ShunterReducerCallResult<Name, Result>;
 export type ReducerCallResultOptions = ShunterReducerCallResultRequestOptions<Uint8Array>;
 export type QueryRunner = ShunterQueryRunner<Uint8Array>;
 export type ViewSubscriber = ShunterViewSubscriber;
@@ -47,12 +57,16 @@ export type RawDeclaredQueryResult<Name extends ExecutableQueryName = Executable
 export type DeclaredQueryDecodeOptions<RowsByName extends object = TableRows> = ShunterDeclaredQueryDecodeOptions<RowsByName>;
 export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName, RowsByName extends object = TableRows> = ShunterDecodedDeclaredQueryResult<Name, RowsByName>;
 export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;
+export type DeclaredViewHandleSubscriber = ShunterDeclaredViewHandleSubscriber<ExecutableViewName>;
+export type DeclaredViewSubscriptionOptions<Row = unknown> = ShunterDeclaredViewSubscriptionOptions<Row>;
 export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;
+export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;
+export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;
 export type TableRow<Name extends TableName> = TableRows[Name];
 export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;
 export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;
 export type TableRowDecoder<Name extends TableName> = ShunterTableRowDecoder<TableRows[Name]>;
-export type TableRowDecoders = ShunterTableRowDecoders<TableRows>;
+export type TableRowDecoders<RowsByName extends object = TableRows> = ShunterTableRowDecoders<RowsByName>;
 export type UUID = string;
 
 export interface MessagesRow {

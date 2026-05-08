@@ -743,6 +743,14 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     });
   };
 
+  const decodeSubscriptionInitialRows = (
+    updates: readonly RawSubscriptionUpdate[],
+    decodeRow: RowDecoder<unknown>,
+    label: string,
+  ): unknown[] => updates.flatMap((update) =>
+    decodeSubscriptionRows(update.insertRowBytes, decodeRow, `${label} initial`)
+  );
+
   const cacheRow = (rowCache: Map<string, unknown[]>, rowBytes: Uint8Array, row: unknown): void => {
     const key = bytesKey(rowBytes);
     const bucket = rowCache.get(key);
@@ -792,7 +800,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return;
     }
     if (update.insertRowBytes === undefined || update.deleteRowBytes === undefined) {
-      throw new ShunterProtocolError(`${label} rows were not encoded as a RowList.`);
+      if (active.decodeRow !== undefined || active.onUpdate !== undefined) {
+        throw new ShunterProtocolError(`${label} rows were not encoded as a RowList.`);
+      }
+      return;
     }
     for (const rowBytes of update.deleteRowBytes) {
       deleteCachedRow(active.rowCache, rowBytes);
@@ -1172,9 +1183,25 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       target: pending.target,
       queryId: response.queryId,
       onRawUpdate: pending.onRawUpdate,
+      onUpdate: pending.onUpdate,
+      decodeRow: pending.decodeRow,
       handle: pending.handle,
+      rowCache: pending.handle === undefined ? undefined : new Map(),
     }, response.updates.map((update) => update.queryId));
     pending.handle?.replaceRows([]);
+    if (pending.onInitialRows !== undefined && pending.decodeRow !== undefined) {
+      try {
+        pending.onInitialRows(decodeSubscriptionInitialRows(response.updates, pending.decodeRow, "SubscribeMultiApplied"));
+      } catch (error) {
+        const callbackError = toShunterError(error, "validation", "SubscribeMultiApplied initial row callback failed");
+        removeActiveSubscription(response.queryId);
+        cleanupPendingSubscription(pending);
+        pending.handle?.close(callbackError);
+        pending.reject(callbackError);
+        failConnected(callbackError);
+        return;
+      }
+    }
     const updateError = dispatchRawSubscriptionUpdates(response.updates, "SubscribeMultiApplied");
     if (updateError !== undefined) {
       removeActiveSubscription(response.queryId);
@@ -1636,7 +1663,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           target: name,
           requestId: request.requestId,
           queryId: request.queryId,
+          onInitialRows: options.onInitialRows as ((rows: readonly unknown[]) => void) | undefined,
+          onUpdate: options.onUpdate as ((update: SubscriptionUpdate<unknown>) => void) | undefined,
           onRawUpdate: options.onRawUpdate,
+          decodeRow: options.decodeRow as RowDecoder<unknown> | undefined,
           handle,
           cleanup,
           resolve: resolve as (value: SubscriptionUnsubscribe | SubscriptionHandle<unknown>) => void,
@@ -2215,9 +2245,9 @@ export function decodeRowList(data: unknown): RawRowList {
 }
 
 export function decodeBsatnProduct<Row>(
-  data: unknown,
-  columns: readonly BsatnColumn[],
-  buildRow: (values: readonly unknown[]) => Row,
+	data: unknown,
+	columns: readonly BsatnColumn[],
+	buildRow: (values: readonly unknown[]) => Row,
 ): Row {
   const row = binaryBytes(data, "encoded BSATN product row");
   let offset = 0;
@@ -2233,7 +2263,234 @@ export function decodeBsatnProduct<Row>(
       details: { expectedColumns: columns.length },
     });
   }
-  return buildRow(values);
+	return buildRow(values);
+}
+
+export function encodeBsatnProduct(
+	values: readonly unknown[],
+	columns: readonly BsatnColumn[],
+): Uint8Array {
+	if (values.length !== columns.length) {
+		throw new ShunterValidationError("BSATN product value count does not match the column schema.", {
+			code: "bsatn_value_count_mismatch",
+			details: { expectedColumns: columns.length, receivedValues: values.length },
+		});
+	}
+	const chunks: Uint8Array[] = [];
+	for (let i = 0; i < columns.length; i += 1) {
+		chunks.push(encodeBsatnColumn(values[i], columns[i]));
+	}
+	return concatBytes(chunks);
+}
+
+function encodeBsatnColumn(value: unknown, column: BsatnColumn): Uint8Array {
+	const tag = bsatnTags[column.kind];
+	if (column.nullable === true) {
+		if (value === null || value === undefined) {
+			return new Uint8Array([tag, 0]);
+		}
+		return concatBytes([new Uint8Array([tag, 1]), encodeBsatnPayload(value, column)]);
+	}
+	if (value === null || value === undefined) {
+		throw new ShunterValidationError("Cannot encode null for a non-nullable BSATN column.", {
+			code: "bsatn_non_nullable_null",
+			details: { column: column.name },
+		});
+	}
+	return concatBytes([new Uint8Array([tag]), encodeBsatnPayload(value, column)]);
+}
+
+function encodeBsatnPayload(value: unknown, column: BsatnColumn): Uint8Array {
+	const view8 = new Uint8Array(8);
+	const view = new DataView(view8.buffer);
+	switch (column.kind) {
+		case "bool":
+			if (typeof value !== "boolean") {
+				throw invalidBsatnValue(column, "boolean");
+			}
+			return new Uint8Array([value ? 1 : 0]);
+		case "int8":
+			return new Uint8Array([asInteger(value, column, -0x80, 0x7f) & 0xff]);
+		case "uint8":
+			return new Uint8Array([asInteger(value, column, 0, 0xff)]);
+		case "int16":
+			view.setInt16(0, asInteger(value, column, -0x8000, 0x7fff), true);
+			return view8.slice(0, 2);
+		case "uint16":
+			view.setUint16(0, asInteger(value, column, 0, 0xffff), true);
+			return view8.slice(0, 2);
+		case "int32":
+			view.setInt32(0, asInteger(value, column, -0x80000000, 0x7fffffff), true);
+			return view8.slice(0, 4);
+		case "uint32":
+			view.setUint32(0, asInteger(value, column, 0, 0xffffffff), true);
+			return view8.slice(0, 4);
+		case "int64":
+		case "timestamp":
+		case "duration":
+			view.setBigInt64(
+				0,
+				asBigIntInRange(value, column, -(1n << 63n), (1n << 63n) - 1n, "64-bit signed integer"),
+				true,
+			);
+			return view8;
+		case "uint64":
+			view.setBigUint64(
+				0,
+				asBigIntInRange(value, column, 0n, (1n << 64n) - 1n, "64-bit unsigned integer"),
+				true,
+			);
+			return view8;
+		case "float32":
+			view.setFloat32(0, asNumber(value, column), true);
+			return view8.slice(0, 4);
+		case "float64":
+			view.setFloat64(0, asNumber(value, column), true);
+			return view8;
+		case "string":
+			return encodeLengthPrefixedBytes(utf8Bytes(asString(value, column), `BSATN ${column.name}`));
+		case "bytes":
+			return encodeLengthPrefixedBytes(binaryBytes(value, `BSATN ${column.name}`));
+		case "int128":
+			return encodeWideInteger(value, column, 16, true);
+		case "uint128":
+			return encodeWideInteger(value, column, 16, false);
+		case "int256":
+			return encodeWideInteger(value, column, 32, true);
+		case "uint256":
+			return encodeWideInteger(value, column, 32, false);
+		case "arrayString":
+			return encodeStringArray(value, column);
+		case "uuid":
+			return encodeUUID(value, column);
+		case "json":
+			{
+				const json = JSON.stringify(value);
+				if (json === undefined) {
+					throw invalidBsatnValue(column, "JSON value");
+				}
+				return encodeLengthPrefixedBytes(utf8Bytes(json, `BSATN ${column.name}`));
+			}
+	}
+}
+
+function encodeLengthPrefixedBytes(bytes: Uint8Array): Uint8Array {
+	const out = new Uint8Array(4 + bytes.length);
+	writeUint32LE(out, 0, bytes.length);
+	out.set(bytes, 4);
+	return out;
+}
+
+function encodeStringArray(value: unknown, column: BsatnColumn): Uint8Array {
+	if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+		throw invalidBsatnValue(column, "string[]");
+	}
+	const encoded = value.map((item) => utf8Bytes(item, `BSATN ${column.name}`));
+	const chunks: Uint8Array[] = [new Uint8Array(4)];
+	writeUint32LE(chunks[0], 0, encoded.length);
+	for (const item of encoded) {
+		chunks.push(encodeLengthPrefixedBytes(item));
+	}
+	return concatBytes(chunks);
+}
+
+function encodeUUID(value: unknown, column: BsatnColumn): Uint8Array {
+	const text = asString(value, column).replaceAll("-", "");
+	if (!/^[0-9a-fA-F]{32}$/.test(text)) {
+		throw invalidBsatnValue(column, "UUID string");
+	}
+	const out = new Uint8Array(16);
+	for (let i = 0; i < out.length; i += 1) {
+		out[i] = Number.parseInt(text.slice(i * 2, i * 2 + 2), 16);
+	}
+	return out;
+}
+
+function encodeWideInteger(value: unknown, column: BsatnColumn, byteLength: 16 | 32, signed: boolean): Uint8Array {
+	const bits = BigInt(byteLength * 8);
+	const max = signed ? (1n << (bits - 1n)) - 1n : (1n << bits) - 1n;
+	const min = signed ? -(1n << (bits - 1n)) : 0n;
+	let n = asBigIntInRange(
+		value,
+		column,
+		min,
+		max,
+		signed ? `${byteLength * 8}-bit signed integer` : `${byteLength * 8}-bit unsigned integer`,
+	);
+	if (n < 0) {
+		n = (1n << bits) + n;
+	}
+	const out = new Uint8Array(byteLength);
+	for (let i = 0; i < byteLength; i += 1) {
+		out[i] = Number((n >> BigInt(i * 8)) & 0xffn);
+	}
+	return out;
+}
+
+function asInteger(value: unknown, column: BsatnColumn, min: number, max: number): number {
+	if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
+		throw invalidBsatnValue(column, `integer in [${min}, ${max}]`);
+	}
+	return value;
+}
+
+function asNumber(value: unknown, column: BsatnColumn): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		throw invalidBsatnValue(column, "finite number");
+	}
+	return value;
+}
+
+function asBigInt(value: unknown, column: BsatnColumn): bigint {
+	if (typeof value === "bigint") {
+		return value;
+	}
+	if (typeof value === "number" && Number.isSafeInteger(value)) {
+		return BigInt(value);
+	}
+	if (typeof value === "string" && /^-?\d+$/.test(value)) {
+		return BigInt(value);
+	}
+	throw invalidBsatnValue(column, "bigint");
+}
+
+function asBigIntInRange(
+	value: unknown,
+	column: BsatnColumn,
+	min: bigint,
+	max: bigint,
+	expected: string,
+): bigint {
+	const n = asBigInt(value, column);
+	if (n < min || n > max) {
+		throw invalidBsatnValue(column, expected);
+	}
+	return n;
+}
+
+function asString(value: unknown, column: BsatnColumn): string {
+	if (typeof value !== "string") {
+		throw invalidBsatnValue(column, "string");
+	}
+	return value;
+}
+
+function invalidBsatnValue(column: BsatnColumn, expected: string): ShunterValidationError {
+	return new ShunterValidationError("Value does not match the BSATN column schema.", {
+		code: "bsatn_value_type_mismatch",
+		details: { column: column.name, kind: column.kind, expected },
+	});
+}
+
+function concatBytes(chunks: readonly Uint8Array[]): Uint8Array {
+	const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+	const out = new Uint8Array(length);
+	let offset = 0;
+	for (const chunk of chunks) {
+		out.set(chunk, offset);
+		offset += chunk.length;
+	}
+	return out;
 }
 
 function readBsatnColumn(
@@ -3329,13 +3586,14 @@ export function createSubscriptionHandle<Row = unknown>(
 }
 
 export interface DeclaredViewSubscriptionOptions<Row = unknown> {
-  readonly requestId?: RequestID;
-  readonly queryId?: QueryID;
-  readonly signal?: AbortSignal;
-  readonly returnHandle?: boolean;
-  readonly onInitialRows?: (rows: readonly Row[]) => void;
-  readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
-  readonly onRawUpdate?: RawSubscriptionUpdateCallback;
+	readonly requestId?: RequestID;
+	readonly queryId?: QueryID;
+	readonly signal?: AbortSignal;
+	readonly returnHandle?: boolean;
+	readonly decodeRow?: RowDecoder<Row>;
+	readonly onInitialRows?: (rows: readonly Row[]) => void;
+	readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
+	readonly onRawUpdate?: RawSubscriptionUpdateCallback;
 }
 
 export interface EncodedSubscribeSingleRequest {
@@ -3370,15 +3628,15 @@ export interface EncodedUnsubscribeMultiRequest {
   readonly frame: Uint8Array;
 }
 
-export type DeclaredViewSubscriber<Name extends string = string> = (
-  name: Name,
-  options?: DeclaredViewSubscriptionOptions,
+export type DeclaredViewSubscriber<Name extends string = string> = <Row = Uint8Array>(
+	name: Name,
+	options?: DeclaredViewSubscriptionOptions<Row>,
 ) => Promise<SubscriptionUnsubscribe>;
 
-export type DeclaredViewHandleSubscriber<Name extends string = string> = (
-  name: Name,
-  options: DeclaredViewSubscriptionOptions<Uint8Array> & SubscriptionHandleReturnOptions,
-) => Promise<SubscriptionHandle<Uint8Array>>;
+export type DeclaredViewHandleSubscriber<Name extends string = string> = <Row = Uint8Array>(
+	name: Name,
+	options: DeclaredViewSubscriptionOptions<Row> & SubscriptionHandleReturnOptions,
+) => Promise<SubscriptionHandle<Row>>;
 
 export function encodeSubscribeSingleRequest<Row = unknown>(
   queryString: string,

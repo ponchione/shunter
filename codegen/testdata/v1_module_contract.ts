@@ -7,7 +7,11 @@ import type {
   DecodedDeclaredQueryResult as ShunterDecodedDeclaredQueryResult,
   DeclaredQueryDecodeOptions as ShunterDeclaredQueryDecodeOptions,
   DeclaredQueryRunner as ShunterDeclaredQueryRunner,
+  DeclaredViewHandleSubscriber as ShunterDeclaredViewHandleSubscriber,
   DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,
+  DeclaredViewSubscriptionOptions as ShunterDeclaredViewSubscriptionOptions,
+  EncodedReducerCallOptions as ShunterEncodedReducerCallOptions,
+  EncodedReducerCallResultOptions as ShunterEncodedReducerCallResultOptions,
   ProtocolMetadata as ShunterProtocolMetadata,
   QueryRunner as ShunterQueryRunner,
   RawDeclaredQueryResult as ShunterRawDeclaredQueryResult,
@@ -15,6 +19,8 @@ import type {
   ReducerCallResult as ShunterReducerCallResult,
   ReducerCallResultRequestOptions as ShunterReducerCallResultRequestOptions,
   SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,
+  SubscriptionHandle as ShunterSubscriptionHandle,
+  SubscriptionHandleReturnOptions as ShunterSubscriptionHandleReturnOptions,
   TableRowDecoder as ShunterTableRowDecoder,
   TableRowDecoders as ShunterTableRowDecoders,
   TableSubscriber as ShunterTableSubscriber,
@@ -23,9 +29,11 @@ import type {
 } from "@shunter/client";
 
 import {
+  callReducerWithEncodedArgs as shunterCallReducerWithEncodedArgs,
   callReducerWithResult as shunterCallReducerWithResult,
   decodeBsatnProduct as shunterDecodeBsatnProduct,
   decodeDeclaredQueryResult as shunterDecodeDeclaredQueryResult,
+  encodeBsatnProduct as shunterEncodeBsatnProduct,
 } from "@shunter/client";
 
 export const shunterProtocol = {
@@ -38,7 +46,9 @@ export const shunterProtocol = {
 export type ShunterSubprotocol = (typeof shunterProtocol.supportedSubprotocols)[number];
 
 export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;
-export type ReducerCallResult<Name extends ReducerName = ReducerName> = ShunterReducerCallResult<Name, Uint8Array>;
+export type EncodedReducerCallOptions<Args = unknown> = ShunterEncodedReducerCallOptions<Args>;
+export type EncodedReducerCallResultOptions<Args = unknown, Result = Uint8Array> = ShunterEncodedReducerCallResultOptions<Args, Result>;
+export type ReducerCallResult<Name extends ReducerName = ReducerName, Result = Uint8Array> = ShunterReducerCallResult<Name, Result>;
 export type ReducerCallResultOptions = ShunterReducerCallResultRequestOptions<Uint8Array>;
 export type QueryRunner = ShunterQueryRunner<Uint8Array>;
 export type ViewSubscriber = ShunterViewSubscriber;
@@ -47,12 +57,16 @@ export type RawDeclaredQueryResult<Name extends ExecutableQueryName = Executable
 export type DeclaredQueryDecodeOptions<RowsByName extends object = TableRows> = ShunterDeclaredQueryDecodeOptions<RowsByName>;
 export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName, RowsByName extends object = TableRows> = ShunterDecodedDeclaredQueryResult<Name, RowsByName>;
 export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;
+export type DeclaredViewHandleSubscriber = ShunterDeclaredViewHandleSubscriber<ExecutableViewName>;
+export type DeclaredViewSubscriptionOptions<Row = unknown> = ShunterDeclaredViewSubscriptionOptions<Row>;
 export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;
+export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;
+export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;
 export type TableRow<Name extends TableName> = TableRows[Name];
 export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;
 export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;
 export type TableRowDecoder<Name extends TableName> = ShunterTableRowDecoder<TableRows[Name]>;
-export type TableRowDecoders = ShunterTableRowDecoders<TableRows>;
+export type TableRowDecoders<RowsByName extends object = TableRows> = ShunterTableRowDecoders<RowsByName>;
 export type UUID = string;
 
 export interface MessagesRow {
@@ -178,8 +192,44 @@ export const reducers = {
 
 export type ReducerName = (typeof reducers)[keyof typeof reducers];
 
+export interface CreateMessageArgs {
+  sender: string;
+  body: string;
+}
+
+const createMessageArgsColumns = [
+  { name: "sender", kind: "string" },
+  { name: "body", kind: "string" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function encodeCreateMessageArgs(value: CreateMessageArgs): Uint8Array {
+  return shunterEncodeBsatnProduct([
+    value.sender,
+    value.body,
+  ], createMessageArgsColumns);
+}
+
+export interface CreateMessageResult {
+  messageId: bigint;
+}
+
+const createMessageResultColumns = [
+  { name: "message_id", kind: "uint64" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decodeCreateMessageResult(row: Uint8Array): CreateMessageResult {
+  return shunterDecodeBsatnProduct(row, createMessageResultColumns, (values) => ({
+    messageId: values[0] as bigint,
+  }));
+}
+
 export function callCreateMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {
   return callReducer("create_message", args);
+}
+
+export function callCreateMessageTyped(callReducer: ReducerCaller, args: CreateMessageArgs, options: EncodedReducerCallOptions<CreateMessageArgs> = {}): Promise<Uint8Array> {
+  const callOptions: EncodedReducerCallOptions<CreateMessageArgs> = options.encodeArgs === undefined ? { ...options, encodeArgs: encodeCreateMessageArgs } : options;
+  return shunterCallReducerWithEncodedArgs(callReducer, "create_message", args, callOptions);
 }
 
 export function callCreateMessageResult(callReducer: ReducerCaller, args: Uint8Array, options: ReducerCallResultOptions = {}): Promise<ReducerCallResult<typeof reducers.createMessage>> {
@@ -204,12 +254,45 @@ export const querySQL = {
 
 export type ExecutableQueryName = (typeof queries)[keyof typeof querySQL];
 
+export interface RecentMessagesQueryRow {
+  id: bigint;
+  sender: string;
+  body: string;
+}
+
+const recentMessagesQueryColumns = [
+  { name: "id", kind: "uint64" },
+  { name: "sender", kind: "string" },
+  { name: "body", kind: "string" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decodeRecentMessagesQueryRow(row: Uint8Array): RecentMessagesQueryRow {
+  return shunterDecodeBsatnProduct(row, recentMessagesQueryColumns, (values) => ({
+    id: values[0] as bigint,
+    sender: values[1] as string,
+    body: values[2] as string,
+  }));
+}
+
+export type RecentMessagesQueryRows = {
+  "messages": RecentMessagesQueryRow;
+};
+
+export const recentMessagesQueryRowDecoders = {
+  "messages": decodeRecentMessagesQueryRow,
+} as const satisfies TableRowDecoders<RecentMessagesQueryRows>;
+
 export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {
   return runDeclaredQuery("recent_messages");
 }
 
-export function queryRecentMessagesResult<RowsByName extends object = TableRows>(data: unknown, options: DeclaredQueryDecodeOptions<RowsByName>): DecodedDeclaredQueryResult<typeof queries.recentMessages, RowsByName> {
-  return shunterDecodeDeclaredQueryResult("recent_messages", data, options);
+export function queryRecentMessagesResult(data: unknown, options: DeclaredQueryDecodeOptions<RecentMessagesQueryRows> = {}): DecodedDeclaredQueryResult<typeof queries.recentMessages, RecentMessagesQueryRows> {
+  const decodeOptions: DeclaredQueryDecodeOptions<RecentMessagesQueryRows> = options.tableDecoders === undefined && options.decodeRow === undefined ? { ...options, tableDecoders: recentMessagesQueryRowDecoders } : options;
+  return shunterDecodeDeclaredQueryResult("recent_messages", data, decodeOptions);
+}
+
+export async function queryRecentMessagesDecoded(runDeclaredQuery: DeclaredQueryRunner, options: DeclaredQueryDecodeOptions<RecentMessagesQueryRows> = {}): Promise<DecodedDeclaredQueryResult<typeof queries.recentMessages, RecentMessagesQueryRows>> {
+  return queryRecentMessagesResult(await runDeclaredQuery("recent_messages"), options);
 }
 
 export const views = {
@@ -226,12 +309,55 @@ export const viewSQL = {
 
 export type ExecutableViewName = (typeof views)[keyof typeof viewSQL];
 
-export function subscribeLiveMessageProjection(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {
-  return subscribeDeclaredView("live_message_projection");
+export interface LiveMessageProjectionViewRow {
+  id: bigint;
+  text: string;
 }
 
-export function subscribeLiveMessageCount(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {
-  return subscribeDeclaredView("live_message_count");
+const liveMessageProjectionViewColumns = [
+  { name: "id", kind: "uint64" },
+  { name: "text", kind: "string" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decodeLiveMessageProjectionViewRow(row: Uint8Array): LiveMessageProjectionViewRow {
+  return shunterDecodeBsatnProduct(row, liveMessageProjectionViewColumns, (values) => ({
+    id: values[0] as bigint,
+    text: values[1] as string,
+  }));
+}
+
+export function subscribeLiveMessageProjection(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscriptionOptions<LiveMessageProjectionViewRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: DeclaredViewSubscriptionOptions<LiveMessageProjectionViewRow> = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessageProjectionViewRow } : options;
+  return subscribeDeclaredView("live_message_projection", subscribeOptions);
+}
+
+export function subscribeLiveMessageProjectionHandle(subscribeDeclaredView: DeclaredViewHandleSubscriber, options: DeclaredViewSubscriptionOptions<LiveMessageProjectionViewRow> & SubscriptionHandleReturnOptions): Promise<SubscriptionHandle<LiveMessageProjectionViewRow>> {
+  const subscribeOptions: DeclaredViewSubscriptionOptions<LiveMessageProjectionViewRow> & SubscriptionHandleReturnOptions = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessageProjectionViewRow } : options;
+  return subscribeDeclaredView("live_message_projection", subscribeOptions);
+}
+
+export interface LiveMessageCountViewRow {
+  n: bigint;
+}
+
+const liveMessageCountViewColumns = [
+  { name: "n", kind: "uint64" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decodeLiveMessageCountViewRow(row: Uint8Array): LiveMessageCountViewRow {
+  return shunterDecodeBsatnProduct(row, liveMessageCountViewColumns, (values) => ({
+    n: values[0] as bigint,
+  }));
+}
+
+export function subscribeLiveMessageCount(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscriptionOptions<LiveMessageCountViewRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: DeclaredViewSubscriptionOptions<LiveMessageCountViewRow> = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessageCountViewRow } : options;
+  return subscribeDeclaredView("live_message_count", subscribeOptions);
+}
+
+export function subscribeLiveMessageCountHandle(subscribeDeclaredView: DeclaredViewHandleSubscriber, options: DeclaredViewSubscriptionOptions<LiveMessageCountViewRow> & SubscriptionHandleReturnOptions): Promise<SubscriptionHandle<LiveMessageCountViewRow>> {
+  const subscribeOptions: DeclaredViewSubscriptionOptions<LiveMessageCountViewRow> & SubscriptionHandleReturnOptions = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessageCountViewRow } : options;
+  return subscribeDeclaredView("live_message_count", subscribeOptions);
 }
 
 export const permissions = {

@@ -38,7 +38,9 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 		return nil, err
 	}
 	b.WriteString("export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;\n")
-	b.WriteString("export type ReducerCallResult<Name extends ReducerName = ReducerName> = ShunterReducerCallResult<Name, Uint8Array>;\n")
+	b.WriteString("export type EncodedReducerCallOptions<Args = unknown> = ShunterEncodedReducerCallOptions<Args>;\n")
+	b.WriteString("export type EncodedReducerCallResultOptions<Args = unknown, Result = Uint8Array> = ShunterEncodedReducerCallResultOptions<Args, Result>;\n")
+	b.WriteString("export type ReducerCallResult<Name extends ReducerName = ReducerName, Result = Uint8Array> = ShunterReducerCallResult<Name, Result>;\n")
 	b.WriteString("export type ReducerCallResultOptions = ShunterReducerCallResultRequestOptions<Uint8Array>;\n")
 	b.WriteString("export type QueryRunner = ShunterQueryRunner<Uint8Array>;\n")
 	b.WriteString("export type ViewSubscriber = ShunterViewSubscriber;\n")
@@ -47,12 +49,16 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	b.WriteString("export type DeclaredQueryDecodeOptions<RowsByName extends object = TableRows> = ShunterDeclaredQueryDecodeOptions<RowsByName>;\n")
 	b.WriteString("export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName, RowsByName extends object = TableRows> = ShunterDecodedDeclaredQueryResult<Name, RowsByName>;\n")
 	b.WriteString("export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;\n")
+	b.WriteString("export type DeclaredViewHandleSubscriber = ShunterDeclaredViewHandleSubscriber<ExecutableViewName>;\n")
+	b.WriteString("export type DeclaredViewSubscriptionOptions<Row = unknown> = ShunterDeclaredViewSubscriptionOptions<Row>;\n")
 	b.WriteString("export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;\n")
+	b.WriteString("export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;\n")
+	b.WriteString("export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;\n")
 	b.WriteString("export type TableRow<Name extends TableName> = TableRows[Name];\n")
 	b.WriteString("export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;\n")
 	b.WriteString("export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;\n")
 	b.WriteString("export type TableRowDecoder<Name extends TableName> = ShunterTableRowDecoder<TableRows[Name]>;\n")
-	b.WriteString("export type TableRowDecoders = ShunterTableRowDecoders<TableRows>;\n")
+	b.WriteString("export type TableRowDecoders<RowsByName extends object = TableRows> = ShunterTableRowDecoders<RowsByName>;\n")
 	b.WriteString("export type UUID = string;\n")
 	b.WriteString("\n")
 
@@ -113,11 +119,40 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	reducerIdentifiers := uniqueTypeScriptIdentifiers(reducerNames, typeScriptCamelIdentifier)
 	writeTypeScriptConstMap(&b, "reducers", reducerIdentifiers)
 	b.WriteString("export type ReducerName = (typeof reducers)[keyof typeof reducers];\n\n")
+	reducersByName := make(map[string]schema.ReducerExport, len(contract.Schema.Reducers))
+	for _, reducer := range contract.Schema.Reducers {
+		reducersByName[reducer.Name] = reducer
+	}
 	for _, reducer := range reducerIdentifiers {
+		reducerExport := reducersByName[reducer.name]
+		var argsTypeName, argsEncoderName string
+		if reducerExport.Args != nil {
+			argsTypeName = uniqueTypeScriptIdentifier(upperFirst(reducer.identifier)+"Args", topLevelValueNames)
+			argsColumnsName := uniqueTypeScriptIdentifier(reducer.identifier+"ArgsColumns", topLevelValueNames)
+			argsEncoderName = uniqueTypeScriptIdentifier("encode"+upperFirst(reducer.identifier)+"Args", topLevelValueNames)
+			if err := writeTypeScriptProductCodec(&b, argsTypeName, argsColumnsName, argsEncoderName, "", *reducerExport.Args, true, false); err != nil {
+				return nil, err
+			}
+		}
+		if reducerExport.Result != nil {
+			resultTypeName := uniqueTypeScriptIdentifier(upperFirst(reducer.identifier)+"Result", topLevelValueNames)
+			resultColumnsName := uniqueTypeScriptIdentifier(reducer.identifier+"ResultColumns", topLevelValueNames)
+			resultDecoderName := uniqueTypeScriptIdentifier("decode"+upperFirst(reducer.identifier)+"Result", topLevelValueNames)
+			if err := writeTypeScriptProductCodec(&b, resultTypeName, resultColumnsName, "", resultDecoderName, *reducerExport.Result, false, true); err != nil {
+				return nil, err
+			}
+		}
 		functionName := uniqueTypeScriptIdentifier("call"+upperFirst(reducer.identifier), topLevelValueNames)
 		fmt.Fprintf(&b, "export function %s(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {\n", functionName)
 		fmt.Fprintf(&b, "  return callReducer(%s, args);\n", strconv.Quote(reducer.name))
 		b.WriteString("}\n\n")
+		if reducerExport.Args != nil {
+			typedFunctionName := uniqueTypeScriptIdentifier(functionName+"Typed", topLevelValueNames)
+			fmt.Fprintf(&b, "export function %s(callReducer: ReducerCaller, args: %s, options: EncodedReducerCallOptions<%s> = {}): Promise<Uint8Array> {\n", typedFunctionName, argsTypeName, argsTypeName)
+			fmt.Fprintf(&b, "  const callOptions: EncodedReducerCallOptions<%s> = options.encodeArgs === undefined ? { ...options, encodeArgs: %s } : options;\n", argsTypeName, argsEncoderName)
+			fmt.Fprintf(&b, "  return shunterCallReducerWithEncodedArgs(callReducer, %s, args, callOptions);\n", strconv.Quote(reducer.name))
+			b.WriteString("}\n\n")
+		}
 		resultFunctionName := uniqueTypeScriptIdentifier(functionName+"Result", topLevelValueNames)
 		fmt.Fprintf(&b, "export function %s(callReducer: ReducerCaller, args: Uint8Array, options: ReducerCallResultOptions = {}): Promise<ReducerCallResult<typeof reducers.%s>> {\n", resultFunctionName, reducer.identifier)
 		fmt.Fprintf(&b, "  return shunterCallReducerWithResult(callReducer, %s, args, options);\n", strconv.Quote(reducer.name))
@@ -138,14 +173,43 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	writeTypeScriptSQLConstMap(&b, "querySQL", executableQueries)
 	b.WriteString("export type ExecutableQueryName = (typeof queries)[keyof typeof querySQL];\n\n")
 	for _, query := range executableQueries {
+		queryDescription := contract.Queries[queryIndexByName(contract.Queries, query.name)]
+		var queryRowsTypeName, queryRowDecodersName string
+		if queryDescription.RowSchema != nil && queryDescription.ResultShape != nil {
+			rowTypeName := uniqueTypeScriptIdentifier(upperFirst(query.identifier)+"QueryRow", topLevelValueNames)
+			columnsName := uniqueTypeScriptIdentifier(query.identifier+"QueryColumns", topLevelValueNames)
+			decoderName := uniqueTypeScriptIdentifier("decode"+upperFirst(query.identifier)+"QueryRow", topLevelValueNames)
+			if err := writeTypeScriptProductCodec(&b, rowTypeName, columnsName, "", decoderName, *queryDescription.RowSchema, false, true); err != nil {
+				return nil, err
+			}
+			queryRowsTypeName = uniqueTypeScriptIdentifier(upperFirst(query.identifier)+"QueryRows", topLevelValueNames)
+			queryRowDecodersName = uniqueTypeScriptIdentifier(query.identifier+"QueryRowDecoders", topLevelValueNames)
+			fmt.Fprintf(&b, "export type %s = {\n", queryRowsTypeName)
+			fmt.Fprintf(&b, "  %s: %s;\n", strconv.Quote(queryDescription.ResultShape.Table), rowTypeName)
+			b.WriteString("};\n\n")
+			fmt.Fprintf(&b, "export const %s = {\n", queryRowDecodersName)
+			fmt.Fprintf(&b, "  %s: %s,\n", strconv.Quote(queryDescription.ResultShape.Table), decoderName)
+			fmt.Fprintf(&b, "} as const satisfies TableRowDecoders<%s>;\n\n", queryRowsTypeName)
+		}
 		functionName := uniqueTypeScriptIdentifier("query"+upperFirst(query.identifier), topLevelValueNames)
 		fmt.Fprintf(&b, "export function %s(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {\n", functionName)
 		fmt.Fprintf(&b, "  return runDeclaredQuery(%s);\n", strconv.Quote(query.name))
 		b.WriteString("}\n\n")
 		resultFunctionName := uniqueTypeScriptIdentifier(functionName+"Result", topLevelValueNames)
-		fmt.Fprintf(&b, "export function %s<RowsByName extends object = TableRows>(data: unknown, options: DeclaredQueryDecodeOptions<RowsByName>): DecodedDeclaredQueryResult<typeof queries.%s, RowsByName> {\n", resultFunctionName, query.identifier)
-		fmt.Fprintf(&b, "  return shunterDecodeDeclaredQueryResult(%s, data, options);\n", strconv.Quote(query.name))
-		b.WriteString("}\n\n")
+		if queryRowsTypeName != "" {
+			fmt.Fprintf(&b, "export function %s(data: unknown, options: DeclaredQueryDecodeOptions<%s> = {}): DecodedDeclaredQueryResult<typeof queries.%s, %s> {\n", resultFunctionName, queryRowsTypeName, query.identifier, queryRowsTypeName)
+			fmt.Fprintf(&b, "  const decodeOptions: DeclaredQueryDecodeOptions<%s> = options.tableDecoders === undefined && options.decodeRow === undefined ? { ...options, tableDecoders: %s } : options;\n", queryRowsTypeName, queryRowDecodersName)
+			fmt.Fprintf(&b, "  return shunterDecodeDeclaredQueryResult(%s, data, decodeOptions);\n", strconv.Quote(query.name))
+			b.WriteString("}\n\n")
+			decodedFunctionName := uniqueTypeScriptIdentifier(functionName+"Decoded", topLevelValueNames)
+			fmt.Fprintf(&b, "export async function %s(runDeclaredQuery: DeclaredQueryRunner, options: DeclaredQueryDecodeOptions<%s> = {}): Promise<DecodedDeclaredQueryResult<typeof queries.%s, %s>> {\n", decodedFunctionName, queryRowsTypeName, query.identifier, queryRowsTypeName)
+			fmt.Fprintf(&b, "  return %s(await runDeclaredQuery(%s), options);\n", resultFunctionName, strconv.Quote(query.name))
+			b.WriteString("}\n\n")
+		} else {
+			fmt.Fprintf(&b, "export function %s<RowsByName extends object = TableRows>(data: unknown, options: DeclaredQueryDecodeOptions<RowsByName>): DecodedDeclaredQueryResult<typeof queries.%s, RowsByName> {\n", resultFunctionName, query.identifier)
+			fmt.Fprintf(&b, "  return shunterDecodeDeclaredQueryResult(%s, data, options);\n", strconv.Quote(query.name))
+			b.WriteString("}\n\n")
+		}
 	}
 
 	viewNames := make([]string, len(contract.Views))
@@ -159,10 +223,32 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	writeTypeScriptSQLConstMap(&b, "viewSQL", executableViews)
 	b.WriteString("export type ExecutableViewName = (typeof views)[keyof typeof viewSQL];\n\n")
 	for _, view := range executableViews {
+		viewDescription := contract.Views[viewIndexByName(contract.Views, view.name)]
+		var rowTypeName, decoderName string
+		if viewDescription.RowSchema != nil {
+			rowTypeName = uniqueTypeScriptIdentifier(upperFirst(view.identifier)+"ViewRow", topLevelValueNames)
+			columnsName := uniqueTypeScriptIdentifier(view.identifier+"ViewColumns", topLevelValueNames)
+			decoderName = uniqueTypeScriptIdentifier("decode"+upperFirst(view.identifier)+"ViewRow", topLevelValueNames)
+			if err := writeTypeScriptProductCodec(&b, rowTypeName, columnsName, "", decoderName, *viewDescription.RowSchema, false, true); err != nil {
+				return nil, err
+			}
+		}
 		functionName := uniqueTypeScriptIdentifier("subscribe"+upperFirst(view.identifier), topLevelValueNames)
-		fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {\n", functionName)
-		fmt.Fprintf(&b, "  return subscribeDeclaredView(%s);\n", strconv.Quote(view.name))
-		b.WriteString("}\n\n")
+		if rowTypeName != "" {
+			fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, rowTypeName)
+			fmt.Fprintf(&b, "  const subscribeOptions: DeclaredViewSubscriptionOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: %s } : options;\n", rowTypeName, decoderName)
+			fmt.Fprintf(&b, "  return subscribeDeclaredView(%s, subscribeOptions);\n", strconv.Quote(view.name))
+			b.WriteString("}\n\n")
+			handleFunctionName := uniqueTypeScriptIdentifier(functionName+"Handle", topLevelValueNames)
+			fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewHandleSubscriber, options: DeclaredViewSubscriptionOptions<%s> & SubscriptionHandleReturnOptions): Promise<SubscriptionHandle<%s>> {\n", handleFunctionName, rowTypeName, rowTypeName)
+			fmt.Fprintf(&b, "  const subscribeOptions: DeclaredViewSubscriptionOptions<%s> & SubscriptionHandleReturnOptions = options.decodeRow === undefined ? { ...options, decodeRow: %s } : options;\n", rowTypeName, decoderName)
+			fmt.Fprintf(&b, "  return subscribeDeclaredView(%s, subscribeOptions);\n", strconv.Quote(view.name))
+			b.WriteString("}\n\n")
+		} else {
+			fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {\n", functionName)
+			fmt.Fprintf(&b, "  return subscribeDeclaredView(%s);\n", strconv.Quote(view.name))
+			b.WriteString("}\n\n")
+		}
 	}
 
 	writeTypeScriptPermissions(&b, contract.Permissions)
@@ -173,9 +259,11 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 
 func typeScriptTopLevelValueNames() map[string]int {
 	names := []string{
+		"shunterCallReducerWithEncodedArgs",
 		"shunterCallReducerWithResult",
 		"shunterDecodeBsatnProduct",
 		"shunterDecodeDeclaredQueryResult",
+		"shunterEncodeBsatnProduct",
 		"shunterProtocol",
 		"tables",
 		"tableRowDecoders",
@@ -203,7 +291,11 @@ func writeTypeScriptRuntimeImports(b *bytes.Buffer) {
 	b.WriteString("  DecodedDeclaredQueryResult as ShunterDecodedDeclaredQueryResult,\n")
 	b.WriteString("  DeclaredQueryDecodeOptions as ShunterDeclaredQueryDecodeOptions,\n")
 	b.WriteString("  DeclaredQueryRunner as ShunterDeclaredQueryRunner,\n")
+	b.WriteString("  DeclaredViewHandleSubscriber as ShunterDeclaredViewHandleSubscriber,\n")
 	b.WriteString("  DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,\n")
+	b.WriteString("  DeclaredViewSubscriptionOptions as ShunterDeclaredViewSubscriptionOptions,\n")
+	b.WriteString("  EncodedReducerCallOptions as ShunterEncodedReducerCallOptions,\n")
+	b.WriteString("  EncodedReducerCallResultOptions as ShunterEncodedReducerCallResultOptions,\n")
 	b.WriteString("  ProtocolMetadata as ShunterProtocolMetadata,\n")
 	b.WriteString("  QueryRunner as ShunterQueryRunner,\n")
 	b.WriteString("  RawDeclaredQueryResult as ShunterRawDeclaredQueryResult,\n")
@@ -211,6 +303,8 @@ func writeTypeScriptRuntimeImports(b *bytes.Buffer) {
 	b.WriteString("  ReducerCallResult as ShunterReducerCallResult,\n")
 	b.WriteString("  ReducerCallResultRequestOptions as ShunterReducerCallResultRequestOptions,\n")
 	b.WriteString("  SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,\n")
+	b.WriteString("  SubscriptionHandle as ShunterSubscriptionHandle,\n")
+	b.WriteString("  SubscriptionHandleReturnOptions as ShunterSubscriptionHandleReturnOptions,\n")
 	b.WriteString("  TableRowDecoder as ShunterTableRowDecoder,\n")
 	b.WriteString("  TableRowDecoders as ShunterTableRowDecoders,\n")
 	b.WriteString("  TableSubscriber as ShunterTableSubscriber,\n")
@@ -221,9 +315,11 @@ func writeTypeScriptRuntimeImports(b *bytes.Buffer) {
 
 func writeTypeScriptRuntimeValueImports(b *bytes.Buffer) {
 	b.WriteString("import {\n")
+	b.WriteString("  callReducerWithEncodedArgs as shunterCallReducerWithEncodedArgs,\n")
 	b.WriteString("  callReducerWithResult as shunterCallReducerWithResult,\n")
 	b.WriteString("  decodeBsatnProduct as shunterDecodeBsatnProduct,\n")
 	b.WriteString("  decodeDeclaredQueryResult as shunterDecodeDeclaredQueryResult,\n")
+	b.WriteString("  encodeBsatnProduct as shunterEncodeBsatnProduct,\n")
 	b.WriteString("} from \"@shunter/client\";\n\n")
 }
 
@@ -319,6 +415,69 @@ func writeTypeScriptTableRowDecoders(b *bytes.Buffer, tables []schema.TableExpor
 	return decoders, nil
 }
 
+func writeTypeScriptProductCodec(b *bytes.Buffer, typeName, columnsName, encoderName, decoderName string, product schema.ProductSchemaExport, writeEncoder bool, writeDecoder bool) error {
+	columnNames := make([]string, len(product.Columns))
+	for i, column := range product.Columns {
+		columnNames[i] = column.Name
+	}
+	columnIdentifiers := uniqueTypeScriptIdentifiers(columnNames, typeScriptCamelIdentifier)
+
+	fmt.Fprintf(b, "export interface %s {\n", typeName)
+	for i, column := range product.Columns {
+		tsType, err := typeScriptColumnType(column.Type)
+		if err != nil {
+			return err
+		}
+		if column.Nullable {
+			tsType += " | null"
+		}
+		fmt.Fprintf(b, "  %s: %s;\n", columnIdentifiers[i].identifier, tsType)
+	}
+	b.WriteString("}\n\n")
+
+	fmt.Fprintf(b, "const %s = [\n", columnsName)
+	for _, column := range product.Columns {
+		if _, err := typeScriptColumnType(column.Type); err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  { name: %s, kind: %s", strconv.Quote(column.Name), strconv.Quote(column.Type))
+		if column.Nullable {
+			b.WriteString(", nullable: true")
+		}
+		b.WriteString(" },\n")
+	}
+	b.WriteString("] as const satisfies readonly ShunterBsatnColumn[];\n\n")
+
+	if writeEncoder {
+		fmt.Fprintf(b, "export function %s(value: %s): Uint8Array {\n", encoderName, typeName)
+		fmt.Fprintf(b, "  return shunterEncodeBsatnProduct([\n")
+		for _, identifier := range columnIdentifiers {
+			fmt.Fprintf(b, "    value.%s,\n", identifier.identifier)
+		}
+		fmt.Fprintf(b, "  ], %s);\n", columnsName)
+		b.WriteString("}\n\n")
+	}
+
+	if writeDecoder {
+		fmt.Fprintf(b, "export function %s(row: Uint8Array): %s {\n", decoderName, typeName)
+		fmt.Fprintf(b, "  return shunterDecodeBsatnProduct(row, %s, (values) => ({\n", columnsName)
+		for i, column := range product.Columns {
+			tsType, err := typeScriptColumnType(column.Type)
+			if err != nil {
+				return err
+			}
+			if column.Nullable {
+				tsType += " | null"
+			}
+			fmt.Fprintf(b, "    %s: values[%d] as %s,\n", columnIdentifiers[i].identifier, i, tsType)
+		}
+		b.WriteString("  }));\n")
+		b.WriteString("}\n\n")
+	}
+
+	return nil
+}
+
 func writeTypeScriptTableReadPolicies(b *bytes.Buffer, tables []schema.TableExport, identifiers []namedTypeScriptIdentifier) {
 	b.WriteString("export const tableReadPolicies = {\n")
 	for i, table := range tables {
@@ -364,6 +523,15 @@ func executableQueryIdentifiers(queries []shunter.QueryDescription, identifiers 
 	return out
 }
 
+func queryIndexByName(queries []shunter.QueryDescription, name string) int {
+	for i, query := range queries {
+		if query.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
 func executableViewIdentifiers(views []shunter.ViewDescription, identifiers []namedTypeScriptIdentifier) []namedTypeScriptIdentifier {
 	out := make([]namedTypeScriptIdentifier, 0, len(views))
 	for i, view := range views {
@@ -375,6 +543,15 @@ func executableViewIdentifiers(views []shunter.ViewDescription, identifiers []na
 		out = append(out, identifier)
 	}
 	return out
+}
+
+func viewIndexByName(views []shunter.ViewDescription, name string) int {
+	for i, view := range views {
+		if view.Name == name {
+			return i
+		}
+	}
+	return -1
 }
 
 func writeTypeScriptPermissions(b *bytes.Buffer, permissions shunter.PermissionContract) {

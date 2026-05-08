@@ -35,25 +35,27 @@ RowList envelopes. `decodeRawDeclaredQueryResult()` wraps successful
 table names, raw RowList bytes, and split row byte arrays.
 `decodeDeclaredQueryResult()` maps those raw table row bytes through
 caller-provided table decoders when consumers already have schema-aware row
-codecs. Generated bindings can expose `queryXResult(...)` wrappers and
-module-scoped decoded-query/table-decoder aliases over these runtime surfaces.
+codecs. Generated bindings expose `queryXResult(...)` and
+`queryXDecoded(...)` wrappers with module-scoped row decoders when the contract
+contains declared-read row metadata.
 `subscribeDeclaredView()` and `subscribeTable()` also accept `returnHandle:
 true` to resolve with a managed subscription handle wired to the same
 server-acknowledged unsubscribe path. Table handles expose raw row bytes from
 the initial snapshot by default, or decoded initial rows when `decodeRow` is
-supplied; declared-view handles are lifecycle-only until schema-aware view row
-decoding lands. Table subscriptions can accept `decodeRow` to invoke decoded
+supplied. Declared-view subscriptions can also accept `decodeRow` to invoke
+decoded `onInitialRows` and `onUpdate` callbacks, and declared-view handles use
+RowList insert/delete payloads to maintain decoded row sets when a decoder is
+available. Table subscriptions can accept `decodeRow` to invoke decoded
 `onRows`/`onInitialRows` and `onUpdate` callbacks from split RowList row bytes
 while keeping raw callbacks unchanged. The runtime also exports
-`decodeBsatnProduct()` for schema-aware row decoding, and generated bindings
-emit per-table row decoder functions plus a `tableRowDecoders` map that
-generated table subscription helpers use by default. Managed table handles
-apply RowList insert/delete updates using raw row bytes as local identity. The
-runtime also supports explicit opt-in reconnect with bounded retry,
+`decodeBsatnProduct()` and `encodeBsatnProduct()` for schema-aware product row
+codecs, and generated bindings emit per-table row decoder functions plus a
+`tableRowDecoders` map that generated table subscription helpers use by
+default. Managed table and declared-view handles apply RowList insert/delete
+updates using raw row bytes as local identity. The runtime also supports
+explicit opt-in reconnect with bounded retry,
 token-provider refresh per attempt, and subscription replay after a fresh
-identity handshake. It does not implement typed reducer argument/result
-encoding, declared query/view projection row decoding, or declared-query/view
-cache behavior yet.
+identity handshake.
 
 The lifecycle shell offers Shunter's v1 subprotocol, appends a configured token
 as the server-supported `token` query parameter, tracks `idle`/`connecting`/
@@ -67,17 +69,20 @@ Full-update `callReducer()` calls currently resolve with the raw
 status. `NoSuccessNotify` calls resolve after send because successful server
 echoes may be suppressed. Generated helpers can use `decodeReducerCallResult()`
 or `callReducerWithResult()` to wrap heavy transaction update frames in a
-reducer name/request ID/status envelope while typed result decoding remains
-pending. Typed reducer callers can use `encodeReducerArgs()` and
-`callReducerWithEncodedArgs()` when they provide their own argument encoder;
-generated schema-derived encoders remain pending.
+reducer name/request ID/status envelope. Typed reducer callers can use
+`encodeReducerArgs()` and `callReducerWithEncodedArgs()` when they provide
+their own argument encoder; generated bindings provide schema-derived argument
+encoders and standalone reducer result product decoders when the contract
+exports those schemas.
 `runDeclaredQuery()` currently resolves with the raw `OneOffQueryResponse`
 frame on success and rejects on response errors. Consumers that want a typed raw
 envelope can pass that frame to `decodeRawDeclaredQueryResult()`.
 `subscribeDeclaredView()` currently resolves after `SubscribeMultiApplied`,
 rejects on `SubscriptionError`, and returns an unsubscribe function that sends
 one `UnsubscribeMulti` frame for repeated calls and resolves after the matching
-acknowledgement.
+acknowledgement. It accepts `decodeRow`, `onInitialRows`, `onUpdate`, and
+`returnHandle` options for typed declared-view consumers when update payloads
+include RowList row bytes.
 `subscribeTable()` currently sends a quoted whole-table `SubscribeSingle` SQL
 query, resolves after `SubscribeSingleApplied`, rejects on `SubscriptionError`,
 and returns an unsubscribe function that sends one `UnsubscribeSingle` frame
@@ -86,10 +91,9 @@ Passing `returnHandle: true` to either subscription method preserves the same
 acceptance and acknowledgement semantics while resolving with a
 `SubscriptionHandle` whose `unsubscribe()` is idempotent.
 Declared-view and table subscriptions can opt into raw row-list/update bytes
-with `onRawUpdate` and table-only `onRawRows` callbacks while typed decoding is
-still pending. Callback consumers can use `decodeRowList()` to split live
-RowList payloads into raw per-row bytes before generated schema codecs exist,
-or read `insertRowBytes`/`deleteRowBytes` from raw updates when present.
+with `onRawUpdate` and table-only `onRawRows` callbacks. Callback consumers can
+use `decodeRowList()` to split live RowList payloads into raw per-row bytes, or
+read `insertRowBytes`/`deleteRowBytes` from raw updates when present.
 Table subscriptions can also pass `decodeRow` when the caller already has a
 schema-aware row decoder; the runtime will call the table `onRows`/
 `onInitialRows` callbacks for accepted initial rows and `onUpdate` for RowList
@@ -101,8 +105,10 @@ subscription helpers to those decoders. Managed table handles keep their row
 sets current when later transaction updates include RowList insert/delete row
 bytes.
 Declared query consumers that want decoded rows can call
-`decodeDeclaredQueryResult()` with table-specific decoders; consumers that need
-raw RowList bytes can keep using `decodeRawDeclaredQueryResult()`.
+`decodeDeclaredQueryResult()` with table-specific decoders; generated
+declared-query helpers install contract-derived decoders by default when row
+metadata exists. Consumers that need raw RowList bytes can keep using
+`decodeRawDeclaredQueryResult()`.
 
 Generated module bindings should import types from `@shunter/client` and keep
 module-specific table, reducer, query, and view names in the generated file.

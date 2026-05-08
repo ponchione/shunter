@@ -31,7 +31,7 @@ Package: `github.com/ponchione/shunter`
 
 | Surface | Support | v1 contract |
 | --- | --- | --- |
-| Module declaration | Stable for v1 | `NewModule`, `Module.Name`, `Module.Version`, `Module.VersionString`, `Module.Metadata`, `Module.MetadataMap`, `Module.SchemaVersion`, `Module.TableDef`, `Module.Reducer`, `Module.OnConnect`, `Module.OnDisconnect`, `Module.Query`, `Module.View`, `Module.VisibilityFilter`, `Module.Migration`, `Module.TableMigration`, `Module.Describe`, `WithReducerPermissions`, `QueryDeclaration`, `ViewDeclaration`, `VisibilityFilterDeclaration`, `ModuleDescription`, `QueryDescription`, `ViewDescription`, `PermissionMetadata`, `ReadModelMetadata`, `ReadModelSurfaceQuery`, and `ReadModelSurfaceView`. |
+| Module declaration | Stable for v1 | `NewModule`, `Module.Name`, `Module.Version`, `Module.VersionString`, `Module.Metadata`, `Module.MetadataMap`, `Module.SchemaVersion`, `Module.TableDef`, `Module.Reducer`, `Module.OnConnect`, `Module.OnDisconnect`, `Module.Query`, `Module.View`, `Module.VisibilityFilter`, `Module.Migration`, `Module.TableMigration`, `Module.Describe`, `WithReducerPermissions`, `WithReducerArgs`, `WithReducerResult`, `ProductSchema`, `ProductColumn`, `QueryDeclaration`, `ViewDeclaration`, `VisibilityFilterDeclaration`, `ModuleDescription`, `QueryDescription`, `ViewDescription`, `ReadResultShape`, `ReadResultShapeTable`, `ReadResultShapeProjection`, `ReadResultShapeAggregate`, `PermissionMetadata`, `ReadModelMetadata`, `ReadModelSurfaceQuery`, and `ReadModelSurfaceView`. |
 | Runtime lifecycle | Stable for v1 | `Build`, `Config`, `ProtocolConfig`, `AuthMode`, `AuthModeDev`, `AuthModeStrict`, `Runtime.Start`, `Runtime.Close`, `Runtime.Ready`, `Runtime.ModuleName`, `Runtime.Config`, `Runtime.HTTPHandler`, and `Runtime.ListenAndServe`. |
 | Local reducers | Stable for v1 | `Runtime.CallReducer`, `ReducerCallOption`, `WithRequestID`, `WithIdentity`, `WithConnectionID`, `WithAuthPrincipal`, `WithPermissions`, `ReducerResult`, `ReducerStatus`, status constants, `ReducerDB`, `Value`, `ProductValue`, `AuthPrincipal`, `RowID`, and `TxID`. |
 | Local committed reads | Stable for v1 | `Runtime.Read`, `LocalReadView`, `IndexKey`, `IndexBound`, `NewIndexKey`, `UnboundedLow`, `UnboundedHigh`, `Inclusive`, and `Exclusive`. The read view is callback-scoped only. |
@@ -92,8 +92,10 @@ Stable v1 producers emit `contract_version: 1` and the following top-level
 fields:
 
 - `module`: app module `name`, `version`, and string `metadata`
-- `schema`: schema version, tables, columns, indexes, read policy, and reducers
-- `queries` and `views`: declaration names and optional executable SQL
+- `schema`: schema version, tables, columns, indexes, read policy, reducers,
+  and optional reducer argument/result product schemas
+- `queries` and `views`: declaration names, optional executable SQL, and
+  executable declared-read row schema/result-shape metadata
 - `visibility_filters`: validated SQL, returned table name/ID, and
   caller-identity usage
 - `permissions`: reducer/query/view permission metadata
@@ -105,7 +107,8 @@ fields:
 Compatibility rules:
 
 - `ModuleContract.MarshalCanonicalJSON` is the canonical emitted JSON format.
-- `ValidateModuleContract` validates the known v1 fields and SQL/read metadata.
+- `ValidateModuleContract` validates the known v1 fields, reducer product
+  schemas, and SQL/read metadata.
 - v1 readers must ignore unknown JSON fields so additive metadata can be
   introduced without breaking old consumers.
 - v1 producers must not change the type or meaning of an existing known field
@@ -126,8 +129,14 @@ helpers includes:
 - visibility filter metadata
 - reducer and lifecycle reducer constants
 - reducer call helper functions for non-lifecycle reducers
+- schema-aware reducer argument encoders and result product decoders when the
+  contract exports reducer product schemas, while preserving raw `Uint8Array`
+  call helpers
 - query/view constants, executable query/view SQL maps, and declared-read
   helper functions for declarations with non-empty SQL
+- declared-query/view projection row interfaces, product decoders, default
+  typed declared-query result helpers, and typed declared-view subscription and
+  handle helpers when executable declared-read metadata is present
 - permissions and read-model metadata
 - type mappings for the current exported Shunter value kinds
 
@@ -139,9 +148,8 @@ case style, prefixing leading digits with `_`, suffixing reserved words with
 
 Out of scope for v1 codegen:
 
-- a maintained npm package or full client runtime
-- React/cache/reconnect SDK behavior
 - generated writes that bypass reducers
+- framework-specific cache adapters or UI integrations
 - SpacetimeDB client API compatibility
 
 ## Read Surface Matrix
@@ -207,10 +215,11 @@ implementation details even when importable.
 
 `contractdiff` and `contractworkflow` now enforce the final v1 contract policy
 for stable contract fields: unknown JSON fields are ignored by readers,
-known-field type or version drift is rejected by JSON entry points, stable
-codegen metadata drift is reported as breaking in direct diffs, and reducer
-permission changes are classified by their runtime access impact instead of as
-passive metadata.
+known-field type or version drift is rejected by JSON entry points, reducer
+argument/result schema drift and declared-read row/result-shape drift are
+reported as breaking direct diffs, stable codegen metadata drift is reported as
+breaking in direct diffs, and reducer permission changes are classified by
+their runtime access impact instead of as passive metadata.
 
 Generated TypeScript identifier normalization and collision suffix behavior now
 has dedicated v1 golden coverage across table, column, reducer, lifecycle,
@@ -228,8 +237,9 @@ Contract JSON coverage now has a representative v1 golden fixture and explicit
 raw-JSON key coverage for every stable `ModuleContract` field listed in this
 matrix, including nested module, schema, read-policy, declaration,
 visibility-filter, permission, read-model, migration, and codegen metadata.
-The fixture includes a nullable column so the conditional `nullable` column key
-is pinned when present.
+The fixture includes reducer product schemas, declared-read row schemas/result
+shapes, and a nullable column so conditional metadata keys are pinned when
+present.
 
 Remaining v1 contract maintenance before cutting `v1.0.0`:
 

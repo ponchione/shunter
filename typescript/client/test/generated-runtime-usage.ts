@@ -51,25 +51,42 @@ import type {
 import {
   callCreateMessage,
   callCreateMessageResult,
+  callCreateMessageTyped,
+  decodeCreateMessageResult,
+  decodeLiveMessageProjectionViewRow,
   decodeMessagesRow,
+  decodeRecentMessagesQueryRow,
+  encodeCreateMessageArgs,
   queryRecentMessages,
+  queryRecentMessagesDecoded,
   queryRecentMessagesResult,
   queries,
+  recentMessagesQueryRowDecoders,
   reducers,
   shunterProtocol as generatedProtocol,
   subscribeLiveMessageCount,
   subscribeLiveMessageProjection,
+  subscribeLiveMessageProjectionHandle,
   subscribeMessages,
   tableRowDecoders as generatedTableRowDecodersValue,
 } from "../../../codegen/testdata/v1_module_contract";
 import type {
+  CreateMessageArgs,
+  CreateMessageResult,
   DeclaredQueryRunner,
   DeclaredQueryDecodeOptions as GeneratedDeclaredQueryDecodeOptions,
+  DeclaredViewHandleSubscriber as GeneratedDeclaredViewHandleSubscriber,
   DeclaredViewSubscriber,
+  DeclaredViewSubscriptionOptions as GeneratedDeclaredViewSubscriptionOptions,
   DecodedDeclaredQueryResult as GeneratedDecodedDeclaredQueryResult,
+  EncodedReducerCallOptions as GeneratedEncodedReducerCallOptions,
+  EncodedReducerCallResultOptions as GeneratedEncodedReducerCallResultOptions,
   ExecutableQueryName,
   ExecutableViewName,
+  LiveMessageProjectionViewRow,
   MessagesRow,
+  RecentMessagesQueryRow,
+  RecentMessagesQueryRows,
   ReducerCaller,
   ReducerCallResultOptions,
   ReducerCallResult as GeneratedReducerCallResult,
@@ -130,6 +147,8 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const generatedClientDeclaredQueryRunner: DeclaredQueryRunner = client.runDeclaredQuery;
   const generatedClientDeclaredViewSubscriber: DeclaredViewSubscriber = client.subscribeDeclaredView;
   const generatedClientDeclaredViewHandleSubscriber: DeclaredViewHandleSubscriber<ExecutableViewName> =
+    client.subscribeDeclaredView;
+  const generatedClientGeneratedDeclaredViewHandleSubscriber: GeneratedDeclaredViewHandleSubscriber =
     client.subscribeDeclaredView;
   const generatedClientTableSubscriber: TableSubscriber = client.subscribeTable;
   const generatedClientTableHandleSubscriber: TableHandleSubscriber<TableName> =
@@ -221,6 +240,24 @@ async function exerciseGeneratedBindings(): Promise<void> {
   };
 
   const reducerCaller: ReducerCaller = async (_name, args) => args;
+  const generatedCreateMessageArgs: CreateMessageArgs = {
+    sender: "identity",
+    body: "hello",
+  };
+  const generatedEncodedCreateMessageArgs: Uint8Array =
+    encodeCreateMessageArgs(generatedCreateMessageArgs);
+  const decodedCreateMessageResult: CreateMessageResult =
+    decodeCreateMessageResult(new Uint8Array([8, 1, 0, 0, 0, 0, 0, 0, 0]));
+  const generatedTypedReducerOptions: GeneratedEncodedReducerCallOptions<CreateMessageArgs> = {
+    noSuccessNotify: true,
+  };
+  const generatedTypedReducerResultOptions: GeneratedEncodedReducerCallResultOptions<
+    CreateMessageArgs,
+    CreateMessageResult
+  > = {
+    encodeArgs: encodeCreateMessageArgs,
+    decodeResult: () => decodedCreateMessageResult,
+  };
   const createMessageArgEncoder: ReducerArgEncoder<{ body: string }> = (args) =>
     new TextEncoder().encode(args.body);
   const encodedCreateMessageArgs: Uint8Array = encodeReducerArgs(
@@ -251,6 +288,11 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const reducerBytes: Uint8Array = await callCreateMessage(
     reducerCaller,
     new Uint8Array([1, 2, 3]),
+  );
+  const generatedTypedReducerBytes: Uint8Array = await callCreateMessageTyped(
+    reducerCaller,
+    generatedCreateMessageArgs,
+    generatedTypedReducerOptions,
   );
   const reducerResultOptions: ReducerCallResultOptions = { requestId: 1 };
   const generatedReducerResultPromise: Promise<GeneratedReducerCallResult<typeof reducers.createMessage>> =
@@ -300,11 +342,46 @@ async function exerciseGeneratedBindings(): Promise<void> {
     decodedDeclaredQueryResult;
   const decodedDeclaredQueryDecoder: typeof decodeDeclaredQueryResult = decodeDeclaredQueryResult;
   const generatedDecodedDeclaredQueryDecoder: typeof queryRecentMessagesResult = queryRecentMessagesResult;
+  const recentMessagesQueryRow: RecentMessagesQueryRow = {
+    id: 1n,
+    sender: "identity",
+    body: "hello",
+  };
+  const recentMessagesRows: RecentMessagesQueryRows = {
+    messages: recentMessagesQueryRow,
+  };
+  const recentMessagesRowDecoder: TableRowDecoder<RecentMessagesQueryRow> =
+    decodeRecentMessagesQueryRow;
+  const generatedRecentMessagesRowDecoders: TableRowDecoders<RecentMessagesQueryRows> =
+    recentMessagesQueryRowDecoders;
+  const generatedProjectionDeclaredQueryResult: GeneratedDecodedDeclaredQueryResult<
+    typeof queries.recentMessages,
+    RecentMessagesQueryRows
+  > = queryRecentMessagesResult(rawDeclaredQueryResult, {
+    tableDecoders: recentMessagesQueryRowDecoders,
+  });
+  const generatedProjectionQueryPromise: Promise<
+    GeneratedDecodedDeclaredQueryResult<typeof queries.recentMessages, RecentMessagesQueryRows>
+  > = queryRecentMessagesDecoded(declaredQueryRunner);
 
   const declaredViewSubscriber: DeclaredViewSubscriber = async (_name) => () => {};
+  const liveProjectionRow: LiveMessageProjectionViewRow = {
+    id: 1n,
+    text: "hello",
+  };
+  const liveProjectionDecoder: RowDecoder<LiveMessageProjectionViewRow> =
+    decodeLiveMessageProjectionViewRow;
+  const generatedDeclaredViewOptions: GeneratedDeclaredViewSubscriptionOptions<LiveMessageProjectionViewRow> = {
+    decodeRow: liveProjectionDecoder,
+  };
   const unsubscribeView: SubscriptionUnsubscribe =
-    await subscribeLiveMessageProjection(declaredViewSubscriber);
+    await subscribeLiveMessageProjection(declaredViewSubscriber, generatedDeclaredViewOptions);
   await unsubscribeView();
+  const generatedDeclaredViewHandle: SubscriptionHandle<LiveMessageProjectionViewRow> =
+    await subscribeLiveMessageProjectionHandle(generatedClientGeneratedDeclaredViewHandleSubscriber, {
+      returnHandle: true,
+    });
+  await generatedDeclaredViewHandle.unsubscribe();
 
   const runtimeBindings: RuntimeBindings<
     TableName,
@@ -387,6 +464,12 @@ async function exerciseGeneratedBindings(): Promise<void> {
   await unsubscribeGeneratedDecodedTable();
 
   void reducerBytes;
+  void generatedCreateMessageArgs;
+  void generatedEncodedCreateMessageArgs;
+  void decodedCreateMessageResult;
+  void generatedTypedReducerOptions;
+  void generatedTypedReducerResultOptions;
+  void generatedTypedReducerBytes;
   void encodedCreateMessageArgs;
   void typedReducerBytes;
   void typedReducerEnvelope;
@@ -407,6 +490,13 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void generatedDecodedDeclaredQueryResult;
   void decodedDeclaredQueryDecoder;
   void generatedDecodedDeclaredQueryDecoder;
+  void recentMessagesRows;
+  void recentMessagesRowDecoder;
+  void generatedRecentMessagesRowDecoders;
+  void generatedProjectionDeclaredQueryResult;
+  void generatedProjectionQueryPromise;
+  void liveProjectionRow;
+  void generatedDeclaredViewOptions;
   void generatedDeclaredQueryDecodeOptions;
   void declaredQueryDecodeOptions;
   void tableRowDecoders;
