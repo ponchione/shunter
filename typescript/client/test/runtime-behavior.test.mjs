@@ -1885,6 +1885,43 @@ assert.deepEqual(closePendingUnsubscribeHandle.state, {
 });
 assert.equal(closePendingUnsubscribeClient.state.status, "closed");
 
+const disposePendingViewUnsubscribeSockets = [];
+const disposePendingViewUnsubscribeClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    disposePendingViewUnsubscribeSockets.push(socket);
+    return socket;
+  },
+});
+const disposePendingViewUnsubscribeConnecting = disposePendingViewUnsubscribeClient.connect();
+await nextTurn();
+disposePendingViewUnsubscribeSockets[0].open();
+disposePendingViewUnsubscribeSockets[0].message(identityTokenFrame().buffer);
+await disposePendingViewUnsubscribeConnecting;
+const disposePendingViewUnsubscribeHandleSubscription = disposePendingViewUnsubscribeClient.subscribeDeclaredView("live_users", {
+  requestId: 0x41424344,
+  queryId: 0x61626364,
+  returnHandle: true,
+});
+disposePendingViewUnsubscribeSockets[0].message(subscribeAppliedFrame);
+const disposePendingViewUnsubscribeHandle = await disposePendingViewUnsubscribeHandleSubscription;
+const disposePendingViewUnsubscribe = disposePendingViewUnsubscribeHandle.unsubscribe();
+assert.equal(disposePendingViewUnsubscribeSockets[0].sent.length, 2);
+const disposePendingViewUnsubscribeClosed = disposePendingViewUnsubscribeClient.dispose();
+await disposePendingViewUnsubscribe;
+await disposePendingViewUnsubscribeClosed;
+const disposePendingViewUnsubscribeHandleClosed = await disposePendingViewUnsubscribeHandle.closed;
+assert.equal(disposePendingViewUnsubscribeHandleClosed.reason, "error");
+assert(disposePendingViewUnsubscribeHandleClosed.error instanceof ShunterClosedClientError);
+assert.deepEqual(disposePendingViewUnsubscribeHandle.state, {
+  status: "closed",
+  error: disposePendingViewUnsubscribeHandleClosed.error,
+});
+assert.equal(disposePendingViewUnsubscribeClient.state.status, "closed");
+await assert.rejects(disposePendingViewUnsubscribeClient.connect(), ShunterClosedClientError);
+
 const unexpectedCloseSockets = [];
 const unexpectedCloseStates = [];
 const unexpectedCloseClient = createShunterClient({
