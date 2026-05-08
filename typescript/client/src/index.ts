@@ -2435,8 +2435,8 @@ function asInteger(value: unknown, column: BsatnColumn, min: number, max: number
 }
 
 function asNumber(value: unknown, column: BsatnColumn): number {
-	if (typeof value !== "number" || !Number.isFinite(value)) {
-		throw invalidBsatnValue(column, "finite number");
+	if (typeof value !== "number" || Number.isNaN(value)) {
+		throw invalidBsatnValue(column, "number");
 	}
 	return value;
 }

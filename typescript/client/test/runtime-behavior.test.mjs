@@ -43,6 +43,7 @@ import {
   decodeTransactionUpdateFrame,
   decodeUnsubscribeSingleAppliedFrame,
   decodeUnsubscribeMultiAppliedFrame,
+  encodeBsatnProduct,
   encodeDeclaredQueryRequest,
   encodeDeclaredViewSubscriptionRequest,
   encodeReducerCallRequest,
@@ -231,6 +232,47 @@ assert.deepEqual(decodedBsatnMessage, {
   body: "hello",
   sentAt: 2n,
 });
+const bsatnMessageColumns = [
+  { name: "id", kind: "uint64" },
+  { name: "sender", kind: "string" },
+  { name: "topic", kind: "string", nullable: true },
+  { name: "body", kind: "string" },
+  { name: "sent_at", kind: "timestamp" },
+];
+const encodedBsatnMessage = encodeBsatnProduct(
+  [1n, "alice", null, "hello", 2n],
+  bsatnMessageColumns,
+);
+assert.deepEqual(
+  encodedBsatnMessage,
+  bytesFromHex("0801000000000000000b05000000616c6963650b000b0500000068656c6c6f110200000000000000"),
+);
+assert.deepEqual(
+  decodeBsatnProduct(encodedBsatnMessage, bsatnMessageColumns, (values) => values),
+  [1n, "alice", null, "hello", 2n],
+);
+const encodedBsatnInfinities = encodeBsatnProduct(
+  [Infinity, -Infinity],
+  [
+    { name: "f32", kind: "float32" },
+    { name: "f64", kind: "float64" },
+  ],
+);
+assert.deepEqual(
+  decodeBsatnProduct(
+    encodedBsatnInfinities,
+    [
+      { name: "f32", kind: "float32" },
+      { name: "f64", kind: "float64" },
+    ],
+    (values) => values,
+  ),
+  [Infinity, -Infinity],
+);
+assert.throws(
+  () => encodeBsatnProduct([Number.NaN], [{ name: "f64", kind: "float64" }]),
+  ShunterValidationError,
+);
 assert.deepEqual(
   decodeBsatnProduct(
     bytesFromHex(
