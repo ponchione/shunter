@@ -2097,6 +2097,74 @@ assert.deepEqual(reconnectProtocolStates, [
   "closed",
 ]);
 
+const reconnectReplayFailureSockets = [];
+const reconnectReplayFailureStates = [];
+const reconnectReplayFailureClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    if (reconnectReplayFailureSockets.length === 1) {
+      socket.send = () => {
+        throw new Error("resubscribe send denied");
+      };
+    }
+    reconnectReplayFailureSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectReplayFailureStates.push(current.status),
+});
+const reconnectReplayFailureConnecting = reconnectReplayFailureClient.connect();
+await nextTurn();
+reconnectReplayFailureSockets[0].open();
+reconnectReplayFailureSockets[0].message(identityTokenFrame().buffer);
+await reconnectReplayFailureConnecting;
+const reconnectReplayFailureHandleSubscription = reconnectReplayFailureClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectReplayFailureSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectReplayFailureHandle = await reconnectReplayFailureHandleSubscription;
+assert.deepEqual(reconnectReplayFailureHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectReplayFailureSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectReplayFailureClient.state.status, "reconnecting");
+await nextTurn();
+assert.equal(reconnectReplayFailureSockets.length, 2);
+const observedReplayFailureReconnect = reconnectReplayFailureClient.connect();
+reconnectReplayFailureSockets[1].open();
+reconnectReplayFailureSockets[1].message(identityTokenFrame().buffer);
+const reconnectReplayFailureError = await rejectByNextTurn(observedReplayFailureReconnect, (error) => {
+  assert.equal(error.kind, "transport");
+  assert.match(error.message, /resubscribe send denied/);
+});
+assert.equal(reconnectReplayFailureClient.state.status, "closed");
+assert.strictEqual(reconnectReplayFailureClient.state.error, reconnectReplayFailureError);
+assert.deepEqual(reconnectReplayFailureSockets[1].closeCalls, [{ code: 1000, reason: "protocol failure" }]);
+const reconnectReplayFailureClosed = await reconnectReplayFailureHandle.closed;
+assert.equal(reconnectReplayFailureClosed.reason, "error");
+assert.strictEqual(reconnectReplayFailureClosed.error, reconnectReplayFailureError);
+assert.deepEqual(reconnectReplayFailureHandle.state, {
+  status: "closed",
+  error: reconnectReplayFailureError,
+});
+assert.deepEqual(reconnectReplayFailureStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "connected",
+  "failed",
+  "closed",
+]);
+
 const reconnectAuthSockets = [];
 const reconnectAuthStates = [];
 let reconnectAuthTokenCalls = 0;
