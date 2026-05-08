@@ -705,6 +705,40 @@ tokenQuerySockets[0].message(identityTokenFrame().buffer);
 await tokenQueryConnecting;
 await tokenQueryClient.close();
 
+const asyncTokenSockets = [];
+let resolveAsyncToken;
+let asyncTokenCalls = 0;
+const asyncTokenClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe?existing=1",
+  protocol: shunterProtocol,
+  token: () => {
+    asyncTokenCalls += 1;
+    return new Promise((resolve) => {
+      resolveAsyncToken = resolve;
+    });
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    asyncTokenSockets.push(socket);
+    return socket;
+  },
+});
+const asyncTokenConnecting = asyncTokenClient.connect();
+await nextTurn();
+assert.equal(asyncTokenCalls, 1);
+assert.equal(asyncTokenClient.state.status, "connecting");
+assert.equal(asyncTokenSockets.length, 0);
+resolveAsyncToken("async token&value");
+await nextTurn();
+assert.equal(asyncTokenSockets.length, 1);
+const asyncTokenUrl = new URL(asyncTokenSockets[0].url);
+assert.deepEqual(asyncTokenUrl.searchParams.getAll("token"), ["async token&value"]);
+assert.equal(asyncTokenUrl.searchParams.get("existing"), "1");
+asyncTokenSockets[0].open();
+asyncTokenSockets[0].message(identityTokenFrame().buffer);
+await asyncTokenConnecting;
+await asyncTokenClient.close();
+
 const reconnectTokenSockets = [];
 let reconnectTokenCallsForFailure = 0;
 const reconnectTokenClient = createShunterClient({
