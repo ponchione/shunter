@@ -834,6 +834,32 @@ await nextTurn();
 assert.equal(closePendingTokenSockets.length, 0);
 assert.equal(closePendingTokenClient.state.status, "closed");
 
+const rejectAfterClosePendingTokenSockets = [];
+let rejectAfterClosePendingToken;
+const rejectAfterClosePendingTokenClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => new Promise((_, reject) => {
+    rejectAfterClosePendingToken = reject;
+  }),
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    rejectAfterClosePendingTokenSockets.push(socket);
+    return socket;
+  },
+});
+const rejectAfterClosePendingTokenConnecting = rejectAfterClosePendingTokenClient.connect();
+await nextTurn();
+assert.equal(rejectAfterClosePendingTokenClient.state.status, "connecting");
+const rejectAfterClosePendingTokenClosed = rejectAfterClosePendingTokenClient.close(4002, "caller closed before token");
+await assert.rejects(rejectAfterClosePendingTokenConnecting, ShunterClosedClientError);
+await rejectAfterClosePendingTokenClosed;
+assert.equal(rejectAfterClosePendingTokenClient.state.status, "closed");
+rejectAfterClosePendingToken(new Error("too-late"));
+await nextTurn();
+assert.equal(rejectAfterClosePendingTokenSockets.length, 0);
+assert.equal(rejectAfterClosePendingTokenClient.state.status, "closed");
+
 const disposePendingTokenSockets = [];
 let resolveDisposePendingToken;
 let disposePendingTokenCalls = 0;

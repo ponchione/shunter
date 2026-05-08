@@ -1353,11 +1353,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         rejectConnect = reject;
         let offeredSubprotocol: ShunterSubprotocol;
         let url: string;
-        let tokenResolved = false;
+        let tokenAwaitStarted = false;
         try {
           offeredSubprotocol = selectShunterSubprotocol(options.protocol);
+          tokenAwaitStarted = true;
           const token = await resolveToken(options.token);
-          tokenResolved = true;
           if (connectGeneration !== generation || state.status !== "connecting") {
             return;
           }
@@ -1366,7 +1366,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
             throw new ShunterClosedClientError("Connection aborted before opening.");
           }
         } catch (error) {
-          if (tokenResolved && (connectGeneration !== generation || state.status !== "connecting")) {
+          if (tokenAwaitStarted && (connectGeneration !== generation || state.status !== "connecting")) {
             return;
           }
           const shunterError =
