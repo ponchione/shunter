@@ -1711,6 +1711,65 @@ assert.deepEqual(reconnectPendingUnsubscribeStates, [
 ]);
 await reconnectPendingUnsubscribeClient.close();
 
+const reconnectPendingViewUnsubscribeSockets = [];
+const reconnectPendingViewUnsubscribeStates = [];
+const reconnectPendingViewUnsubscribeClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectPendingViewUnsubscribeSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectPendingViewUnsubscribeStates.push(current.status),
+});
+const reconnectPendingViewUnsubscribeConnecting = reconnectPendingViewUnsubscribeClient.connect();
+await nextTurn();
+reconnectPendingViewUnsubscribeSockets[0].open();
+reconnectPendingViewUnsubscribeSockets[0].message(identityTokenFrame().buffer);
+await reconnectPendingViewUnsubscribeConnecting;
+const reconnectPendingViewUnsubscribeHandleSubscription =
+  reconnectPendingViewUnsubscribeClient.subscribeDeclaredView("live_users", {
+    requestId: 0x41424344,
+    queryId: 0x61626364,
+    returnHandle: true,
+  });
+reconnectPendingViewUnsubscribeSockets[0].message(subscribeAppliedFrame);
+const reconnectPendingViewUnsubscribeHandle = await reconnectPendingViewUnsubscribeHandleSubscription;
+assert.deepEqual(reconnectPendingViewUnsubscribeHandle.state, { status: "active", rows: [] });
+const reconnectPendingViewUnsubscribe = reconnectPendingViewUnsubscribeHandle.unsubscribe();
+assert.equal(reconnectPendingViewUnsubscribeSockets[0].sent.length, 2);
+reconnectPendingViewUnsubscribeSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectPendingViewUnsubscribeClient.state.status, "reconnecting");
+await reconnectPendingViewUnsubscribe;
+const reconnectPendingViewUnsubscribed = await reconnectPendingViewUnsubscribeHandle.closed;
+assert.equal(reconnectPendingViewUnsubscribed.reason, "error");
+assert(reconnectPendingViewUnsubscribed.error instanceof ShunterClosedClientError);
+assert.deepEqual(reconnectPendingViewUnsubscribeHandle.state, {
+  status: "closed",
+  error: reconnectPendingViewUnsubscribed.error,
+});
+await nextTurn();
+assert.equal(reconnectPendingViewUnsubscribeSockets.length, 2);
+reconnectPendingViewUnsubscribeSockets[1].open();
+reconnectPendingViewUnsubscribeSockets[1].message(identityTokenFrame().buffer);
+assert.equal(reconnectPendingViewUnsubscribeClient.state.status, "connected");
+assert.equal(reconnectPendingViewUnsubscribeSockets[1].sent.length, 0);
+assert.deepEqual(reconnectPendingViewUnsubscribeStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "connected",
+]);
+await reconnectPendingViewUnsubscribeClient.close();
+
 const exhaustionSockets = [];
 const exhaustionFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);
