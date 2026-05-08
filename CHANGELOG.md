@@ -128,6 +128,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - The TypeScript runtime now supports explicit opt-in reconnect with bounded
   retry, token-provider refresh per attempt, and subscription replay after a
   fresh identity handshake.
+- Hardened the TypeScript runtime lifecycle around stale WebSocket events,
+  reconnect token failures, caller close/dispose during reconnect attempts,
+  and unsubscribe cleanup during reconnect or failed unsubscribe paths.
+- TypeScript declared-view and table subscriptions now stop delivering updates
+  as soon as caller unsubscribe begins, even before the server acknowledgement.
 - Generated TypeScript reducer helpers now include full-update result-envelope
   wrappers alongside the existing raw byte helpers.
 - The TypeScript runtime now defines explicit reducer argument encoder helpers

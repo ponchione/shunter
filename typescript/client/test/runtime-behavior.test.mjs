@@ -236,6 +236,32 @@ function bytesFromHex(hex) {
   return Uint8Array.from(hex.match(/../g).map((byte) => Number.parseInt(byte, 16)));
 }
 
+function writeUint32LE(frame, offset, value) {
+  new DataView(frame.buffer).setUint32(offset, value, true);
+  return offset + 4;
+}
+
+function subscriptionErrorFrameFor({ requestId, queryId, tableId = 0, error }) {
+  const errorBytes = new TextEncoder().encode(error);
+  const frame = new Uint8Array(1 + 8 + 5 + 5 + 5 + 4 + errorBytes.length);
+  let offset = 0;
+  frame[offset] = SHUNTER_SERVER_MESSAGE_SUBSCRIPTION_ERROR;
+  offset += 1;
+  offset += 8;
+  frame[offset] = 1;
+  offset += 1;
+  offset = writeUint32LE(frame, offset, requestId);
+  frame[offset] = 1;
+  offset += 1;
+  offset = writeUint32LE(frame, offset, queryId);
+  frame[offset] = 1;
+  offset += 1;
+  offset = writeUint32LE(frame, offset, tableId);
+  offset = writeUint32LE(frame, offset, errorBytes.length);
+  frame.set(errorBytes, offset);
+  return frame;
+}
+
 const decodedBsatnMessage = decodeBsatnProduct(
   bytesFromHex("0801000000000000000b05000000616c6963650b000b0500000068656c6c6f110200000000000000"),
   [
@@ -1129,6 +1155,52 @@ await new Promise((resolve) => setTimeout(resolve, 30));
 assert.equal(manualReconnectSockets.length, 2);
 await manualReconnectClient.close();
 
+const staleSocketCloseSockets = [];
+const staleSocketCloseStates = [];
+const staleSocketCloseClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 2,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    staleSocketCloseSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => staleSocketCloseStates.push(current.status),
+});
+const staleSocketCloseConnecting = staleSocketCloseClient.connect();
+await nextTurn();
+staleSocketCloseSockets[0].open();
+staleSocketCloseSockets[0].message(identityTokenFrame().buffer);
+await staleSocketCloseConnecting;
+staleSocketCloseSockets[0].close = function closeWithoutDispatch(code = 1000, reason = "") {
+  this.closeCalls.push({ code, reason });
+};
+staleSocketCloseSockets[0].error();
+assert.equal(staleSocketCloseClient.state.status, "reconnecting");
+await nextTurn();
+assert.equal(staleSocketCloseSockets.length, 2);
+staleSocketCloseSockets[1].open();
+staleSocketCloseSockets[1].message(identityTokenFrame({ token: "fresh-after-stale-close" }).buffer);
+assert.equal(staleSocketCloseClient.state.status, "connected");
+staleSocketCloseSockets[0].dispatch("close", { code: 1000, reason: "late old close", wasClean: true });
+await nextTurn();
+assert.equal(staleSocketCloseClient.state.status, "connected");
+assert.equal(staleSocketCloseSockets.length, 2);
+assert.deepEqual(staleSocketCloseStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "connected",
+]);
+await staleSocketCloseClient.close();
+
 const client = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe?existing=1",
   protocol: shunterProtocol,
@@ -1311,11 +1383,11 @@ assert.deepEqual(
   encodeUnsubscribeMultiRequest(0x61626364, { requestId: 1 }).frame,
 );
 sockets[0].message(lightUpdateFrame);
-assert.equal(declaredViewRawUpdates.length, 3);
+assert.equal(declaredViewRawUpdates.length, 2);
 sockets[0].message(unsubscribeDeclaredViewAppliedFrame);
 await unsubscribeDeclaredViewResult;
 sockets[0].message(lightUpdateFrame);
-assert.equal(declaredViewRawUpdates.length, 3);
+assert.equal(declaredViewRawUpdates.length, 2);
 
 const deniedViewSubscription = client.subscribeDeclaredView("live_users", {
   requestId: 0x41424344,
@@ -1376,13 +1448,13 @@ assert.deepEqual(
   encodeUnsubscribeSingleRequest(0x11121314, { requestId: 2 }).frame,
 );
 sockets[0].message(tableLightUpdateFrame);
-assert.equal(tableRawUpdates.length, 2);
-assert.equal(tableDecodedUpdates.length, 2);
+assert.equal(tableRawUpdates.length, 1);
+assert.equal(tableDecodedUpdates.length, 1);
 sockets[0].message(unsubscribeTableAppliedFrame);
 await unsubscribeTableResult;
 sockets[0].message(tableLightUpdateFrame);
-assert.equal(tableRawUpdates.length, 2);
-assert.equal(tableDecodedUpdates.length, 2);
+assert.equal(tableRawUpdates.length, 1);
+assert.equal(tableDecodedUpdates.length, 1);
 
 const deniedTableSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x41424344,
@@ -1600,6 +1672,50 @@ assert.deepEqual(failedViewUnsubscribeHandle.state, {
   error: failedViewUnsubscribeClosed.error,
 });
 await viewUnsubscribeSendFailureClient.close();
+
+const unsubscribeServerErrorSockets = [];
+const unsubscribeServerErrorClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    unsubscribeServerErrorSockets.push(socket);
+    return socket;
+  },
+});
+const unsubscribeServerErrorConnecting = unsubscribeServerErrorClient.connect();
+await nextTurn();
+unsubscribeServerErrorSockets[0].open();
+unsubscribeServerErrorSockets[0].message(identityTokenFrame().buffer);
+await unsubscribeServerErrorConnecting;
+const unsubscribeServerErrorHandleSubscription = unsubscribeServerErrorClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+unsubscribeServerErrorSockets[0].message(subscribeSingleAppliedFrame);
+const unsubscribeServerErrorHandle = await unsubscribeServerErrorHandleSubscription;
+assert.deepEqual(unsubscribeServerErrorHandle.state, { status: "active", rows: ["1-2", "3"] });
+const unsubscribeServerError = unsubscribeServerErrorHandle.unsubscribe();
+assert.equal(unsubscribeServerErrorSockets[0].sent.length, 2);
+unsubscribeServerErrorSockets[0].message(subscriptionErrorFrameFor({
+  requestId: 1,
+  queryId: 0x11121314,
+  error: "unsubscribe denied",
+}));
+await unsubscribeServerError;
+const unsubscribeServerErrorClosed = await unsubscribeServerErrorHandle.closed;
+assert.equal(unsubscribeServerErrorClosed.reason, "error");
+assert(unsubscribeServerErrorClosed.error instanceof ShunterValidationError);
+assert.match(unsubscribeServerErrorClosed.error.message, /unsubscribe denied/);
+unsubscribeServerErrorSockets[0].message(tableLightUpdateFrame);
+assert.equal(unsubscribeServerErrorClient.state.status, "connected");
+assert.deepEqual(unsubscribeServerErrorHandle.state, {
+  status: "closed",
+  error: unsubscribeServerErrorClosed.error,
+});
+await unsubscribeServerErrorClient.close();
 
 await client.close();
 await client.close();
@@ -3062,6 +3178,60 @@ assert.deepEqual(reconnectViewUnsubscribeStates, [
 ]);
 await reconnectViewUnsubscribeClient.close();
 
+const reconnectConnectingUnsubscribeSockets = [];
+const reconnectConnectingUnsubscribeStates = [];
+const reconnectConnectingUnsubscribeClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectConnectingUnsubscribeSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectConnectingUnsubscribeStates.push(current.status),
+});
+const reconnectConnectingUnsubscribeConnecting = reconnectConnectingUnsubscribeClient.connect();
+await nextTurn();
+reconnectConnectingUnsubscribeSockets[0].open();
+reconnectConnectingUnsubscribeSockets[0].message(identityTokenFrame().buffer);
+await reconnectConnectingUnsubscribeConnecting;
+const reconnectConnectingUnsubscribeHandleSubscription =
+  reconnectConnectingUnsubscribeClient.subscribeTable("users", undefined, {
+    requestId: 0x01020304,
+    queryId: 0x11121314,
+    returnHandle: true,
+    decodeRow: (row) => [...row].join("-"),
+  });
+reconnectConnectingUnsubscribeSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectConnectingUnsubscribeHandle = await reconnectConnectingUnsubscribeHandleSubscription;
+assert.deepEqual(reconnectConnectingUnsubscribeHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectConnectingUnsubscribeSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectConnectingUnsubscribeClient.state.status, "reconnecting");
+await nextTurn();
+assert.equal(reconnectConnectingUnsubscribeClient.state.status, "connecting");
+assert.equal(reconnectConnectingUnsubscribeSockets.length, 2);
+await reconnectConnectingUnsubscribeHandle.unsubscribe();
+assert.deepEqual(await reconnectConnectingUnsubscribeHandle.closed, { reason: "unsubscribed" });
+assert.deepEqual(reconnectConnectingUnsubscribeHandle.state, { status: "closed" });
+reconnectConnectingUnsubscribeSockets[1].open();
+reconnectConnectingUnsubscribeSockets[1].message(identityTokenFrame().buffer);
+assert.equal(reconnectConnectingUnsubscribeClient.state.status, "connected");
+assert.equal(reconnectConnectingUnsubscribeSockets[1].sent.length, 0);
+assert.deepEqual(reconnectConnectingUnsubscribeStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "connected",
+]);
+await reconnectConnectingUnsubscribeClient.close();
+
 const reconnectPendingUnsubscribeSockets = [];
 const reconnectPendingUnsubscribeStates = [];
 const reconnectPendingUnsubscribeClient = createShunterClient({
@@ -3589,6 +3759,157 @@ assert.deepEqual(reconnectAuthHandle.state, {
   error: reconnectAuthError,
 });
 assert.deepEqual(reconnectAuthStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "failed",
+  "closed",
+]);
+
+const reconnectFailedCloseSockets = [];
+const reconnectFailedCloseStates = [];
+let reconnectFailedCloseTokenCalls = 0;
+let reconnectFailedCloseShutdown;
+let reconnectFailedCloseClient;
+reconnectFailedCloseClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => {
+    reconnectFailedCloseTokenCalls += 1;
+    if (reconnectFailedCloseTokenCalls === 1) {
+      return "initial-token";
+    }
+    if (reconnectFailedCloseTokenCalls === 2) {
+      throw new Error("refresh denied");
+    }
+    return "after-close-token";
+  },
+  reconnect: {
+    enabled: true,
+    maxAttempts: 2,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectFailedCloseSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => {
+    reconnectFailedCloseStates.push(current.status);
+    if (current.status === "failed" && reconnectFailedCloseShutdown === undefined) {
+      reconnectFailedCloseShutdown = reconnectFailedCloseClient.close(4007, "caller stopped after refresh failure");
+    }
+  },
+});
+const reconnectFailedCloseConnecting = reconnectFailedCloseClient.connect();
+await nextTurn();
+reconnectFailedCloseSockets[0].open();
+reconnectFailedCloseSockets[0].message(identityTokenFrame().buffer);
+await reconnectFailedCloseConnecting;
+const reconnectFailedCloseHandleSubscription = reconnectFailedCloseClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectFailedCloseSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectFailedCloseHandle = await reconnectFailedCloseHandleSubscription;
+assert.deepEqual(reconnectFailedCloseHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectFailedCloseSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+await nextTurn();
+await nextTurn();
+assert(reconnectFailedCloseShutdown !== undefined);
+await reconnectFailedCloseShutdown;
+assert.equal(reconnectFailedCloseClient.state.status, "closed");
+assert.equal(reconnectFailedCloseTokenCalls, 2);
+assert.equal(reconnectFailedCloseSockets.length, 1);
+const reconnectFailedCloseClosed = await reconnectFailedCloseHandle.closed;
+assert.equal(reconnectFailedCloseClosed.reason, "error");
+assert(reconnectFailedCloseClosed.error instanceof ShunterClosedClientError);
+const reconnectFailedCloseRetry = reconnectFailedCloseClient.connect();
+await nextTurn();
+assert.equal(reconnectFailedCloseTokenCalls, 3);
+assert.equal(reconnectFailedCloseSockets.length, 2);
+reconnectFailedCloseSockets[1].open();
+reconnectFailedCloseSockets[1].message(identityTokenFrame({ token: "after-close-identity" }).buffer);
+const reconnectFailedCloseRetryMetadata = await reconnectFailedCloseRetry;
+assert.equal(reconnectFailedCloseRetryMetadata.identityToken, "after-close-identity");
+await reconnectFailedCloseClient.close();
+assert.deepEqual(reconnectFailedCloseStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "failed",
+  "closed",
+  "connecting",
+  "connected",
+  "closing",
+  "closed",
+]);
+
+const reconnectFailedDisposeSockets = [];
+const reconnectFailedDisposeStates = [];
+let reconnectFailedDisposeTokenCalls = 0;
+let reconnectFailedDisposeShutdown;
+let reconnectFailedDisposeClient;
+reconnectFailedDisposeClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => {
+    reconnectFailedDisposeTokenCalls += 1;
+    if (reconnectFailedDisposeTokenCalls === 1) {
+      return "initial-token";
+    }
+    throw new Error("refresh denied");
+  },
+  reconnect: {
+    enabled: true,
+    maxAttempts: 2,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectFailedDisposeSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => {
+    reconnectFailedDisposeStates.push(current.status);
+    if (current.status === "failed" && reconnectFailedDisposeShutdown === undefined) {
+      reconnectFailedDisposeShutdown = reconnectFailedDisposeClient.dispose();
+    }
+  },
+});
+const reconnectFailedDisposeConnecting = reconnectFailedDisposeClient.connect();
+await nextTurn();
+reconnectFailedDisposeSockets[0].open();
+reconnectFailedDisposeSockets[0].message(identityTokenFrame().buffer);
+await reconnectFailedDisposeConnecting;
+const reconnectFailedDisposeHandleSubscription = reconnectFailedDisposeClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectFailedDisposeSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectFailedDisposeHandle = await reconnectFailedDisposeHandleSubscription;
+assert.deepEqual(reconnectFailedDisposeHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectFailedDisposeSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+await nextTurn();
+await nextTurn();
+assert(reconnectFailedDisposeShutdown !== undefined);
+await reconnectFailedDisposeShutdown;
+assert.equal(reconnectFailedDisposeClient.state.status, "closed");
+assert.equal(reconnectFailedDisposeTokenCalls, 2);
+assert.equal(reconnectFailedDisposeSockets.length, 1);
+const reconnectFailedDisposeClosed = await reconnectFailedDisposeHandle.closed;
+assert.equal(reconnectFailedDisposeClosed.reason, "error");
+assert(reconnectFailedDisposeClosed.error instanceof ShunterClosedClientError);
+await assert.rejects(reconnectFailedDisposeClient.connect(), ShunterClosedClientError);
+assert.deepEqual(reconnectFailedDisposeStates, [
   "connecting",
   "connected",
   "reconnecting",

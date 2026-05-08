@@ -548,8 +548,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
 
   const failConnecting = (error: ShunterError): void => {
     suppressSocketCloseTransition = true;
-    setState({ status: "failed", error });
     rejectConnect?.(error);
+    setState({ status: "failed", error });
     try {
       socket?.close(closeNormalCode, "protocol failure");
     } catch {
@@ -611,10 +611,19 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   const beginClose = (code = closeNormalCode, reason = ""): Promise<void> => {
     clearReconnectTimer();
     reconnectAttempt = 0;
+    connectGeneration += 1;
     if (closePromise !== undefined) {
       return closePromise;
     }
-    if (state.status === "closed" || state.status === "failed") {
+    if (state.status === "closed") {
+      finishClose();
+      return Promise.resolve();
+    }
+    const closedError = new ShunterClosedClientError("Shunter client connection is closing.");
+    if (state.status === "failed") {
+      rejectConnect?.(closedError);
+      rejectPendingOperations(closedError);
+      setState({ status: "closed" });
       finishClose();
       return Promise.resolve();
     }
@@ -623,7 +632,6 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       finishClose();
       return Promise.resolve();
     }
-    const closedError = new ShunterClosedClientError("Shunter client connection is closing.");
     rejectConnect?.(closedError);
     rejectPendingOperations(closedError);
     setState({ status: "closing" });
@@ -980,7 +988,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       }
       unsubscribePromise = (async () => {
         const activeSocket = socket;
-        if (state.status === "reconnecting") {
+        if (state.status === "reconnecting" || state.status === "connecting") {
           removeActiveSubscription(queryId);
           return;
         }
@@ -1008,11 +1016,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           };
           pendingUnsubscribesByRequest.set(request.requestId, pendingUnsubscribe);
           pendingUnsubscribesByQuery.set(request.queryId, pendingUnsubscribe);
+          removeActiveSubscription(request.queryId);
           try {
             activeSocket.send(request.frame);
           } catch (error) {
             cleanupPendingUnsubscribe(pendingUnsubscribe);
-            removeActiveSubscription(request.queryId);
             reject(toShunterError(error, "transport", sendMessage));
           }
         });
@@ -1251,6 +1259,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return;
     }
     cleanupPendingUnsubscribe(pending);
+    removeActiveSubscription(pending.queryId);
     pending.reject(new ShunterValidationError(response.error || "Unsubscribe failed.", {
       code: "unsubscribe_failed",
       details: { kind: pending.kind, response },
@@ -1402,6 +1411,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         };
         const handlers = {
           open: (): void => {
+            if (socket !== ws) {
+              return;
+            }
             try {
               selectedSubprotocol = ws.protocol;
               assertProtocolCompatible(options.protocol, selectedSubprotocol);
@@ -1415,6 +1427,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
             }
           },
           message: (event: MessageEvent): void => {
+            if (socket !== ws) {
+              return;
+            }
             if (state.status === "connected") {
               handleConnectedMessage(event);
               return;
@@ -1453,6 +1468,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           close: (event: CloseEvent): void => {
             cleanupSocketListeners(ws, handlers);
             cleanupOpeningAbort();
+            if (socket !== ws) {
+              return;
+            }
             if (suppressSocketCloseTransition) {
               return;
             }
@@ -1483,6 +1501,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
             }
           },
           error: (event: Event): void => {
+            if (socket !== ws) {
+              return;
+            }
             if (state.status === "connecting") {
               cleanupOpeningAbort();
               const error = new ShunterTransportError("WebSocket failed before opening.", {
