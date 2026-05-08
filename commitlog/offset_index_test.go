@@ -44,6 +44,25 @@ func TestCreateOffsetIndexRejectsOversizedCap(t *testing.T) {
 	}
 }
 
+func TestCreateOffsetIndexRejectsZeroCapWithoutCreatingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, OffsetIndexFileName(1))
+
+	idx, err := CreateOffsetIndex(path, 0)
+	if err == nil {
+		if idx != nil {
+			_ = idx.Close()
+		}
+		t.Fatal("CreateOffsetIndex with zero cap succeeded")
+	}
+	if !strings.Contains(err.Error(), "cap must be > 0") {
+		t.Fatalf("CreateOffsetIndex error = %v, want zero-cap detail", err)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("CreateOffsetIndex left file after zero cap: stat error = %v", statErr)
+	}
+}
+
 func TestOpenOffsetIndexMutRejectsOversizedCap(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "00000000000000000001.idx")
@@ -60,6 +79,33 @@ func TestOpenOffsetIndexMutRejectsOversizedCap(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("OpenOffsetIndexMut error = %v, want too large", err)
+	}
+}
+
+func TestOpenOffsetIndexMutRejectsZeroCapWithoutTruncating(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, OffsetIndexFileName(1))
+	before := []byte("existing index bytes")
+	if err := os.WriteFile(path, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx, err := OpenOffsetIndexMut(path, 0)
+	if err == nil {
+		if idx != nil {
+			_ = idx.Close()
+		}
+		t.Fatal("OpenOffsetIndexMut with zero cap succeeded")
+	}
+	if !strings.Contains(err.Error(), "cap must be > 0") {
+		t.Fatalf("OpenOffsetIndexMut error = %v, want zero-cap detail", err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("existing index file changed: got %q want %q", after, before)
 	}
 }
 
