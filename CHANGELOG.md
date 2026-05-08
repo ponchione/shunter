@@ -5,6 +5,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 ## v0.1.1-dev
 
 - Current development line.
+- Recovery now rejects directory artifacts named as the first commit-log
+  segment instead of treating the data directory as empty, while preserving
+  rollover directory cleanup behavior.
 - Added `Config.AuthIssuers` for strict JWT issuer allowlist validation.
 - Strict JWT validation now rejects future `iat` claims.
 - Contract diff and workflow policy checks now classify stable v1 contract
