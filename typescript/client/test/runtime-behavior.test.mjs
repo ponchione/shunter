@@ -1196,6 +1196,48 @@ await assert.rejects(errorPreIdentityConnecting, (error) => {
 });
 assert.equal(errorPreIdentityClient.state.status, "failed");
 
+const closeDuringConnectSockets = [];
+const closeDuringConnectStates = [];
+const closeDuringConnectClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    closeDuringConnectSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => closeDuringConnectStates.push(current.status),
+});
+const closeDuringConnect = closeDuringConnectClient.connect();
+await nextTurn();
+const closeDuringConnectResult = closeDuringConnectClient.close(4000, "caller canceled");
+await assert.rejects(closeDuringConnect, ShunterClosedClientError);
+await closeDuringConnectResult;
+assert.equal(closeDuringConnectClient.state.status, "closed");
+assert.deepEqual(closeDuringConnectSockets[0].closeCalls, [{ code: 4000, reason: "caller canceled" }]);
+assert.deepEqual(closeDuringConnectStates, ["connecting", "closing", "closed"]);
+
+const disposeDuringConnectSockets = [];
+const disposeDuringConnectStates = [];
+const disposeDuringConnectClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    disposeDuringConnectSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => disposeDuringConnectStates.push(current.status),
+});
+const disposeDuringConnect = disposeDuringConnectClient.connect();
+await nextTurn();
+await disposeDuringConnectClient.dispose();
+await assert.rejects(disposeDuringConnect, ShunterClosedClientError);
+assert.equal(disposeDuringConnectClient.state.status, "closed");
+assert.deepEqual(disposeDuringConnectSockets[0].closeCalls, [{ code: 1000, reason: "disposed" }]);
+assert.deepEqual(disposeDuringConnectStates, ["connecting", "closing", "closed"]);
+await assert.rejects(disposeDuringConnectClient.connect(), ShunterClosedClientError);
+
 const pendingCloseSockets = [];
 const pendingCloseFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);
