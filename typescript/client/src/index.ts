@@ -978,6 +978,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       }
       unsubscribePromise = (async () => {
         const activeSocket = socket;
+        if (state.status === "reconnecting") {
+          removeActiveSubscription(queryId);
+          return;
+        }
         if (state.status !== "connected" || activeSocket === undefined) {
           throw new ShunterClosedClientError(closedMessage);
         }

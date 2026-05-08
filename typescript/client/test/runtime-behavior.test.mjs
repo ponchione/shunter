@@ -1549,6 +1549,58 @@ assert.deepEqual(reconnectCloseHandle.state, {
 });
 assert.deepEqual(reconnectCloseStates, ["connecting", "connected", "reconnecting", "closing", "closed"]);
 
+const reconnectUnsubscribeSockets = [];
+const reconnectUnsubscribeStates = [];
+const reconnectUnsubscribeClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectUnsubscribeSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectUnsubscribeStates.push(current.status),
+});
+const reconnectUnsubscribeConnecting = reconnectUnsubscribeClient.connect();
+await nextTurn();
+reconnectUnsubscribeSockets[0].open();
+reconnectUnsubscribeSockets[0].message(identityTokenFrame().buffer);
+await reconnectUnsubscribeConnecting;
+const reconnectUnsubscribeHandleSubscription = reconnectUnsubscribeClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectUnsubscribeSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectUnsubscribeHandle = await reconnectUnsubscribeHandleSubscription;
+assert.deepEqual(reconnectUnsubscribeHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectUnsubscribeSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectUnsubscribeClient.state.status, "reconnecting");
+await reconnectUnsubscribeHandle.unsubscribe();
+assert.deepEqual(await reconnectUnsubscribeHandle.closed, { reason: "unsubscribed" });
+assert.deepEqual(reconnectUnsubscribeHandle.state, { status: "closed" });
+await nextTurn();
+assert.equal(reconnectUnsubscribeSockets.length, 2);
+reconnectUnsubscribeSockets[1].open();
+reconnectUnsubscribeSockets[1].message(identityTokenFrame().buffer);
+assert.equal(reconnectUnsubscribeClient.state.status, "connected");
+assert.equal(reconnectUnsubscribeSockets[1].sent.length, 0);
+assert.deepEqual(reconnectUnsubscribeStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "connected",
+]);
+await reconnectUnsubscribeClient.close();
+
 const exhaustionSockets = [];
 const exhaustionFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);
