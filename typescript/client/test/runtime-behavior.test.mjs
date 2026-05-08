@@ -1484,6 +1484,39 @@ sockets[0].message(tableLightUpdateFrame);
 assert.equal(tableRawUpdates.length, 1);
 assert.equal(tableDecodedUpdates.length, 1);
 
+const rawTableCallbackSockets = [];
+const rawTableCallbackRows = [];
+const rawTableCallbackInitialRows = [];
+const rawTableCallbackClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    rawTableCallbackSockets.push(socket);
+    return socket;
+  },
+});
+const rawTableCallbackConnecting = rawTableCallbackClient.connect();
+await nextTurn();
+rawTableCallbackSockets[0].open();
+rawTableCallbackSockets[0].message(identityTokenFrame().buffer);
+await rawTableCallbackConnecting;
+const rawTableCallbackSubscription = rawTableCallbackClient.subscribeTable(
+  "users",
+  (rows) => rawTableCallbackRows.push(rows),
+  {
+    requestId: 0x01020304,
+    queryId: 0x11121314,
+    onInitialRows: (rows) => rawTableCallbackInitialRows.push(rows),
+  },
+);
+rawTableCallbackSockets[0].message(subscribeSingleAppliedFrame);
+const rawTableCallbackUnsubscribe = await rawTableCallbackSubscription;
+assert.equal(typeof rawTableCallbackUnsubscribe, "function");
+assert.deepEqual(rawTableCallbackRows[0].map((row) => [...row]), [[1, 2], [3]]);
+assert.deepEqual(rawTableCallbackInitialRows[0].map((row) => [...row]), [[1, 2], [3]]);
+await rawTableCallbackClient.close();
+
 const deniedTableSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x41424344,
   queryId: 0x51525354,

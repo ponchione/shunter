@@ -1173,7 +1173,20 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         return;
       }
     } else {
-      replaceCachedRows(active, response.rowBytes, cloneRowBytes(response.rowBytes));
+      try {
+        const rows = cloneRowBytes(response.rowBytes);
+        replaceCachedRows(active, response.rowBytes, rows);
+        pending.onRows?.(cloneRowBytes(rows));
+        pending.onInitialRows?.(cloneRowBytes(rows));
+      } catch (error) {
+        const callbackError = toShunterError(error, "validation", "SubscribeSingleApplied raw row callback failed");
+        removeActiveSubscription(response.queryId);
+        cleanupPendingSubscription(pending);
+        pending.handle?.close(callbackError);
+        pending.reject(callbackError);
+        failConnected(callbackError);
+        return;
+      }
     }
     cleanupPendingSubscription(pending);
     pending.resolve(pending.handle ?? tableSubscriptionUnsubscribe(response.queryId));

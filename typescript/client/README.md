@@ -48,7 +48,8 @@ decoded `onInitialRows` and `onUpdate` callbacks, and declared-view handles use
 RowList insert/delete payloads to maintain decoded row sets when a decoder is
 available. Table subscriptions can accept `decodeRow` to invoke decoded
 `onRows`/`onInitialRows` and `onUpdate` callbacks from split RowList row bytes
-while keeping raw callbacks unchanged. The runtime also exports
+while keeping raw callbacks unchanged; without a decoder, table `onRows` and
+`onInitialRows` receive raw row bytes. The runtime also exports
 `decodeBsatnProduct()` and `encodeBsatnProduct()` for schema-aware product row
 codecs, and generated bindings emit per-table row decoder functions plus a
 `tableRowDecoders` map that generated table subscription helpers use by
@@ -103,13 +104,14 @@ read `insertRowBytes`/`deleteRowBytes` from raw updates when present.
 Table subscriptions can also pass `decodeRow` when the caller already has a
 schema-aware row decoder; the runtime will call the table `onRows`/
 `onInitialRows` callbacks for accepted initial rows and `onUpdate` for RowList
-insert/delete deltas. Generated table subscription helpers pass through those
-callbacks and options. When `returnHandle: true` is also set, the returned
-table handle starts with decoded initial rows. Generated bindings now provide
-table row decoders for exported table schemas and default generated table
-subscription helpers to those decoders. Managed table handles keep their row
-sets current when later transaction updates include RowList insert/delete row
-bytes.
+insert/delete deltas. Without `decodeRow`, table `onRows`/`onInitialRows`
+callbacks receive cloned raw row bytes. Generated table subscription helpers
+pass through those callbacks and options. When `returnHandle: true` is also
+set, the returned table handle starts with decoded initial rows. Generated
+bindings now provide table row decoders for exported table schemas and default
+generated table subscription helpers to those decoders. Managed table handles
+keep their row sets current when later transaction updates include RowList
+insert/delete row bytes.
 Declared query consumers that want decoded rows can call
 `decodeDeclaredQueryResult()` with table-specific decoders; generated
 declared-query helpers install contract-derived decoders by default when row
