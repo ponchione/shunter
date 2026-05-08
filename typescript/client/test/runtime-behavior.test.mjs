@@ -1443,3 +1443,67 @@ assert.deepEqual(exhaustionHandle.state, {
   error: exhaustionError,
 });
 assert.deepEqual(exhaustionStates, ["connecting", "connected", "reconnecting", "connecting", "closed"]);
+
+const reconnectProtocolSockets = [];
+const reconnectProtocolFactory = (url, protocols) => {
+  const socket = new FakeWebSocket(url, protocols);
+  reconnectProtocolSockets.push(socket);
+  return socket;
+};
+const reconnectProtocolStates = [];
+const reconnectProtocolClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: reconnectProtocolFactory,
+  onStateChange: ({ current }) => reconnectProtocolStates.push(current.status),
+});
+const reconnectProtocolConnecting = reconnectProtocolClient.connect();
+await nextTurn();
+reconnectProtocolSockets[0].open();
+reconnectProtocolSockets[0].message(identityTokenFrame().buffer);
+await reconnectProtocolConnecting;
+const reconnectProtocolHandleSubscription = reconnectProtocolClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectProtocolSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectProtocolHandle = await reconnectProtocolHandleSubscription;
+assert.deepEqual(reconnectProtocolHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectProtocolSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectProtocolClient.state.status, "reconnecting");
+await nextTurn();
+assert.equal(reconnectProtocolSockets.length, 2);
+const observedProtocolReconnect = reconnectProtocolClient.connect();
+reconnectProtocolSockets[1].open("v1.bsatn.spacetimedb");
+const reconnectProtocolError = await rejectByNextTurn(observedProtocolReconnect, (error) => {
+  assert(error instanceof ShunterProtocolMismatchError);
+  assert.equal(error.kind, "protocol_mismatch");
+  assert.equal(error.code, "unsupported_selected_subprotocol");
+  assert.equal(error.receivedSubprotocol, "v1.bsatn.spacetimedb");
+});
+assert.equal(reconnectProtocolClient.state.status, "closed");
+assert.strictEqual(reconnectProtocolClient.state.error, reconnectProtocolError);
+assert.equal(reconnectProtocolSockets[1].closeCalls.length, 1);
+const reconnectProtocolClosed = await reconnectProtocolHandle.closed;
+assert.equal(reconnectProtocolClosed.reason, "error");
+assert.strictEqual(reconnectProtocolClosed.error, reconnectProtocolError);
+assert.deepEqual(reconnectProtocolHandle.state, {
+  status: "closed",
+  error: reconnectProtocolError,
+});
+assert.deepEqual(reconnectProtocolStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "failed",
+  "closed",
+]);
