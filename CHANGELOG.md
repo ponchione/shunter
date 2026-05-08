@@ -146,6 +146,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - TypeScript declared-view and table subscriptions now reject explicit
   request/query IDs that are pending, active, or awaiting unsubscribe
   acknowledgement.
+- The TypeScript runtime now fails connected clients on scoped subscription
+  errors for already accepted subscriptions when no pending operation matches.
 - The TypeScript runtime now defines explicit reducer argument encoder helpers
   for callers that map typed reducer args to raw `Uint8Array` payloads.
 

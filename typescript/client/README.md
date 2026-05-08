@@ -70,6 +70,8 @@ Unsupported or malformed connected server frames fail the client as protocol
 errors, rejecting pending operations and closing active managed handles.
 Server-side subscription evaluation errors that are not scoped to a pending
 request also fail the client so live handles do not remain silently stale.
+Scoped errors for already accepted subscriptions are treated the same way when
+no pending subscribe or unsubscribe matches them.
 Full-update `callReducer()` calls currently resolve with the raw
 `TransactionUpdate` response frame on committed status and reject on failed
 status. `NoSuccessNotify` calls resolve after send because successful server

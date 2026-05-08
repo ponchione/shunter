@@ -1296,6 +1296,20 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }));
   };
 
+  const settleActiveSubscriptionError = (response: SubscriptionErrorMessage): void => {
+    if (response.queryId === undefined) {
+      return;
+    }
+    const active = activeSubscriptionsByQuery.get(response.queryId);
+    if (active === undefined) {
+      return;
+    }
+    failConnected(new ShunterValidationError(response.error || "Subscription failed.", {
+      code: "subscription_failed",
+      details: { kind: active.kind, target: active.target, response },
+    }));
+  };
+
   const settleUnsubscribeApplied = (
     response: { readonly requestId: RequestID; readonly queryId: QueryID },
     kind: PendingUnsubscribe["kind"],
@@ -1369,6 +1383,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
             }
             settleSubscriptionError(response);
             settleUnsubscribeError(response);
+            settleActiveSubscriptionError(response);
           }
           return;
         case SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_MULTI_APPLIED:
