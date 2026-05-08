@@ -1176,6 +1176,34 @@ assert.equal(firstConcurrentMetadata.identityToken, "concurrent-token");
 assert.strictEqual(await concurrentConnectClient.connect(), firstConcurrentMetadata);
 await concurrentConnectClient.close();
 
+const stateListenerSockets = [];
+const removedStateListenerEvents = [];
+const retainedStateListenerEvents = [];
+const stateListenerClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    stateListenerSockets.push(socket);
+    return socket;
+  },
+});
+const removeStateListener = stateListenerClient.onStateChange(
+  ({ current }) => removedStateListenerEvents.push(current.status),
+);
+stateListenerClient.onStateChange(
+  ({ current }) => retainedStateListenerEvents.push(current.status),
+);
+const stateListenerConnecting = stateListenerClient.connect();
+await nextTurn();
+stateListenerSockets[0].open();
+stateListenerSockets[0].message(identityTokenFrame().buffer);
+await stateListenerConnecting;
+removeStateListener();
+await stateListenerClient.close();
+assert.deepEqual(removedStateListenerEvents, ["connecting", "connected"]);
+assert.deepEqual(retainedStateListenerEvents, ["connecting", "connected", "closing", "closed"]);
+
 const reconnectAfterCloseSockets = [];
 const reconnectAfterCloseStates = [];
 const reconnectAfterCloseClient = createShunterClient({
