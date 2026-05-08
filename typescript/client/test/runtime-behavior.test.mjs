@@ -262,6 +262,28 @@ function subscriptionErrorFrameFor({ requestId, queryId, tableId = 0, error }) {
   return frame;
 }
 
+function subscribeSingleAppliedFrameFor({
+  requestId,
+  queryId,
+  tableName = "users",
+  rows = bytesFromHex("020000000200000001020100000003"),
+}) {
+  const tableNameBytes = new TextEncoder().encode(tableName);
+  const frame = new Uint8Array(1 + 4 + 8 + 4 + 4 + tableNameBytes.length + 4 + rows.length);
+  let offset = 0;
+  frame[offset] = SHUNTER_SERVER_MESSAGE_SUBSCRIBE_SINGLE_APPLIED;
+  offset += 1;
+  offset = writeUint32LE(frame, offset, requestId);
+  offset += 8;
+  offset = writeUint32LE(frame, offset, queryId);
+  offset = writeUint32LE(frame, offset, tableNameBytes.length);
+  frame.set(tableNameBytes, offset);
+  offset += tableNameBytes.length;
+  offset = writeUint32LE(frame, offset, rows.length);
+  frame.set(rows, offset);
+  return frame;
+}
+
 const decodedBsatnMessage = decodeBsatnProduct(
   bytesFromHex("0801000000000000000b05000000616c6963650b000b0500000068656c6c6f110200000000000000"),
   [
@@ -1653,6 +1675,50 @@ assert.equal(duplicateQueryIdSockets[0].sent.length, 2);
 duplicateQueryIdSockets[0].message(unsubscribeTableAppliedFrame);
 await duplicateQueryIdUnsubscribe;
 await duplicateQueryIdClient.close();
+
+const autoSubscriptionIdSockets = [];
+const autoSubscriptionIdClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    autoSubscriptionIdSockets.push(socket);
+    return socket;
+  },
+});
+const autoSubscriptionIdConnecting = autoSubscriptionIdClient.connect();
+await nextTurn();
+autoSubscriptionIdSockets[0].open();
+autoSubscriptionIdSockets[0].message(identityTokenFrame().buffer);
+await autoSubscriptionIdConnecting;
+const explicitLowQueryIdSubscription = autoSubscriptionIdClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 1,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+autoSubscriptionIdSockets[0].message(subscribeSingleAppliedFrameFor({
+  requestId: 0x01020304,
+  queryId: 1,
+}));
+const explicitLowQueryIdHandle = await explicitLowQueryIdSubscription;
+assert.deepEqual(explicitLowQueryIdHandle.state, { status: "active", rows: ["1-2", "3"] });
+const autoAllocatedSubscription = autoSubscriptionIdClient.subscribeTable("users");
+assert.equal(autoSubscriptionIdSockets[0].sent.length, 2);
+assert.deepEqual(
+  autoSubscriptionIdSockets[0].sent[1],
+  encodeTableSubscriptionRequest("users", {
+    requestId: 1,
+    queryId: 2,
+  }).frame,
+);
+autoSubscriptionIdSockets[0].message(subscribeSingleAppliedFrameFor({
+  requestId: 1,
+  queryId: 2,
+}));
+const autoAllocatedUnsubscribe = await autoAllocatedSubscription;
+assert.equal(typeof autoAllocatedUnsubscribe, "function");
+await autoSubscriptionIdClient.close();
 
 const deniedTableSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x41424344,

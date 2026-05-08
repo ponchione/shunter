@@ -974,12 +974,18 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     return pending;
   };
 
-  const subscriptionIdInUse = (requestId: RequestID, queryId: QueryID): boolean =>
+  const subscriptionRequestIdInUse = (requestId: RequestID): boolean =>
     pendingSubscriptionsByRequest.has(requestId) ||
+    pendingUnsubscribesByRequest.has(requestId);
+
+  const subscriptionQueryIdInUse = (queryId: QueryID): boolean =>
     pendingSubscriptionsByQuery.has(queryId) ||
-    pendingUnsubscribesByRequest.has(requestId) ||
     pendingUnsubscribesByQuery.has(queryId) ||
     activeSubscriptionsByQuery.has(queryId);
+
+  const subscriptionIdInUse = (requestId: RequestID, queryId: QueryID): boolean =>
+    subscriptionRequestIdInUse(requestId) ||
+    subscriptionQueryIdInUse(queryId);
 
   const subscriptionIdInUseError = (
     kind: PendingSubscription["kind"],
@@ -990,6 +996,35 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     code: "subscription_id_in_use",
     details: { kind, target, requestId, queryId },
   });
+
+  const allocateSubscriptionRequestId = (): RequestID => {
+    const attempts = Math.min(maxUint32, pendingSubscriptionsByRequest.size + pendingUnsubscribesByRequest.size + 1);
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const requestId = allocateRequestId();
+      if (!subscriptionRequestIdInUse(requestId)) {
+        return requestId;
+      }
+    }
+    throw new ShunterValidationError("No subscription request IDs are available.", {
+      code: "subscription_request_ids_exhausted",
+    });
+  };
+
+  const allocateSubscriptionQueryId = (): QueryID => {
+    const attempts = Math.min(
+      maxUint32,
+      pendingSubscriptionsByQuery.size + pendingUnsubscribesByQuery.size + activeSubscriptionsByQuery.size + 1,
+    );
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const queryId = allocateQueryId();
+      if (!subscriptionQueryIdInUse(queryId)) {
+        return queryId;
+      }
+    }
+    throw new ShunterValidationError("No subscription query IDs are available.", {
+      code: "subscription_query_ids_exhausted",
+    });
+  };
 
   const unsubscribeOnce = (
     kind: PendingUnsubscribe["kind"],
@@ -1764,8 +1799,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       }
       const request = encodeDeclaredViewSubscriptionRequest(name, {
         ...options,
-        requestId: options.requestId ?? allocateRequestId(),
-        queryId: options.queryId ?? allocateQueryId(),
+        requestId: options.requestId ?? allocateSubscriptionRequestId(),
+        queryId: options.queryId ?? allocateSubscriptionQueryId(),
       });
       if (subscriptionIdInUse(request.requestId, request.queryId)) {
         throw subscriptionIdInUseError("declared_view", name, request.requestId, request.queryId);
@@ -1837,8 +1872,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       }
       const request = encodeTableSubscriptionRequest(table, {
         ...options,
-        requestId: options.requestId ?? allocateRequestId(),
-        queryId: options.queryId ?? allocateQueryId(),
+        requestId: options.requestId ?? allocateSubscriptionRequestId(),
+        queryId: options.queryId ?? allocateSubscriptionQueryId(),
       });
       if (subscriptionIdInUse(request.requestId, request.queryId)) {
         throw subscriptionIdInUseError("table", table, request.requestId, request.queryId);
