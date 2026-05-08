@@ -73,7 +73,8 @@ Permissions are simple string tags. They can be declared on:
 
 - reducers with `WithReducerPermissions`
 - declared queries and views with `PermissionMetadata`
-- table read policies with schema table options such as `WithReadPermissions`
+- table read policies with schema table options such as
+  `schema.WithReadPermissions`
 
 Protocol strict-mode permissions come from the token's `permissions` claim.
 Local callers must supply permissions explicitly with `WithPermissions` or

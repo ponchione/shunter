@@ -289,9 +289,5 @@ func protocolSubscribeMetricKind(variant SubscriptionSetVariant) string {
 // distinguish "measured" from the deferred-measurement sentinel (0)
 // that error-origin SubscriptionError emitters used before the seam.
 func elapsedMicros(receipt time.Time) uint64 {
-	us := uint64(time.Since(receipt).Microseconds())
-	if us == 0 {
-		return 1
-	}
-	return us
+	return uint64(elapsedMicrosI64(receipt))
 }

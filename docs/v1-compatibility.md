@@ -1,6 +1,6 @@
 # Shunter v1 Compatibility Matrix
 
-Status: initial v1 contract slice
+Status: current v1 compatibility matrix
 Scope: app-facing Go APIs, Shunter-native protocol, contract JSON, generated
 TypeScript, read surfaces, local runtime APIs, and multi-module hosting.
 

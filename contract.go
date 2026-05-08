@@ -438,19 +438,7 @@ func copySchemaExport(in *schema.SchemaExport) schema.SchemaExport {
 	if in == nil {
 		return normalizeSchemaExport(schema.SchemaExport{})
 	}
-
-	out := schema.SchemaExport{
-		Version:  in.Version,
-		Tables:   make([]schema.TableExport, len(in.Tables)),
-		Reducers: make([]schema.ReducerExport, len(in.Reducers)),
-	}
-	for i, table := range in.Tables {
-		out.Tables[i] = copyTableExport(table)
-	}
-	for i, reducer := range in.Reducers {
-		out.Reducers[i] = copyReducerExport(reducer)
-	}
-	return out
+	return normalizeSchemaExport(*in)
 }
 
 func normalizeSchemaExport(in schema.SchemaExport) schema.SchemaExport {
@@ -483,13 +471,9 @@ func copyTableExport(in schema.TableExport) schema.TableExport {
 	}
 	copy(out.Columns, in.Columns)
 	for i, idx := range in.Indexes {
-		columns := append([]string(nil), idx.Columns...)
-		if columns == nil {
-			columns = []string{}
-		}
 		out.Indexes[i] = schema.IndexExport{
 			Name:    idx.Name,
-			Columns: columns,
+			Columns: normalizeStringSlice(idx.Columns),
 			Unique:  idx.Unique,
 			Primary: idx.Primary,
 		}
@@ -513,14 +497,10 @@ func copyReducerExport(in schema.ReducerExport) schema.ReducerExport {
 }
 
 func normalizeSchemaReadPolicy(in schema.ReadPolicy) schema.ReadPolicy {
-	out := schema.ReadPolicy{
+	return schema.ReadPolicy{
 		Access:      in.Access,
-		Permissions: append([]string(nil), in.Permissions...),
+		Permissions: normalizeStringSlice(in.Permissions),
 	}
-	if out.Permissions == nil {
-		out.Permissions = []string{}
-	}
-	return out
 }
 
 func copyQueryDescriptions(in []QueryDescription) []QueryDescription {

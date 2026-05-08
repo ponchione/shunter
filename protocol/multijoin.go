@@ -3,6 +3,7 @@ package protocol
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/ponchione/shunter/query/sql"
 	"github.com/ponchione/shunter/schema"
@@ -15,14 +16,8 @@ func copyCompiledSQLMultiJoin(in *compiledSQLMultiJoin) *compiledSQLMultiJoin {
 		return nil
 	}
 	out := *in
-	if len(in.Relations) != 0 {
-		out.Relations = make([]compiledSQLMultiJoinRelation, len(in.Relations))
-		copy(out.Relations, in.Relations)
-	}
-	if len(in.Conditions) != 0 {
-		out.Conditions = make([]compiledSQLMultiJoinCondition, len(in.Conditions))
-		copy(out.Conditions, in.Conditions)
-	}
+	out.Relations = slices.Clone(in.Relations)
+	out.Conditions = slices.Clone(in.Conditions)
 	if in.Filter != nil {
 		out.Filter = copyCompiledSQLMultiPredicate(in.Filter)
 	}
@@ -335,30 +330,7 @@ func resolveMultiJoinProjectedRelation(stmt sql.Statement, relations []compiledS
 }
 
 func compileMultiJoinProjectionColumns(columns []sql.ProjectionColumn, relations map[string]relationSchema, aliasTag func(string) uint8) ([]compiledSQLProjectionColumn, error) {
-	if len(columns) == 0 {
-		return nil, nil
-	}
-	resolved := make([]compiledSQLProjectionColumn, 0, len(columns))
-	seen := make(map[string]struct{}, len(columns))
-	for _, col := range columns {
-		if err := checkDuplicateProjectionName(col, seen); err != nil {
-			return nil, err
-		}
-		qualifier := col.SourceQualifier
-		if qualifier == "" {
-			qualifier = col.Table
-		}
-		rel, ok := relations[qualifier]
-		if !ok {
-			return nil, sql.UnresolvedVarError{Name: projectionQualifierName(col)}
-		}
-		compiledCol, err := compileProjectionColumn(col, rel.id, rel.ts, aliasTag(col.SourceQualifier))
-		if err != nil {
-			return nil, err
-		}
-		resolved = append(resolved, compiledCol)
-	}
-	return resolved, nil
+	return compileJoinProjectionColumns(columns, relations, aliasTag)
 }
 
 func compileMultiJoinAggregateProjection(agg *sql.AggregateProjection, relations map[string]relationSchema, aliasTag func(string) uint8) (*compiledSQLAggregate, error) {
@@ -383,18 +355,9 @@ func compileMultiJoinAggregateProjection(agg *sql.AggregateProjection, relations
 }
 
 func compileMultiJoinOrderBy(orderBy []sql.OrderByColumn, stmt sql.Statement, relations []compiledSQLMultiJoinRelation, relationMap map[string]relationSchema, projectionColumns []compiledSQLProjectionColumn, projectedRelation int) ([]compiledSQLOrderBy, error) {
-	if len(orderBy) == 0 {
-		return nil, nil
-	}
-	compiled := make([]compiledSQLOrderBy, 0, len(orderBy))
-	for _, term := range orderBy {
-		resolved, err := compileMultiJoinOrderByTerm(term, stmt, relations, relationMap, projectionColumns, projectedRelation)
-		if err != nil {
-			return nil, err
-		}
-		compiled = append(compiled, resolved)
-	}
-	return compiled, nil
+	return compileOrderByList(orderBy, func(term sql.OrderByColumn) (compiledSQLOrderBy, error) {
+		return compileMultiJoinOrderByTerm(term, stmt, relations, relationMap, projectionColumns, projectedRelation)
+	})
 }
 
 func compileMultiJoinOrderByTerm(orderBy sql.OrderByColumn, stmt sql.Statement, relations []compiledSQLMultiJoinRelation, relationMap map[string]relationSchema, projectionColumns []compiledSQLProjectionColumn, projectedRelation int) (compiledSQLOrderBy, error) {

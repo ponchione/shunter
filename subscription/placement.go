@@ -175,19 +175,7 @@ func mutateAliasCompoundPlacement(idx *PruningIndexes, pred MultiJoin, condition
 		}
 		edges = append(edges, relationEdges...)
 	}
-	if !filters.hasAny() && len(edges) == 0 {
-		return false
-	}
-	for _, ce := range filters.eqs {
-		mutateValuePlacement(idx, t, ce.Column, ce.Value, hash, add)
-	}
-	for _, cr := range filters.ranges {
-		mutateRangePlacement(idx, t, cr.Column, cr.Lower, cr.Upper, hash, add)
-	}
-	for _, placement := range edges {
-		mutateJoinExistencePlacement(idx, placement.edge, hash, add)
-	}
-	return true
+	return mutateFilterAndExistencePlacements(idx, t, filters, edges, hash, add)
 }
 
 func mutateMultiJoinFilterPlacement(idx *PruningIndexes, relations []MultiJoinRelation, conditions multiJoinPlacementConditionSet, t TableID, hash QueryHash, add bool, resolver IndexResolver) bool {
@@ -212,18 +200,18 @@ func mutateMultiJoinFilterPlacement(idx *PruningIndexes, relations []MultiJoinRe
 		}
 		edges = append(edges, relationEdges...)
 	}
+	return mutateFilterAndExistencePlacements(idx, t, filters, edges, hash, add)
+}
+
+func mutateFilterAndExistencePlacements(idx *PruningIndexes, table TableID, filters colFilterPlacements, edges []joinExistenceEdgePlacement, hash QueryHash, add bool) bool {
 	if !filters.hasAny() && len(edges) == 0 {
 		return false
 	}
-	for _, ce := range filters.eqs {
-		mutateValuePlacement(idx, t, ce.Column, ce.Value, hash, add)
-	}
-	for _, cr := range filters.ranges {
-		mutateRangePlacement(idx, t, cr.Column, cr.Lower, cr.Upper, hash, add)
-	}
-	for _, placement := range edges {
-		mutateJoinExistencePlacement(idx, placement.edge, hash, add)
-	}
+	mutateSplitJoinOrPlacements(idx, splitJoinOrPlacements{
+		eqs:            filters.eqs,
+		ranges:         filters.ranges,
+		existenceEdges: edges,
+	}, table, hash, add)
 	return true
 }
 

@@ -227,8 +227,9 @@ if err := contractworkflow.ExportRuntimeFile(rt, "shunter.contract.json"); err !
 }
 ```
 
-The generic `cmd/shunter` CLI can diff, validate, plan, and generate from
-existing contract JSON files. It does not dynamically load your module code.
+The generic `cmd/shunter` CLI can diff contracts, run policy checks, plan
+migrations, and generate clients from existing contract JSON files. It does not
+dynamically load your module code.
 
 ## Continue
 

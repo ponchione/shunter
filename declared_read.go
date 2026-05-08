@@ -617,11 +617,7 @@ func declaredReadElapsedMicrosI64(receipt time.Time) int64 {
 }
 
 func declaredReadElapsedMicrosU64(receipt time.Time) uint64 {
-	us := uint64(time.Since(receipt).Microseconds())
-	if us == 0 {
-		return 1
-	}
-	return us
+	return uint64(declaredReadElapsedMicrosI64(receipt))
 }
 
 func declaredReadOptionalUint32(v uint32) *uint32 {

@@ -3,6 +3,7 @@ package protocol
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	queryplan "github.com/ponchione/shunter/internal/queryplan"
@@ -280,8 +281,7 @@ func (q CompiledSQLQuery) PredicateHashIdentity(identity types.Identity) *types.
 func copyCompiledSQLQuery(query compiledSQLQuery) compiledSQLQuery {
 	out := query
 	if len(query.ProjectionColumns) > 0 {
-		out.ProjectionColumns = make([]compiledSQLProjectionColumn, len(query.ProjectionColumns))
-		copy(out.ProjectionColumns, query.ProjectionColumns)
+		out.ProjectionColumns = slices.Clone(query.ProjectionColumns)
 	}
 	if query.Aggregate != nil {
 		aggregate := *query.Aggregate
@@ -300,8 +300,7 @@ func copyCompiledSQLQuery(query compiledSQLQuery) compiledSQLQuery {
 		out.Predicate = pred
 	}
 	if len(query.OrderBy) > 0 {
-		out.OrderBy = make([]compiledSQLOrderBy, len(query.OrderBy))
-		copy(out.OrderBy, query.OrderBy)
+		out.OrderBy = slices.Clone(query.OrderBy)
 	}
 	if query.Limit != nil {
 		limit := *query.Limit
@@ -1291,18 +1290,9 @@ func compileAggregateOrderBy(orderBy []sql.OrderByColumn, aggregate *compiledSQL
 }
 
 func compileSingleRelationOrderBy(orderBy []sql.OrderByColumn, projectedTable string, tableAlias string, tableID schema.TableID, ts *schema.TableSchema, projectionColumns []compiledSQLProjectionColumn) ([]compiledSQLOrderBy, error) {
-	if len(orderBy) == 0 {
-		return nil, nil
-	}
-	compiled := make([]compiledSQLOrderBy, 0, len(orderBy))
-	for _, term := range orderBy {
-		resolved, err := compileSingleRelationOrderByTerm(term, projectedTable, tableAlias, tableID, ts, projectionColumns)
-		if err != nil {
-			return nil, err
-		}
-		compiled = append(compiled, resolved)
-	}
-	return compiled, nil
+	return compileOrderByList(orderBy, func(term sql.OrderByColumn) (compiledSQLOrderBy, error) {
+		return compileSingleRelationOrderByTerm(term, projectedTable, tableAlias, tableID, ts, projectionColumns)
+	})
 }
 
 func compileSingleRelationOrderByTerm(orderBy sql.OrderByColumn, projectedTable string, tableAlias string, tableID schema.TableID, ts *schema.TableSchema, projectionColumns []compiledSQLProjectionColumn) (compiledSQLOrderBy, error) {
@@ -1346,18 +1336,9 @@ func compileSingleRelationOrderByTerm(orderBy sql.OrderByColumn, projectedTable 
 }
 
 func compileJoinOrderBy(orderBy []sql.OrderByColumn, stmt sql.Statement, relations map[string]relationSchema, projectionColumns []compiledSQLProjectionColumn, projectedID schema.TableID, aliasTag func(string) uint8, selfJoin bool) ([]compiledSQLOrderBy, error) {
-	if len(orderBy) == 0 {
-		return nil, nil
-	}
-	compiled := make([]compiledSQLOrderBy, 0, len(orderBy))
-	for _, term := range orderBy {
-		resolved, err := compileJoinOrderByTerm(term, stmt, relations, projectionColumns, projectedID, aliasTag, selfJoin)
-		if err != nil {
-			return nil, err
-		}
-		compiled = append(compiled, resolved)
-	}
-	return compiled, nil
+	return compileOrderByList(orderBy, func(term sql.OrderByColumn) (compiledSQLOrderBy, error) {
+		return compileJoinOrderByTerm(term, stmt, relations, projectionColumns, projectedID, aliasTag, selfJoin)
+	})
 }
 
 func compileJoinOrderByTerm(orderBy sql.OrderByColumn, stmt sql.Statement, relations map[string]relationSchema, projectionColumns []compiledSQLProjectionColumn, projectedID schema.TableID, aliasTag func(string) uint8, selfJoin bool) (compiledSQLOrderBy, error) {
@@ -1393,6 +1374,21 @@ func compileJoinOrderByTerm(orderBy sql.OrderByColumn, stmt sql.Statement, relat
 		Column: compiledSQLProjectionColumn{Schema: *col, Table: rel.id, Alias: aliasTag(qualifier)},
 		Desc:   orderBy.Desc,
 	}, nil
+}
+
+func compileOrderByList(orderBy []sql.OrderByColumn, compile func(sql.OrderByColumn) (compiledSQLOrderBy, error)) ([]compiledSQLOrderBy, error) {
+	if len(orderBy) == 0 {
+		return nil, nil
+	}
+	compiled := make([]compiledSQLOrderBy, 0, len(orderBy))
+	for _, term := range orderBy {
+		resolved, err := compile(term)
+		if err != nil {
+			return nil, err
+		}
+		compiled = append(compiled, resolved)
+	}
+	return compiled, nil
 }
 
 func resolveOrderByProjectionOutputName(name string, columns []compiledSQLProjectionColumn) (compiledSQLProjectionColumn, bool, error) {

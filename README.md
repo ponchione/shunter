@@ -74,8 +74,9 @@ subsystems:
 
 ## Runtime Entrypoint
 
-There is no maintained bundled demo command at the moment. The root package is
-the maintained integration surface for application code and tests.
+Shunter does not currently bundle a canonical example application in this
+repository. The root package is the maintained integration surface for
+application code and tests.
 
 Important public APIs include:
 
@@ -98,16 +99,15 @@ Important public APIs include:
 - `Runtime.ExportSchema`
 - `Runtime.ExportContract`
 
-A runnable example should be added when it can demonstrate the intended product
-workflow end to end rather than serve as a temporary smoke test.
+A bundled runnable example should be added to this repository only when it
+captures a stable integration pattern worth maintaining.
 
 ## Current Limitations
 
 The runtime has meaningful implementation depth, but several areas are still
 early or intentionally narrow:
 
-- developer onboarding material is limited
-- there is no maintained hello-world command or tutorial flow
+- no bundled canonical example application is maintained in this repo
 - client bindings and code generation exist, but onboarding material around
   them is still limited
 - SQL support is scoped to the v1 read-surface matrix; Shunter does not promise
@@ -142,10 +142,16 @@ Shunter tool/runtime release version.
 
 For human orientation, start with:
 
-1. `README.md` - project overview and current status
-2. `docs/README.md` - guide to the app-author and codebase docs tree
-3. `docs/getting-started.md` - first-pass app-author path for embedding
-   Shunter
+1. [README.md](README.md) - project overview and current status
+2. [docs/README.md](docs/README.md) - guide to the app-author docs tree
+3. [docs/getting-started.md](docs/getting-started.md) - first-pass
+   app-author path for embedding Shunter
+4. [docs/concepts.md](docs/concepts.md) - vocabulary for modules, runtimes,
+   reducers, reads, contracts, protocol serving, and durable state
+5. [docs/how-to/README.md](docs/how-to/README.md) - task-focused integration
+   guides
+6. [docs/reference/README.md](docs/reference/README.md) - compact API
+   decision notes
 
 For implementation planning context, use `working-docs/README.md`,
 `working-docs/shunter-design-decisions.md`, and the narrow
