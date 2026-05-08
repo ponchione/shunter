@@ -1964,6 +1964,58 @@ assert.equal(recoveredTableHandle.state.status, "active");
 assert.deepEqual(recoveredTableHandle.state.rows.map((row) => [...row]), [[1, 2], [3]]);
 await subscriptionSendFailureClient.close();
 
+const requestSendFailureSockets = [];
+const requestSendFailureClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    requestSendFailureSockets.push(socket);
+    return socket;
+  },
+});
+const requestSendFailureConnecting = requestSendFailureClient.connect();
+await nextTurn();
+requestSendFailureSockets[0].open();
+requestSendFailureSockets[0].message(identityTokenFrame().buffer);
+await requestSendFailureConnecting;
+const originalRequestSend = requestSendFailureSockets[0].send.bind(requestSendFailureSockets[0]);
+requestSendFailureSockets[0].send = () => {
+  throw new Error("request send denied");
+};
+const failedReducerSend = requestSendFailureClient.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+});
+await assert.rejects(failedReducerSend, (error) => {
+  assert.equal(error.kind, "transport");
+  assert.match(error.message, /request send denied/);
+  return true;
+});
+requestSendFailureSockets[0].send = originalRequestSend;
+const recoveredReducerSend = requestSendFailureClient.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+});
+requestSendFailureSockets[0].message(committedUpdateFrame);
+assert.deepEqual(await recoveredReducerSend, committedUpdateFrame);
+requestSendFailureSockets[0].send = () => {
+  throw new Error("request send denied");
+};
+const failedQuerySend = requestSendFailureClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x01, 0x02]),
+});
+await assert.rejects(failedQuerySend, (error) => {
+  assert.equal(error.kind, "transport");
+  assert.match(error.message, /request send denied/);
+  return true;
+});
+requestSendFailureSockets[0].send = originalRequestSend;
+const recoveredQuerySend = requestSendFailureClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x01, 0x02]),
+});
+requestSendFailureSockets[0].message(oneOffSuccessFrame);
+assert.deepEqual(await recoveredQuerySend, oneOffSuccessFrame);
+await requestSendFailureClient.close();
+
 const reconnectSockets = [];
 const reconnectFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);
