@@ -143,6 +143,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   evaluation errors so pending operations and live handles settle explicitly.
 - TypeScript table subscription `onRows` and `onInitialRows` callbacks now
   receive raw row bytes when no row decoder is supplied.
+- TypeScript declared-view and table subscriptions now reject explicit
+  request/query IDs that are pending, active, or awaiting unsubscribe
+  acknowledgement.
 - The TypeScript runtime now defines explicit reducer argument encoder helpers
   for callers that map typed reducer args to raw `Uint8Array` payloads.
 

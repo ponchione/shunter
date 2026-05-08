@@ -974,6 +974,23 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     return pending;
   };
 
+  const subscriptionIdInUse = (requestId: RequestID, queryId: QueryID): boolean =>
+    pendingSubscriptionsByRequest.has(requestId) ||
+    pendingSubscriptionsByQuery.has(queryId) ||
+    pendingUnsubscribesByRequest.has(requestId) ||
+    pendingUnsubscribesByQuery.has(queryId) ||
+    activeSubscriptionsByQuery.has(queryId);
+
+  const subscriptionIdInUseError = (
+    kind: PendingSubscription["kind"],
+    target: string,
+    requestId: RequestID,
+    queryId: QueryID,
+  ): ShunterValidationError => new ShunterValidationError("Subscription ID is already in use.", {
+    code: "subscription_id_in_use",
+    details: { kind, target, requestId, queryId },
+  });
+
   const unsubscribeOnce = (
     kind: PendingUnsubscribe["kind"],
     queryId: QueryID,
@@ -1733,13 +1750,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         requestId: options.requestId ?? allocateRequestId(),
         queryId: options.queryId ?? allocateQueryId(),
       });
-      if (
-        pendingSubscriptionsByRequest.has(request.requestId) ||
-        pendingSubscriptionsByQuery.has(request.queryId)
-      ) {
-        throw new ShunterValidationError("Declared view subscription ID is already in flight.", {
-          details: { name, requestId: request.requestId, queryId: request.queryId },
-        });
+      if (subscriptionIdInUse(request.requestId, request.queryId)) {
+        throw subscriptionIdInUseError("declared_view", name, request.requestId, request.queryId);
       }
       const handle = options.returnHandle === true
         ? createSubscriptionHandle<unknown>({
@@ -1811,13 +1823,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         requestId: options.requestId ?? allocateRequestId(),
         queryId: options.queryId ?? allocateQueryId(),
       });
-      if (
-        pendingSubscriptionsByRequest.has(request.requestId) ||
-        pendingSubscriptionsByQuery.has(request.queryId)
-      ) {
-        throw new ShunterValidationError("Table subscription ID is already in flight.", {
-          details: { table, requestId: request.requestId, queryId: request.queryId },
-        });
+      if (subscriptionIdInUse(request.requestId, request.queryId)) {
+        throw subscriptionIdInUseError("table", table, request.requestId, request.queryId);
       }
       const handle = options.returnHandle === true
         ? createSubscriptionHandle<unknown>({

@@ -1517,6 +1517,67 @@ assert.deepEqual(rawTableCallbackRows[0].map((row) => [...row]), [[1, 2], [3]]);
 assert.deepEqual(rawTableCallbackInitialRows[0].map((row) => [...row]), [[1, 2], [3]]);
 await rawTableCallbackClient.close();
 
+const duplicateQueryIdSockets = [];
+const duplicateQueryIdClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    duplicateQueryIdSockets.push(socket);
+    return socket;
+  },
+});
+const duplicateQueryIdConnecting = duplicateQueryIdClient.connect();
+await nextTurn();
+duplicateQueryIdSockets[0].open();
+duplicateQueryIdSockets[0].message(identityTokenFrame().buffer);
+await duplicateQueryIdConnecting;
+const duplicateQueryIdHandleSubscription = duplicateQueryIdClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+duplicateQueryIdSockets[0].message(subscribeSingleAppliedFrame);
+const duplicateQueryIdHandle = await duplicateQueryIdHandleSubscription;
+assert.deepEqual(duplicateQueryIdHandle.state, { status: "active", rows: ["1-2", "3"] });
+await rejectByNextTurn(
+  duplicateQueryIdClient.subscribeTable("users", undefined, {
+    requestId: 0x11111111,
+    queryId: 0x11121314,
+  }),
+  (error) => {
+    assert(error instanceof ShunterValidationError);
+    assert.equal(error.kind, "validation");
+    assert.equal(error.code, "subscription_id_in_use");
+    assert.deepEqual(error.details, { kind: "table", target: "users", requestId: 0x11111111, queryId: 0x11121314 });
+  },
+);
+assert.equal(duplicateQueryIdSockets[0].sent.length, 1);
+const duplicateQueryIdUnsubscribe = duplicateQueryIdHandle.unsubscribe();
+assert.equal(duplicateQueryIdSockets[0].sent.length, 2);
+await rejectByNextTurn(
+  duplicateQueryIdClient.subscribeDeclaredView("live_users", {
+    requestId: 0x22222222,
+    queryId: 0x11121314,
+  }),
+  (error) => {
+    assert(error instanceof ShunterValidationError);
+    assert.equal(error.kind, "validation");
+    assert.equal(error.code, "subscription_id_in_use");
+    assert.deepEqual(error.details, {
+      kind: "declared_view",
+      target: "live_users",
+      requestId: 0x22222222,
+      queryId: 0x11121314,
+    });
+  },
+);
+assert.equal(duplicateQueryIdSockets[0].sent.length, 2);
+duplicateQueryIdSockets[0].message(unsubscribeTableAppliedFrame);
+await duplicateQueryIdUnsubscribe;
+await duplicateQueryIdClient.close();
+
 const deniedTableSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x41424344,
   queryId: 0x51525354,

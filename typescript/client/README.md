@@ -94,6 +94,8 @@ include RowList row bytes.
 query, resolves after `SubscribeSingleApplied`, rejects on `SubscriptionError`,
 and returns an unsubscribe function that sends one `UnsubscribeSingle` frame
 for repeated calls and resolves after the matching acknowledgement.
+Explicit subscription IDs are rejected while the same request/query ID is
+pending, active, or awaiting unsubscribe acknowledgement.
 Passing `returnHandle: true` to either subscription method preserves the same
 acceptance and acknowledgement semantics while resolving with a
 `SubscriptionHandle` whose `unsubscribe()` is idempotent.
