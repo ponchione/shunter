@@ -865,6 +865,57 @@ func TestOpenOffsetIndexReadOnlyIgnoresShortPartialTrailingEntry(t *testing.T) {
 	}
 }
 
+func TestOpenOffsetIndexMutClearsShortPartialTrailingEntry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, OffsetIndexFileName(1))
+
+	idx, err := CreateOffsetIndex(path, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []OffsetIndexEntry{
+		{TxID: 10, ByteOffset: 100},
+		{TxID: 20, ByteOffset: 200},
+	} {
+		if err := idx.Append(e.TxID, e.ByteOffset); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	writeRawOffsetIndexEntry(t, path, 2, 30, 300)
+	if err := os.Truncate(path, int64(2*OffsetIndexEntrySize+offsetIndexValOff)); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenOffsetIndexMut(path, 8)
+	if err != nil {
+		t.Fatalf("OpenOffsetIndexMut: %v", err)
+	}
+	if got := reopened.NumEntries(); got != 2 {
+		t.Fatalf("NumEntries after writable reopen = %d, want 2", got)
+	}
+	if err := reopened.Append(30, 300); err != nil {
+		t.Fatalf("Append after clearing short tail: %v", err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ro, err := OpenOffsetIndex(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ro.Close()
+	assertOffsetIndexViewMatchesModel(t, ro, []OffsetIndexEntry{
+		{TxID: 10, ByteOffset: 100},
+		{TxID: 20, ByteOffset: 200},
+		{TxID: 30, ByteOffset: 300},
+	}, 0, 0, []string{"mutable-short-partial"})
+}
+
 func TestOffsetIndexFixedSeedAppendTruncateReopenModel(t *testing.T) {
 	const capEntries = uint64(16)
 	seeds := []uint64{0x1d0ff51de, 0x51deca11, 0xc0ffee17}
