@@ -474,6 +474,35 @@ func TestRunCompactionRemovesCoveredOrphansButRetainsUncoveredOrphans(t *testing
 	assertFileExists(t, futureOrphan)
 }
 
+func TestRunCompactionIgnoresMalformedOffsetIndexArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	covered := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	active := makeScanTestSegment(t, dir, 4, 4, 5)
+
+	canonicalOrphan := filepath.Join(dir, OffsetIndexFileName(2))
+	idx, err := CreateOffsetIndex(canonicalOrphan, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+	malformed := filepath.Join(dir, "2.idx")
+	if err := os.WriteFile(malformed, []byte("malformed sidecar"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ignoreCompactionSyncDir(t)
+
+	if err := RunCompaction(dir, 3); err != nil {
+		t.Fatalf("RunCompaction: %v", err)
+	}
+	assertFileMissing(t, covered)
+	assertFileMissing(t, canonicalOrphan)
+	assertFileExists(t, active)
+	assertFileExists(t, malformed)
+}
+
 func TestRunCompactionRemovesCoveredSymlinkOrphanButRetainsFutureSymlinkOrphan(t *testing.T) {
 	dir := t.TempDir()
 	covered := makeScanTestSegment(t, dir, 1, 1, 2, 3)
