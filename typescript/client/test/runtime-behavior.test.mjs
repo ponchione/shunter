@@ -1470,6 +1470,18 @@ assert.deepEqual(
   sockets[0].sent[4],
   encodeDeclaredQueryRequest("recent_users", { messageId: new Uint8Array([0x01, 0x02]) }).frame,
 );
+await rejectByNextTurn(
+  client.runDeclaredQuery("recent_users", {
+    messageId: new Uint8Array([0x01, 0x02]),
+  }),
+  (error) => {
+    assert(error instanceof ShunterValidationError);
+    assert.equal(error.kind, "validation");
+    assert.equal(error.code, "declared_query_message_id_in_use");
+    assert.deepEqual(error.details, { name: "recent_users", messageId: new Uint8Array([0x01, 0x02]) });
+  },
+);
+assert.equal(sockets[0].sent.length, 5);
 sockets[0].message(oneOffSuccessFrame);
 assert.deepEqual(await declaredQueryResponse, oneOffSuccessFrame);
 

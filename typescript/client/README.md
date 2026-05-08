@@ -90,7 +90,8 @@ exports those schemas.
 `runDeclaredQuery()` currently resolves with the raw `OneOffQueryResponse`
 frame on success and rejects on response errors. Consumers that want a typed raw
 envelope can pass that frame to `decodeRawDeclaredQueryResult()`.
-Auto-generated declared-query message IDs skip in-flight query responses.
+Declared queries reject explicit message IDs that are already in flight, and
+auto-generated declared-query message IDs skip in-flight query responses.
 `subscribeDeclaredView()` currently resolves after `SubscribeMultiApplied`,
 rejects on `SubscriptionError`, and returns an unsubscribe function that sends
 one `UnsubscribeMulti` frame for repeated calls and resolves after the matching

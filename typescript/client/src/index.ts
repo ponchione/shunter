@@ -1780,6 +1780,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       const messageKey = bytesKey(request.messageId);
       if (pendingDeclaredQueries.has(messageKey)) {
         throw new ShunterValidationError("Declared query message ID is already in flight.", {
+          code: "declared_query_message_id_in_use",
           details: { name, messageId: request.messageId },
         });
       }

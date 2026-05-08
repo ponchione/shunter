@@ -154,6 +154,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   with an in-flight full-update reducer response.
 - TypeScript reducer calls and declared queries now skip occupied in-flight IDs
   when auto-allocating reducer request IDs and declared-query message IDs.
+- TypeScript declared queries now expose a stable validation error code when
+  callers reuse an in-flight message ID.
 - TypeScript table `onRawRows` callbacks now receive cloned row bytes so raw
   callback mutation cannot corrupt decoded initial rows or managed handles.
 - TypeScript token providers now fail before WebSocket creation when they
