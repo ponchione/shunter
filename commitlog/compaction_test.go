@@ -810,6 +810,33 @@ func TestRunCompactionRejectsSnapshotBeyondDurableHorizon(t *testing.T) {
 	assertFileExists(t, seg1)
 }
 
+func TestRunCompactionRejectsCorruptCoveredSealedSegmentBeforeDeleting(t *testing.T) {
+	dir := t.TempDir()
+	corruptCovered := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	tail := makeScanTestSegment(t, dir, 4, 4, 5)
+	corruptScanTestRecordPayloadByte(t, corruptCovered, 0, 0)
+
+	syncCalls := 0
+	stubCompactionSyncDir(t, func(path string) error {
+		syncCalls++
+		return nil
+	})
+
+	err := RunCompaction(dir, 5)
+	if err == nil {
+		t.Fatal("expected corrupt covered sealed segment to abort compaction")
+	}
+	var checksumErr *ChecksumMismatchError
+	if !errors.As(err, &checksumErr) {
+		t.Fatalf("RunCompaction error = %T %v, want ChecksumMismatchError", err, err)
+	}
+	if syncCalls != 0 {
+		t.Fatalf("syncDir calls = %d, want 0 after scan failure", syncCalls)
+	}
+	assertFileExists(t, corruptCovered)
+	assertFileExists(t, tail)
+}
+
 func TestRunCompactionDoesNotDeleteBoundarySegment(t *testing.T) {
 	dir := t.TempDir()
 	boundary := makeScanTestSegment(t, dir, 900, contiguousTxs(900, 1100)...)
