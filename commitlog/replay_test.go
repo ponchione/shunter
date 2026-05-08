@@ -494,6 +494,40 @@ func TestReplayCorrectAfterPartialIndexTail(t *testing.T) {
 	assertReplayStatesEqual(t, committedClean, committedPartial)
 }
 
+func TestReplayCorrectAfterShortPartialIndexTail(t *testing.T) {
+	root := t.TempDir()
+	const startTx = uint64(1)
+	const n = uint64(1024)
+	const horizon = types.TxID(512)
+
+	segPath, entries := writeDenseReplaySegment(t, root, startTx, n)
+
+	sparse := make([]OffsetIndexEntry, 0, n/64)
+	for i := uint64(0); i < uint64(len(entries)); i += 64 {
+		sparse = append(sparse, entries[i])
+	}
+	idxPath := filepath.Join(root, OffsetIndexFileName(startTx))
+	idx := populateSparseIndex(t, idxPath, 64, sparse)
+	_ = idx.Close()
+
+	segments := []SegmentInfo{{Path: segPath, StartTx: types.TxID(startTx), LastTx: types.TxID(startTx + n - 1), Valid: true}}
+	committedClean, reg := buildReplayCommittedState(t)
+	if _, err := ReplayLog(committedClean, segments, horizon, reg); err != nil {
+		t.Fatalf("clean-index replay: %v", err)
+	}
+
+	lastEntryOffset := int64(uint64(len(sparse)-1) * OffsetIndexEntrySize)
+	if err := os.Truncate(idxPath, lastEntryOffset+offsetIndexValOff); err != nil {
+		t.Fatal(err)
+	}
+
+	committedPartial, regPartial := buildReplayCommittedState(t)
+	if _, err := ReplayLog(committedPartial, segments, horizon, regPartial); err != nil {
+		t.Fatalf("short-partial-index replay: %v", err)
+	}
+	assertReplayStatesEqual(t, committedClean, committedPartial)
+}
+
 func TestReplayCorrectAfterIndexOffsetPastEOF(t *testing.T) {
 	root := t.TempDir()
 	const startTx = uint64(1)
