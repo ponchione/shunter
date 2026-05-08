@@ -976,6 +976,44 @@ assert.equal(firstConcurrentMetadata.identityToken, "concurrent-token");
 assert.strictEqual(await concurrentConnectClient.connect(), firstConcurrentMetadata);
 await concurrentConnectClient.close();
 
+const reconnectAfterCloseSockets = [];
+const reconnectAfterCloseStates = [];
+const reconnectAfterCloseClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectAfterCloseSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectAfterCloseStates.push(current.status),
+});
+const firstReconnectAfterClose = reconnectAfterCloseClient.connect();
+await nextTurn();
+reconnectAfterCloseSockets[0].open();
+reconnectAfterCloseSockets[0].message(identityTokenFrame({ token: "first-close-token" }).buffer);
+const firstReconnectAfterCloseMetadata = await firstReconnectAfterClose;
+assert.equal(firstReconnectAfterCloseMetadata.identityToken, "first-close-token");
+await reconnectAfterCloseClient.close();
+assert.equal(reconnectAfterCloseClient.state.status, "closed");
+const secondReconnectAfterClose = reconnectAfterCloseClient.connect();
+await nextTurn();
+assert.equal(reconnectAfterCloseSockets.length, 2);
+reconnectAfterCloseSockets[1].open();
+reconnectAfterCloseSockets[1].message(identityTokenFrame({ token: "second-close-token" }).buffer);
+const secondReconnectAfterCloseMetadata = await secondReconnectAfterClose;
+assert.equal(secondReconnectAfterCloseMetadata.identityToken, "second-close-token");
+assert.equal(reconnectAfterCloseClient.state.status, "connected");
+assert.deepEqual(reconnectAfterCloseStates, [
+  "connecting",
+  "connected",
+  "closing",
+  "closed",
+  "connecting",
+  "connected",
+]);
+await reconnectAfterCloseClient.close();
+
 const reducerResponse = client.callReducer("send", new Uint8Array([0xaa, 0xbb]), {
   requestId: 0x21222324,
 });
