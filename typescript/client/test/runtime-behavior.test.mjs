@@ -2131,6 +2131,82 @@ assert.deepEqual(reconnectPendingTokenCloseStates, [
   "closed",
 ]);
 
+const reconnectPendingTokenDisposeSockets = [];
+const reconnectPendingTokenDisposeStates = [];
+let reconnectPendingTokenDisposeCalls = 0;
+let resolveReconnectPendingTokenDispose;
+const reconnectPendingTokenDisposeClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => {
+    reconnectPendingTokenDisposeCalls += 1;
+    if (reconnectPendingTokenDisposeCalls === 1) {
+      return "initial-token";
+    }
+    return new Promise((resolve) => {
+      resolveReconnectPendingTokenDispose = resolve;
+    });
+  },
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectPendingTokenDisposeSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectPendingTokenDisposeStates.push(current.status),
+});
+const reconnectPendingTokenDisposeConnecting = reconnectPendingTokenDisposeClient.connect();
+await nextTurn();
+assert.equal(reconnectPendingTokenDisposeSockets[0].url, "ws://127.0.0.1:3000/subscribe?token=initial-token");
+reconnectPendingTokenDisposeSockets[0].open();
+reconnectPendingTokenDisposeSockets[0].message(identityTokenFrame().buffer);
+await reconnectPendingTokenDisposeConnecting;
+const reconnectPendingTokenDisposeHandleSubscription = reconnectPendingTokenDisposeClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectPendingTokenDisposeSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectPendingTokenDisposeHandle = await reconnectPendingTokenDisposeHandleSubscription;
+assert.deepEqual(reconnectPendingTokenDisposeHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectPendingTokenDisposeSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectPendingTokenDisposeClient.state.status, "reconnecting");
+await nextTurn();
+assert.equal(reconnectPendingTokenDisposeCalls, 2);
+assert.equal(reconnectPendingTokenDisposeClient.state.status, "connecting");
+assert.equal(reconnectPendingTokenDisposeSockets.length, 1);
+const observedReconnectPendingTokenDispose = reconnectPendingTokenDisposeClient.connect();
+const reconnectPendingTokenDisposed = reconnectPendingTokenDisposeClient.dispose();
+await assert.rejects(observedReconnectPendingTokenDispose, ShunterClosedClientError);
+await reconnectPendingTokenDisposed;
+assert.equal(reconnectPendingTokenDisposeClient.state.status, "closed");
+const reconnectPendingTokenDisposedHandleClosed = await reconnectPendingTokenDisposeHandle.closed;
+assert.equal(reconnectPendingTokenDisposedHandleClosed.reason, "error");
+assert(reconnectPendingTokenDisposedHandleClosed.error instanceof ShunterClosedClientError);
+assert.deepEqual(reconnectPendingTokenDisposeHandle.state, {
+  status: "closed",
+  error: reconnectPendingTokenDisposedHandleClosed.error,
+});
+resolveReconnectPendingTokenDispose("too-late");
+await nextTurn();
+assert.equal(reconnectPendingTokenDisposeSockets.length, 1);
+assert.equal(reconnectPendingTokenDisposeClient.state.status, "closed");
+await assert.rejects(reconnectPendingTokenDisposeClient.connect(), ShunterClosedClientError);
+assert.deepEqual(reconnectPendingTokenDisposeStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "closing",
+  "closed",
+]);
+
 const reconnectHandshakeCloseSockets = [];
 const reconnectHandshakeCloseStates = [];
 const reconnectHandshakeCloseClient = createShunterClient({
