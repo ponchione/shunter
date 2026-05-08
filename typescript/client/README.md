@@ -66,6 +66,8 @@ injected WebSocket factory for Node tests or host-specific transports.
 `connect()` resolves after the first server frame is decoded as an
 `IdentityToken`. Passing `reconnect: { enabled: true }` reconnects unexpected
 transport failures with configurable bounded backoff.
+Token providers must resolve to strings; invalid results fail before a
+WebSocket is created.
 Unsupported or malformed connected server frames fail the client as protocol
 errors, rejecting pending operations and closing active managed handles.
 Server-side subscription evaluation errors that are not scoped to a pending

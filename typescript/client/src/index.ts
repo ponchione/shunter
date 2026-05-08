@@ -1961,7 +1961,14 @@ async function resolveToken(token?: TokenSource): Promise<string | undefined> {
   if (typeof token === "string") {
     return token;
   }
-  return token();
+  const resolved = await token();
+  if (typeof resolved !== "string") {
+    throw new ShunterAuthError("Token provider failed.", {
+      code: "invalid_token_provider_result",
+      details: { receivedType: typeof resolved },
+    });
+  }
+  return resolved;
 }
 
 function withTokenQuery(url: string, token?: string): string {

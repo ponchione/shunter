@@ -800,6 +800,27 @@ await assert.rejects(asyncTokenFailureClient.connect(), (error) => {
 assert.equal(asyncTokenFailureClient.state.status, "failed");
 assert.equal(asyncTokenFailureFactoryCalls, 0);
 
+let invalidTokenFactoryCalls = 0;
+const invalidTokenClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => 42,
+  webSocketFactory: () => {
+    invalidTokenFactoryCalls += 1;
+    throw new Error("should not create socket");
+  },
+});
+await assert.rejects(invalidTokenClient.connect(), (error) => {
+  assert(error instanceof ShunterAuthError);
+  assert.equal(error.kind, "auth");
+  assert.match(error.message, /Token provider failed/);
+  assert.equal(error.code, "invalid_token_provider_result");
+  assert.deepEqual(error.details, { receivedType: "number" });
+  return true;
+});
+assert.equal(invalidTokenClient.state.status, "failed");
+assert.equal(invalidTokenFactoryCalls, 0);
+
 const preAbortedConnect = new AbortController();
 preAbortedConnect.abort();
 let preAbortedConnectFactoryCalls = 0;

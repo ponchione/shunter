@@ -152,6 +152,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   with an in-flight full-update reducer response.
 - TypeScript table `onRawRows` callbacks now receive cloned row bytes so raw
   callback mutation cannot corrupt decoded initial rows or managed handles.
+- TypeScript token providers now fail before WebSocket creation when they
+  resolve to non-string values.
 - The TypeScript runtime now defines explicit reducer argument encoder helpers
   for callers that map typed reducer args to raw `Uint8Array` payloads.
 
