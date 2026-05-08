@@ -837,6 +837,27 @@ func TestRunCompactionRejectsCorruptCoveredSealedSegmentBeforeDeleting(t *testin
 	assertFileExists(t, tail)
 }
 
+func TestRunCompactionRejectsDamagedCoveredSealedTailBeforeDeleting(t *testing.T) {
+	dir := t.TempDir()
+	damagedCovered := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	tail := makeScanTestSegment(t, dir, 4, 4, 5)
+	corruptScanTestRecordPayloadByte(t, damagedCovered, 2, 0)
+
+	syncCalls := 0
+	stubCompactionSyncDir(t, func(path string) error {
+		syncCalls++
+		return nil
+	})
+
+	err := RunCompaction(dir, 5)
+	assertHistoryGap(t, err, 3, 4)
+	if syncCalls != 0 {
+		t.Fatalf("syncDir calls = %d, want 0 after scan failure", syncCalls)
+	}
+	assertFileExists(t, damagedCovered)
+	assertFileExists(t, tail)
+}
+
 func TestRunCompactionDoesNotDeleteBoundarySegment(t *testing.T) {
 	dir := t.TempDir()
 	boundary := makeScanTestSegment(t, dir, 900, contiguousTxs(900, 1100)...)
