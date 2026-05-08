@@ -1652,6 +1652,65 @@ assert.deepEqual(reconnectViewUnsubscribeStates, [
 ]);
 await reconnectViewUnsubscribeClient.close();
 
+const reconnectPendingUnsubscribeSockets = [];
+const reconnectPendingUnsubscribeStates = [];
+const reconnectPendingUnsubscribeClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectPendingUnsubscribeSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectPendingUnsubscribeStates.push(current.status),
+});
+const reconnectPendingUnsubscribeConnecting = reconnectPendingUnsubscribeClient.connect();
+await nextTurn();
+reconnectPendingUnsubscribeSockets[0].open();
+reconnectPendingUnsubscribeSockets[0].message(identityTokenFrame().buffer);
+await reconnectPendingUnsubscribeConnecting;
+const reconnectPendingUnsubscribeHandleSubscription = reconnectPendingUnsubscribeClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectPendingUnsubscribeSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectPendingUnsubscribeHandle = await reconnectPendingUnsubscribeHandleSubscription;
+assert.deepEqual(reconnectPendingUnsubscribeHandle.state, { status: "active", rows: ["1-2", "3"] });
+const reconnectPendingUnsubscribe = reconnectPendingUnsubscribeHandle.unsubscribe();
+assert.equal(reconnectPendingUnsubscribeSockets[0].sent.length, 2);
+reconnectPendingUnsubscribeSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectPendingUnsubscribeClient.state.status, "reconnecting");
+await reconnectPendingUnsubscribe;
+const reconnectPendingUnsubscribed = await reconnectPendingUnsubscribeHandle.closed;
+assert.equal(reconnectPendingUnsubscribed.reason, "error");
+assert(reconnectPendingUnsubscribed.error instanceof ShunterClosedClientError);
+assert.deepEqual(reconnectPendingUnsubscribeHandle.state, {
+  status: "closed",
+  error: reconnectPendingUnsubscribed.error,
+});
+await nextTurn();
+assert.equal(reconnectPendingUnsubscribeSockets.length, 2);
+reconnectPendingUnsubscribeSockets[1].open();
+reconnectPendingUnsubscribeSockets[1].message(identityTokenFrame().buffer);
+assert.equal(reconnectPendingUnsubscribeClient.state.status, "connected");
+assert.equal(reconnectPendingUnsubscribeSockets[1].sent.length, 0);
+assert.deepEqual(reconnectPendingUnsubscribeStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "connected",
+]);
+await reconnectPendingUnsubscribeClient.close();
+
 const exhaustionSockets = [];
 const exhaustionFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);

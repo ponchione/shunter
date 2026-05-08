@@ -503,6 +503,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   const rejectPendingUnsubscribes = (error: ShunterError): void => {
     for (const pending of [...pendingUnsubscribesByRequest.values()]) {
       cleanupPendingUnsubscribe(pending);
+      removeActiveSubscription(pending.queryId);
       pending.reject(error);
     }
   };
