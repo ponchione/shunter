@@ -1060,12 +1060,45 @@ assert.deepEqual(decodedTableHandle.state, { status: "closed" });
 
 await client.close();
 await client.close();
-await client.dispose();
 assert.equal(sockets[0].closeCalls.length, 1);
 assert.deepEqual(clientStates, ["connecting", "connected", "closing", "closed"]);
+const assertClosedClientError = (error) => {
+  assert(error instanceof ShunterClosedClientError);
+  return true;
+};
 await assert.rejects(
   client.callReducer("send", new Uint8Array(), { requestId: 1 }),
-  ShunterClosedClientError,
+  assertClosedClientError,
+);
+await assert.rejects(
+  client.runDeclaredQuery("recent_users"),
+  assertClosedClientError,
+);
+await assert.rejects(
+  client.subscribeDeclaredView("live_users", { returnHandle: true }),
+  assertClosedClientError,
+);
+await assert.rejects(
+  client.subscribeTable("users", undefined, { returnHandle: true }),
+  assertClosedClientError,
+);
+await client.dispose();
+await assert.rejects(client.connect(), assertClosedClientError);
+await assert.rejects(
+  client.callReducer("send", new Uint8Array(), { requestId: 1 }),
+  assertClosedClientError,
+);
+await assert.rejects(
+  client.runDeclaredQuery("recent_users"),
+  assertClosedClientError,
+);
+await assert.rejects(
+  client.subscribeDeclaredView("live_users", { returnHandle: true }),
+  assertClosedClientError,
+);
+await assert.rejects(
+  client.subscribeTable("users", undefined, { returnHandle: true }),
+  assertClosedClientError,
 );
 
 const tokenFailureClient = createShunterClient({
