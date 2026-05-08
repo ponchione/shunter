@@ -2166,6 +2166,69 @@ assert.deepEqual(reconnectProtocolStates, [
   "closed",
 ]);
 
+const reconnectMissingProtocolSockets = [];
+const reconnectMissingProtocolStates = [];
+const reconnectMissingProtocolClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectMissingProtocolSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectMissingProtocolStates.push(current.status),
+});
+const reconnectMissingProtocolConnecting = reconnectMissingProtocolClient.connect();
+await nextTurn();
+reconnectMissingProtocolSockets[0].open();
+reconnectMissingProtocolSockets[0].message(identityTokenFrame().buffer);
+await reconnectMissingProtocolConnecting;
+const reconnectMissingProtocolHandleSubscription = reconnectMissingProtocolClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectMissingProtocolSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectMissingProtocolHandle = await reconnectMissingProtocolHandleSubscription;
+assert.deepEqual(reconnectMissingProtocolHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectMissingProtocolSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectMissingProtocolClient.state.status, "reconnecting");
+await nextTurn();
+assert.equal(reconnectMissingProtocolSockets.length, 2);
+const observedMissingProtocolReconnect = reconnectMissingProtocolClient.connect();
+reconnectMissingProtocolSockets[1].open("");
+const reconnectMissingProtocolError = await rejectByNextTurn(observedMissingProtocolReconnect, (error) => {
+  assert(error instanceof ShunterProtocolMismatchError);
+  assert.equal(error.kind, "protocol_mismatch");
+  assert.equal(error.code, "unsupported_selected_subprotocol");
+  assert.equal(error.receivedSubprotocol, "");
+});
+assert.equal(reconnectMissingProtocolClient.state.status, "closed");
+assert.strictEqual(reconnectMissingProtocolClient.state.error, reconnectMissingProtocolError);
+assert.equal(reconnectMissingProtocolSockets[1].closeCalls.length, 1);
+const reconnectMissingProtocolClosed = await reconnectMissingProtocolHandle.closed;
+assert.equal(reconnectMissingProtocolClosed.reason, "error");
+assert.strictEqual(reconnectMissingProtocolClosed.error, reconnectMissingProtocolError);
+assert.deepEqual(reconnectMissingProtocolHandle.state, {
+  status: "closed",
+  error: reconnectMissingProtocolError,
+});
+assert.deepEqual(reconnectMissingProtocolStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "failed",
+  "closed",
+]);
+
 const reconnectReplayFailureSockets = [];
 const reconnectReplayFailureStates = [];
 const reconnectReplayFailureClient = createShunterClient({
