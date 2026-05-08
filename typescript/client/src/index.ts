@@ -421,6 +421,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   let disposed = false;
   let suppressSocketCloseTransition = false;
   let hasConnected = false;
+  let connectGeneration = 0;
   let reconnectAttempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let resolveClose: (() => void) | undefined;
@@ -1344,19 +1345,30 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       }
 
       const attempt = state.status === "reconnecting" ? state.attempt : 1;
+      const generation = connectGeneration + 1;
+      connectGeneration = generation;
       setState({ status: "connecting", attempt });
 
       connectPromise = new Promise<ConnectionMetadata<Protocol>>(async (resolve, reject) => {
         rejectConnect = reject;
         let offeredSubprotocol: ShunterSubprotocol;
         let url: string;
+        let tokenResolved = false;
         try {
           offeredSubprotocol = selectShunterSubprotocol(options.protocol);
-          url = withTokenQuery(options.url, await resolveToken(options.token));
+          const token = await resolveToken(options.token);
+          tokenResolved = true;
+          if (connectGeneration !== generation || state.status !== "connecting") {
+            return;
+          }
+          url = withTokenQuery(options.url, token);
           if (options.signal?.aborted) {
             throw new ShunterClosedClientError("Connection aborted before opening.");
           }
         } catch (error) {
+          if (tokenResolved && (connectGeneration !== generation || state.status !== "connecting")) {
+            return;
+          }
           const shunterError =
             isShunterError(error)
               ? error

@@ -802,6 +802,71 @@ await assert.rejects(asyncAbortConnecting, ShunterClosedClientError);
 assert.equal(asyncAbortConnectClient.state.status, "failed");
 assert.equal(asyncAbortConnectFactoryCalls, 0);
 
+const closePendingTokenSockets = [];
+let resolveClosePendingToken;
+let closePendingTokenCalls = 0;
+const closePendingTokenClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => {
+    closePendingTokenCalls += 1;
+    return new Promise((resolve) => {
+      resolveClosePendingToken = resolve;
+    });
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    closePendingTokenSockets.push(socket);
+    return socket;
+  },
+});
+const closePendingTokenConnecting = closePendingTokenClient.connect();
+await nextTurn();
+assert.equal(closePendingTokenCalls, 1);
+assert.equal(closePendingTokenClient.state.status, "connecting");
+const closePendingTokenClosed = closePendingTokenClient.close(4002, "caller closed before token");
+await assert.rejects(closePendingTokenConnecting, ShunterClosedClientError);
+await closePendingTokenClosed;
+assert.equal(closePendingTokenClient.state.status, "closed");
+assert.equal(closePendingTokenSockets.length, 0);
+resolveClosePendingToken("too-late");
+await nextTurn();
+assert.equal(closePendingTokenSockets.length, 0);
+assert.equal(closePendingTokenClient.state.status, "closed");
+
+const disposePendingTokenSockets = [];
+let resolveDisposePendingToken;
+let disposePendingTokenCalls = 0;
+const disposePendingTokenClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => {
+    disposePendingTokenCalls += 1;
+    return new Promise((resolve) => {
+      resolveDisposePendingToken = resolve;
+    });
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    disposePendingTokenSockets.push(socket);
+    return socket;
+  },
+});
+const disposePendingTokenConnecting = disposePendingTokenClient.connect();
+await nextTurn();
+assert.equal(disposePendingTokenCalls, 1);
+assert.equal(disposePendingTokenClient.state.status, "connecting");
+const disposePendingTokenClosed = disposePendingTokenClient.dispose();
+await assert.rejects(disposePendingTokenConnecting, ShunterClosedClientError);
+await disposePendingTokenClosed;
+assert.equal(disposePendingTokenClient.state.status, "closed");
+assert.equal(disposePendingTokenSockets.length, 0);
+resolveDisposePendingToken("too-late");
+await nextTurn();
+assert.equal(disposePendingTokenSockets.length, 0);
+assert.equal(disposePendingTokenClient.state.status, "closed");
+await assert.rejects(disposePendingTokenClient.connect(), ShunterClosedClientError);
+
 const abortHandshake = new AbortController();
 const abortHandshakeSockets = [];
 const abortHandshakeStates = [];
@@ -1990,6 +2055,81 @@ assert.deepEqual(reconnectCloseHandle.state, {
   error: reconnectCloseClosed.error,
 });
 assert.deepEqual(reconnectCloseStates, ["connecting", "connected", "reconnecting", "closing", "closed"]);
+
+const reconnectPendingTokenCloseSockets = [];
+const reconnectPendingTokenCloseStates = [];
+let reconnectPendingTokenCloseCalls = 0;
+let resolveReconnectPendingTokenClose;
+const reconnectPendingTokenCloseClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  token: () => {
+    reconnectPendingTokenCloseCalls += 1;
+    if (reconnectPendingTokenCloseCalls === 1) {
+      return "initial-token";
+    }
+    return new Promise((resolve) => {
+      resolveReconnectPendingTokenClose = resolve;
+    });
+  },
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectPendingTokenCloseSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectPendingTokenCloseStates.push(current.status),
+});
+const reconnectPendingTokenCloseConnecting = reconnectPendingTokenCloseClient.connect();
+await nextTurn();
+assert.equal(reconnectPendingTokenCloseSockets[0].url, "ws://127.0.0.1:3000/subscribe?token=initial-token");
+reconnectPendingTokenCloseSockets[0].open();
+reconnectPendingTokenCloseSockets[0].message(identityTokenFrame().buffer);
+await reconnectPendingTokenCloseConnecting;
+const reconnectPendingTokenCloseHandleSubscription = reconnectPendingTokenCloseClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectPendingTokenCloseSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectPendingTokenCloseHandle = await reconnectPendingTokenCloseHandleSubscription;
+assert.deepEqual(reconnectPendingTokenCloseHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectPendingTokenCloseSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+assert.equal(reconnectPendingTokenCloseClient.state.status, "reconnecting");
+await nextTurn();
+assert.equal(reconnectPendingTokenCloseCalls, 2);
+assert.equal(reconnectPendingTokenCloseClient.state.status, "connecting");
+assert.equal(reconnectPendingTokenCloseSockets.length, 1);
+const observedReconnectPendingTokenClose = reconnectPendingTokenCloseClient.connect();
+const reconnectPendingTokenCloseClosed = reconnectPendingTokenCloseClient.close(4003, "caller stopped before token");
+await assert.rejects(observedReconnectPendingTokenClose, ShunterClosedClientError);
+await reconnectPendingTokenCloseClosed;
+assert.equal(reconnectPendingTokenCloseClient.state.status, "closed");
+const reconnectPendingTokenClosed = await reconnectPendingTokenCloseHandle.closed;
+assert.equal(reconnectPendingTokenClosed.reason, "error");
+assert(reconnectPendingTokenClosed.error instanceof ShunterClosedClientError);
+assert.deepEqual(reconnectPendingTokenCloseHandle.state, {
+  status: "closed",
+  error: reconnectPendingTokenClosed.error,
+});
+resolveReconnectPendingTokenClose("too-late");
+await nextTurn();
+assert.equal(reconnectPendingTokenCloseSockets.length, 1);
+assert.equal(reconnectPendingTokenCloseClient.state.status, "closed");
+assert.deepEqual(reconnectPendingTokenCloseStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "closing",
+  "closed",
+]);
 
 const reconnectHandshakeCloseSockets = [];
 const reconnectHandshakeCloseStates = [];
