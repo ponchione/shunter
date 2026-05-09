@@ -23,6 +23,10 @@ func BenchmarkWebSocketFanout64ClientsLightUpdate(b *testing.B) {
 	benchmarkWebSocketFanoutLightUpdate(b, 64)
 }
 
+func BenchmarkWebSocketFanout128ClientsLightUpdate(b *testing.B) {
+	benchmarkWebSocketFanoutLightUpdate(b, 128)
+}
+
 func benchmarkWebSocketFanoutLightUpdate(b *testing.B, clientCount int) {
 	h := newBenchmarkWebSocketFanoutHarness(b, clientCount)
 	fanout := make(map[types.ConnectionID][]SubscriptionUpdate, clientCount)
