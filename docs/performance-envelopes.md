@@ -50,6 +50,15 @@ go test -run '^$' -bench 'BenchmarkFanOut1KClients.*VariedQueries' -benchmem -co
 rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-fanout-varied-bench.txt
 ```
 
+The WebSocket SubscribeSingle round-trip row was measured from a clean
+detached worktree at Shunter commit
+`de9bbd35dfec2b62771cf2223358d23562cf4775` with:
+
+```bash
+go test -run '^$' -bench 'BenchmarkSubscribeSingleWebSocketRoundTrip' -benchmem -count=10 ./protocol > /tmp/shunter-websocket-subscribe-bench.txt
+rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-websocket-subscribe-bench.txt
+```
+
 Every row is advisory.
 
 ## Protocol
@@ -68,6 +77,7 @@ Every row is advisory.
 | Subscribe admission | `HandleSubscribeSingleAdmissionReadShapes/single_table_filter-24` | parse and register single-table query | 1.634us +/- 7% | 3.219Ki +/- 0% | 26 | advisory |
 | Subscribe admission | `HandleSubscribeSingleAdmissionReadShapes/two_table_join-24` | parse and register two-table join | 2.777us +/- 3% | 5.492Ki +/- 0% | 44 | advisory |
 | Subscribe admission | `HandleSubscribeSingleAdmissionReadShapes/multi_way_join-24` | parse and register multi-way join | 5.659us +/- 10% | 14.67Ki +/- 0% | 92 | advisory |
+| Subscribe WebSocket | `SubscribeSingleWebSocketRoundTrip-24` | persistent WebSocket; client `SubscribeSingle` write through server dispatch, executor reply, and client `SubscribeSingleApplied` read | 16.36us +/- 4% | 6.454Ki +/- 0% | 82 | advisory |
 
 ## Commitlog
 
@@ -165,7 +175,9 @@ Findings:
 
 These remain outside the current benchmark envelope:
 
-- WebSocket network-level subscription workloads beyond handler admission
+- WebSocket network-level subscription workloads beyond the single
+  persistent-connection SubscribeSingle round trip, including multi-client
+  fanout and backpressure paths
 - broader fanout distributions beyond deterministic in-process same-query,
   single-table, and two-table varied predicate fixtures
 - external canary workload, including canary-scale backup/restore timing

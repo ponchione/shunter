@@ -198,14 +198,16 @@ Current benchmark coverage:
 | Scheduler scans | `BenchmarkSchedulerScanEnqueue` | covered for enqueue scan hot path |
 | One-off SQL | `BenchmarkExecuteCompiledSQLQueryCommonPaths`, `BenchmarkExecuteCompiledSQLQueryJoinReadShapes` | covered for common single-table, join, multi-way aggregate, projection, ordering, and limit paths |
 | Declared reads | `BenchmarkDeclaredReadRuntimeSurfaces` | covered for local declared query execution and declared live-view initial rows, including projection/order/limit and aggregate shapes |
-| Raw subscription protocol admission | `BenchmarkHandleSubscribeSingleAdmissionReadShapes` | covered for single-table, two-table join, and multi-way join SubscribeSingle admission |
+| Raw subscription protocol admission | `BenchmarkHandleSubscribeSingleAdmissionReadShapes`, `BenchmarkSubscribeSingleWebSocketRoundTrip` | covered for single-table, two-table join, and multi-way join SubscribeSingle admission plus one persistent-WebSocket SubscribeSingle round trip |
 | Subscription equality and lifecycle | `BenchmarkEvalEqualitySubs1K`, `BenchmarkEvalEqualitySubs10K`, `BenchmarkRegisterUnregister` | covered for core hot paths |
 | Subscription initial snapshots and fanout | `BenchmarkRegisterSetInitialQueryAllRows`, `BenchmarkProjectedRowsBeforeLargeBags`, `BenchmarkFanOut1KClientsSameQuery`, `BenchmarkFanOut1KClientsVariedQueries`, `BenchmarkFanOut1KClientsMultiTableVariedQueries` | partial; covers deterministic same-query, varied single-table, and varied two-table fanout plus memory-profile evidence for the current large initial snapshot and projected-row diff fixtures; still needs network/canary-scale and skewed distributions |
 | Subscription joins and candidate pruning | `BenchmarkJoinFragmentEval`, `BenchmarkMultiWayLiveJoinEvalSizes`, `BenchmarkDeltaIndexConstruction`, `BenchmarkCandidateCollection` | covered for two-table joins plus deterministic small/medium/large multi-way live joins with table-shaped and aggregate deltas; `rows_512` has memory-profile evidence |
 
 Known benchmark gaps for v1 envelopes:
 
-- WebSocket network-level subscription workloads beyond handler admission
+- WebSocket network-level subscription workloads beyond the single
+  persistent-connection SubscribeSingle round trip, including multi-client
+  fanout and backpressure paths
 - broader fanout distributions beyond deterministic in-process same-query,
   single-table, and two-table varied predicate fixtures
 - external canary workload, including canary-scale backup/restore timing
