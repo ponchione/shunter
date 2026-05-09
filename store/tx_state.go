@@ -33,6 +33,9 @@ func (tx *TxState) AddInsert(tableID schema.TableID, id types.RowID, row types.P
 func (tx *TxState) RemoveInsert(tableID schema.TableID, id types.RowID) {
 	if m := tx.inserts[tableID]; m != nil {
 		delete(m, id)
+		if len(m) == 0 {
+			delete(tx.inserts, tableID)
+		}
 	}
 }
 
@@ -50,6 +53,9 @@ func (tx *TxState) AddDelete(tableID schema.TableID, id types.RowID) {
 func (tx *TxState) CancelDelete(tableID schema.TableID, id types.RowID) {
 	if m := tx.deletes[tableID]; m != nil {
 		delete(m, id)
+		if len(m) == 0 {
+			delete(tx.deletes, tableID)
+		}
 	}
 }
 

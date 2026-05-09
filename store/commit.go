@@ -167,46 +167,34 @@ func revalidateInsertAgainstPending(tableID schema.TableID, table *Table, row ty
 		key := idx.ExtractKey(row)
 		ref := txUniqueRef{table: tableID, index: idxOrdinal}
 		buckets := pendingUnique[ref]
-		if buckets == nil {
-			continue
-		}
-		for _, priorKey := range buckets[key.hash64()] {
+		hash := key.hash64()
+		for _, priorKey := range buckets[hash] {
 			if key.Equal(priorKey) {
 				return uniqueViolationError(table, idx, key)
 			}
 		}
+		if buckets == nil {
+			buckets = make(map[uint64][]IndexKey)
+			pendingUnique[ref] = buckets
+		}
+		buckets[hash] = append(buckets[hash], key)
 	}
 	if table.rowHashIndex != nil {
+		hash := row.Hash64()
 		if buckets := pendingRows[tableID]; buckets != nil {
-			for _, prior := range buckets[row.Hash64()] {
+			for _, prior := range buckets[hash] {
 				if !prior.Equal(row) {
 					continue
 				}
 				return ErrDuplicateRow
 			}
 		}
-	}
-
-	for idxOrdinal, idx := range table.indexes {
-		if !idx.schema.Unique {
-			continue
-		}
-		key := idx.ExtractKey(row)
-		ref := txUniqueRef{table: tableID, index: idxOrdinal}
-		buckets := pendingUnique[ref]
-		if buckets == nil {
-			buckets = make(map[uint64][]IndexKey)
-			pendingUnique[ref] = buckets
-		}
-		buckets[key.hash64()] = append(buckets[key.hash64()], key)
-	}
-	if table.rowHashIndex != nil {
 		buckets := pendingRows[tableID]
 		if buckets == nil {
 			buckets = make(map[uint64][]types.ProductValue)
 			pendingRows[tableID] = buckets
 		}
-		buckets[row.Hash64()] = append(buckets[row.Hash64()], row)
+		buckets[hash] = append(buckets[hash], row)
 	}
 	return nil
 }

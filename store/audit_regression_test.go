@@ -737,6 +737,21 @@ func TestTxStateAccessorsReturnDetachedMaps(t *testing.T) {
 	}
 }
 
+func TestTxStateRemovesEmptyTableBuffers(t *testing.T) {
+	tx := NewTxState()
+	tx.AddInsert(0, 1, mkRow(1, "alice"))
+	tx.RemoveInsert(0, 1)
+	if got := tx.AllInserts(); len(got) != 0 {
+		t.Fatalf("AllInserts after removing last insert = %v, want empty", got)
+	}
+
+	tx.AddDelete(0, 2)
+	tx.CancelDelete(0, 2)
+	if got := tx.AllDeletes(); len(got) != 0 {
+		t.Fatalf("AllDeletes after canceling last delete = %v, want empty", got)
+	}
+}
+
 func TestRollbackBlocksPostRollbackInsert(t *testing.T) {
 	cs, reg := buildTestState()
 	tx := NewTransaction(cs, reg)
