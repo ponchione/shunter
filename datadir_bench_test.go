@@ -8,9 +8,38 @@ import (
 )
 
 func BenchmarkBackupRestoreDataDirWorkflow(b *testing.B) {
+	benchmarkBackupRestoreDataDirWorkflow(b, backupRestoreBenchmarkFixture{
+		logSegments:  4,
+		logSize:      64 * 1024,
+		snapshots:    2,
+		snapshotSize: 128 * 1024,
+		metadataSize: 512,
+	})
+}
+
+func BenchmarkBackupRestoreDataDirWorkflowLarge(b *testing.B) {
+	benchmarkBackupRestoreDataDirWorkflow(b, backupRestoreBenchmarkFixture{
+		logSegments:  16,
+		logSize:      256 * 1024,
+		snapshots:    4,
+		snapshotSize: 512 * 1024,
+		metadataSize: 1024,
+	})
+}
+
+type backupRestoreBenchmarkFixture struct {
+	logSegments  int
+	logSize      int
+	snapshots    int
+	snapshotSize int
+	metadataSize int
+}
+
+func benchmarkBackupRestoreDataDirWorkflow(b *testing.B, fixture backupRestoreBenchmarkFixture) {
+	b.Helper()
 	root := b.TempDir()
 	source := filepath.Join(root, "source")
-	buildBackupRestoreBenchmarkDataDir(b, source)
+	buildBackupRestoreBenchmarkDataDir(b, source, fixture)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -23,7 +52,7 @@ func BenchmarkBackupRestoreDataDirWorkflow(b *testing.B) {
 		if err := RestoreDataDir(backup, restore); err != nil {
 			b.Fatalf("RestoreDataDir: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(restore, "snapshots", "2", "snapshot")); err != nil {
+		if _, err := os.Stat(filepath.Join(restore, "snapshots", fmt.Sprint(fixture.snapshots), "snapshot")); err != nil {
 			b.Fatalf("stat restored snapshot: %v", err)
 		}
 
@@ -38,16 +67,16 @@ func BenchmarkBackupRestoreDataDirWorkflow(b *testing.B) {
 	}
 }
 
-func buildBackupRestoreBenchmarkDataDir(b *testing.B, root string) {
+func buildBackupRestoreBenchmarkDataDir(b *testing.B, root string, fixture backupRestoreBenchmarkFixture) {
 	b.Helper()
-	for i := 1; i <= 4; i++ {
+	for i := 1; i <= fixture.logSegments; i++ {
 		name := fmt.Sprintf("%020d.log", i)
-		writeBenchmarkDataDirFile(b, filepath.Join(root, name), 64*1024, byte(i))
+		writeBenchmarkDataDirFile(b, filepath.Join(root, name), fixture.logSize, byte(i))
 	}
-	for i := 1; i <= 2; i++ {
-		writeBenchmarkDataDirFile(b, filepath.Join(root, "snapshots", fmt.Sprint(i), "snapshot"), 128*1024, byte(10+i))
+	for i := 1; i <= fixture.snapshots; i++ {
+		writeBenchmarkDataDirFile(b, filepath.Join(root, "snapshots", fmt.Sprint(i), "snapshot"), fixture.snapshotSize, byte(10+i))
 	}
-	writeBenchmarkDataDirFile(b, filepath.Join(root, "shunter.datadir.json"), 512, 42)
+	writeBenchmarkDataDirFile(b, filepath.Join(root, "shunter.datadir.json"), fixture.metadataSize, 42)
 }
 
 func writeBenchmarkDataDirFile(b *testing.B, path string, size int, seed byte) {
