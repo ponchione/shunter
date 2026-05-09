@@ -198,7 +198,7 @@ Current benchmark coverage:
 | Scheduler scans | `BenchmarkSchedulerScanEnqueue` | covered for enqueue scan hot path |
 | One-off SQL | `BenchmarkExecuteCompiledSQLQueryCommonPaths`, `BenchmarkExecuteCompiledSQLQueryJoinReadShapes` | covered for common single-table, join, multi-way aggregate, projection, ordering, and limit paths |
 | Declared reads | `BenchmarkDeclaredReadRuntimeSurfaces` | covered for local declared query execution and declared live-view initial rows, including projection/order/limit and aggregate shapes |
-| Raw subscription protocol admission and network delivery | `BenchmarkHandleSubscribeSingleAdmissionReadShapes`, `BenchmarkSubscribeSingleWebSocketRoundTrip`, `BenchmarkWebSocketFanout16ClientsLightUpdate`, `BenchmarkWebSocketFanout64ClientsLightUpdate` | covered for single-table, two-table join, and multi-way join SubscribeSingle admission, one persistent-WebSocket SubscribeSingle round trip, and 16- and 64-client WebSocket light-update fanout |
+| Raw subscription protocol admission and network delivery | `BenchmarkHandleSubscribeSingleAdmissionReadShapes`, `BenchmarkSubscribeSingleWebSocketRoundTrip`, `BenchmarkWebSocketFanout16ClientsLightUpdate`, `BenchmarkWebSocketFanout64ClientsLightUpdate`, `BenchmarkClientSenderBackpressureFullBuffer` | covered for single-table, two-table join, and multi-way join SubscribeSingle admission, one persistent-WebSocket SubscribeSingle round trip, 16- and 64-client WebSocket light-update fanout, and deterministic sender-level full-buffer rejection |
 | Subscription equality and lifecycle | `BenchmarkEvalEqualitySubs1K`, `BenchmarkEvalEqualitySubs10K`, `BenchmarkRegisterUnregister` | covered for core hot paths |
 | Subscription initial snapshots and fanout | `BenchmarkRegisterSetInitialQueryAllRows`, `BenchmarkProjectedRowsBeforeLargeBags`, `BenchmarkFanOut1KClientsSameQuery`, `BenchmarkFanOut1KClientsVariedQueries`, `BenchmarkFanOut1KClientsMultiTableVariedQueries` | partial; covers deterministic same-query, varied single-table, and varied two-table fanout plus memory-profile evidence for the current large initial snapshot and projected-row diff fixtures; still needs network/canary-scale and skewed distributions |
 | Subscription joins and candidate pruning | `BenchmarkJoinFragmentEval`, `BenchmarkMultiWayLiveJoinEvalSizes`, `BenchmarkDeltaIndexConstruction`, `BenchmarkCandidateCollection` | covered for two-table joins plus deterministic small/medium/large multi-way live joins with table-shaped and aggregate deltas; `rows_512` has memory-profile evidence |
@@ -207,7 +207,9 @@ Known benchmark gaps for v1 envelopes:
 
 - WebSocket network-level subscription workloads beyond the current
   single-connection subscribe and 16/64-client light-update fanout fixtures,
-  including backpressure-heavy paths and canary-scale fanout
+  including slow-reader writer/write-timeout backpressure paths and
+  canary-scale fanout. Deterministic sender-level full-buffer rejection now has
+  benchmark coverage.
 - broader fanout distributions beyond deterministic in-process same-query,
   single-table, and two-table varied predicate fixtures
 - external canary workload, including canary-scale backup/restore timing
@@ -233,9 +235,10 @@ Current performance read:
   workflow; canary-scale backup/restore timing remains open.
 - Memory-profile evidence now covers the existing large subscription initial
   snapshot, projected-row diff, `rows_512` multi-way join, small local
-  backup/restore, single-WebSocket subscribe, and 16- and 64-client WebSocket
-  fanout fixtures; canary-scale, backpressure-heavy network paths, and larger
-  backup/restore profiles remain open.
+  backup/restore, single-WebSocket subscribe, 16- and 64-client WebSocket
+  fanout, and deterministic sender-level full-buffer backpressure fixtures;
+  canary-scale, slow-reader network paths, and larger backup/restore profiles
+  remain open.
 - Current measured rows are advisory. The repo does not yet define hard
   performance thresholds.
 
