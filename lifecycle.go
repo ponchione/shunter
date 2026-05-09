@@ -36,6 +36,10 @@ var (
 	ErrRuntimeStarting = errors.New("shunter: runtime is starting")
 	// ErrRuntimeClosed reports that the runtime has already been closed.
 	ErrRuntimeClosed = errors.New("shunter: runtime is closed")
+	// ErrRuntimeRestartRequired reports that this Runtime cannot be safely
+	// restarted after a failed Start. Build a fresh Runtime over the same
+	// DataDir to reload durable state before retrying.
+	ErrRuntimeRestartRequired = errors.New("shunter: runtime must be rebuilt before restart")
 )
 
 var runtimeStartAfterDurabilityHook func(*Runtime) error
@@ -65,6 +69,12 @@ func (r *Runtime) Start(ctx context.Context) error {
 	case RuntimeStateClosing, RuntimeStateClosed:
 		r.mu.Unlock()
 		return ErrRuntimeClosed
+	case RuntimeStateFailed:
+		if r.startRetryBlockedErr != nil {
+			err := r.startRetryBlockedErr
+			r.mu.Unlock()
+			return err
+		}
 	}
 	r.stateName = RuntimeStateStarting
 	r.lastErr = nil
@@ -121,8 +131,15 @@ func (r *Runtime) Start(ctx context.Context) error {
 		return err
 	}
 	if err := r.runMigrationHooks(ctx, durability); err != nil {
+		blocksRetry := migrationStateDirty(err)
 		err = fmt.Errorf("run migration hooks: %w", err)
+		if blocksRetry {
+			err = fmt.Errorf("%w: %w", ErrRuntimeRestartRequired, err)
+		}
 		r.recordStartFailure(ctx, err, time.Since(startedAt))
+		if blocksRetry {
+			r.blockStartRetry(err)
+		}
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -349,6 +366,17 @@ func (r *Runtime) recordStartFailure(ctx context.Context, err error, duration ti
 	}
 	r.observability.recordRuntimeStartFailed(ctx, err, duration)
 	r.observability.recordRuntimeHealthDegraded(health, runtimePrimaryDegradedReason(health))
+}
+
+func (r *Runtime) blockStartRetry(err error) {
+	if err == nil {
+		return
+	}
+	r.mu.Lock()
+	if r.stateName == RuntimeStateFailed {
+		r.startRetryBlockedErr = err
+	}
+	r.mu.Unlock()
 }
 
 func (r *Runtime) recordStartReady(ctx context.Context, duration time.Duration) {

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -401,6 +402,62 @@ func TestMigrationHookContextCancelAfterSecondHookPreservesDurableFirstHook(t *t
 	}
 	defer restarted.Close()
 	requireMigrationMessageBodies(t, restarted, "startup-first")
+}
+
+func TestMigrationHookDurabilityFailureBlocksSameRuntimeRetry(t *testing.T) {
+	dir := t.TempDir()
+	injected := errors.New("injected durability failure")
+	prevHook := migrationAfterCommitBeforeDurabilityHook
+	migrationAfterCommitBeforeDurabilityHook = func(types.TxID, *store.Changeset) error {
+		return injected
+	}
+	t.Cleanup(func() {
+		migrationAfterCommitBeforeDurabilityHook = prevHook
+	})
+
+	hookCalls := 0
+	mod := validChatModule().MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+		hookCalls++
+		tableID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("dirty-only")})
+		return err
+	})
+
+	rt, err := Build(mod, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	err = rt.Start(context.Background())
+	if !errors.Is(err, ErrRuntimeRestartRequired) || !errors.Is(err, injected) {
+		t.Fatalf("Start error = %v, want ErrRuntimeRestartRequired wrapping injected failure", err)
+	}
+	if hookCalls != 1 {
+		t.Fatalf("hook calls = %d, want 1", hookCalls)
+	}
+	if rt.Ready() {
+		t.Fatal("runtime ready after dirty migration durability failure")
+	}
+
+	err = rt.Start(context.Background())
+	if !errors.Is(err, ErrRuntimeRestartRequired) {
+		t.Fatalf("same-runtime retry error = %v, want ErrRuntimeRestartRequired", err)
+	}
+	if hookCalls != 1 {
+		t.Fatalf("same-runtime retry reran migration hook; calls = %d, want 1", hookCalls)
+	}
+
+	restarted, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("restarted Build: %v", err)
+	}
+	if err := restarted.Start(context.Background()); err != nil {
+		t.Fatalf("restarted Start: %v", err)
+	}
+	defer restarted.Close()
+	requireMigrationMessageBodies(t, restarted)
 }
 
 func TestRunDataDirMigrationsExecutesOfflineAndLeavesModuleBuildable(t *testing.T) {

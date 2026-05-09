@@ -196,6 +196,10 @@ func (r *Runtime) runMigrationHooks(ctx context.Context, durability *commitlog.D
 	return nil
 }
 
+// migrationAfterCommitBeforeDurabilityHook is a package test hook for the
+// narrow window after committed state mutation and before durable persistence.
+var migrationAfterCommitBeforeDurabilityHook func(types.TxID, *store.Changeset) error
+
 type migrationExecutor struct {
 	moduleName    string
 	moduleVersion string
@@ -263,14 +267,40 @@ func (e *migrationExecutor) runHook(ctx context.Context, hookIndex int, hook Mig
 	changeset.TxID = txID
 	e.state.SetCommittedTxID(txID)
 	e.state.RecordMemoryUsage()
+	if migrationAfterCommitBeforeDurabilityHook != nil {
+		if err := migrationAfterCommitBeforeDurabilityHook(txID, changeset); err != nil {
+			return result, dirtyMigrationStateErrorf("migration hook %d durability: %w", hookIndex+1, err)
+		}
+	}
 	if err := persistMigrationChangeset(ctx, e.durability, txID, changeset); err != nil {
-		return result, fmt.Errorf("migration hook %d durability: %w", hookIndex+1, err)
+		return result, dirtyMigrationStateErrorf("migration hook %d durability: %w", hookIndex+1, err)
 	}
 	e.currentTxID = txID
 	e.durableTxID = txID
 	result.TxID = txID
 	result.Changed = true
 	return result, nil
+}
+
+type dirtyMigrationStateError struct {
+	err error
+}
+
+func dirtyMigrationStateErrorf(format string, args ...any) error {
+	return dirtyMigrationStateError{err: fmt.Errorf(format, args...)}
+}
+
+func (e dirtyMigrationStateError) Error() string {
+	return e.err.Error()
+}
+
+func (e dirtyMigrationStateError) Unwrap() error {
+	return e.err
+}
+
+func migrationStateDirty(err error) bool {
+	var dirty dirtyMigrationStateError
+	return errors.As(err, &dirty)
 }
 
 func migrationTransactionEmpty(tx *store.Transaction) bool {

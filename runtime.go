@@ -39,6 +39,7 @@ type Runtime struct {
 	stateName                   RuntimeState
 	ready                       atomic.Bool
 	lastErr                     error
+	startRetryBlockedErr        error
 	durableTxID                 types.TxID
 	executorFatal               bool
 	executorFatalErr            error
