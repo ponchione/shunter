@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ponchione/shunter/internal/atomicfile"
 	"github.com/ponchione/shunter/schema"
 )
 
@@ -14,6 +15,8 @@ const (
 	dataDirMetadataFilename      = "shunter.datadir.json"
 	dataDirMetadataFormatVersion = 1
 )
+
+var syncDataDirMetadataDir = atomicfile.SyncDir
 
 type dataDirMetadata struct {
 	FormatVersion   int                   `json:"format_version"`
@@ -96,32 +99,12 @@ func writeDataDirMetadata(dataDir string, mod *Module, reg schema.SchemaRegistry
 	data = append(data, '\n')
 
 	path := filepath.Join(dataDir, dataDirMetadataFilename)
-	tmp, err := os.CreateTemp(dataDir, dataDirMetadataFilename+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create data dir metadata temp file: %w", err)
-	}
-	tmpName := tmp.Name()
-	removeTmp := true
-	defer func() {
-		if removeTmp {
-			_ = os.Remove(tmpName)
-		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write data dir metadata temp file: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("sync data dir metadata temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close data dir metadata temp file: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := atomicfile.WriteFile(path, data, atomicfile.Options{
+		Mode:        0o600,
+		TempPattern: dataDirMetadataFilename + ".tmp-*",
+		SyncDir:     syncDataDirMetadataDir,
+	}); err != nil {
 		return fmt.Errorf("replace data dir metadata %s: %w", path, err)
 	}
-	removeTmp = false
 	return nil
 }

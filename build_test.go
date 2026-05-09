@@ -111,6 +111,32 @@ func TestBuildWritesDataDirMetadata(t *testing.T) {
 	}
 }
 
+func TestBuildSyncsDataDirMetadataParentAfterAtomicRename(t *testing.T) {
+	dir := t.TempDir()
+	originalSyncDir := syncDataDirMetadataDir
+	var synced []string
+	syncDataDirMetadataDir = func(path string) error {
+		synced = append(synced, path)
+		if path != dir {
+			t.Fatalf("metadata parent sync path = %q, want %q", path, dir)
+		}
+		if _, ok, err := readDataDirMetadata(dir); err != nil || !ok {
+			t.Fatalf("metadata not published before parent sync: ok=%v err=%v", ok, err)
+		}
+		return nil
+	}
+	defer func() { syncDataDirMetadataDir = originalSyncDir }()
+
+	rt, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	if len(synced) != 1 {
+		t.Fatalf("metadata parent sync calls = %v, want one call", synced)
+	}
+}
+
 func TestBuildUpdatesDataDirModuleVersionMetadataWithoutBlocking(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Build(validChatModule().Version("v1.0.0"), Config{DataDir: dir}); err != nil {

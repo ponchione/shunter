@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	shunter "github.com/ponchione/shunter"
 	"github.com/ponchione/shunter/codegen"
 	"github.com/ponchione/shunter/contractdiff"
+	"github.com/ponchione/shunter/internal/atomicfile"
 )
 
 const (
@@ -24,7 +24,7 @@ var (
 	ErrUnsupportedFormat = errors.New("unsupported contract workflow output format")
 	ErrRuntimeRequired   = errors.New("contract workflow runtime is required")
 
-	syncDir = syncDirPath
+	syncDir = atomicfile.SyncDir
 )
 
 // CompareFiles diffs two canonical ModuleContract JSON files.
@@ -294,57 +294,9 @@ func readRequiredFile(label, path string) ([]byte, error) {
 }
 
 func writeFile(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	base := filepath.Base(path)
-	tmp, err := os.CreateTemp(dir, "."+base+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	removeTemp := true
-	defer func() {
-		if removeTemp {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	mode := os.FileMode(0o666)
-	if info, err := os.Stat(path); err == nil {
-		mode = info.Mode().Perm()
-	} else if !errors.Is(err, os.ErrNotExist) {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	removeTemp = false
-	if err := syncDir(dir); err != nil {
-		return err
-	}
-	return nil
-}
-
-func syncDirPath(path string) error {
-	dir, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
+	return atomicfile.WriteFile(path, data, atomicfile.Options{
+		Mode:         0o666,
+		PreserveMode: true,
+		SyncDir:      syncDir,
+	})
 }
