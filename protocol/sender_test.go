@@ -73,6 +73,19 @@ func TestSendConnNotFound(t *testing.T) {
 	}
 }
 
+func TestSendClosedOutboundChannelReturnsConnNotFound(t *testing.T) {
+	c, id := testConn(false)
+	mgr := NewConnManager()
+	mgr.Add(c)
+	close(c.OutboundCh)
+	s := NewClientSender(mgr, &fakeInbox{})
+
+	err := s.Send(id, SubscribeSingleApplied{})
+	if !errors.Is(err, ErrConnNotFound) {
+		t.Fatalf("expected ErrConnNotFound, got %v", err)
+	}
+}
+
 func TestSendBufferFull(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	opts.OutgoingBufferMessages = 1

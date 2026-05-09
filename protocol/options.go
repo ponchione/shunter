@@ -46,12 +46,12 @@ const DefaultOutgoingBufferMessages = 16 * 1024
 // DefaultProtocolOptions returns SPEC-005 §12 default values.
 func DefaultProtocolOptions() ProtocolOptions {
 	return ProtocolOptions{
-			PingInterval:           15 * time.Second,
-			IdleTimeout:            30 * time.Second,
-			CloseHandshakeTimeout:  250 * time.Millisecond,
-			WriteTimeout:           5 * time.Second,
-			DisconnectTimeout:      5 * time.Second,
-			OutgoingBufferMessages: DefaultOutgoingBufferMessages,
+		PingInterval:           15 * time.Second,
+		IdleTimeout:            30 * time.Second,
+		CloseHandshakeTimeout:  250 * time.Millisecond,
+		WriteTimeout:           5 * time.Second,
+		DisconnectTimeout:      5 * time.Second,
+		OutgoingBufferMessages: DefaultOutgoingBufferMessages,
 		IncomingQueueMessages:  64,
 		MaxMessageSize:         4 * 1024 * 1024,
 	}

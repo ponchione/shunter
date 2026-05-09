@@ -42,6 +42,38 @@ type connManagerSender struct {
 	inbox ExecutorInbox
 }
 
+type outboundSendResult uint8
+
+const (
+	outboundSendSent outboundSendResult = iota
+	outboundSendClosed
+	outboundSendFull
+)
+
+func (c *Conn) trySendOutbound(frame []byte) (result outboundSendResult) {
+	if c == nil {
+		return outboundSendClosed
+	}
+	defer func() {
+		if recover() != nil {
+			result = outboundSendClosed
+		}
+	}()
+	select {
+	case <-c.closed:
+		return outboundSendClosed
+	default:
+	}
+	select {
+	case <-c.closed:
+		return outboundSendClosed
+	case c.OutboundCh <- frame:
+		return outboundSendSent
+	default:
+		return outboundSendFull
+	}
+}
+
 func (s *connManagerSender) Send(connID types.ConnectionID, msg any) error {
 	return s.enqueue(connID, msg)
 }
@@ -81,21 +113,17 @@ func (s *connManagerSender) enqueueOnConn(conn *Conn, connID types.ConnectionID,
 
 	wrapped := EncodeFrame(frame[0], frame[1:], conn.Compression, outboundCompressionMode(conn))
 
-	select {
-	case <-conn.closed:
-		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
-	default:
-	}
-
-	select {
-	case <-conn.closed:
-		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
-	case conn.OutboundCh <- wrapped:
+	switch conn.trySendOutbound(wrapped) {
+	case outboundSendSent:
 		return nil
-	default:
+	case outboundSendClosed:
+		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
+	case outboundSendFull:
 		logProtocolBackpressure(conn.Observer, "outbound", "buffer_full")
 		conn.startOutboundOverflowDisconnect(s.inbox, s.mgr)
 		return fmt.Errorf("%w: %x", ErrClientBufferFull, connID[:])
+	default:
+		panic("protocol: unknown outbound send result")
 	}
 }
 

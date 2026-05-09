@@ -18,21 +18,27 @@ func (c *Conn) runOutboundWriter(ctx context.Context) {
 		}
 
 		select {
-			case <-ctx.Done():
+		case <-ctx.Done():
+			return
+		case frame, ok := <-c.OutboundCh:
+			if !ok {
 				return
-			case frame := <-c.OutboundCh:
-				if err := c.writeBinary(ctx, frame); err != nil {
-					logProtocolError(c.Observer, "unknown", "send_failed", err)
-					return
-				}
-			case <-c.closed:
-				for {
-					select {
-					case frame := <-c.OutboundCh:
-						if err := c.writeBinary(ctx, frame); err != nil {
-							logProtocolError(c.Observer, "unknown", "send_failed", err)
-							return
-						}
+			}
+			if err := c.writeBinary(ctx, frame); err != nil {
+				logProtocolError(c.Observer, "unknown", "send_failed", err)
+				return
+			}
+		case <-c.closed:
+			for {
+				select {
+				case frame, ok := <-c.OutboundCh:
+					if !ok {
+						return
+					}
+					if err := c.writeBinary(ctx, frame); err != nil {
+						logProtocolError(c.Observer, "unknown", "send_failed", err)
+						return
+					}
 				default:
 					return
 				}

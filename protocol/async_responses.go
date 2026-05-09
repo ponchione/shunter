@@ -24,21 +24,17 @@ func (s connOnlySender) Send(connID types.ConnectionID, msg any) error {
 	}
 	wrapped := EncodeFrame(frame[0], frame[1:], s.conn.Compression, outboundCompressionMode(s.conn))
 
-	select {
-	case <-s.conn.closed:
-		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
-	default:
-	}
-
-	select {
-	case <-s.conn.closed:
-		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
-	case s.conn.OutboundCh <- wrapped:
+	switch s.conn.trySendOutbound(wrapped) {
+	case outboundSendSent:
 		return nil
-	default:
+	case outboundSendClosed:
+		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
+	case outboundSendFull:
 		logProtocolBackpressure(s.conn.Observer, "outbound", "buffer_full")
 		s.conn.startOutboundOverflowDisconnect(nil, nil)
 		return fmt.Errorf("%w: %x", ErrClientBufferFull, connID[:])
+	default:
+		panic("protocol: unknown outbound send result")
 	}
 }
 

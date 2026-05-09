@@ -93,6 +93,29 @@ func TestOutboundWriterExitsOnDisconnectSignal(t *testing.T) {
 	}
 }
 
+func TestOutboundWriterExitsOnClosedOutboundChannel(t *testing.T) {
+	opts := DefaultProtocolOptions()
+	c := &Conn{
+		OutboundCh: make(chan []byte, 8),
+		opts:       &opts,
+		closed:     make(chan struct{}),
+	}
+
+	done := make(chan struct{})
+	go func() {
+		c.runOutboundWriter(context.Background())
+		close(done)
+	}()
+
+	close(c.OutboundCh)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writer goroutine did not exit after OutboundCh closed")
+	}
+}
+
 func TestOutboundWriteContextUsesConfiguredTimeout(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	opts.WriteTimeout = 5 * time.Millisecond
