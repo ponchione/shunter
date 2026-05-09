@@ -201,6 +201,10 @@ func (b *BTreeIndex) SeekRange(low, high *IndexKey) iter.Seq[types.RowID] {
 func (b *BTreeIndex) SeekBounds(low, high Bound) iter.Seq[types.RowID] {
 	return func(yield func(types.RowID) bool) {
 		startPage, startEntry := 0, 0
+		var highKey IndexKey
+		if !high.Unbounded {
+			highKey = NewIndexKey(high.Value)
+		}
 		if !low.Unbounded {
 			lowKey := NewIndexKey(low.Value)
 			found := false
@@ -222,7 +226,7 @@ func (b *BTreeIndex) SeekBounds(low, high Bound) iter.Seq[types.RowID] {
 			for ; entryIdx < len(entries); entryIdx++ {
 				e := entries[entryIdx]
 				if !high.Unbounded {
-					cmp := e.key.Compare(NewIndexKey(high.Value))
+					cmp := e.key.Compare(highKey)
 					if high.Inclusive {
 						if cmp > 0 {
 							return

@@ -83,6 +83,7 @@ func (s *CommittedSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, 
 			if !yield(rid, row) {
 				return
 			}
+			s.ensureOpen()
 		}
 	}
 }
@@ -102,13 +103,12 @@ func (s *CommittedSnapshot) IndexSeek(tableID schema.TableID, indexID schema.Ind
 	if !ok {
 		return nil
 	}
-	// Clone so callers cannot retain BTree-internal RowID storage.
 	ids := idx.Seek(key)
 	recordStoreReadRows(s.observer, StoreReadKindIndexSeek, uint64(len(ids)))
 	if len(ids) == 0 {
 		return nil
 	}
-	return slices.Clone(ids)
+	return ids
 }
 
 // SeekIndex yields rows whose index key exactly matches key.
@@ -128,6 +128,8 @@ func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.In
 		return func(func(types.RowID, types.ProductValue) bool) {}
 	}
 	// Collect bounds before yielding so callbacks cannot observe BTree mutation.
+	// Existing aliasing tests pin this contract; streaming requires a different
+	// immutable or versioned BTree cursor design.
 	return func(yield func(types.RowID, types.ProductValue) bool) {
 		var rows uint64
 		defer func() {
@@ -146,6 +148,7 @@ func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.In
 			if !yield(rid, row) {
 				return
 			}
+			s.ensureOpen()
 		}
 	}
 }
@@ -208,6 +211,7 @@ func (s *CommittedSnapshot) rowsFromRowIDs(t *Table, rowIDs []types.RowID, readK
 			if !yield(rid, row) {
 				return
 			}
+			s.ensureOpen()
 		}
 	}
 }

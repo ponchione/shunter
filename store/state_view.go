@@ -78,13 +78,13 @@ func (sv *StateView) ScanTable(tableID schema.TableID) RowIterator {
 }
 
 // SeekIndex returns visible row IDs whose index key exactly matches key.
-// The committed index result is cloned before yielding to avoid BTree aliasing.
+// The committed index returns cloned RowID storage before yielding.
 func (sv *StateView) SeekIndex(tableID schema.TableID, indexID schema.IndexID, key IndexKey) iter.Seq[types.RowID] {
 	return sv.seekIndexRows(
 		tableID,
 		indexID,
 		func(idx *Index) []types.RowID {
-			return slices.Clone(idx.Seek(key))
+			return idx.Seek(key)
 		},
 		func(idx *Index, row types.ProductValue) bool {
 			return idx.ExtractKey(row).Equal(key)
