@@ -37,6 +37,7 @@ func TestSubsystemMetricsUseExactFamiliesAndLabels(t *testing.T) {
 	obs.RecordSnapshotDuration("error", 6*time.Millisecond)
 	obs.RecordSubscriptionActive(5)
 	obs.RecordSubscriptionEvalDuration("error", 4*time.Millisecond)
+	obs.RecordSubscriptionFanoutBlockedDuration(7 * time.Millisecond)
 	obs.LogSubscriptionFanoutError("send_failed", nil, assertErr("send"))
 	obs.LogSubscriptionClientDropped("buffer_full", nil)
 
@@ -57,6 +58,7 @@ func TestSubsystemMetricsUseExactFamiliesAndLabels(t *testing.T) {
 	requireHistogram(t, metrics, MetricSnapshotDurationSeconds, MetricLabels{Module: "chat", Runtime: "rt-a", Result: "error"})
 	metrics.requireGauge(t, MetricSubscriptionActive, MetricLabels{Module: "chat", Runtime: "rt-a"}, 5)
 	requireHistogram(t, metrics, MetricSubscriptionEvalDurationSeconds, MetricLabels{Module: "chat", Runtime: "rt-a", Result: "error"})
+	requireHistogram(t, metrics, MetricSubscriptionFanoutBlockedSeconds, MetricLabels{Module: "chat", Runtime: "rt-a"})
 	metrics.requireCounter(t, MetricSubscriptionFanoutErrorsTotal, MetricLabels{Module: "chat", Runtime: "rt-a", Reason: "send_failed"}, 1)
 	metrics.requireCounter(t, MetricSubscriptionDroppedClientsTotal, MetricLabels{Module: "chat", Runtime: "rt-a", Reason: "buffer_full"}, 1)
 }

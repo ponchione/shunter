@@ -683,6 +683,9 @@ func TestRuntimeObservationMethodsRecoverPanickingSinks(t *testing.T) {
 		{name: "record_subscription_eval_duration", call: func(o *runtimeObservability) {
 			o.RecordSubscriptionEvalDuration("error", time.Millisecond)
 		}},
+		{name: "record_subscription_fanout_blocked_duration", call: func(o *runtimeObservability) {
+			o.RecordSubscriptionFanoutBlockedDuration(time.Millisecond)
+		}},
 		{name: "log_store_snapshot_leaked", call: func(o *runtimeObservability) {
 			o.LogStoreSnapshotLeaked("test")
 		}},

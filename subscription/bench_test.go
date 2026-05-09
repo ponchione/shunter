@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -142,7 +143,7 @@ func BenchmarkProjectedRowsBeforeLargeBags(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = projectedRowsBefore(dv, 1)
+		_, _ = projectedRowsBefore(context.Background(), dv, 1)
 	}
 }
 

@@ -26,24 +26,24 @@ func TestBuildProtocolOptionsUsesDefaultsForZeroConfig(t *testing.T) {
 
 func TestBuildProtocolOptionsAppliesOverrides(t *testing.T) {
 	opts, err := buildProtocolOptions(ProtocolConfig{
-			PingInterval:           time.Second,
-			IdleTimeout:            2 * time.Second,
-			CloseHandshakeTimeout:  3 * time.Second,
-			WriteTimeout:           4 * time.Second,
-			DisconnectTimeout:      5 * time.Second,
-			OutgoingBufferMessages: 17,
-			IncomingQueueMessages:  18,
-			MaxMessageSize:         19,
+		PingInterval:           time.Second,
+		IdleTimeout:            2 * time.Second,
+		CloseHandshakeTimeout:  3 * time.Second,
+		WriteTimeout:           4 * time.Second,
+		DisconnectTimeout:      5 * time.Second,
+		OutgoingBufferMessages: 17,
+		IncomingQueueMessages:  18,
+		MaxMessageSize:         19,
 	})
 	if err != nil {
 		t.Fatalf("buildProtocolOptions returned error: %v", err)
 	}
-		if opts.PingInterval != time.Second ||
-			opts.IdleTimeout != 2*time.Second ||
-			opts.CloseHandshakeTimeout != 3*time.Second ||
-			opts.WriteTimeout != 4*time.Second ||
-			opts.DisconnectTimeout != 5*time.Second ||
-			opts.OutgoingBufferMessages != 17 ||
+	if opts.PingInterval != time.Second ||
+		opts.IdleTimeout != 2*time.Second ||
+		opts.CloseHandshakeTimeout != 3*time.Second ||
+		opts.WriteTimeout != 4*time.Second ||
+		opts.DisconnectTimeout != 5*time.Second ||
+		opts.OutgoingBufferMessages != 17 ||
 		opts.IncomingQueueMessages != 18 ||
 		opts.MaxMessageSize != 19 {
 		t.Fatalf("override mapping failed: %+v", opts)

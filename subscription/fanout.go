@@ -1,6 +1,10 @@
 package subscription
 
-import "github.com/ponchione/shunter/types"
+import (
+	"context"
+
+	"github.com/ponchione/shunter/types"
+)
 
 // FanOutMessage is the handoff payload from evaluation to the fan-out worker.
 // CallerConnID suppresses the caller's light delivery; CallerOutcome is set
@@ -42,6 +46,11 @@ type FanOutMessage struct {
 // subscription fan-out seam. Zero value means ordinary non-caller,
 // fast-read delivery.
 type PostCommitMeta struct {
+	// Context bounds post-commit subscription evaluation. Nil means Background.
+	Context context.Context
+	// FanoutContext bounds enqueueing the evaluated fan-out message. Nil means
+	// Background so evaluation cancellation can still deliver eval errors.
+	FanoutContext context.Context
 	TxDurable     <-chan types.TxID
 	CallerConnID  *types.ConnectionID
 	CallerOutcome *CallerOutcome

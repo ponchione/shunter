@@ -16,28 +16,83 @@ func (m *Manager) appendProjectedMultiJoinRows(ctx context.Context, out []types.
 	return append(out, rows...), nil
 }
 
-func evalMultiJoinDelta(dv *DeltaView, p MultiJoin) (inserts, deletes []types.ProductValue) {
-	before := multiJoinRowsBefore(dv, p)
-	after := multiJoinRowsAfter(dv.CommittedView(), p)
-	return diffProjectedRowBags(before, after)
-}
-
-func multiJoinRowsAfter(view store.CommittedReadView, p MultiJoin) []types.ProductValue {
-	rows, _ := multiJoinRowsFromView(context.Background(), view, p, 0)
-	return rows
-}
-
-func multiJoinRowsBefore(dv *DeltaView, p MultiJoin) []types.ProductValue {
-	rows, _ := collectMultiJoinProjectedRows(context.Background(), p, multiJoinRowsByRelationBefore(dv, p), 0)
-	return rows
-}
-
-func multiJoinRowsByRelationBefore(dv *DeltaView, p MultiJoin) [][]types.ProductValue {
-	rowsByRelation := make([][]types.ProductValue, len(p.Relations))
+func evalMultiJoinDelta(ctx context.Context, dv *DeltaView, p MultiJoin) (inserts, deletes []types.ProductValue, err error) {
+	beforeRows, err := multiJoinRowsByRelationBefore(ctx, dv, p)
+	if err != nil {
+		return nil, nil, err
+	}
+	afterRows, err := multiJoinRowsByRelationFromView(ctx, dv.CommittedView(), p)
+	if err != nil {
+		return nil, nil, err
+	}
+	insertFragments := make([][]types.ProductValue, 0, len(p.Relations))
+	deleteFragments := make([][]types.ProductValue, 0, len(p.Relations))
 	for i, rel := range p.Relations {
-		rowsByRelation[i] = projectedRowsBefore(dv, rel.Table)
+		if err := ctxErr(ctx); err != nil {
+			return nil, nil, err
+		}
+		if rows := dv.InsertedRows(rel.Table); len(rows) > 0 {
+			fragmentRows := multiJoinDeltaRowsByRelation(beforeRows, afterRows, i, rows, true)
+			fragment, err := collectMultiJoinProjectedRows(ctx, p, fragmentRows, 0)
+			if err != nil {
+				return nil, nil, err
+			}
+			insertFragments = append(insertFragments, fragment)
+		}
+		if rows := dv.DeletedRows(rel.Table); len(rows) > 0 {
+			fragmentRows := multiJoinDeltaRowsByRelation(beforeRows, afterRows, i, rows, false)
+			fragment, err := collectMultiJoinProjectedRows(ctx, p, fragmentRows, 0)
+			if err != nil {
+				return nil, nil, err
+			}
+			deleteFragments = append(deleteFragments, fragment)
+		}
+	}
+	inserts, deletes = ReconcileJoinDelta(insertFragments, deleteFragments)
+	return inserts, deletes, nil
+}
+
+func multiJoinDeltaRowsByRelation(beforeRows, afterRows [][]types.ProductValue, relation int, deltaRows []types.ProductValue, insert bool) [][]types.ProductValue {
+	rowsByRelation := make([][]types.ProductValue, len(beforeRows))
+	for i := range rowsByRelation {
+		switch {
+		case i == relation:
+			rowsByRelation[i] = deltaRows
+		case insert && i < relation:
+			rowsByRelation[i] = afterRows[i]
+		case insert:
+			rowsByRelation[i] = beforeRows[i]
+		case !insert && i < relation:
+			rowsByRelation[i] = beforeRows[i]
+		default:
+			rowsByRelation[i] = afterRows[i]
+		}
 	}
 	return rowsByRelation
+}
+
+func multiJoinRowsAfter(ctx context.Context, view store.CommittedReadView, p MultiJoin) ([]types.ProductValue, error) {
+	return multiJoinRowsFromView(ctx, view, p, 0)
+}
+
+func multiJoinRowsBefore(ctx context.Context, dv *DeltaView, p MultiJoin) ([]types.ProductValue, error) {
+	rowsByRelation, err := multiJoinRowsByRelationBefore(ctx, dv, p)
+	if err != nil {
+		return nil, err
+	}
+	return collectMultiJoinProjectedRows(ctx, p, rowsByRelation, 0)
+}
+
+func multiJoinRowsByRelationBefore(ctx context.Context, dv *DeltaView, p MultiJoin) ([][]types.ProductValue, error) {
+	rowsByRelation := make([][]types.ProductValue, len(p.Relations))
+	for i, rel := range p.Relations {
+		rows, err := projectedRowsBefore(ctx, dv, rel.Table)
+		if err != nil {
+			return nil, err
+		}
+		rowsByRelation[i] = rows
+	}
+	return rowsByRelation, nil
 }
 
 func multiJoinRowsFromView(ctx context.Context, view store.CommittedReadView, p MultiJoin, limit int) ([]types.ProductValue, error) {
@@ -49,15 +104,19 @@ func multiJoinRowsFromView(ctx context.Context, view store.CommittedReadView, p 
 }
 
 func multiJoinRowsByRelationFromView(ctx context.Context, view store.CommittedReadView, p MultiJoin) ([][]types.ProductValue, error) {
-	if view == nil {
-		return nil, nil
-	}
 	rowsByRelation := make([][]types.ProductValue, len(p.Relations))
+	if view == nil {
+		return rowsByRelation, nil
+	}
 	for i, rel := range p.Relations {
 		if err := ctxErr(ctx); err != nil {
 			return nil, err
 		}
-		rowsByRelation[i] = tableRowsAfter(view, rel.Table)
+		rows, err := tableRowsAfter(ctx, view, rel.Table)
+		if err != nil {
+			return nil, err
+		}
+		rowsByRelation[i] = rows
 	}
 	return rowsByRelation, nil
 }

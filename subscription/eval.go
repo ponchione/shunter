@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
@@ -14,6 +15,10 @@ import (
 // caller-bound commits still produce their heavy response when there is no
 // subscription work.
 func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView, meta PostCommitMeta) {
+	ctx := meta.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	hasCaller := meta.CallerConnID != nil && (meta.CallerOutcome != nil || meta.CaptureCallerUpdates != nil)
 	nothingToEvaluate := !m.registry.hasActive() || changeset == nil || changeset.IsEmpty()
 	if nothingToEvaluate && !hasCaller {
@@ -25,7 +30,7 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 		errs   map[types.ConnectionID][]SubscriptionError
 	)
 	if !nothingToEvaluate {
-		fanout, errs = m.evaluate(txID, changeset, view)
+		fanout, errs = m.evaluate(ctx, txID, changeset, view)
 	} else {
 		fanout = CommitFanout{}
 		errs = make(map[types.ConnectionID][]SubscriptionError)
@@ -61,7 +66,7 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 		}
 	}
 	if m.inbox != nil {
-		m.sendFanOut(FanOutMessage{
+		m.sendFanOut(meta.FanoutContext, FanOutMessage{
 			TxID:          txID,
 			TxDurable:     meta.TxDurable,
 			Fanout:        fanout,
@@ -72,19 +77,39 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 	}
 }
 
-func (m *Manager) sendFanOut(msg FanOutMessage) {
+func (m *Manager) sendFanOut(ctx context.Context, msg FanOutMessage) {
 	const retryDelay = time.Millisecond
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var blockedStart time.Time
+	recordBlocked := func() {
+		if !blockedStart.IsZero() {
+			recordSubscriptionFanoutBlockedDuration(m.observer, time.Since(blockedStart))
+		}
+	}
 	for {
+		select {
+		case <-ctx.Done():
+			recordBlocked()
+			return
+		default:
+		}
 		m.fanoutMu.Lock()
 		if m.fanoutClosed {
 			m.fanoutMu.Unlock()
+			recordBlocked()
 			return
 		}
 		select {
 		case m.inbox <- msg:
 			m.fanoutMu.Unlock()
+			recordBlocked()
 			return
 		default:
+			if blockedStart.IsZero() {
+				blockedStart = time.Now()
+			}
 		}
 		closed := m.fanoutClosedCh
 		m.fanoutMu.Unlock()
@@ -98,6 +123,16 @@ func (m *Manager) sendFanOut(msg FanOutMessage) {
 				default:
 				}
 			}
+			recordBlocked()
+			return
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			recordBlocked()
 			return
 		case <-timer.C:
 		}
@@ -106,7 +141,7 @@ func (m *Manager) sendFanOut(msg FanOutMessage) {
 
 // evaluate is the inner orchestration: build DeltaView, collect candidates,
 // evaluate each candidate, and assemble the per-connection fanout.
-func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView) (CommitFanout, map[types.ConnectionID][]SubscriptionError) {
+func (m *Manager) evaluate(ctx context.Context, txID types.TxID, changeset *store.Changeset, view store.CommittedReadView) (CommitFanout, map[types.ConnectionID][]SubscriptionError) {
 	activeCols := m.collectDeltaIndexColumns()
 	dv := NewDeltaView(view, changeset, activeCols)
 	defer dv.Release()
@@ -122,7 +157,7 @@ func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view sto
 		if qs == nil {
 			continue
 		}
-		updates, err := m.evalQuerySafe(qs, dv)
+		updates, err := m.evalQuerySafe(ctx, qs, dv)
 		if err != nil {
 			m.handleEvalError(txID, qs, err, errs)
 			continue
@@ -369,13 +404,13 @@ func forEachRowColumnValue(rows []types.ProductValue, col ColID, fn func(Value))
 
 // evalQuerySafe wraps evalQuery in a panic recovery so one broken
 // subscription does not abort the whole evaluation loop (SPEC-004 §11.1).
-func (m *Manager) evalQuerySafe(qs *queryState, dv *DeltaView) (updates []SubscriptionUpdate, err error) {
+func (m *Manager) evalQuerySafe(ctx context.Context, qs *queryState, dv *DeltaView) (updates []SubscriptionUpdate, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = &evalPanic{hash: qs.hash, cause: r}
 		}
 	}()
-	return m.evalQuery(qs, dv)
+	return m.evalQuery(ctx, qs, dv)
 }
 
 type evalPanic struct {
@@ -393,9 +428,9 @@ func (e *evalPanic) Unwrap() error { return ErrSubscriptionEval }
 // table; join predicates produce one SubscriptionUpdate carrying the joined
 // rows (TableID = Join.Left by convention). SubscriptionID is filled in by
 // the caller because it varies per subscriber.
-func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) ([]SubscriptionUpdate, error) {
+func (m *Manager) evalQuery(ctx context.Context, qs *queryState, dv *DeltaView) ([]SubscriptionUpdate, error) {
 	if qs.aggregate != nil {
-		return m.evalAggregateQuery(qs, dv)
+		return m.evalAggregateQuery(ctx, qs, dv)
 	}
 	switch p := qs.predicate.(type) {
 	case Join:
@@ -418,7 +453,10 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) ([]SubscriptionUpdate
 			Deletes:   del,
 		}}, nil
 	case CrossJoin:
-		ins, del := evalCrossJoinDelta(dv, p)
+		ins, del, err := evalCrossJoinDelta(ctx, dv, p)
+		if err != nil {
+			return nil, err
+		}
 		ins, del = projectDeltaRows(ins, del, qs.projection, len(qs.projection) > 0)
 		if len(ins) == 0 && len(del) == 0 {
 			return nil, nil
@@ -433,7 +471,10 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) ([]SubscriptionUpdate
 			Deletes:   del,
 		}}, nil
 	case MultiJoin:
-		ins, del := evalMultiJoinDelta(dv, p)
+		ins, del, err := evalMultiJoinDelta(ctx, dv, p)
+		if err != nil {
+			return nil, err
+		}
 		ins, del = projectDeltaRows(ins, del, qs.projection, len(qs.projection) > 0)
 		if len(ins) == 0 && len(del) == 0 {
 			return nil, nil
@@ -506,52 +547,113 @@ func projectJoinFragments(fragments [][]types.ProductValue, lhsWidth int, projec
 	}
 }
 
-func evalCrossJoinDelta(dv *DeltaView, p CrossJoin) (inserts, deletes []types.ProductValue) {
+func evalCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin) (inserts, deletes []types.ProductValue, err error) {
 	if p.Filter != nil {
 		if p.Left != p.Right {
-			return evalFilteredCrossJoinDelta(dv, p)
+			return evalFilteredCrossJoinDelta(ctx, dv, p)
 		}
-		before := crossJoinProjectedRows(p, projectedRowsBefore(dv, p.Left), projectedRowsBefore(dv, p.Right))
-		after := crossJoinProjectedRows(p, tableRowsAfter(dv.CommittedView(), p.Left), tableRowsAfter(dv.CommittedView(), p.Right))
-		return diffProjectedRowBags(before, after)
+		leftBefore, err := projectedRowsBefore(ctx, dv, p.Left)
+		if err != nil {
+			return nil, nil, err
+		}
+		rightBefore, err := projectedRowsBefore(ctx, dv, p.Right)
+		if err != nil {
+			return nil, nil, err
+		}
+		before, err := crossJoinProjectedRows(ctx, p, leftBefore, rightBefore)
+		if err != nil {
+			return nil, nil, err
+		}
+		leftAfter, err := tableRowsAfter(ctx, dv.CommittedView(), p.Left)
+		if err != nil {
+			return nil, nil, err
+		}
+		rightAfter, err := tableRowsAfter(ctx, dv.CommittedView(), p.Right)
+		if err != nil {
+			return nil, nil, err
+		}
+		after, err := crossJoinProjectedRows(ctx, p, leftAfter, rightAfter)
+		if err != nil {
+			return nil, nil, err
+		}
+		ins, del := diffProjectedRowBags(before, after)
+		return ins, del, nil
 	}
 	projectedTable := p.ProjectedTable()
 	otherTable := crossJoinOtherTable(p)
-	afterProjectedRows := tableRowsAfter(dv.CommittedView(), projectedTable)
-	beforeProjectedRows := projectedRowsBefore(dv, projectedTable)
+	afterProjectedRows, err := tableRowsAfter(ctx, dv.CommittedView(), projectedTable)
+	if err != nil {
+		return nil, nil, err
+	}
+	beforeProjectedRows, err := projectedRowsBefore(ctx, dv, projectedTable)
+	if err != nil {
+		return nil, nil, err
+	}
 	afterOtherCount := rowCountAfter(dv.CommittedView(), otherTable)
 	beforeOtherCount := rowCountBefore(dv, otherTable)
-	return diffProjectedRowsWithMultiplicity(beforeProjectedRows, beforeOtherCount, afterProjectedRows, afterOtherCount)
+	ins, del := diffProjectedRowsWithMultiplicity(beforeProjectedRows, beforeOtherCount, afterProjectedRows, afterOtherCount)
+	return ins, del, nil
 }
 
-func evalFilteredCrossJoinDelta(dv *DeltaView, p CrossJoin) (inserts, deletes []types.ProductValue) {
+func evalFilteredCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin) (inserts, deletes []types.ProductValue, err error) {
 	leftInserts := dv.InsertedRows(p.Left)
 	rightInserts := dv.InsertedRows(p.Right)
 	leftDeletes := dv.DeletedRows(p.Left)
 	rightDeletes := dv.DeletedRows(p.Right)
 
-	leftAfter := tableRowsAfter(dv.CommittedView(), p.Left)
-	rightAfter := tableRowsAfter(dv.CommittedView(), p.Right)
-	leftBefore := projectedRowsBefore(dv, p.Left)
-	rightBefore := projectedRowsBefore(dv, p.Right)
+	leftAfter, err := tableRowsAfter(ctx, dv.CommittedView(), p.Left)
+	if err != nil {
+		return nil, nil, err
+	}
+	rightAfter, err := tableRowsAfter(ctx, dv.CommittedView(), p.Right)
+	if err != nil {
+		return nil, nil, err
+	}
+	leftBefore, err := projectedRowsBefore(ctx, dv, p.Left)
+	if err != nil {
+		return nil, nil, err
+	}
+	rightBefore, err := projectedRowsBefore(ctx, dv, p.Right)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	leftAfterWithoutInserts := subtractProjectedRowsByKey(leftAfter, leftInserts)
 	leftBeforeWithoutDeletes := subtractProjectedRowsByKey(leftBefore, leftDeletes)
 
-	insertFromLeft := crossJoinProjectedRows(p, leftInserts, rightAfter)
-	insertFromRight := crossJoinProjectedRows(p, leftAfterWithoutInserts, rightInserts)
-	deleteFromLeft := crossJoinProjectedRows(p, leftDeletes, rightBefore)
-	deleteFromRight := crossJoinProjectedRows(p, leftBeforeWithoutDeletes, rightDeletes)
-	return ReconcileJoinDelta(
+	insertFromLeft, err := crossJoinProjectedRows(ctx, p, leftInserts, rightAfter)
+	if err != nil {
+		return nil, nil, err
+	}
+	insertFromRight, err := crossJoinProjectedRows(ctx, p, leftAfterWithoutInserts, rightInserts)
+	if err != nil {
+		return nil, nil, err
+	}
+	deleteFromLeft, err := crossJoinProjectedRows(ctx, p, leftDeletes, rightBefore)
+	if err != nil {
+		return nil, nil, err
+	}
+	deleteFromRight, err := crossJoinProjectedRows(ctx, p, leftBeforeWithoutDeletes, rightDeletes)
+	if err != nil {
+		return nil, nil, err
+	}
+	ins, del := ReconcileJoinDelta(
 		[][]types.ProductValue{insertFromLeft, insertFromRight},
 		[][]types.ProductValue{deleteFromLeft, deleteFromRight},
 	)
+	return ins, del, nil
 }
 
-func crossJoinProjectedRows(p CrossJoin, leftRows, rightRows []types.ProductValue) []types.ProductValue {
+func crossJoinProjectedRows(ctx context.Context, p CrossJoin, leftRows, rightRows []types.ProductValue) ([]types.ProductValue, error) {
 	var rows []types.ProductValue
 	for _, leftRow := range leftRows {
+		if err := ctxErr(ctx); err != nil {
+			return nil, err
+		}
 		for _, rightRow := range rightRows {
+			if err := ctxErr(ctx); err != nil {
+				return nil, err
+			}
 			if !MatchJoinPair(p.Filter, p.Left, p.LeftAlias, leftRow, p.Right, p.RightAlias, rightRow) {
 				continue
 			}
@@ -562,7 +664,7 @@ func crossJoinProjectedRows(p CrossJoin, leftRows, rightRows []types.ProductValu
 			}
 		}
 	}
-	return rows
+	return rows, nil
 }
 
 func crossJoinOtherTable(p CrossJoin) TableID {
@@ -573,15 +675,18 @@ func crossJoinOtherTable(p CrossJoin) TableID {
 	return p.Left
 }
 
-func tableRowsAfter(view store.CommittedReadView, table TableID) []types.ProductValue {
+func tableRowsAfter(ctx context.Context, view store.CommittedReadView, table TableID) ([]types.ProductValue, error) {
 	if view == nil {
-		return nil
+		return nil, nil
 	}
 	var rows []types.ProductValue
 	for _, row := range view.TableScan(table) {
+		if err := ctxErr(ctx); err != nil {
+			return nil, err
+		}
 		rows = append(rows, row)
 	}
-	return rows
+	return rows, nil
 }
 
 func rowCountAfter(view store.CommittedReadView, table TableID) int {
@@ -643,17 +748,20 @@ func diffProjectedRowBags(beforeRows, afterRows []types.ProductValue) (inserts, 
 	return diffProjectedRowsWithMultiplicity(beforeRows, 1, afterRows, 1)
 }
 
-func projectedRowsBefore(dv *DeltaView, table TableID) []types.ProductValue {
+func projectedRowsBefore(ctx context.Context, dv *DeltaView, table TableID) ([]types.ProductValue, error) {
 	view := dv.CommittedView()
 	var current []types.ProductValue
 	if view != nil {
 		for _, row := range view.TableScan(table) {
+			if err := ctxErr(ctx); err != nil {
+				return nil, err
+			}
 			current = append(current, row)
 		}
 	}
 	remaining := subtractProjectedRowsByKey(current, dv.InsertedRows(table))
 	remaining = append(remaining, dv.DeletedRows(table)...)
-	return remaining
+	return remaining, nil
 }
 
 func subtractProjectedRowsByKey(current, inserted []types.ProductValue) []types.ProductValue {

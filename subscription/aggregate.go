@@ -453,12 +453,12 @@ func (m *Manager) initialAggregateUpdates(ctx context.Context, pred Predicate, a
 	}}, nil
 }
 
-func (m *Manager) evalAggregateQuery(qs *queryState, dv *DeltaView) ([]SubscriptionUpdate, error) {
+func (m *Manager) evalAggregateQuery(ctx context.Context, qs *queryState, dv *DeltaView) ([]SubscriptionUpdate, error) {
 	table, ok := aggregateEmittedTable(qs.predicate)
 	if !ok || qs.aggregate == nil {
 		return nil, nil
 	}
-	after, err := aggregateCommittedValue(context.Background(), dv.CommittedView(), table, qs.predicate, qs.aggregate, m.resolver)
+	after, err := aggregateCommittedValue(ctx, dv.CommittedView(), table, qs.predicate, qs.aggregate, m.resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -466,19 +466,39 @@ func (m *Manager) evalAggregateQuery(qs *queryState, dv *DeltaView) ([]Subscript
 	switch pred := qs.predicate.(type) {
 	case Join:
 		join := pred
-		before, err = aggregateJoinRowsValue(projectedRowsBefore(dv, join.Left), projectedRowsBefore(dv, join.Right), join, qs.aggregate)
+		leftBefore, err := projectedRowsBefore(ctx, dv, join.Left)
+		if err != nil {
+			return nil, err
+		}
+		rightBefore, err := projectedRowsBefore(ctx, dv, join.Right)
+		if err != nil {
+			return nil, err
+		}
+		before, err = aggregateJoinRowsValue(leftBefore, rightBefore, join, qs.aggregate)
 		if err != nil {
 			return nil, err
 		}
 	case CrossJoin:
 		cross := pred
-		before, err = aggregateCrossJoinRowsValue(projectedRowsBefore(dv, cross.Left), projectedRowsBefore(dv, cross.Right), cross, qs.aggregate)
+		leftBefore, err := projectedRowsBefore(ctx, dv, cross.Left)
+		if err != nil {
+			return nil, err
+		}
+		rightBefore, err := projectedRowsBefore(ctx, dv, cross.Right)
+		if err != nil {
+			return nil, err
+		}
+		before, err = aggregateCrossJoinRowsValue(leftBefore, rightBefore, cross, qs.aggregate)
 		if err != nil {
 			return nil, err
 		}
 	case MultiJoin:
 		multi := pred
-		before, err = aggregateMultiJoinRowsValue(context.Background(), multi, multiJoinRowsByRelationBefore(dv, multi), qs.aggregate)
+		rowsByRelation, err := multiJoinRowsByRelationBefore(ctx, dv, multi)
+		if err != nil {
+			return nil, err
+		}
+		before, err = aggregateMultiJoinRowsValue(ctx, multi, rowsByRelation, qs.aggregate)
 		if err != nil {
 			return nil, err
 		}
@@ -486,7 +506,11 @@ func (m *Manager) evalAggregateQuery(qs *queryState, dv *DeltaView) ([]Subscript
 		switch qs.aggregate.Func {
 		case AggregateCount:
 			if qs.aggregate.Distinct {
-				before, err = aggregateRowsValue(projectedRowsBefore(dv, table), table, qs.predicate, qs.aggregate)
+				rows, err := projectedRowsBefore(ctx, dv, table)
+				if err != nil {
+					return nil, err
+				}
+				before, err = aggregateRowsValue(rows, table, qs.predicate, qs.aggregate)
 				if err != nil {
 					return nil, err
 				}
@@ -494,7 +518,11 @@ func (m *Manager) evalAggregateQuery(qs *queryState, dv *DeltaView) ([]Subscript
 				before = countAggregateBeforeValue(dv, table, qs.predicate, qs.aggregate, after)
 			}
 		case AggregateSum:
-			before, err = aggregateRowsValue(projectedRowsBefore(dv, table), table, qs.predicate, qs.aggregate)
+			rows, err := projectedRowsBefore(ctx, dv, table)
+			if err != nil {
+				return nil, err
+			}
+			before, err = aggregateRowsValue(rows, table, qs.predicate, qs.aggregate)
 			if err != nil {
 				return nil, err
 			}

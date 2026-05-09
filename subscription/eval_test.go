@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"slices"
@@ -2131,10 +2132,21 @@ func TestEvalFilteredCrossJoinDeltaMatchesFullBagDiff(t *testing.T) {
 	dv := NewDeltaView(committed, cs, nil)
 	defer dv.Release()
 
-	gotIns, gotDel := evalCrossJoinDelta(dv, pred)
+	gotIns, gotDel, err := evalCrossJoinDelta(context.Background(), dv, pred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBefore, err := crossJoinProjectedRows(context.Background(), pred, beforeLeft, beforeRight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAfter, err := crossJoinProjectedRows(context.Background(), pred, afterLeft, afterRight)
+	if err != nil {
+		t.Fatal(err)
+	}
 	wantIns, wantDel := diffProjectedRowBags(
-		crossJoinProjectedRows(pred, beforeLeft, beforeRight),
-		crossJoinProjectedRows(pred, afterLeft, afterRight),
+		wantBefore,
+		wantAfter,
 	)
 	if !sameRowBag(gotIns, wantIns) || !sameRowBag(gotDel, wantDel) {
 		t.Fatalf("filtered cross join delta got inserts=%v deletes=%v, want inserts=%v deletes=%v", gotIns, gotDel, wantIns, wantDel)

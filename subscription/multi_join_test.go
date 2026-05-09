@@ -1,6 +1,8 @@
 package subscription
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -603,6 +605,42 @@ func TestMultiJoinRegisterInitialRowsAndDeltas(t *testing.T) {
 	deleteUpdate := requireSingleFanoutUpdate(t, deleteMsg, connID)
 	if !productRowsHaveUint64IDs(deleteUpdate.Deletes, 2, 2, 3, 3) || len(deleteUpdate.Inserts) != 0 {
 		t.Fatalf("delete delta inserts/deletes = %v/%v, want no inserts and delete ids 2,2,3,3", deleteUpdate.Inserts, deleteUpdate.Deletes)
+	}
+}
+
+func TestMultiJoinPostCommitContextCancellationQueuesEvalError(t *testing.T) {
+	s := multiJoinTestSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := multiJoinTestPredicate()
+	connID := types.ConnectionID{17}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    170,
+		RequestID:  71,
+		Predicates: []Predicate{pred},
+	}, multiJoinCommitted(false)); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	extra := types.ProductValue{types.NewUint64(301), types.NewUint64(20)}
+	cs := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Inserts: []types.ProductValue{extra}},
+		},
+	}
+	mgr.EvalAndBroadcast(types.TxID(1), cs, multiJoinCommitted(true), PostCommitMeta{Context: ctx})
+
+	msg := <-inbox
+	errs := msg.Errors[connID]
+	if len(errs) != 1 {
+		t.Fatalf("subscription errors = %v, want one", msg.Errors)
+	}
+	if !strings.Contains(errs[0].Message, context.Canceled.Error()) {
+		t.Fatalf("subscription error = %q, want context canceled", errs[0].Message)
 	}
 }
 

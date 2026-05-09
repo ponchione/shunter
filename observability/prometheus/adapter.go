@@ -424,6 +424,12 @@ var metricFamilies = []metricFamily{
 		help:   "Subscription evaluation duration after a committed transaction.",
 	},
 	{
+		name:   shunter.MetricSubscriptionFanoutBlockedSeconds,
+		kind:   metricKindHistogram,
+		labels: []string{"module", "runtime"},
+		help:   "Time subscription evaluation spent blocked on the fan-out inbox.",
+	},
+	{
 		name:   shunter.MetricSubscriptionFanoutErrorsTotal,
 		kind:   metricKindCounter,
 		labels: []string{"module", "runtime", "reason"},

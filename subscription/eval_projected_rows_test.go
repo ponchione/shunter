@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"context"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -54,7 +55,10 @@ func TestProjectedRowsBeforeAppendsDeletesAfterBagSubtraction(t *testing.T) {
 	dv := NewDeltaView(view, cs, nil)
 	defer dv.Release()
 
-	got := projectedRowsBefore(dv, 1)
+	got, err := projectedRowsBefore(context.Background(), dv, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 3 {
 		t.Fatalf("projectedRowsBefore len = %d, want 3 (%v)", len(got), got)
 	}

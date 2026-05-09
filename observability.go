@@ -110,36 +110,37 @@ type TracingConfig struct {
 type MetricName string
 
 const (
-	MetricRuntimeReady                    MetricName = "runtime_ready"
-	MetricRuntimeState                    MetricName = "runtime_state"
-	MetricRuntimeDegraded                 MetricName = "runtime_degraded"
-	MetricRuntimeErrorsTotal              MetricName = "runtime_errors_total"
-	MetricProtocolConnections             MetricName = "protocol_connections"
-	MetricProtocolConnectionsTotal        MetricName = "protocol_connections_total"
-	MetricProtocolMessagesTotal           MetricName = "protocol_messages_total"
-	MetricProtocolBackpressureTotal       MetricName = "protocol_backpressure_total"
-	MetricExecutorCommandsTotal           MetricName = "executor_commands_total"
-	MetricExecutorCommandDurationSeconds  MetricName = "executor_command_duration_seconds"
-	MetricExecutorInboxDepth              MetricName = "executor_inbox_depth"
-	MetricExecutorFatal                   MetricName = "executor_fatal"
-	MetricReducerCallsTotal               MetricName = "reducer_calls_total"
-	MetricReducerDurationSeconds          MetricName = "reducer_duration_seconds"
-	MetricDurabilityDurableTxID           MetricName = "durability_durable_tx_id"
-	MetricDurabilityQueueDepth            MetricName = "durability_queue_depth"
-	MetricDurabilityFailuresTotal         MetricName = "durability_failures_total"
-	MetricSnapshotDurationSeconds         MetricName = "snapshot_duration_seconds"
-	MetricSubscriptionActive              MetricName = "subscription_active"
-	MetricSubscriptionEvalDurationSeconds MetricName = "subscription_eval_duration_seconds"
-	MetricSubscriptionFanoutErrorsTotal   MetricName = "subscription_fanout_errors_total"
-	MetricSubscriptionDroppedClientsTotal MetricName = "subscription_dropped_clients_total"
-	MetricRecoveryRunsTotal               MetricName = "recovery_runs_total"
-	MetricRecoveryRecoveredTxID           MetricName = "recovery_recovered_tx_id"
-	MetricRecoveryDamagedTailSegments     MetricName = "recovery_damaged_tail_segments"
-	MetricRecoverySkippedSnapshotsTotal   MetricName = "recovery_skipped_snapshots_total"
-	MetricRecoveryReplayDurationSeconds   MetricName = "recovery_replay_duration_seconds"
-	MetricStoreCommitDurationSeconds      MetricName = "store_commit_duration_seconds"
-	MetricStoreMemoryBytes                MetricName = "store_memory_bytes"
-	MetricStoreReadRowsTotal              MetricName = "store_read_rows_total"
+	MetricRuntimeReady                     MetricName = "runtime_ready"
+	MetricRuntimeState                     MetricName = "runtime_state"
+	MetricRuntimeDegraded                  MetricName = "runtime_degraded"
+	MetricRuntimeErrorsTotal               MetricName = "runtime_errors_total"
+	MetricProtocolConnections              MetricName = "protocol_connections"
+	MetricProtocolConnectionsTotal         MetricName = "protocol_connections_total"
+	MetricProtocolMessagesTotal            MetricName = "protocol_messages_total"
+	MetricProtocolBackpressureTotal        MetricName = "protocol_backpressure_total"
+	MetricExecutorCommandsTotal            MetricName = "executor_commands_total"
+	MetricExecutorCommandDurationSeconds   MetricName = "executor_command_duration_seconds"
+	MetricExecutorInboxDepth               MetricName = "executor_inbox_depth"
+	MetricExecutorFatal                    MetricName = "executor_fatal"
+	MetricReducerCallsTotal                MetricName = "reducer_calls_total"
+	MetricReducerDurationSeconds           MetricName = "reducer_duration_seconds"
+	MetricDurabilityDurableTxID            MetricName = "durability_durable_tx_id"
+	MetricDurabilityQueueDepth             MetricName = "durability_queue_depth"
+	MetricDurabilityFailuresTotal          MetricName = "durability_failures_total"
+	MetricSnapshotDurationSeconds          MetricName = "snapshot_duration_seconds"
+	MetricSubscriptionActive               MetricName = "subscription_active"
+	MetricSubscriptionEvalDurationSeconds  MetricName = "subscription_eval_duration_seconds"
+	MetricSubscriptionFanoutBlockedSeconds MetricName = "subscription_fanout_blocked_seconds"
+	MetricSubscriptionFanoutErrorsTotal    MetricName = "subscription_fanout_errors_total"
+	MetricSubscriptionDroppedClientsTotal  MetricName = "subscription_dropped_clients_total"
+	MetricRecoveryRunsTotal                MetricName = "recovery_runs_total"
+	MetricRecoveryRecoveredTxID            MetricName = "recovery_recovered_tx_id"
+	MetricRecoveryDamagedTailSegments      MetricName = "recovery_damaged_tail_segments"
+	MetricRecoverySkippedSnapshotsTotal    MetricName = "recovery_skipped_snapshots_total"
+	MetricRecoveryReplayDurationSeconds    MetricName = "recovery_replay_duration_seconds"
+	MetricStoreCommitDurationSeconds       MetricName = "store_commit_duration_seconds"
+	MetricStoreMemoryBytes                 MetricName = "store_memory_bytes"
+	MetricStoreReadRowsTotal               MetricName = "store_read_rows_total"
 )
 
 // MetricLabels is intentionally fixed so Shunter code cannot create free-form
@@ -792,6 +793,10 @@ func (o *runtimeObservability) RecordSubscriptionEvalDuration(result string, dur
 	o.observeHistogram(MetricSubscriptionEvalDurationSeconds, MetricLabels{
 		Result: subscriptionEvalMetricResult(result),
 	}, duration.Seconds())
+}
+
+func (o *runtimeObservability) RecordSubscriptionFanoutBlockedDuration(duration time.Duration) {
+	o.observeHistogram(MetricSubscriptionFanoutBlockedSeconds, MetricLabels{}, duration.Seconds())
 }
 
 func (o *runtimeObservability) LogStoreSnapshotLeaked(reason string) {

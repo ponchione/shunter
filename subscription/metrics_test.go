@@ -16,6 +16,7 @@ type subscriptionMetricObserver struct {
 	evalErrors     int
 	fanoutReasons  []string
 	droppedReasons []string
+	blocked        []time.Duration
 }
 
 func (o *subscriptionMetricObserver) LogSubscriptionEvalError(types.TxID, error) {
@@ -48,6 +49,12 @@ func (o *subscriptionMetricObserver) RecordSubscriptionEvalDuration(result strin
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.evalResults = append(o.evalResults, result)
+}
+
+func (o *subscriptionMetricObserver) RecordSubscriptionFanoutBlockedDuration(duration time.Duration) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.blocked = append(o.blocked, duration)
 }
 
 func TestSubscriptionMetricsActiveGaugeRegisterUnregisterDisconnect(t *testing.T) {
@@ -110,6 +117,63 @@ func TestSubscriptionMetricsFanoutAndDroppedCounters(t *testing.T) {
 	observer.requireDroppedReason(t, "buffer_full")
 }
 
+func TestSubscriptionMetricsFanoutBlockedDuration(t *testing.T) {
+	observer := &subscriptionMetricObserver{}
+	s := testSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox), WithObserver(observer))
+	conn := cid(1)
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: conn, QueryID: 10, Predicates: []Predicate{AllRows{Table: 1}}}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	inbox <- FanOutMessage{}
+
+	done := make(chan struct{})
+	go func() {
+		mgr.EvalAndBroadcast(1, simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("a")}}, nil), nil, PostCommitMeta{})
+		close(done)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	select {
+	case <-done:
+		t.Fatal("EvalAndBroadcast finished while fanout inbox was full")
+	default:
+	}
+	<-inbox
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("EvalAndBroadcast did not finish after fanout inbox was drained")
+	}
+	observer.requireBlockedDuration(t)
+}
+
+func TestEvalAndBroadcastFanoutContextCancellationUnblocksFullInbox(t *testing.T) {
+	s := testSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	conn := cid(1)
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: conn, QueryID: 10, Predicates: []Predicate{AllRows{Table: 1}}}, nil); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	inbox <- FanOutMessage{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		mgr.EvalAndBroadcast(1, simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("a")}}, nil), nil, PostCommitMeta{FanoutContext: ctx})
+		close(done)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("EvalAndBroadcast did not unblock after fanout context cancellation")
+	}
+}
+
 func (o *subscriptionMetricObserver) requireActive(t *testing.T, want int) {
 	t.Helper()
 	o.mu.Lock()
@@ -156,4 +220,16 @@ func (o *subscriptionMetricObserver) requireDroppedReason(t *testing.T, want str
 		}
 	}
 	t.Fatalf("missing dropped reason %q in %v", want, o.droppedReasons)
+}
+
+func (o *subscriptionMetricObserver) requireBlockedDuration(t *testing.T) {
+	t.Helper()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, got := range o.blocked {
+		if got > 0 {
+			return
+		}
+	}
+	t.Fatalf("missing positive blocked duration in %v", o.blocked)
 }

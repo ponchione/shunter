@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"slices"
@@ -517,7 +518,7 @@ func evalAllQueries(mgr *Manager, cs *store.Changeset, view store.CommittedReadV
 	dv := NewDeltaView(view, cs, activeCols)
 	out := map[QueryHash]deltaBag{}
 	for h, qs := range mgr.registry.byHash {
-		updates, err := mgr.evalQuery(qs, dv)
+		updates, err := mgr.evalQuery(context.Background(), qs, dv)
 		if err != nil {
 			panic(err)
 		}
