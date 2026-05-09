@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -267,6 +269,96 @@ func TestMigrationHookFailureRollsBackAndBlocksStart(t *testing.T) {
 	requireMigrationMessageBodies(t, restarted)
 }
 
+func TestMigrationHookContextCancelAfterHookRollsBackAndBlocksStart(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	hookCalls := 0
+	mod := validChatModule().MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+		hookCalls++
+		tableID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		if _, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("startup-canceled")}); err != nil {
+			return err
+		}
+		cancel()
+		return nil
+	})
+
+	rt, err := Build(mod, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	err = rt.Start(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Start error = %v, want context.Canceled", err)
+	}
+	if hookCalls != 1 {
+		t.Fatalf("hook calls = %d, want 1", hookCalls)
+	}
+	if rt.Ready() {
+		t.Fatal("runtime ready after canceled migration hook")
+	}
+
+	restarted, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("restarted Build: %v", err)
+	}
+	if err := restarted.Start(context.Background()); err != nil {
+		t.Fatalf("restarted Start: %v", err)
+	}
+	defer restarted.Close()
+	requireMigrationMessageBodies(t, restarted)
+}
+
+func TestMigrationHookContextCancelAfterSecondHookPreservesDurableFirstHook(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	mod := validChatModule().
+		MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+			tableID, _, ok := mc.Schema().TableByName("messages")
+			if !ok {
+				return fmt.Errorf("messages table missing from migration schema")
+			}
+			_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("startup-first")})
+			return err
+		}).
+		MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+			tableID, _, ok := mc.Schema().TableByName("messages")
+			if !ok {
+				return fmt.Errorf("messages table missing from migration schema")
+			}
+			if _, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(2), types.NewString("startup-second-canceled")}); err != nil {
+				return err
+			}
+			cancel()
+			return nil
+		})
+
+	rt, err := Build(mod, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	err = rt.Start(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Start error = %v, want context.Canceled", err)
+	}
+	if rt.Ready() {
+		t.Fatal("runtime ready after canceled second migration hook")
+	}
+
+	restarted, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("restarted Build: %v", err)
+	}
+	if err := restarted.Start(context.Background()); err != nil {
+		t.Fatalf("restarted Start: %v", err)
+	}
+	defer restarted.Close()
+	requireMigrationMessageBodies(t, restarted, "startup-first")
+}
+
 func TestRunDataDirMigrationsExecutesOfflineAndLeavesModuleBuildable(t *testing.T) {
 	dir := t.TempDir()
 	mod := validChatModule()
@@ -441,6 +533,27 @@ func TestRunDataDirMigrationsFailureRollsBackHookTransaction(t *testing.T) {
 	requireMigrationMessageBodies(t, rt)
 }
 
+func TestRunDataDirMigrationsCanceledContextBeforeBuildDoesNotRunHooks(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "missing-data-dir")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	hookCalls := 0
+
+	_, err := RunDataDirMigrations(ctx, validChatModule(), Config{DataDir: dir}, func(context.Context, *MigrationContext) error {
+		hookCalls++
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunDataDirMigrations error = %v, want context.Canceled", err)
+	}
+	if hookCalls != 0 {
+		t.Fatalf("hook calls = %d, want 0", hookCalls)
+	}
+	if _, statErr := os.Stat(dir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("data dir stat after pre-canceled migration = %v, want not exist", statErr)
+	}
+}
+
 func TestRunDataDirMigrationsContextCancelAfterHookRollsBackHookTransaction(t *testing.T) {
 	dir := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -473,6 +586,48 @@ func TestRunDataDirMigrationsContextCancelAfterHookRollsBackHookTransaction(t *t
 	}
 	defer rt.Close()
 	requireMigrationMessageBodies(t, rt)
+}
+
+func TestRunDataDirMigrationsContextCancelAfterSecondHookPreservesDurableFirstHook(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	result, err := RunDataDirMigrations(ctx, validChatModule(), Config{DataDir: dir},
+		func(_ context.Context, mc *MigrationContext) error {
+			tableID, _, ok := mc.Schema().TableByName("messages")
+			if !ok {
+				return fmt.Errorf("messages table missing from migration schema")
+			}
+			_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("offline-first")})
+			return err
+		},
+		func(_ context.Context, mc *MigrationContext) error {
+			tableID, _, ok := mc.Schema().TableByName("messages")
+			if !ok {
+				return fmt.Errorf("messages table missing from migration schema")
+			}
+			if _, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(2), types.NewString("offline-second-canceled")}); err != nil {
+				return err
+			}
+			cancel()
+			return nil
+		},
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunDataDirMigrations error = %v, want context.Canceled", err)
+	}
+	if result.DataDir != "" || result.RecoveredTxID != 0 || result.DurableTxID != 0 || len(result.Hooks) != 0 {
+		t.Fatalf("RunDataDirMigrations result after canceled second hook = %+v, want zero result", result)
+	}
+
+	rt, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build after canceled second migration hook: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start after canceled second migration hook: %v", err)
+	}
+	defer rt.Close()
+	requireMigrationMessageBodies(t, rt, "offline-first")
 }
 
 func assertMigrationDeclaration(t *testing.T, declarations []MigrationContractDeclaration, surface, name string, compatibility MigrationCompatibility, classification MigrationClassification) {
