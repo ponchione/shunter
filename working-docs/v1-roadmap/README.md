@@ -233,9 +233,9 @@ Current performance read:
   workflow; canary-scale backup/restore timing remains open.
 - Memory-profile evidence now covers the existing large subscription initial
   snapshot, projected-row diff, `rows_512` multi-way join, small local
-  backup/restore, single-WebSocket subscribe, and 16-client WebSocket fanout
-  fixtures; canary-scale, backpressure-heavy network paths, 64-client fanout,
-  and larger backup/restore profiles remain open.
+  backup/restore, single-WebSocket subscribe, and 16- and 64-client WebSocket
+  fanout fixtures; canary-scale, backpressure-heavy network paths, and larger
+  backup/restore profiles remain open.
 - Current measured rows are advisory. The repo does not yet define hard
   performance thresholds.
 

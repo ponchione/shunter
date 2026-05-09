@@ -196,7 +196,9 @@ Operations and network memory profiles were spot-checked on 2026-05-09 from a
 clean detached worktree at Shunter commit
 `446d7c124a3128fa954d7c3a31aeda6c8a9b9309`. The 16-client WebSocket
 fanout profile was spot-checked at Shunter commit
-`5d768686238922af86044a9b607ca99707b6d093`.
+`5d768686238922af86044a9b607ca99707b6d093`. The 64-client WebSocket
+fanout profile was spot-checked at Shunter commit
+`f0de4eb465f9e586802179b7eeaba2fb575af1e0`.
 
 Commands:
 
@@ -207,6 +209,8 @@ go test -run '^$' -bench 'BenchmarkSubscribeSingleWebSocketRoundTrip' -benchmem 
 rtk go tool pprof -top -alloc_space /tmp/shunter-websocket-subscribe-mem.out
 go test -run '^$' -bench 'BenchmarkWebSocketFanout16ClientsLightUpdate' -benchmem -memprofile /tmp/shunter-websocket-fanout-mem.out ./protocol
 rtk go tool pprof -top -alloc_space /tmp/shunter-websocket-fanout-mem.out
+go test -run '^$' -bench 'BenchmarkWebSocketFanout64ClientsLightUpdate' -benchmem -memprofile /tmp/shunter-websocket-fanout-64-mem.out ./protocol
+rtk go tool pprof -top -alloc_space /tmp/shunter-websocket-fanout-64-mem.out
 ```
 
 Findings:
@@ -227,6 +231,15 @@ Findings:
   samples in `io.ReadAll`, `context.(*cancelCtx).propagateCancel`,
   `context.AfterFunc`, `context.WithDeadlineCause`, `time.newTimer`,
   `websocket.(*Conn).prepareRead`, and protocol sender enqueue.
+- `BenchmarkWebSocketFanout64ClientsLightUpdate-24`: 320.660us/op,
+  169,521 B/op, 2,496 allocs/op. Allocation space keeps the same shape at
+  64 clients: WebSocket client reads, context/deadline setup, harness
+  connection setup, writer timeouts, and protocol sender enqueue dominate the
+  sampled allocation space, with top samples in `io.ReadAll`,
+  `context.(*cancelCtx).propagateCancel`, `context.AfterFunc`,
+  `context.WithDeadlineCause`, `newBenchmarkWebSocketFanoutHarness`,
+  `time.newTimer`, `websocket.(*Conn).prepareRead`, and
+  `enqueueTransactionEnvelope`.
 
 ## Known Gaps
 
@@ -239,6 +252,6 @@ These remain outside the current benchmark envelope:
   single-table, and two-table varied predicate fixtures
 - external canary workload, including canary-scale backup/restore timing
 - memory profiles outside the current subscription, single-WebSocket,
-  16-client WebSocket fanout, and small local backup/restore fixtures,
+  16/64-client WebSocket fanout, and small local backup/restore fixtures,
   including canary-scale, backpressure-heavy network paths, and larger
   backup/restore workloads
