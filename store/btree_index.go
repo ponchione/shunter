@@ -200,52 +200,70 @@ func (b *BTreeIndex) SeekRange(low, high *IndexKey) iter.Seq[types.RowID] {
 // order; within a key, RowIDs in ascending order.
 func (b *BTreeIndex) SeekBounds(low, high Bound) iter.Seq[types.RowID] {
 	return func(yield func(types.RowID) bool) {
-		startPage, startEntry := 0, 0
-		var highKey IndexKey
-		if !high.Unbounded {
-			highKey = NewIndexKey(high.Value)
-		}
-		if !low.Unbounded {
-			lowKey := NewIndexKey(low.Value)
-			found := false
-			startPage, startEntry, found = b.lowerBound(lowKey)
-			if found && !low.Inclusive {
-				startEntry++
-			}
-			if startPage < len(b.pages) && startEntry >= len(b.pages[startPage].entries) {
-				startPage++
-				startEntry = 0
-			}
-		}
-		for pageIdx := startPage; pageIdx < len(b.pages); pageIdx++ {
-			entries := b.pages[pageIdx].entries
-			entryIdx := 0
-			if pageIdx == startPage {
-				entryIdx = startEntry
-			}
-			for ; entryIdx < len(entries); entryIdx++ {
-				e := entries[entryIdx]
-				if !high.Unbounded {
-					cmp := e.key.Compare(highKey)
-					if high.Inclusive {
-						if cmp > 0 {
-							return
-						}
-					} else if cmp >= 0 {
-						return
-					}
-				}
-				for _, rid := range e.rowIDs {
-					if !yield(rid) {
-						return
-					}
-				}
-			}
-		}
+		b.seekBounds(low, high, yield)
 	}
+}
+
+// collectBounds returns an alias-detached RowID snapshot for keys between low
+// and high per Bound semantics.
+func (b *BTreeIndex) collectBounds(low, high Bound) []types.RowID {
+	var out []types.RowID
+	if low.Unbounded && high.Unbounded {
+		out = make([]types.RowID, 0, b.mappings)
+	}
+	b.seekBounds(low, high, func(rid types.RowID) bool {
+		out = append(out, rid)
+		return true
+	})
+	return out
 }
 
 // Scan returns all RowIDs in key order.
 func (b *BTreeIndex) Scan() iter.Seq[types.RowID] {
 	return b.SeekRange(nil, nil)
+}
+
+func (b *BTreeIndex) seekBounds(low, high Bound, yield func(types.RowID) bool) {
+	startPage, startEntry := 0, 0
+	var highKey IndexKey
+	if !high.Unbounded {
+		highKey = NewIndexKey(high.Value)
+	}
+	if !low.Unbounded {
+		lowKey := NewIndexKey(low.Value)
+		found := false
+		startPage, startEntry, found = b.lowerBound(lowKey)
+		if found && !low.Inclusive {
+			startEntry++
+		}
+		if startPage < len(b.pages) && startEntry >= len(b.pages[startPage].entries) {
+			startPage++
+			startEntry = 0
+		}
+	}
+	for pageIdx := startPage; pageIdx < len(b.pages); pageIdx++ {
+		entries := b.pages[pageIdx].entries
+		entryIdx := 0
+		if pageIdx == startPage {
+			entryIdx = startEntry
+		}
+		for ; entryIdx < len(entries); entryIdx++ {
+			e := entries[entryIdx]
+			if !high.Unbounded {
+				cmp := e.key.Compare(highKey)
+				if high.Inclusive {
+					if cmp > 0 {
+						return
+					}
+				} else if cmp >= 0 {
+					return
+				}
+			}
+			for _, rid := range e.rowIDs {
+				if !yield(rid) {
+					return
+				}
+			}
+		}
+	}
 }

@@ -3,7 +3,6 @@ package store
 import (
 	"iter"
 	"runtime"
-	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -128,8 +127,8 @@ func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.In
 		return func(func(types.RowID, types.ProductValue) bool) {}
 	}
 	// Collect bounds before yielding so callbacks cannot observe BTree mutation.
-	// Existing aliasing tests pin this contract; streaming requires a different
-	// immutable or versioned BTree cursor design.
+	// Existing aliasing tests pin this contract; true streaming requires a
+	// different immutable or versioned BTree cursor design.
 	return func(yield func(types.RowID, types.ProductValue) bool) {
 		var rows uint64
 		defer func() {
@@ -137,7 +136,7 @@ func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.In
 			runtime.KeepAlive(s)
 		}()
 		s.ensureOpen()
-		for _, rid := range slices.Collect(idx.BTree().SeekBounds(lower, upper)) {
+		for _, rid := range idx.BTree().collectBounds(lower, upper) {
 			// Read-view mid-iter-close defense-in-depth: see TableScan.
 			s.ensureOpen()
 			row, ok := t.GetRow(rid)
