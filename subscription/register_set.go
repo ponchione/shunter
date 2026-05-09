@@ -179,6 +179,24 @@ func (w initialRowWindow) streamOutputLimit(collector *initialRowCollector) int 
 	}
 }
 
+func (w initialRowWindow) orderedKeepLimit(collector *initialRowCollector) int {
+	if len(w.orderBy) == 0 {
+		return 0
+	}
+	outputLimit := w.streamOutputLimit(collector)
+	if outputLimit == 0 {
+		return 0
+	}
+	if w.offset == nil || *w.offset == 0 {
+		return outputLimit
+	}
+	maxInt := int(^uint(0) >> 1)
+	if *w.offset > uint64(maxInt-outputLimit) {
+		return 0
+	}
+	return int(*w.offset) + outputLimit
+}
+
 func (w initialRowWindow) apply(rows []types.ProductValue) ([]types.ProductValue, error) {
 	var err error
 	rows, err = orderInitialRows(rows, w.orderBy)
@@ -219,6 +237,13 @@ func (w *initialRowScanWindow) add(out *[]types.ProductValue, row types.ProductV
 	return w.outputLimit == 0 || len(*out) < w.outputLimit
 }
 
+func addInitialRow(out *[]types.ProductValue, scan *initialRowScanWindow, ordered *boundedOrderedInitialRows, row types.ProductValue) (bool, error) {
+	if ordered != nil {
+		return true, ordered.add(row)
+	}
+	return scan.add(out, row), nil
+}
+
 func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predicate, view store.CommittedReadView, table TableID, window initialRowWindow) ([]types.ProductValue, error) {
 	if view == nil {
 		return nil, nil
@@ -232,6 +257,7 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 		scan.offset = window.offset
 		scan.outputLimit = window.streamOutputLimit(collector)
 	}
+	ordered := newBoundedOrderedInitialRows(window.orderBy, window.orderedKeepLimit(collector))
 	if m.resolver != nil {
 		if eq, idxID, ok := initialIndexedEquality(pred, table, m.resolver); ok {
 			key := store.NewIndexKey(eq.Value)
@@ -244,10 +270,17 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 					continue
 				}
 				if MatchRow(pred, table, row) {
-					if !scan.add(&out, row) {
+					cont, err := addInitialRow(&out, &scan, ordered, row)
+					if err != nil {
+						return nil, err
+					}
+					if !cont {
 						break
 					}
 				}
+			}
+			if ordered != nil {
+				return ordered.productRows(), nil
 			}
 			return out, nil
 		}
@@ -261,9 +294,16 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 				if !MatchRow(pred, table, row) {
 					continue
 				}
-				if !scan.add(&out, row) {
+				cont, err := addInitialRow(&out, &scan, ordered, row)
+				if err != nil {
+					return nil, err
+				}
+				if !cont {
 					break
 				}
+			}
+			if ordered != nil {
+				return ordered.productRows(), nil
 			}
 			return out, nil
 		}
@@ -273,10 +313,17 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 			return nil, err
 		}
 		if MatchRow(pred, table, row) {
-			if !scan.add(&out, row) {
+			cont, err := addInitialRow(&out, &scan, ordered, row)
+			if err != nil {
+				return nil, err
+			}
+			if !cont {
 				break
 			}
 		}
+	}
+	if ordered != nil {
+		return ordered.productRows(), nil
 	}
 	return out, nil
 }

@@ -438,6 +438,41 @@ func TestRegisterSetOrderByAffectsSameConnectionQueryIdentity(t *testing.T) {
 	}
 }
 
+func TestRegisterSetOrderByWindowAppliesInitialRowLimitAfterBoundedSort(t *testing.T) {
+	s := testSchema()
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewString("b")},
+			{types.NewUint64(3), types.NewString("c")},
+			{types.NewUint64(4), types.NewString("d")},
+			{types.NewUint64(5), types.NewString("e")},
+		},
+	})
+	limitOne := uint64(1)
+	offsetTwo := uint64(2)
+	mgr := NewManager(s, s, WithInitialRowLimit(1))
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    21,
+		Predicates: []Predicate{AllRows{Table: 1}},
+		OrderByColumns: [][]OrderByColumn{{
+			{Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64}, Table: 1, Column: 0, Desc: true},
+		}},
+		Limits:  []*uint64{&limitOne},
+		Offsets: []*uint64{&offsetTwo},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet ordered window under initial cap = %v", err)
+	}
+	if len(res.Update) != 1 || len(res.Update[0].Inserts) != 1 {
+		t.Fatalf("ordered window update = %+v, want one row", res.Update)
+	}
+	if got := res.Update[0].Inserts[0][0].AsUint64(); got != 3 {
+		t.Fatalf("ordered window id = %d, want 3", got)
+	}
+}
+
 func TestRegisterSetLimitAffectsSameConnectionQueryIdentity(t *testing.T) {
 	mgr, view := newRegisterSetTestManagerWithRows(t)
 	connID := types.ConnectionID{1}
