@@ -621,6 +621,7 @@ func TestRunDataDirMigrationsNoopHookDoesNotConsumeTxID(t *testing.T) {
 
 func TestRunDataDirMigrationsNilContextUsesBackground(t *testing.T) {
 	dir := t.TempDir()
+	//lint:ignore SA1012 This test pins RunDataDirMigrations nil context compatibility.
 	result, err := RunDataDirMigrations(nil, validChatModule(), Config{DataDir: dir}, func(_ context.Context, mc *MigrationContext) error {
 		tableID, _, ok := mc.Schema().TableByName("messages")
 		if !ok {

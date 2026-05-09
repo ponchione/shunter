@@ -72,6 +72,7 @@ func TestRuntimeStartAndCloseOwnLifecycle(t *testing.T) {
 
 func TestRuntimeStartNilContextUsesBackground(t *testing.T) {
 	rt := buildValidTestRuntime(t)
+	//lint:ignore SA1012 This test pins Runtime.Start nil context compatibility.
 	if err := rt.Start(nil); err != nil {
 		t.Fatalf("Start(nil) returned error: %v", err)
 	}

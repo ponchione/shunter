@@ -5,6 +5,13 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 ## v0.1.1-dev
 
 - Current development line.
+- Live subscription initial row limits now apply after supported
+  `ORDER BY`/`OFFSET`/`LIMIT` initial-snapshot windowing, and streaming
+  single-table `LIMIT` snapshots stop scanning once enough rows are gathered.
+- Runtime durability waits no longer report success when a pending durability
+  waiter is closed without confirming the requested transaction.
+- Protocol, BSATN, and commit-log encoders now reject oversized length-prefixed
+  payloads instead of silently truncating lengths to `uint32`.
 - Release qualification now explicitly includes the external `opsboard-canary`
   gates and recording the Shunter/canary commits used for the run.
 - Recovery now rejects directory artifacts named as the first commit-log
