@@ -199,13 +199,14 @@ Current benchmark coverage:
 | Declared reads | `BenchmarkDeclaredReadRuntimeSurfaces` | covered for local declared query execution and declared live-view initial rows, including projection/order/limit and aggregate shapes |
 | Raw subscription protocol admission | `BenchmarkHandleSubscribeSingleAdmissionReadShapes` | covered for single-table, two-table join, and multi-way join SubscribeSingle admission |
 | Subscription equality and lifecycle | `BenchmarkEvalEqualitySubs1K`, `BenchmarkEvalEqualitySubs10K`, `BenchmarkRegisterUnregister` | covered for core hot paths |
-| Subscription initial snapshots and fanout | `BenchmarkRegisterSetInitialQueryAllRows`, `BenchmarkProjectedRowsBeforeLargeBags`, `BenchmarkFanOut1KClientsSameQuery` | partial; needs varied-query fanout and memory-profile coverage |
+| Subscription initial snapshots and fanout | `BenchmarkRegisterSetInitialQueryAllRows`, `BenchmarkProjectedRowsBeforeLargeBags`, `BenchmarkFanOut1KClientsSameQuery`, `BenchmarkFanOut1KClientsVariedQueries` | partial; covers deterministic same-query and varied single-table fanout; still needs broader distributions and memory-profile coverage |
 | Subscription joins and candidate pruning | `BenchmarkJoinFragmentEval`, `BenchmarkMultiWayLiveJoinEvalSizes`, `BenchmarkDeltaIndexConstruction`, `BenchmarkCandidateCollection` | covered for two-table joins plus deterministic small/medium/large multi-way live joins with table-shaped and aggregate deltas |
 
 Known benchmark gaps for v1 envelopes:
 
 - WebSocket network-level subscription workloads beyond handler admission
-- fanout with varied query shapes across many clients
+- broader fanout distributions beyond deterministic same-query and varied
+  single-table predicate fixtures
 - external canary workload and backup/restore workflow
 - memory profiles for large joins and initial snapshots
 

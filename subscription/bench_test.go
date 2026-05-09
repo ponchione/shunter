@@ -169,6 +169,77 @@ func BenchmarkFanOut1KClientsSameQuery(b *testing.B) {
 	}
 }
 
+func BenchmarkFanOut1KClientsVariedQueries(b *testing.B) {
+	const (
+		clientCount = 1000
+		changedRows = 256
+	)
+
+	s := benchSchema()
+	inbox := make(chan FanOutMessage, 1024)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	for i := 0; i < clientCount; i++ {
+		c := types.ConnectionID{}
+		c[0] = byte(i)
+		c[1] = byte(i >> 8)
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID:     c,
+			QueryID:    uint32(i),
+			Predicates: []Predicate{benchmarkVariedFanoutPredicate(i, changedRows)},
+		}, nil); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	rows := make([]types.ProductValue, changedRows)
+	for i := range rows {
+		v := uint64(i)
+		rows[i] = types.ProductValue{types.NewUint64(v), benchmarkVariedFanoutBucket(v)}
+	}
+	cs := simpleChangeset(1, rows, nil)
+	drainBenchmarkInbox(b, inbox)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		mgr.EvalAndBroadcast(types.TxID(uint64(i+1)), cs, nil, PostCommitMeta{})
+	}
+}
+
+func benchmarkVariedFanoutPredicate(i, changedRows int) Predicate {
+	value := uint64(i % changedRows)
+	switch i % 4 {
+	case 0:
+		return ColEq{Table: 1, Column: 0, Value: types.NewUint64(value)}
+	case 1:
+		return ColRange{
+			Table:  1,
+			Column: 0,
+			Lower:  Bound{Value: types.NewUint64(value), Inclusive: true},
+			Upper:  Bound{Value: types.NewUint64(value), Inclusive: true},
+		}
+	case 2:
+		return And{
+			Left: ColRange{
+				Table:  1,
+				Column: 0,
+				Lower:  Bound{Value: types.NewUint64(value), Inclusive: true},
+				Upper:  Bound{Value: types.NewUint64(value + 3), Inclusive: true},
+			},
+			Right: ColEq{Table: 1, Column: 1, Value: benchmarkVariedFanoutBucket(value)},
+		}
+	default:
+		return Or{
+			Left:  ColEq{Table: 1, Column: 0, Value: types.NewUint64(value)},
+			Right: ColEq{Table: 1, Column: 0, Value: types.NewUint64((value + uint64(changedRows/2)) % uint64(changedRows))},
+		}
+	}
+}
+
+func benchmarkVariedFanoutBucket(value uint64) types.Value {
+	return types.NewString(fmt.Sprintf("bucket-%02d", value%4))
+}
+
 // BenchmarkJoinFragmentEval measures end-to-end EvalAndBroadcast cost for one
 // affected join subscription (Story 5.4 §9.1: target < 10 ms per affected
 // subscription). It is not a microbenchmark of EvalJoinDeltaFragments alone:
