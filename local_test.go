@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ponchione/shunter/commitlog"
 	"github.com/ponchione/shunter/executor"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
@@ -490,6 +491,30 @@ func TestLocalIndexedReadsAndDurableWait(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Read: %v", err)
+	}
+}
+
+func TestWaitUntilDurableClosedWorkerDoesNotReportSuccess(t *testing.T) {
+	opts := commitlog.DefaultCommitLogOptions()
+	opts.OffsetIndexIntervalBytes = 0
+	opts.OffsetIndexCap = 0
+	dw, err := commitlog.NewDurabilityWorker(t.TempDir(), 1, opts)
+	if err != nil {
+		t.Fatalf("NewDurabilityWorker: %v", err)
+	}
+	if _, err := dw.Close(); err != nil {
+		t.Fatalf("Close durability worker: %v", err)
+	}
+
+	rt := &Runtime{
+		stateName:  RuntimeStateReady,
+		durability: dw,
+	}
+	rt.ready.Store(true)
+
+	err = rt.WaitUntilDurable(context.Background(), 1)
+	if !errors.Is(err, ErrRuntimeNotReady) {
+		t.Fatalf("WaitUntilDurable closed worker error = %v, want ErrRuntimeNotReady", err)
 	}
 }
 

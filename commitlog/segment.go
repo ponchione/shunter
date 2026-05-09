@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -79,19 +80,30 @@ func ComputeRecordCRC(rec *Record) uint32 {
 	binary.LittleEndian.PutUint64(buf[:8], rec.TxID)
 	buf[8] = rec.RecordType
 	buf[9] = rec.Flags
-	binary.LittleEndian.PutUint32(buf[10:14], uint32(len(rec.Payload)))
+	binary.LittleEndian.PutUint32(buf[10:14], checkedRecordPayloadLen(rec))
 	h.Write(buf[:])
 	h.Write(rec.Payload)
 	return h.Sum32()
 }
 
+func checkedRecordPayloadLen(rec *Record) uint32 {
+	if uint64(len(rec.Payload)) > math.MaxUint32 {
+		panic(fmt.Sprintf("commitlog: record payload %d exceeds uint32 length", len(rec.Payload)))
+	}
+	return uint32(len(rec.Payload))
+}
+
 // EncodeRecord writes a record with CRC.
 func EncodeRecord(w io.Writer, rec *Record) error {
+	if uint64(len(rec.Payload)) > math.MaxUint32 {
+		return fmt.Errorf("%w: record payload %d exceeds uint32 length", ErrTraversal, len(rec.Payload))
+	}
+	payloadLen := checkedRecordPayloadLen(rec)
 	var buf [RecordHeaderSize]byte
 	binary.LittleEndian.PutUint64(buf[:8], rec.TxID)
 	buf[8] = rec.RecordType
 	buf[9] = rec.Flags
-	binary.LittleEndian.PutUint32(buf[10:14], uint32(len(rec.Payload)))
+	binary.LittleEndian.PutUint32(buf[10:14], payloadLen)
 	if err := writeFull(w, buf[:]); err != nil {
 		return err
 	}
@@ -416,10 +428,9 @@ func (sw *SegmentWriter) Sync() error {
 
 // Close syncs and closes.
 func (sw *SegmentWriter) Close() error {
-	if err := sw.Sync(); err != nil {
-		return err
-	}
-	return sw.file.Close()
+	syncErr := sw.Sync()
+	closeErr := sw.file.Close()
+	return errors.Join(syncErr, closeErr)
 }
 
 // Size returns bytes written.

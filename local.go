@@ -227,11 +227,23 @@ func (r *Runtime) WaitUntilDurable(ctx context.Context, txID types.TxID) error {
 	r.mu.Unlock()
 
 	select {
-	case <-wait:
+	case got, ok := <-wait:
 		if err := durability.FatalError(); err != nil {
 			return err
 		}
-		return nil
+		if ok && got >= txID {
+			return nil
+		}
+		if types.TxID(durability.DurableTxID()) >= txID {
+			return nil
+		}
+		r.mu.Lock()
+		err := r.readyLocked()
+		r.mu.Unlock()
+		if err != nil {
+			return err
+		}
+		return ErrRuntimeNotReady
 	case <-ctx.Done():
 		return ctx.Err()
 	}
