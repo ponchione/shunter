@@ -59,6 +59,14 @@ go test -run '^$' -bench 'BenchmarkSubscribeSingleWebSocketRoundTrip' -benchmem 
 rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-websocket-subscribe-bench.txt
 ```
 
+The WebSocket fanout row was measured at Shunter commit
+`563f53d584dd0494252c02f0b00c0e13cd014fb3` with:
+
+```bash
+go test -run '^$' -bench 'BenchmarkWebSocketFanout16ClientsLightUpdate' -benchmem -count=10 ./protocol > /tmp/shunter-websocket-fanout-bench.txt
+rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-websocket-fanout-bench.txt
+```
+
 Every row is advisory.
 
 ## Protocol
@@ -78,6 +86,7 @@ Every row is advisory.
 | Subscribe admission | `HandleSubscribeSingleAdmissionReadShapes/two_table_join-24` | parse and register two-table join | 2.777us +/- 3% | 5.492Ki +/- 0% | 44 | advisory |
 | Subscribe admission | `HandleSubscribeSingleAdmissionReadShapes/multi_way_join-24` | parse and register multi-way join | 5.659us +/- 10% | 14.67Ki +/- 0% | 92 | advisory |
 | Subscribe WebSocket | `SubscribeSingleWebSocketRoundTrip-24` | persistent WebSocket; client `SubscribeSingle` write through server dispatch, executor reply, and client `SubscribeSingleApplied` read | 16.36us +/- 4% | 6.454Ki +/- 0% | 82 | advisory |
+| Fanout WebSocket | `WebSocketFanout16ClientsLightUpdate-24` | 16 persistent WebSocket clients; protocol light update fanout through `ConnManager`, sender enqueue, outbound writers, and client reads | 85.07us +/- 8% | 41.41Ki +/- 0% | 624 | advisory |
 
 ## Commitlog
 
@@ -131,6 +140,9 @@ Every row is advisory.
 - Offline backup/restore is covered for a small complete DataDir fixture and is
   expected to be I/O dominated; this row does not replace canary-scale
   backup/restore timing.
+- WebSocket coverage now includes a single SubscribeSingle round trip and a
+  16-client light-update fanout fixture, but not larger or backpressure-heavy
+  network workloads.
 - The current rows are not release-blocking thresholds. Treat regressions here
   as investigation triggers until the release process defines hard limits.
 
@@ -201,9 +213,9 @@ Findings:
 
 These remain outside the current benchmark envelope:
 
-- WebSocket network-level subscription workloads beyond the single
-  persistent-connection SubscribeSingle round trip, including multi-client
-  fanout and backpressure paths
+- WebSocket network-level subscription workloads beyond the current
+  single-connection subscribe and 16-client light-update fanout fixtures,
+  including larger fanout and backpressure paths
 - broader fanout distributions beyond deterministic in-process same-query,
   single-table, and two-table varied predicate fixtures
 - external canary workload, including canary-scale backup/restore timing
