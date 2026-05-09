@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
@@ -28,13 +29,15 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		Tables: make(map[schema.TableID]*TableChangeset),
 	}
 
-	for tableID, dels := range txState.allTableDeletes() {
+	deletesByTable := txState.allTableDeletes()
+	for _, tableID := range sortedCommitMapKeys(deletesByTable) {
+		dels := deletesByTable[tableID]
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
 		tc := ensureTableChangeset(changeset, tableID, table.schema)
-		for rowID := range dels {
+		for _, rowID := range sortedCommitMapKeys(dels) {
 			oldRow, ok := table.DeleteRow(rowID)
 			if !ok {
 				return nil, fmt.Errorf("%w: %d", ErrRowNotFound, rowID)
@@ -43,13 +46,16 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		}
 	}
 
-	for tableID, ins := range txState.allTableInserts() {
+	insertsByTable := txState.allTableInserts()
+	for _, tableID := range sortedCommitMapKeys(insertsByTable) {
+		ins := insertsByTable[tableID]
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
 		tc := ensureTableChangeset(changeset, tableID, table.schema)
-		for rowID, row := range ins {
+		for _, rowID := range sortedCommitMapKeys(ins) {
+			row := ins[rowID]
 			if err := table.InsertRow(rowID, row); err != nil {
 				return nil, err
 			}
@@ -57,7 +63,8 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		}
 	}
 
-	for tableID, next := range tx.txNextRowIDs {
+	for _, tableID := range sortedCommitMapKeys(tx.txNextRowIDs) {
+		next := tx.txNextRowIDs[tableID]
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
@@ -65,7 +72,8 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		table.SetNextID(next)
 	}
 
-	for tableID, next := range tx.txSequences {
+	for _, tableID := range sortedCommitMapKeys(tx.txSequences) {
+		next := tx.txSequences[tableID]
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
@@ -99,12 +107,14 @@ func ensureTableChangeset(cs *Changeset, id schema.TableID, ts *schema.TableSche
 }
 
 func revalidateCommit(cs *CommittedState, txState *TxState) error {
-	for tableID, deletes := range txState.allTableDeletes() {
+	deletesByTable := txState.allTableDeletes()
+	for _, tableID := range sortedCommitMapKeys(deletesByTable) {
+		deletes := deletesByTable[tableID]
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
-		for rowID := range deletes {
+		for _, rowID := range sortedCommitMapKeys(deletes) {
 			if _, ok := table.rowView(rowID); !ok {
 				return fmt.Errorf("%w: %d", ErrRowNotFound, rowID)
 			}
@@ -113,12 +123,15 @@ func revalidateCommit(cs *CommittedState, txState *TxState) error {
 
 	pendingUnique := make(map[txUniqueRef]map[uint64][]IndexKey)
 	pendingRows := make(map[schema.TableID]map[uint64][]types.ProductValue)
-	for tableID, inserts := range txState.allTableInserts() {
+	insertsByTable := txState.allTableInserts()
+	for _, tableID := range sortedCommitMapKeys(insertsByTable) {
+		inserts := insertsByTable[tableID]
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
-		for rowID, row := range inserts {
+		for _, rowID := range sortedCommitMapKeys(inserts) {
+			row := inserts[rowID]
 			if err := ValidateRow(table.Schema(), row); err != nil {
 				return err
 			}
@@ -225,4 +238,20 @@ func revalidateInsertAgainstCommitted(tableID schema.TableID, table *Table, row 
 	}
 
 	return nil
+}
+
+type orderedCommitMapKey interface {
+	~uint32 | ~uint64
+}
+
+func sortedCommitMapKeys[K orderedCommitMapKey, V any](m map[K]V) []K {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]K, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys
 }

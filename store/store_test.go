@@ -921,6 +921,42 @@ func TestCommitProducesLocalChangesetsAcrossTransactions(t *testing.T) {
 	}
 }
 
+func TestCommitChangesetRowsAreSortedByRowID(t *testing.T) {
+	cs, reg := buildTestState()
+
+	insertTx := NewTransaction(cs, reg)
+	insertTx.tx.AddInsert(0, 3, mkRow(30, "c"))
+	insertTx.tx.AddInsert(0, 1, mkRow(10, "a"))
+	insertTx.tx.AddInsert(0, 2, mkRow(20, "b"))
+	insertChangeset, err := Commit(cs, insertTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := changesetPKs(insertChangeset.TableChanges(0).Inserts); !slices.Equal(got, []uint64{10, 20, 30}) {
+		t.Fatalf("insert changeset pk order = %v, want [10 20 30]", got)
+	}
+
+	deleteTx := NewTransaction(cs, reg)
+	deleteTx.tx.AddDelete(0, 3)
+	deleteTx.tx.AddDelete(0, 1)
+	deleteTx.tx.AddDelete(0, 2)
+	deleteChangeset, err := Commit(cs, deleteTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := changesetPKs(deleteChangeset.TableChanges(0).Deletes); !slices.Equal(got, []uint64{10, 20, 30}) {
+		t.Fatalf("delete changeset pk order = %v, want [10 20 30]", got)
+	}
+}
+
+func changesetPKs(rows []types.ProductValue) []uint64 {
+	out := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row[0].AsUint64())
+	}
+	return out
+}
+
 // --- Snapshot tests (E7) ---
 
 func TestSnapshotPointInTime(t *testing.T) {
