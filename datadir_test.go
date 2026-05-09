@@ -236,6 +236,31 @@ func TestRestoreDataDirRejectsNonEmptyDestinationWithoutMutation(t *testing.T) {
 	assertDataDirFileBytes(t, filepath.Join(restoreDir, "existing"), original)
 }
 
+func TestBackupDataDirErrorsNameSourceDataDir(t *testing.T) {
+	dir := t.TempDir()
+	outputDir := filepath.Join(dir, "backup")
+	missingDataDir := filepath.Join(dir, "missing-data")
+
+	err := BackupDataDir(missingDataDir, outputDir)
+	if err == nil {
+		t.Fatal("BackupDataDir returned nil for missing data dir")
+	}
+	assertErrorContains(t, err, "read source data dir "+missingDataDir)
+	if _, statErr := os.Stat(outputDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("backup output stat after missing source = %v, want not exist", statErr)
+	}
+
+	dataFile := writeDataDirTestBytes(t, dir, "data-file", []byte("not a data dir"))
+	err = BackupDataDir(dataFile, outputDir)
+	if err == nil {
+		t.Fatal("BackupDataDir returned nil for file data dir")
+	}
+	assertErrorContains(t, err, "source data dir "+dataFile+" is not a directory")
+	if _, statErr := os.Stat(outputDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("backup output stat after file source = %v, want not exist", statErr)
+	}
+}
+
 func TestRestoreDataDirErrorsNameBackupSource(t *testing.T) {
 	dir := t.TempDir()
 	restoreDir := filepath.Join(dir, "restore")
