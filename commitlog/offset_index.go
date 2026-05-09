@@ -23,7 +23,8 @@ const (
 	offsetIndexKeyOff = 0
 	offsetIndexValOff = 8
 
-	maxOffsetIndexCap = uint64((1<<63 - 1) / OffsetIndexEntrySize)
+	maxOffsetIndexCap        = uint64((1<<63 - 1) / OffsetIndexEntrySize)
+	offsetIndexZeroChunkSize = 32 * 1024
 )
 
 // OffsetIndexEntry is one (tx id, segment byte offset) pair.
@@ -198,8 +199,7 @@ func (o *OffsetIndexMut) Truncate(target types.TxID) error {
 	if drop >= n {
 		return nil
 	}
-	zero := make([]byte, OffsetIndexEntrySize*(n-drop))
-	if err := writeAtFull(o.f, zero, int64(drop*OffsetIndexEntrySize)); err != nil {
+	if err := writeZeroAt(o.f, int64(drop*OffsetIndexEntrySize), OffsetIndexEntrySize*(n-drop)); err != nil {
 		return err
 	}
 	o.numEntries = drop
@@ -211,6 +211,24 @@ func (o *OffsetIndexMut) Truncate(target types.TxID) error {
 			return err
 		}
 		o.lastKey = last
+	}
+	return nil
+}
+
+func writeZeroAt(f interface {
+	WriteAt([]byte, int64) (int, error)
+}, off int64, n uint64) error {
+	var zero [offsetIndexZeroChunkSize]byte
+	for n > 0 {
+		chunk := zero[:]
+		if n < uint64(len(chunk)) {
+			chunk = chunk[:n]
+		}
+		if err := writeAtFull(f, chunk, off); err != nil {
+			return err
+		}
+		off += int64(len(chunk))
+		n -= uint64(len(chunk))
 	}
 	return nil
 }
