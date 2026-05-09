@@ -231,9 +231,11 @@ Current performance read:
   latency targets in the current coverage.
 - Local offline backup/restore timing now covers a complete small DataDir copy
   workflow; canary-scale backup/restore timing remains open.
-- Subscription memory-profile evidence now covers the existing large initial
-  snapshot, projected-row diff, and `rows_512` multi-way join fixtures; broader
-  network, canary, and backup/restore profiles remain open.
+- Memory-profile evidence now covers the existing large subscription initial
+  snapshot, projected-row diff, `rows_512` multi-way join, small local
+  backup/restore, and single-WebSocket subscribe fixtures; canary-scale,
+  broader network fanout/backpressure, and larger backup/restore profiles
+  remain open.
 - Current measured rows are advisory. The repo does not yet define hard
   performance thresholds.
 

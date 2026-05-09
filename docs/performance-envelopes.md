@@ -171,6 +171,32 @@ Findings:
   (`projectedRowsBefore`, `tableRowsAfter`, `subtractProjectedRowsByKey`,
   `encodeRowKey`) inside `evalMultiJoinDelta`.
 
+Operations and network memory profiles were spot-checked on 2026-05-09 from a
+clean detached worktree at Shunter commit
+`446d7c124a3128fa954d7c3a31aeda6c8a9b9309`.
+
+Commands:
+
+```bash
+go test -run '^$' -bench 'BenchmarkBackupRestoreDataDirWorkflow' -benchmem -memprofile /tmp/shunter-backup-restore-mem.out .
+rtk go tool pprof -top -alloc_space /tmp/shunter-backup-restore-mem.out
+go test -run '^$' -bench 'BenchmarkSubscribeSingleWebSocketRoundTrip' -benchmem -memprofile /tmp/shunter-websocket-subscribe-mem.out ./protocol
+rtk go tool pprof -top -alloc_space /tmp/shunter-websocket-subscribe-mem.out
+```
+
+Findings:
+
+- `BenchmarkBackupRestoreDataDirWorkflow-24`: 72.135ms/op,
+  30,522 B/op, 363 allocs/op. The allocation-space profile is small and mixed
+  with benchmark fixture setup; the timed copy path shows allocation through
+  `copyDirectoryContents`, `filepath.WalkDir`, `filepath.Join`, and `os.Lstat`.
+- `BenchmarkSubscribeSingleWebSocketRoundTrip-24`: 16.137us/op,
+  6,609 B/op, 82 allocs/op. Allocation space is dominated by SQL
+  tokenization/parse/query-plan construction and WebSocket read/write timeout
+  machinery, with top samples in `query/sql.tokenize`, `io.ReadAll`,
+  `context.AfterFunc`, `compileRawSubscribeAdmissionPlan`, and
+  `normalizePredicate`.
+
 ## Known Gaps
 
 These remain outside the current benchmark envelope:
@@ -181,5 +207,6 @@ These remain outside the current benchmark envelope:
 - broader fanout distributions beyond deterministic in-process same-query,
   single-table, and two-table varied predicate fixtures
 - external canary workload, including canary-scale backup/restore timing
-- memory profiles outside the current subscription large fixtures, including
-  network-level, canary, and backup/restore workloads
+- memory profiles outside the current subscription, single-WebSocket, and small
+  local backup/restore fixtures, including canary-scale, broader network
+  fanout/backpressure, and larger backup/restore workloads
