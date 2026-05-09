@@ -91,6 +91,14 @@ go test -run '^$' -bench 'BenchmarkWebSocketFanout64ClientsLightUpdate' -benchme
 rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-websocket-fanout-64-bench.txt
 ```
 
+The 128-client WebSocket fanout row was measured at Shunter commit
+`64dd7129310efa534febd779f1586b045f138efb` with:
+
+```bash
+go test -run '^$' -bench 'BenchmarkWebSocketFanout128ClientsLightUpdate' -benchmem -count=10 ./protocol > /tmp/shunter-websocket-fanout-128-bench.txt
+rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-websocket-fanout-128-bench.txt
+```
+
 The ClientSender backpressure row was measured from a clean detached worktree
 at Shunter commit `b23f871e4f248e05f6430520f1d84d85e4d9072c` with:
 
@@ -128,6 +136,7 @@ Every row is advisory.
 | Subscribe WebSocket | `SubscribeSingleWebSocketRoundTrip-24` | persistent WebSocket; client `SubscribeSingle` write through server dispatch, executor reply, and client `SubscribeSingleApplied` read | 16.36us +/- 4% | 6.454Ki +/- 0% | 82 | advisory |
 | Fanout WebSocket | `WebSocketFanout16ClientsLightUpdate-24` | 16 persistent WebSocket clients; protocol light update fanout through `ConnManager`, sender enqueue, outbound writers, and client reads | 85.07us +/- 8% | 41.41Ki +/- 0% | 624 | advisory |
 | Fanout WebSocket | `WebSocketFanout64ClientsLightUpdate-24` | 64 persistent WebSocket clients; protocol light update fanout through `ConnManager`, sender enqueue, outbound writers, and client reads | 340.2us +/- 5% | 165.5Ki +/- 0% | 2.496k | advisory |
+| Fanout WebSocket | `WebSocketFanout128ClientsLightUpdate-24` | 128 persistent WebSocket clients; protocol light update fanout through `ConnManager`, sender enqueue, outbound writers, and client reads | 580.6us +/- 2% | 331.1Ki +/- 0% | 4.992k | advisory |
 | Backpressure sender | `ClientSenderBackpressureFullBuffer-24` | one registered connection with a one-slot outbound queue already full; `SendTransactionUpdateLight` encodes a light update and rejects the non-blocking enqueue with `ErrClientBufferFull`; no WebSocket writer or async disconnect teardown in the timed loop | 420.1ns +/- 5% | 376 B +/- 0% | 10 | advisory |
 
 ## Executor
@@ -198,10 +207,10 @@ Every row is advisory.
   DataDir fixtures and is expected to be I/O dominated; these rows do not
   replace canary-scale backup/restore timing.
 - WebSocket coverage now includes a single SubscribeSingle round trip and
-  16- and 64-client light-update fanout fixtures. Deterministic sender-level
-  full-buffer rejection now has an advisory row, but slow-reader WebSocket
-  writer/write-timeout behavior and canary-scale network workloads remain
-  outside the envelope.
+  16-, 64-, and 128-client light-update fanout fixtures. Deterministic
+  sender-level full-buffer rejection now has an advisory row, but slow-reader
+  WebSocket writer/write-timeout behavior and external canary-scale network
+  workloads remain outside the envelope.
 - The current rows are not release-blocking thresholds. Treat regressions here
   as investigation triggers until the release process defines hard limits.
 
@@ -259,7 +268,9 @@ fanout profile was spot-checked at Shunter commit
 fanout profile was spot-checked at Shunter commit
 `f0de4eb465f9e586802179b7eeaba2fb575af1e0`. The sender-level
 backpressure profile was spot-checked from a clean detached worktree at
-Shunter commit `b23f871e4f248e05f6430520f1d84d85e4d9072c`.
+Shunter commit `b23f871e4f248e05f6430520f1d84d85e4d9072c`. The 128-client
+WebSocket fanout profile was spot-checked at Shunter commit
+`64dd7129310efa534febd779f1586b045f138efb`.
 Executor reducer commit profiles were spot-checked at Shunter commit
 `10c7b4c64b387441d9e2cd67caadcc62e36ff16c`.
 The larger backup/restore profile was spot-checked at Shunter commit
@@ -278,6 +289,8 @@ go test -run '^$' -bench 'BenchmarkWebSocketFanout16ClientsLightUpdate' -benchme
 rtk go tool pprof -top -alloc_space /tmp/shunter-websocket-fanout-mem.out
 go test -run '^$' -bench 'BenchmarkWebSocketFanout64ClientsLightUpdate' -benchmem -memprofile /tmp/shunter-websocket-fanout-64-mem.out ./protocol
 rtk go tool pprof -top -alloc_space /tmp/shunter-websocket-fanout-64-mem.out
+go test -run '^$' -bench 'BenchmarkWebSocketFanout128ClientsLightUpdate' -benchmem -memprofile /tmp/shunter-websocket-fanout-128-mem.out ./protocol
+rtk go tool pprof -top -alloc_space /tmp/shunter-websocket-fanout-128-mem.out
 go test -run '^$' -bench 'Benchmark.*Backpressure.*' -benchmem -memprofile /tmp/shunter-backpressure-mem.out ./protocol
 rtk go tool pprof -top -alloc_space /tmp/shunter-backpressure-mem.out
 go test -run '^$' -bench 'BenchmarkExecutorReducerCommit' -benchmem -memprofile /tmp/shunter-executor-reducer-mem.out ./executor
@@ -317,6 +330,14 @@ Findings:
   `context.WithDeadlineCause`, `newBenchmarkWebSocketFanoutHarness`,
   `time.newTimer`, `websocket.(*Conn).prepareRead`, and
   `enqueueTransactionEnvelope`.
+- `BenchmarkWebSocketFanout128ClientsLightUpdate-24`: 616.287us/op,
+  339,010 B/op, 4,992 allocs/op. Allocation space keeps the same broad shape
+  as the smaller fanout fixtures: harness connection setup, WebSocket client
+  reads, context/deadline setup, writer timeouts, and protocol sender enqueue
+  dominate, with top samples in `newBenchmarkWebSocketFanoutHarness`,
+  `io.ReadAll`, `context.(*cancelCtx).propagateCancel`, `context.AfterFunc`,
+  `context.WithDeadlineCause`, `time.newTimer`,
+  `websocket.(*Conn).prepareRead`, and `enqueueTransactionEnvelope`.
 - `BenchmarkClientSenderBackpressureFullBuffer-24`: 428.6ns/op,
   376 B/op, 10 allocs/op. Allocation space is dominated by rejection error
   construction, light-update server-message encoding and frame wrapping,
@@ -336,16 +357,16 @@ Findings:
 These remain outside the current benchmark envelope:
 
 - WebSocket network-level subscription workloads beyond the current
-  single-connection subscribe and 16/64-client light-update fanout fixtures,
-  including slow-reader writer/write-timeout backpressure paths and
-  canary-scale fanout; deterministic sender-level full-buffer rejection is
-  covered separately
+  single-connection subscribe and 16/64/128-client light-update fanout
+  fixtures, including slow-reader writer/write-timeout backpressure paths and
+  external canary-scale fanout; deterministic sender-level full-buffer
+  rejection is covered separately
 - workload-derived or canary fanout distributions beyond the deterministic
   in-process same-query, varied single-table, skewed hot-key, and varied
   two-table predicate fixtures
 - external canary workload, including canary-scale backup/restore timing
 - memory profiles outside the current subscription, single-WebSocket,
-  16/64-client WebSocket fanout, sender-level backpressure, executor reducer
-  commit, and small/larger local backup/restore fixtures, including
+  16/64/128-client WebSocket fanout, sender-level backpressure, executor
+  reducer commit, and small/larger local backup/restore fixtures, including
   canary-scale, slow-reader network paths, and production-sized
   backup/restore workloads
