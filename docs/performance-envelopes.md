@@ -42,6 +42,14 @@ go test -run '^$' -bench 'BenchmarkBackupRestoreDataDirWorkflow' -benchmem -coun
 rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-backup-restore-bench.txt
 ```
 
+The multi-table varied-query fanout row was measured at Shunter commit
+`3632780dd46c07333b51f5201dde3cb031aa243f` with:
+
+```bash
+go test -run '^$' -bench 'BenchmarkFanOut1KClients.*VariedQueries' -benchmem -count=10 ./subscription > /tmp/shunter-fanout-varied-bench.txt
+rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-fanout-varied-bench.txt
+```
+
 Every row is advisory.
 
 ## Protocol
@@ -92,6 +100,7 @@ Every row is advisory.
 | Initial snapshot diff | `ProjectedRowsBeforeLargeBags-24` | 4,096 current rows, 2,048 inserted rows, 64 distinct keys | 778.6us +/- 1% | 871.8Ki +/- 0% | 12.32k | advisory |
 | Fanout | `FanOut1KClientsSameQuery-24` | 1,000 clients on one equality query | 167.3us +/- 9% | 321.3Ki +/- 0% | 2.029k | advisory |
 | Fanout | `FanOut1KClientsVariedQueries-24` | 1,000 clients across equality, range, AND, and OR predicates; 256 changed rows | 1.761ms +/- 2% | 448.7Ki +/- 0% | 3.405k | advisory |
+| Fanout | `FanOut1KClientsMultiTableVariedQueries-24` | 1,000 clients split across two tables with equality, range, AND, and OR predicates; 256 changed rows per table | 3.427ms +/- 6% | 570.7Ki +/- 0% | 4.786k | advisory |
 | Join delta eval | `JoinFragmentEval-24` | two-table join, 100 committed rows per side, 10 inserts per side | 146.0us +/- 1% | 81.34Ki +/- 0% | 285 | advisory |
 | Multi-way join eval | `MultiWayLiveJoinEvalSizes/rows_32/table_shape-24` | 32 rows per joined table | 27.97us +/- 6% | 17.97Ki +/- 0% | 167 | advisory |
 | Multi-way join eval | `MultiWayLiveJoinEvalSizes/rows_32/count-24` | 32 rows per joined table, `COUNT(*)` | 114.7us +/- 3% | 18.25Ki +/- 0% | 170 | advisory |
@@ -157,8 +166,8 @@ Findings:
 These remain outside the current benchmark envelope:
 
 - WebSocket network-level subscription workloads beyond handler admission
-- broader fanout distributions beyond deterministic same-query and varied
-  single-table predicate fixtures
+- broader fanout distributions beyond deterministic in-process same-query,
+  single-table, and two-table varied predicate fixtures
 - external canary workload, including canary-scale backup/restore timing
 - memory profiles outside the current subscription large fixtures, including
   network-level, canary, and backup/restore workloads

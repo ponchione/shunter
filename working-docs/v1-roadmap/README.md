@@ -200,14 +200,14 @@ Current benchmark coverage:
 | Declared reads | `BenchmarkDeclaredReadRuntimeSurfaces` | covered for local declared query execution and declared live-view initial rows, including projection/order/limit and aggregate shapes |
 | Raw subscription protocol admission | `BenchmarkHandleSubscribeSingleAdmissionReadShapes` | covered for single-table, two-table join, and multi-way join SubscribeSingle admission |
 | Subscription equality and lifecycle | `BenchmarkEvalEqualitySubs1K`, `BenchmarkEvalEqualitySubs10K`, `BenchmarkRegisterUnregister` | covered for core hot paths |
-| Subscription initial snapshots and fanout | `BenchmarkRegisterSetInitialQueryAllRows`, `BenchmarkProjectedRowsBeforeLargeBags`, `BenchmarkFanOut1KClientsSameQuery`, `BenchmarkFanOut1KClientsVariedQueries` | partial; covers deterministic same-query and varied single-table fanout plus memory-profile evidence for the current large initial snapshot and projected-row diff fixtures; still needs broader distributions |
+| Subscription initial snapshots and fanout | `BenchmarkRegisterSetInitialQueryAllRows`, `BenchmarkProjectedRowsBeforeLargeBags`, `BenchmarkFanOut1KClientsSameQuery`, `BenchmarkFanOut1KClientsVariedQueries`, `BenchmarkFanOut1KClientsMultiTableVariedQueries` | partial; covers deterministic same-query, varied single-table, and varied two-table fanout plus memory-profile evidence for the current large initial snapshot and projected-row diff fixtures; still needs network/canary-scale and skewed distributions |
 | Subscription joins and candidate pruning | `BenchmarkJoinFragmentEval`, `BenchmarkMultiWayLiveJoinEvalSizes`, `BenchmarkDeltaIndexConstruction`, `BenchmarkCandidateCollection` | covered for two-table joins plus deterministic small/medium/large multi-way live joins with table-shaped and aggregate deltas; `rows_512` has memory-profile evidence |
 
 Known benchmark gaps for v1 envelopes:
 
 - WebSocket network-level subscription workloads beyond handler admission
-- broader fanout distributions beyond deterministic same-query and varied
-  single-table predicate fixtures
+- broader fanout distributions beyond deterministic in-process same-query,
+  single-table, and two-table varied predicate fixtures
 - external canary workload, including canary-scale backup/restore timing
 - memory profiles outside the current subscription large fixtures
 
