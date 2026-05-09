@@ -5,6 +5,15 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 ## v0.1.1-dev
 
 - Current development line.
+- Hardened protocol outbound delivery against externally closed outbound queues.
+- Commit log durability workers now reject non-positive segment sizes and drain
+  batch sizes at startup.
+- Live subscription filtered cross-join deltas now skip committed table scans
+  for unchanged sides of the join.
+- Store index seeks avoid redundant RowID slice cloning, and bounded B-tree
+  scans reuse their upper bound key.
+- Observability error redaction now bounds the raw scan window before
+  redacting/truncating long error strings.
 - Live subscription initial row limits now apply after supported
   `ORDER BY`/`OFFSET`/`LIMIT` initial-snapshot windowing, and streaming
   single-table `LIMIT` snapshots stop scanning once enough rows are gathered.
