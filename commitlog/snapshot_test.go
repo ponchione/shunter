@@ -2248,6 +2248,28 @@ func TestCreateSnapshotRejectsTxIDThatDoesNotMatchCommittedHorizon(t *testing.T)
 	}
 }
 
+func TestCreateSnapshotAtCurrentHorizonCapturesCommittedTxID(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	cs.SetCommittedTxID(6)
+	baseDir := t.TempDir()
+	writer := NewFileSnapshotWriterWithObserver(filepath.Join(baseDir, "snapshots"), reg, nil)
+
+	txID, err := writer.CreateSnapshotAtCurrentHorizon(cs)
+	if err != nil {
+		t.Fatalf("CreateSnapshotAtCurrentHorizon returned error: %v", err)
+	}
+	if txID != 6 {
+		t.Fatalf("CreateSnapshotAtCurrentHorizon txID = %d, want 6", txID)
+	}
+	data, err := ReadSnapshot(filepath.Join(baseDir, "snapshots", "6"))
+	if err != nil {
+		t.Fatalf("ReadSnapshot: %v", err)
+	}
+	if data.TxID != 6 {
+		t.Fatalf("snapshot data TxID = %d, want 6", data.TxID)
+	}
+}
+
 func assertSnapshotPayloadArtifactsMissing(t *testing.T, snapshotDir string) {
 	t.Helper()
 	for _, name := range []string{snapshotTempFileName, snapshotFileName} {

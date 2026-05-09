@@ -345,6 +345,10 @@ func NewSnapshotWriter(baseDir string, reg schema.SchemaRegistry) SnapshotWriter
 }
 
 func NewSnapshotWriterWithObserver(baseDir string, reg schema.SchemaRegistry, observer SnapshotObserver) SnapshotWriter {
+	return NewFileSnapshotWriterWithObserver(baseDir, reg, observer)
+}
+
+func NewFileSnapshotWriterWithObserver(baseDir string, reg schema.SchemaRegistry, observer SnapshotObserver) *FileSnapshotWriter {
 	return &FileSnapshotWriter{
 		baseDir:    baseDir,
 		reg:        reg,
@@ -366,23 +370,56 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 		recordSnapshotDuration(w.observer, resultFromErr(err), time.Since(start))
 	}()
 
+	if err := w.beginSnapshot(); err != nil {
+		return err
+	}
+	defer w.endSnapshot()
+
+	body, err := w.captureSnapshotBody(committed, txID)
+	if err != nil {
+		return err
+	}
+	return w.createSnapshotFromBody(txID, body)
+}
+
+func (w *FileSnapshotWriter) CreateSnapshotAtCurrentHorizon(committed *store.CommittedState) (txID types.TxID, err error) {
+	start := time.Now()
+	defer func() {
+		recordSnapshotDuration(w.observer, resultFromErr(err), time.Since(start))
+	}()
+
+	if err := w.beginSnapshot(); err != nil {
+		return 0, err
+	}
+	defer w.endSnapshot()
+
+	txID, body, err := w.captureSnapshotBodyAtCurrentHorizon(committed)
+	if err != nil {
+		return 0, err
+	}
+	if err := w.createSnapshotFromBody(txID, body); err != nil {
+		return 0, err
+	}
+	return txID, nil
+}
+
+func (w *FileSnapshotWriter) beginSnapshot() error {
 	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.inProgress {
-		w.mu.Unlock()
 		return ErrSnapshotInProgress
 	}
 	w.inProgress = true
+	return nil
+}
+
+func (w *FileSnapshotWriter) endSnapshot() {
+	w.mu.Lock()
+	w.inProgress = false
 	w.mu.Unlock()
-	defer func() {
-		w.mu.Lock()
-		w.inProgress = false
-		w.mu.Unlock()
-	}()
+}
 
-	if err := validateSnapshotHorizon(committed, txID); err != nil {
-		return err
-	}
-
+func (w *FileSnapshotWriter) createSnapshotFromBody(txID types.TxID, body snapshotBodyCapture) error {
 	snapshotDir := filepath.Join(w.baseDir, strconv.FormatUint(uint64(txID), 10))
 	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
 		return &SnapshotCompletionError{Phase: "mkdir", Path: snapshotDir, Err: err}
@@ -419,7 +456,7 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 		<-w.continueWrite
 	}
 
-	if err := w.writeSnapshotFile(f, committed, txID); err != nil {
+	if err := w.writeSnapshotFile(f, txID, body); err != nil {
 		f.Close()
 		return &SnapshotCompletionError{Phase: "write-temp", Path: tmpPath, Err: err}
 	}
@@ -448,21 +485,7 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 	return nil
 }
 
-func validateSnapshotHorizon(committed *store.CommittedState, txID types.TxID) error {
-	committedTxID := committed.CommittedTxID()
-	if committedTxID != txID {
-		return &SnapshotHorizonMismatchError{
-			SnapshotTxID:  txID,
-			CommittedTxID: committedTxID,
-		}
-	}
-	if txID == ^types.TxID(0) {
-		return fmt.Errorf("%w: snapshot tx_id %d leaves no next tx_id", ErrSnapshot, txID)
-	}
-	return nil
-}
-
-func (w *FileSnapshotWriter) writeSnapshotFile(f snapshotTempFile, committed *store.CommittedState, txID types.TxID) error {
+func (w *FileSnapshotWriter) writeSnapshotFile(f snapshotTempFile, txID types.TxID, body snapshotBodyCapture) error {
 	if err := writeFull(f, SnapshotMagic[:]); err != nil {
 		return err
 	}
@@ -481,7 +504,7 @@ func (w *FileSnapshotWriter) writeSnapshotFile(f snapshotTempFile, committed *st
 
 	hasher := blake3.New(32, nil)
 	bodyWriter := io.MultiWriter(f, hasher)
-	if err := w.writeSnapshotBody(bodyWriter, committed, txID); err != nil {
+	if err := writeSnapshotBodyCapture(bodyWriter, w.reg, txID, body); err != nil {
 		return err
 	}
 	var hash [32]byte
@@ -492,11 +515,7 @@ func (w *FileSnapshotWriter) writeSnapshotFile(f snapshotTempFile, committed *st
 	return nil
 }
 
-func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.CommittedState, txID types.TxID) error {
-	body, err := w.captureSnapshotBody(committed, txID)
-	if err != nil {
-		return err
-	}
+func writeSnapshotBodyCapture(dst io.Writer, reg schema.SchemaRegistry, txID types.TxID, body snapshotBodyCapture) error {
 	if err := validateSnapshotBootstrapState(txID, snapshotBodyBootstrapSequences(body), snapshotBodyBootstrapNextIDs(body), snapshotBodyBootstrapRowCounts(body)); err != nil {
 		return err
 	}
@@ -543,7 +562,7 @@ func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.C
 		for _, row := range table.rows {
 			rowBuf = rowBuf[:0]
 			var err error
-			ts, ok := w.reg.Table(table.tableID)
+			ts, ok := reg.Table(table.tableID)
 			if !ok {
 				return fmt.Errorf("%w: snapshot table section references unknown table %d", ErrSnapshot, table.tableID)
 			}
@@ -564,6 +583,14 @@ func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.C
 		}
 	}
 	return nil
+}
+
+func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.CommittedState, txID types.TxID) error {
+	body, err := w.captureSnapshotBody(committed, txID)
+	if err != nil {
+		return err
+	}
+	return writeSnapshotBodyCapture(dst, w.reg, txID, body)
 }
 
 func validateSnapshotRowPayloadLen(rowLen int, maxRowBytes uint32) error {
@@ -602,12 +629,10 @@ type snapshotTableCapture struct {
 }
 
 func (w *FileSnapshotWriter) captureSnapshotBody(committed *store.CommittedState, txID types.TxID) (snapshotBodyCapture, error) {
-	var body snapshotBodyCapture
-	var schemaBuf bytes.Buffer
-	if err := EncodeSchemaSnapshot(&schemaBuf, w.reg); err != nil {
+	body, err := w.newSnapshotBodyCapture()
+	if err != nil {
 		return body, err
 	}
-	body.schema = append(body.schema, schemaBuf.Bytes()...)
 
 	committed.RLock()
 	defer committed.RUnlock()
@@ -618,7 +643,52 @@ func (w *FileSnapshotWriter) captureSnapshotBody(committed *store.CommittedState
 			CommittedTxID: committedTxID,
 		}
 	}
+	if err := validateSnapshotTxID(txID); err != nil {
+		return body, err
+	}
+	if err := captureCommittedSnapshotBodyLocked(&body, committed); err != nil {
+		return body, err
+	}
+	return body, nil
+}
 
+func (w *FileSnapshotWriter) captureSnapshotBodyAtCurrentHorizon(committed *store.CommittedState) (types.TxID, snapshotBodyCapture, error) {
+	body, err := w.newSnapshotBodyCapture()
+	if err != nil {
+		return 0, body, err
+	}
+
+	committed.RLock()
+	defer committed.RUnlock()
+
+	txID := committed.CommittedTxIDLocked()
+	if err := validateSnapshotTxID(txID); err != nil {
+		return 0, body, err
+	}
+	if err := captureCommittedSnapshotBodyLocked(&body, committed); err != nil {
+		return 0, body, err
+	}
+	return txID, body, nil
+}
+
+func (w *FileSnapshotWriter) newSnapshotBodyCapture() (snapshotBodyCapture, error) {
+	var body snapshotBodyCapture
+	var schemaBuf bytes.Buffer
+	if err := EncodeSchemaSnapshot(&schemaBuf, w.reg); err != nil {
+		return body, err
+	}
+	body.schema = append(body.schema, schemaBuf.Bytes()...)
+	return body, nil
+}
+
+func validateSnapshotTxID(txID types.TxID) error {
+	if txID == ^types.TxID(0) {
+		return fmt.Errorf("%w: snapshot tx_id %d leaves no next tx_id", ErrSnapshot, txID)
+	}
+	return nil
+}
+
+func captureCommittedSnapshotBodyLocked(body *snapshotBodyCapture, committed *store.CommittedState) error {
 	ids := committed.TableIDsLocked()
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	for _, tableID := range ids {
@@ -638,11 +708,11 @@ func (w *FileSnapshotWriter) captureSnapshotBody(committed *store.CommittedState
 		table, _ := committed.TableLocked(tableID)
 		rows, err := deterministicRows(table)
 		if err != nil {
-			return body, err
+			return err
 		}
 		body.tables = append(body.tables, snapshotTableCapture{tableID: tableID, rows: rows})
 	}
-	return body, nil
+	return nil
 }
 
 type SnapshotData struct {

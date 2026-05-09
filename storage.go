@@ -31,9 +31,9 @@ func (r *Runtime) CreateSnapshot() (types.TxID, error) {
 		return 0, err
 	}
 
-	txID := handles.state.CommittedTxID()
-	writer := commitlog.NewSnapshotWriterWithObserver(handles.dataDir, handles.registry, handles.observability)
-	if err := writer.CreateSnapshot(handles.state, txID); err != nil {
+	writer := commitlog.NewFileSnapshotWriterWithObserver(handles.dataDir, handles.registry, handles.observability)
+	txID, err := writer.CreateSnapshotAtCurrentHorizon(handles.state)
+	if err != nil {
 		return 0, err
 	}
 	return txID, nil
