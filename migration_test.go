@@ -441,6 +441,40 @@ func TestRunDataDirMigrationsFailureRollsBackHookTransaction(t *testing.T) {
 	requireMigrationMessageBodies(t, rt)
 }
 
+func TestRunDataDirMigrationsContextCancelAfterHookRollsBackHookTransaction(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	hookCalls := 0
+	_, err := RunDataDirMigrations(ctx, validChatModule(), Config{DataDir: dir}, func(_ context.Context, mc *MigrationContext) error {
+		hookCalls++
+		tableID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		if _, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("offline-canceled")}); err != nil {
+			return err
+		}
+		cancel()
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunDataDirMigrations error = %v, want context.Canceled", err)
+	}
+	if hookCalls != 1 {
+		t.Fatalf("hook calls = %d, want 1", hookCalls)
+	}
+
+	rt, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build after canceled explicit migration runner: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start after canceled explicit migration runner: %v", err)
+	}
+	defer rt.Close()
+	requireMigrationMessageBodies(t, rt)
+}
+
 func assertMigrationDeclaration(t *testing.T, declarations []MigrationContractDeclaration, surface, name string, compatibility MigrationCompatibility, classification MigrationClassification) {
 	t.Helper()
 	for _, declaration := range declarations {
