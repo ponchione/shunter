@@ -481,6 +481,76 @@ func TestRunModuleDataDirMigrationsUsesRegisteredHooks(t *testing.T) {
 	requireMigrationMessageBodies(t, rt, "registered-hook", "after-module-runner")
 }
 
+func TestRunModuleDataDirMigrationsNoHooksDoesNotBootstrapMissingDataDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "missing-data-dir")
+	result, err := RunModuleDataDirMigrations(context.Background(), validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("RunModuleDataDirMigrations no hooks: %v", err)
+	}
+	if result.DataDir != dir || result.RecoveredTxID != 0 || result.DurableTxID != 0 || len(result.Hooks) != 0 {
+		t.Fatalf("no-hook module migration result = %+v, want data dir only", result)
+	}
+	if _, statErr := os.Stat(dir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("data dir stat after no-hook module migration = %v, want not exist", statErr)
+	}
+}
+
+func TestRunModuleDataDirMigrationsSnapshotsRegisteredHooks(t *testing.T) {
+	dir := t.TempDir()
+	var calls []string
+	mod := validChatModule()
+	mod.MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+		calls = append(calls, "first")
+		mod.migrationHooks[1] = func(context.Context, *MigrationContext) error {
+			calls = append(calls, "mutated")
+			return fmt.Errorf("mutated hook ran during active migration")
+		}
+		tableID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("first-snapshot-hook")})
+		return err
+	})
+	mod.MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+		calls = append(calls, "second")
+		if mc.CommittedTxID() != 1 {
+			return fmt.Errorf("committed tx id = %d, want first hook horizon", mc.CommittedTxID())
+		}
+		tableID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(2), types.NewString("second-snapshot-hook")})
+		return err
+	})
+
+	result, err := RunModuleDataDirMigrations(context.Background(), mod, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("RunModuleDataDirMigrations snapshot hooks: %v", err)
+	}
+	if len(calls) != 2 || calls[0] != "first" || calls[1] != "second" {
+		t.Fatalf("migration hook calls = %#v, want first then second", calls)
+	}
+	if result.RecoveredTxID != 0 || result.DurableTxID != 2 {
+		t.Fatalf("snapshot result tx ids recovered/durable = %d/%d, want 0/2", result.RecoveredTxID, result.DurableTxID)
+	}
+	requireMigrationHookResults(t, result.Hooks,
+		MigrationHookResult{Index: 0, TxID: 1, Changed: true},
+		MigrationHookResult{Index: 1, TxID: 2, Changed: true},
+	)
+
+	rt, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build after snapshot module migration runner: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start after snapshot module migration runner: %v", err)
+	}
+	defer rt.Close()
+	requireMigrationMessageBodies(t, rt, "first-snapshot-hook", "second-snapshot-hook")
+}
+
 func TestRunDataDirMigrationsNoopHookDoesNotConsumeTxID(t *testing.T) {
 	dir := t.TempDir()
 	result, err := RunDataDirMigrations(context.Background(), validChatModule(), Config{DataDir: dir}, func(_ context.Context, mc *MigrationContext) error {
