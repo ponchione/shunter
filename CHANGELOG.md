@@ -5,6 +5,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 ## v0.1.1-dev
 
 - Current development line.
+- Release qualification now explicitly includes the external `opsboard-canary`
+  gates and recording the Shunter/canary commits used for the run.
 - Recovery now rejects directory artifacts named as the first commit-log
   segment instead of treating the data directory as empty, while preserving
   rollover directory cleanup behavior.

@@ -217,16 +217,26 @@ Before cutting a Shunter release:
 1. Confirm `VERSION` uses the intended v-prefixed SemVer value.
 2. Update `CHANGELOG.md` for release-facing behavior.
 3. Run the release qualification commands documented by the hardening plan.
-4. Build release binaries with linker variables for Shunter build metadata:
+4. Run the external `opsboard-canary` gates from the sibling canary checkout:
+
+```bash
+rtk make canary-quick
+rtk make canary-full
+```
+
+Record the Shunter commit or release tag under test and the `opsboard-canary`
+commit used for the qualification run.
+
+5. Build release binaries with linker variables for Shunter build metadata:
 
 ```bash
 rtk go build -ldflags "-X github.com/ponchione/shunter.Version=v1.0.0 -X github.com/ponchione/shunter.Commit=<git-sha> -X github.com/ponchione/shunter.Date=<utc-rfc3339>" ./cmd/shunter
 ```
 
-5. Run the built command's `version` output and verify the stamped Shunter
+6. Run the built command's `version` output and verify the stamped Shunter
    version, commit, date, and Go version.
-6. Tag released versions with `vX.Y.Z`.
-7. Keep normal post-release development on a `-dev` version unless cutting a
+7. Tag released versions with `vX.Y.Z`.
+8. Keep normal post-release development on a `-dev` version unless cutting a
    release.
 
 ## Unsupported Operations

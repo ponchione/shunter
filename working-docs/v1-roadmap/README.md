@@ -86,11 +86,9 @@ Covered surfaces:
 - Raw subscription visibility and deltas:
   `protocol/visibility_expansion_test.go` and `read_auth_gauntlet_test.go`.
 - Strict-auth public-runtime workload: `rc_app_workload_test.go`.
-
-Remaining auth gap:
-
-- Prove the recommended production setup through the external canary app using
-  realistic non-dev tokens across the normal app, protocol, and client workflow.
+- Strict-auth external canary workflow through realistic JWTs with issuer and
+  audience allowlists, permission claims, sender-based visibility, protocol
+  clients, and the public TypeScript SDK: external `opsboard-canary`.
 
 ## Hardening Status
 
@@ -281,6 +279,10 @@ Current release-gate coverage:
 
 - `opsboard-canary` has a public `@shunter/client` SDK smoke path in
   `make sdk-smoke`, and `make canary-quick` runs it.
+- `opsboard-canary` strict auth uses accepted issuer and audience allowlists and
+  exercises permissioned reducers, declared reads/views, raw SQL, table
+  subscriptions, declared-view subscriptions, sender-based visibility,
+  backup/restore, and an app-owned offline migration path.
 
 Tasks:
 
@@ -289,8 +291,8 @@ Tasks:
   sender-based visibility, reducers, declared queries/views, raw SQL escape
   hatches, subscriptions, restart/rollback, contract export, generated
   TypeScript, offline backup/restore, and one app-owned migration path.
-- Add canary commands to the release qualification checklist and pin them to
-  the intended Shunter commit or tag.
+- Record the Shunter commit or release tag under test and the `opsboard-canary`
+  commit used for each release qualification run.
 
 Verification from the canary checkout:
 
