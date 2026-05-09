@@ -113,6 +113,12 @@ func validateCommitLogOptions(opts CommitLogOptions) error {
 	if opts.MaxSegmentSize <= 0 {
 		return fmt.Errorf("commitlog: max segment size must be positive: %d", opts.MaxSegmentSize)
 	}
+	if opts.MaxRecordPayloadBytes == 0 {
+		return fmt.Errorf("commitlog: max record payload bytes must be positive: %d", opts.MaxRecordPayloadBytes)
+	}
+	if opts.MaxRowBytes == 0 {
+		return fmt.Errorf("commitlog: max row bytes must be positive: %d", opts.MaxRowBytes)
+	}
 	if opts.ChannelCapacity < 0 {
 		return fmt.Errorf("commitlog: channel capacity must be non-negative: %d", opts.ChannelCapacity)
 	}

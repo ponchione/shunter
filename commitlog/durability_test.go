@@ -64,6 +64,20 @@ func TestNewDurabilityWorkerRejectsInvalidBatchAndSegmentOptions(t *testing.T) {
 			wantErr: "max segment size must be positive",
 		},
 		{
+			name: "zero max record payload bytes",
+			mutate: func(opts *CommitLogOptions) {
+				opts.MaxRecordPayloadBytes = 0
+			},
+			wantErr: "max record payload bytes must be positive",
+		},
+		{
+			name: "zero max row bytes",
+			mutate: func(opts *CommitLogOptions) {
+				opts.MaxRowBytes = 0
+			},
+			wantErr: "max row bytes must be positive",
+		},
+		{
 			name: "zero drain batch size",
 			mutate: func(opts *CommitLogOptions) {
 				opts.DrainBatchSize = 0
