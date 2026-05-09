@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -249,6 +250,55 @@ func TestDispatchRegisterSubscriptionSetClosesSnapshotOnError(t *testing.T) {
 	}
 }
 
+func TestDispatchRegisterSubscriptionSetCanceledBeforeSnapshot(t *testing.T) {
+	exec, _ := setupExecutor()
+	fakeSubs := &registerDispatchSubs{}
+	exec.subs = fakeSubs
+
+	snapshotCalled := false
+	exec.snapshotFn = func() store.CommittedReadView {
+		snapshotCalled = true
+		return exec.committed.Snapshot()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var (
+		gotResult subscription.SubscriptionSetRegisterResult
+		gotErr    error
+		called    bool
+	)
+	result := exec.dispatch(RegisterSubscriptionSetCmd{
+		Request: subscription.SubscriptionSetRegisterRequest{
+			Context:    ctx,
+			ConnID:     types.ConnectionID{9},
+			QueryID:    42,
+			Predicates: []subscription.Predicate{subscription.AllRows{Table: 1}},
+		},
+		Reply: func(r subscription.SubscriptionSetRegisterResult, err error) {
+			called = true
+			gotResult = r
+			gotErr = err
+		},
+	})
+
+	if result != "canceled" {
+		t.Fatalf("dispatch result = %q, want canceled", result)
+	}
+	if !called || !errors.Is(gotErr, context.Canceled) {
+		t.Fatalf("Reply called=%v err=%v, want context.Canceled", called, gotErr)
+	}
+	if gotResult.TotalHostExecutionDurationMicros == 0 {
+		t.Fatal("canceled register result should carry non-zero duration")
+	}
+	if fakeSubs.registerSetCalled {
+		t.Fatal("RegisterSet called for pre-canceled request")
+	}
+	if snapshotCalled {
+		t.Fatal("snapshot acquired for pre-canceled register request")
+	}
+}
+
 func TestDispatchUnregisterSubscriptionSetCarriesError(t *testing.T) {
 	exec, _ := setupExecutor()
 	fakeSubs := &registerDispatchSubs{
@@ -282,5 +332,51 @@ func TestDispatchUnregisterSubscriptionSetCarriesError(t *testing.T) {
 	}
 	if tracked == nil || !tracked.closed {
 		t.Fatal("snapshot should be closed even on error path")
+	}
+}
+
+func TestDispatchUnregisterSubscriptionSetCanceledBeforeSnapshot(t *testing.T) {
+	exec, _ := setupExecutor()
+	fakeSubs := &registerDispatchSubs{}
+	exec.subs = fakeSubs
+
+	snapshotCalled := false
+	exec.snapshotFn = func() store.CommittedReadView {
+		snapshotCalled = true
+		return exec.committed.Snapshot()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var (
+		gotResult subscription.SubscriptionSetUnregisterResult
+		gotErr    error
+		called    bool
+	)
+	result := exec.dispatch(UnregisterSubscriptionSetCmd{
+		ConnID:  types.ConnectionID{9},
+		QueryID: 42,
+		Context: ctx,
+		Reply: func(r subscription.SubscriptionSetUnregisterResult, err error) {
+			called = true
+			gotResult = r
+			gotErr = err
+		},
+	})
+
+	if result != "canceled" {
+		t.Fatalf("dispatch result = %q, want canceled", result)
+	}
+	if !called || !errors.Is(gotErr, context.Canceled) {
+		t.Fatalf("Reply called=%v err=%v, want context.Canceled", called, gotErr)
+	}
+	if gotResult.TotalHostExecutionDurationMicros == 0 {
+		t.Fatal("canceled unregister result should carry non-zero duration")
+	}
+	if fakeSubs.unregisterSetCalled {
+		t.Fatal("UnregisterSet called for pre-canceled request")
+	}
+	if snapshotCalled {
+		t.Fatal("snapshot acquired for pre-canceled unregister request")
 	}
 }

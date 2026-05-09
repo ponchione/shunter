@@ -78,64 +78,39 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 }
 
 func (m *Manager) sendFanOut(ctx context.Context, msg FanOutMessage) {
-	const retryDelay = time.Millisecond
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var blockedStart time.Time
-	recordBlocked := func() {
-		if !blockedStart.IsZero() {
-			recordSubscriptionFanoutBlockedDuration(m.observer, time.Since(blockedStart))
-		}
+	if err := ctx.Err(); err != nil {
+		return
 	}
-	for {
-		select {
-		case <-ctx.Done():
-			recordBlocked()
-			return
-		default:
-		}
-		m.fanoutMu.Lock()
-		if m.fanoutClosed {
-			m.fanoutMu.Unlock()
-			recordBlocked()
-			return
-		}
-		select {
-		case m.inbox <- msg:
-			m.fanoutMu.Unlock()
-			recordBlocked()
-			return
-		default:
-			if blockedStart.IsZero() {
-				blockedStart = time.Now()
-			}
-		}
-		closed := m.fanoutClosedCh
+	m.fanoutMu.Lock()
+	if m.fanoutClosed {
 		m.fanoutMu.Unlock()
+		return
+	}
+	closed := m.fanoutClosedCh
+	m.fanoutMu.Unlock()
 
-		timer := time.NewTimer(retryDelay)
-		select {
-		case <-closed:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			recordBlocked()
-			return
-		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			recordBlocked()
-			return
-		case <-timer.C:
-		}
+	select {
+	case <-closed:
+		return
+	default:
+	}
+	select {
+	case m.inbox <- msg:
+		return
+	default:
+	}
+
+	blockedStart := time.Now()
+	defer func() {
+		recordSubscriptionFanoutBlockedDuration(m.observer, time.Since(blockedStart))
+	}()
+	select {
+	case m.inbox <- msg:
+	case <-closed:
+	case <-ctx.Done():
 	}
 }
 

@@ -547,8 +547,6 @@ func (e *Executor) latchDurabilityFatal(txID types.TxID) error {
 }
 
 func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd) string {
-	view := e.snapshotFn()
-	defer view.Close()
 	start := cmd.Receipt
 	if start.IsZero() {
 		start = time.Now()
@@ -557,12 +555,20 @@ func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
 	if req.Context == nil {
 		req.Context = context.Background()
 	}
-	res, err := e.subs.RegisterSet(req, view)
-	durationMicros := uint64(time.Since(start).Microseconds())
-	if durationMicros == 0 {
-		durationMicros = 1
+	if err := req.Context.Err(); err != nil {
+		res := subscription.SubscriptionSetRegisterResult{
+			TotalHostExecutionDurationMicros: elapsedHostExecutionMicros(start),
+		}
+		if cmd.Reply != nil {
+			cmd.Reply(res, err)
+		}
+		e.traceSubscriptionRegister("canceled", err)
+		return "canceled"
 	}
-	res.TotalHostExecutionDurationMicros = durationMicros
+	view := e.snapshotFn()
+	defer view.Close()
+	res, err := e.subs.RegisterSet(req, view)
+	res.TotalHostExecutionDurationMicros = elapsedHostExecutionMicros(start)
 	if cmd.Reply != nil {
 		// Synchronous invocation on the executor goroutine so the
 		// caller's Applied/Error enqueue strictly precedes any
@@ -578,8 +584,6 @@ func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
 }
 
 func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSetCmd) string {
-	view := e.snapshotFn()
-	defer view.Close()
 	start := cmd.Receipt
 	if start.IsZero() {
 		start = time.Now()
@@ -588,6 +592,18 @@ func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSet
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		res := subscription.SubscriptionSetUnregisterResult{
+			TotalHostExecutionDurationMicros: elapsedHostExecutionMicros(start),
+		}
+		if cmd.Reply != nil {
+			cmd.Reply(res, err)
+		}
+		e.traceSubscriptionUnregister("canceled", err)
+		return "canceled"
+	}
+	view := e.snapshotFn()
+	defer view.Close()
 	type unregisterSetContexter interface {
 		UnregisterSetContext(context.Context, types.ConnectionID, uint32, store.CommittedReadView) (subscription.SubscriptionSetUnregisterResult, error)
 	}
@@ -598,11 +614,7 @@ func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSet
 	} else {
 		res, err = e.subs.UnregisterSet(cmd.ConnID, cmd.QueryID, view)
 	}
-	durationMicros := uint64(time.Since(start).Microseconds())
-	if durationMicros == 0 {
-		durationMicros = 1
-	}
-	res.TotalHostExecutionDurationMicros = durationMicros
+	res.TotalHostExecutionDurationMicros = elapsedHostExecutionMicros(start)
 	if cmd.Reply != nil {
 		// Synchronous invocation on the executor goroutine so the
 		// caller's Applied/Error enqueue strictly precedes any
@@ -615,6 +627,14 @@ func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSet
 	}
 	e.traceSubscriptionUnregister("ok", nil)
 	return "ok"
+}
+
+func elapsedHostExecutionMicros(start time.Time) uint64 {
+	durationMicros := uint64(time.Since(start).Microseconds())
+	if durationMicros == 0 {
+		return 1
+	}
+	return durationMicros
 }
 
 func (e *Executor) handleDisconnectClientSubscriptions(cmd DisconnectClientSubscriptionsCmd) string {
@@ -739,8 +759,12 @@ func sendResponse[T any](ch chan<- T, resp T) bool {
 	if ch == nil {
 		return true
 	}
-	ch <- resp
-	return true
+	select {
+	case ch <- resp:
+		return true
+	default:
+		return false
+	}
 }
 
 func sendCallReducerResponse(cmd CallReducerCmd, resp ReducerResponse, committed *CommittedCallerPayload) bool {

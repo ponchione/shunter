@@ -14,7 +14,8 @@ type ExecutorCommand interface {
 }
 
 // CallReducerCmd requests a reducer invocation.
-// Non-nil reply channels receive exactly one response before the next command.
+// Non-nil reply channels receive at most one nonblocking response before the
+// next command.
 type CallReducerCmd struct {
 	Request            ReducerRequest
 	ResponseCh         chan<- ReducerResponse
@@ -72,7 +73,7 @@ func (UnregisterSubscriptionSetCmd) isExecutorCommand() {}
 //
 // ResponseCh follows the same executor-owned reply contract as CallReducerCmd:
 // public Submit/SubmitWithContext calls reject unbuffered channels, while
-// commands admitted to the inbox still use blocking reply sends.
+// commands admitted to the inbox use best-effort nonblocking reply sends.
 type DisconnectClientSubscriptionsCmd struct {
 	ConnID     types.ConnectionID
 	ResponseCh chan<- error
@@ -84,8 +85,8 @@ func (DisconnectClientSubscriptionsCmd) isExecutorCommand() {}
 // client connection is being admitted (SPEC-003 §10.3). It inserts the
 // `sys_clients` row and runs the optional OnConnect lifecycle reducer inside
 // a single transaction. A failed reducer rolls back the entire transaction.
-// ResponseCh follows the same Submit-time rejection / in-inbox blocking contract
-// as CallReducerCmd.
+// ResponseCh follows the same Submit-time rejection / in-inbox nonblocking
+// send contract as CallReducerCmd.
 type OnConnectCmd struct {
 	ConnID     types.ConnectionID
 	Identity   types.Identity
@@ -99,7 +100,7 @@ func (OnConnectCmd) isExecutorCommand() {}
 // the client is considered gone (SPEC-003 §10.4). Disconnect cannot be
 // vetoed: if the OnDisconnect reducer fails, a cleanup transaction still
 // deletes the `sys_clients` row. ResponseCh follows the same Submit-time
-// rejection / in-inbox blocking contract as CallReducerCmd.
+// rejection / in-inbox nonblocking send contract as CallReducerCmd.
 type OnDisconnectCmd struct {
 	ConnID     types.ConnectionID
 	Identity   types.Identity

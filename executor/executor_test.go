@@ -652,65 +652,18 @@ func TestSubmitWithContextRejectModeCanceledContextDoesNotEnqueue(t *testing.T) 
 	}
 }
 
-func TestSendResponse_ReducerChannelBlocksUntilReceiverReady(t *testing.T) {
+func TestSendResponse_ReducerChannelReturnsFalseWhenReceiverUnavailable(t *testing.T) {
 	ch := make(chan ReducerResponse)
-	done := make(chan struct{})
-
-	go func() {
-		sendResponse(ch, ReducerResponse{Status: StatusCommitted})
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		t.Fatal("sendResponse returned before a receiver was ready")
-	case <-time.After(25 * time.Millisecond):
-	}
-
-	select {
-	case resp := <-ch:
-		if resp.Status != StatusCommitted {
-			t.Fatalf("status = %d, want %d", resp.Status, StatusCommitted)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting to receive reducer response")
-	}
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("sendResponse did not finish after receiver consumed response")
+	if sendResponse(ch, ReducerResponse{Status: StatusCommitted}) {
+		t.Fatal("sendResponse returned true for unavailable unbuffered channel")
 	}
 }
 
-func TestSendResponse_ProtocolReducerChannelBlocksUntilReceiverReady(t *testing.T) {
-	ch := make(chan ProtocolCallReducerResponse)
-	done := make(chan struct{})
-
-	go func() {
-		sendResponse(ch, ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusCommitted}})
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		t.Fatal("sendResponse returned before a receiver was ready")
-	case <-time.After(25 * time.Millisecond):
-	}
-
-	select {
-	case resp := <-ch:
-		if resp.Reducer.Status != StatusCommitted {
-			t.Fatalf("status = %d, want %d", resp.Reducer.Status, StatusCommitted)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting to receive protocol reducer response")
-	}
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("sendResponse did not finish after receiver consumed response")
+func TestSendResponse_ProtocolReducerChannelReturnsFalseWhenFull(t *testing.T) {
+	ch := make(chan ProtocolCallReducerResponse, 1)
+	ch <- ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusFailedInternal}}
+	if sendResponse(ch, ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusCommitted}}) {
+		t.Fatal("sendResponse returned true for full buffered channel")
 	}
 }
 
