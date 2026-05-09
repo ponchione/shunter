@@ -110,8 +110,14 @@ func validateCommitLogOptions(opts CommitLogOptions) error {
 	if err := validateFsyncMode(opts.FsyncMode); err != nil {
 		return err
 	}
+	if opts.MaxSegmentSize <= 0 {
+		return fmt.Errorf("commitlog: max segment size must be positive: %d", opts.MaxSegmentSize)
+	}
 	if opts.ChannelCapacity < 0 {
 		return fmt.Errorf("commitlog: channel capacity must be non-negative: %d", opts.ChannelCapacity)
+	}
+	if opts.DrainBatchSize <= 0 {
+		return fmt.Errorf("commitlog: drain batch size must be positive: %d", opts.DrainBatchSize)
 	}
 	return nil
 }

@@ -43,6 +43,58 @@ func TestNewDurabilityWorkerRejectsNegativeChannelCapacity(t *testing.T) {
 	}
 }
 
+func TestNewDurabilityWorkerRejectsInvalidBatchAndSegmentOptions(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*CommitLogOptions)
+		wantErr string
+	}{
+		{
+			name: "zero max segment size",
+			mutate: func(opts *CommitLogOptions) {
+				opts.MaxSegmentSize = 0
+			},
+			wantErr: "max segment size must be positive",
+		},
+		{
+			name: "negative max segment size",
+			mutate: func(opts *CommitLogOptions) {
+				opts.MaxSegmentSize = -1
+			},
+			wantErr: "max segment size must be positive",
+		},
+		{
+			name: "zero drain batch size",
+			mutate: func(opts *CommitLogOptions) {
+				opts.DrainBatchSize = 0
+			},
+			wantErr: "drain batch size must be positive",
+		},
+		{
+			name: "negative drain batch size",
+			mutate: func(opts *CommitLogOptions) {
+				opts.DrainBatchSize = -1
+			},
+			wantErr: "drain batch size must be positive",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := DefaultCommitLogOptions()
+			tc.mutate(&opts)
+
+			_, err := NewDurabilityWorker(t.TempDir(), 1, opts)
+			if err == nil {
+				t.Fatal("NewDurabilityWorker accepted invalid options")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestDurabilityWorkerRejectsRowsLargerThanRecoveryLimitBeforeAppend(t *testing.T) {
 	dir := t.TempDir()
 	opts := DefaultCommitLogOptions()
