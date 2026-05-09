@@ -212,7 +212,7 @@ Known benchmark gaps for v1 envelopes:
 Latest baseline snapshot:
 
 - Date: 2026-05-09
-- Shunter commit: `452cdebb433af76f3c4bb65f6c95b90c26a0af4f`
+- Shunter commit: `8d3306b2ff85b26f47ffa8bfbc4899355545b6e5`
 - Command: `go test -run '^$' -bench . -benchmem -count=10 ./protocol ./commitlog ./subscription > /tmp/shunter-bench-new.txt`
 - Environment: linux/amd64, `go1.26.2`,
   `AMD Ryzen 9 9900X 12-Core Processor`
