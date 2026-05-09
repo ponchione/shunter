@@ -505,6 +505,35 @@ func TestRunDataDirMigrationsNoopHookDoesNotConsumeTxID(t *testing.T) {
 	}
 }
 
+func TestRunDataDirMigrationsNilContextUsesBackground(t *testing.T) {
+	dir := t.TempDir()
+	result, err := RunDataDirMigrations(nil, validChatModule(), Config{DataDir: dir}, func(_ context.Context, mc *MigrationContext) error {
+		tableID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("nil-context-hook")})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("RunDataDirMigrations nil context: %v", err)
+	}
+	if result.RecoveredTxID != 0 || result.DurableTxID != 1 {
+		t.Fatalf("nil-context result tx ids recovered/durable = %d/%d, want 0/1", result.RecoveredTxID, result.DurableTxID)
+	}
+	requireMigrationHookResults(t, result.Hooks, MigrationHookResult{Index: 0, TxID: 1, Changed: true})
+
+	rt, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build after nil-context migration runner: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start after nil-context migration runner: %v", err)
+	}
+	defer rt.Close()
+	requireMigrationMessageBodies(t, rt, "nil-context-hook")
+}
+
 func TestRunDataDirMigrationsNoHooksDoesNotBootstrapMissingDataDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "missing-data-dir")
 	result, err := RunDataDirMigrations(context.Background(), validChatModule(), Config{DataDir: dir})

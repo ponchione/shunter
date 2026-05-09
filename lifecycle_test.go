@@ -70,6 +70,22 @@ func TestRuntimeStartAndCloseOwnLifecycle(t *testing.T) {
 	}
 }
 
+func TestRuntimeStartNilContextUsesBackground(t *testing.T) {
+	rt := buildValidTestRuntime(t)
+	if err := rt.Start(nil); err != nil {
+		t.Fatalf("Start(nil) returned error: %v", err)
+	}
+	if !rt.Ready() {
+		t.Fatal("runtime not ready after Start(nil)")
+	}
+	if got := rt.Health().State; got != RuntimeStateReady {
+		t.Fatalf("state after Start(nil) = %q, want %q", got, RuntimeStateReady)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close after Start(nil): %v", err)
+	}
+}
+
 func TestRuntimeStartIsIdempotentAfterReady(t *testing.T) {
 	rt := buildValidTestRuntime(t)
 	if err := rt.Start(context.Background()); err != nil {
