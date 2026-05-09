@@ -50,6 +50,14 @@ go test -run '^$' -bench 'BenchmarkFanOut1KClients.*VariedQueries' -benchmem -co
 rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-fanout-varied-bench.txt
 ```
 
+The skewed hot-key fanout row was measured at Shunter commit
+`0975b147e31703c385056bf664bb1a6907a6000a` with:
+
+```bash
+go test -run '^$' -bench 'BenchmarkFanOut1KClientsSkewedHotKey' -benchmem -count=10 ./subscription > /tmp/shunter-fanout-skewed-bench.txt
+rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-fanout-skewed-bench.txt
+```
+
 The WebSocket SubscribeSingle round-trip row was measured from a clean
 detached worktree at Shunter commit
 `de9bbd35dfec2b62771cf2223358d23562cf4775` with:
@@ -152,6 +160,7 @@ Every row is advisory.
 | Initial snapshot diff | `ProjectedRowsBeforeLargeBags-24` | 4,096 current rows, 2,048 inserted rows, 64 distinct keys | 778.6us +/- 1% | 871.8Ki +/- 0% | 12.32k | advisory |
 | Fanout | `FanOut1KClientsSameQuery-24` | 1,000 clients on one equality query | 167.3us +/- 9% | 321.3Ki +/- 0% | 2.029k | advisory |
 | Fanout | `FanOut1KClientsVariedQueries-24` | 1,000 clients across equality, range, AND, and OR predicates; 256 changed rows | 1.761ms +/- 2% | 448.7Ki +/- 0% | 3.405k | advisory |
+| Fanout | `FanOut1KClientsSkewedHotKey-24` | 1,000 clients with 800 on one hot equality predicate and 200 spread across cold equality, range, AND, and OR predicates; 64 changed rows | 303.2us +/- 6% | 355.0Ki +/- 0% | 2.381k | advisory |
 | Fanout | `FanOut1KClientsMultiTableVariedQueries-24` | 1,000 clients split across two tables with equality, range, AND, and OR predicates; 256 changed rows per table | 3.427ms +/- 6% | 570.7Ki +/- 0% | 4.786k | advisory |
 | Join delta eval | `JoinFragmentEval-24` | two-table join, 100 committed rows per side, 10 inserts per side | 146.0us +/- 1% | 81.34Ki +/- 0% | 285 | advisory |
 | Multi-way join eval | `MultiWayLiveJoinEvalSizes/rows_32/table_shape-24` | 32 rows per joined table | 27.97us +/- 6% | 17.97Ki +/- 0% | 167 | advisory |
@@ -170,6 +179,9 @@ Every row is advisory.
 - Large bag diffing, large snapshot-plus-tail recovery, segmented log replay,
   and multi-way joins at 512 rows per table are the clearest allocation and
   latency targets in the current coverage.
+- Subscription fanout coverage now includes same-query, varied single-table,
+  skewed hot-key, and varied two-table fixtures. Workload-derived and canary
+  distributions remain outside the local benchmark envelope.
 - Executor reducer commit coverage now includes one-at-a-time round trips and
   a queued 64-command burst fixture. These are internal executor fixtures, not
   public app or canary throughput measurements.
@@ -189,7 +201,9 @@ Every row is advisory.
 Subscription large-fixture memory profiles were spot-checked on 2026-05-09 at
 Shunter commit `59f838f960a762e95b623408b1749dfe7678d6c1`, using the same
 host and Go toolchain as the snapshot above. Profiles were written under
-`/tmp` and are not repo artifacts.
+`/tmp` and are not repo artifacts. The skewed hot-key fanout profile was
+spot-checked at Shunter commit
+`0975b147e31703c385056bf664bb1a6907a6000a`.
 
 Commands:
 
@@ -199,9 +213,11 @@ rtk go tool pprof -top -alloc_space /tmp/shunter-subscription-mem.out
 go test -run '^$' -bench 'BenchmarkProjectedRowsBeforeLargeBags$' -benchmem -memprofile /tmp/shunter-projected-rows-mem.out ./subscription
 go test -run '^$' -bench 'BenchmarkMultiWayLiveJoinEvalSizes/rows_512' -benchmem -memprofile /tmp/shunter-multiway-512-mem.out ./subscription
 go test -run '^$' -bench 'BenchmarkRegisterSetInitialQueryAllRows$' -benchmem -memprofile /tmp/shunter-initial-rows-mem.out ./subscription
+go test -run '^$' -bench 'BenchmarkFanOut1KClientsSkewedHotKey' -benchmem -memprofile /tmp/shunter-fanout-skewed-mem.out ./subscription
 rtk go tool pprof -top -alloc_space /tmp/shunter-projected-rows-mem.out
 rtk go tool pprof -top -alloc_space /tmp/shunter-multiway-512-mem.out
 rtk go tool pprof -top -alloc_space /tmp/shunter-initial-rows-mem.out
+rtk go tool pprof -top -alloc_space /tmp/shunter-fanout-skewed-mem.out
 ```
 
 Findings:
@@ -220,6 +236,11 @@ Findings:
   from before/after row materialization and projected-row diffing
   (`projectedRowsBefore`, `tableRowsAfter`, `subtractProjectedRowsByKey`,
   `encodeRowKey`) inside `evalMultiJoinDelta`.
+- `BenchmarkFanOut1KClientsSkewedHotKey-24`: 290.886us/op,
+  363,442 B/op, 2,381 allocs/op. Allocation space is dominated by
+  `(*Manager).evaluate`, with candidate collection over distinct changed
+  values next; smaller samples come from per-query evaluation and
+  single-table delta evaluation.
 
 Operations and network memory profiles were spot-checked on 2026-05-09 from a
 clean detached worktree at Shunter commit
@@ -300,8 +321,9 @@ These remain outside the current benchmark envelope:
   including slow-reader writer/write-timeout backpressure paths and
   canary-scale fanout; deterministic sender-level full-buffer rejection is
   covered separately
-- broader fanout distributions beyond deterministic in-process same-query,
-  single-table, and two-table varied predicate fixtures
+- workload-derived or canary fanout distributions beyond the deterministic
+  in-process same-query, varied single-table, skewed hot-key, and varied
+  two-table predicate fixtures
 - external canary workload, including canary-scale backup/restore timing
 - memory profiles outside the current subscription, single-WebSocket,
   16/64-client WebSocket fanout, sender-level backpressure, executor reducer

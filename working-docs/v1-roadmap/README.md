@@ -200,7 +200,7 @@ Current benchmark coverage:
 | Declared reads | `BenchmarkDeclaredReadRuntimeSurfaces` | covered for local declared query execution and declared live-view initial rows, including projection/order/limit and aggregate shapes |
 | Raw subscription protocol admission and network delivery | `BenchmarkHandleSubscribeSingleAdmissionReadShapes`, `BenchmarkSubscribeSingleWebSocketRoundTrip`, `BenchmarkWebSocketFanout16ClientsLightUpdate`, `BenchmarkWebSocketFanout64ClientsLightUpdate`, `BenchmarkClientSenderBackpressureFullBuffer` | covered for single-table, two-table join, and multi-way join SubscribeSingle admission, one persistent-WebSocket SubscribeSingle round trip, 16- and 64-client WebSocket light-update fanout, and deterministic sender-level full-buffer rejection |
 | Subscription equality and lifecycle | `BenchmarkEvalEqualitySubs1K`, `BenchmarkEvalEqualitySubs10K`, `BenchmarkRegisterUnregister` | covered for core hot paths |
-| Subscription initial snapshots and fanout | `BenchmarkRegisterSetInitialQueryAllRows`, `BenchmarkProjectedRowsBeforeLargeBags`, `BenchmarkFanOut1KClientsSameQuery`, `BenchmarkFanOut1KClientsVariedQueries`, `BenchmarkFanOut1KClientsMultiTableVariedQueries` | partial; covers deterministic same-query, varied single-table, and varied two-table fanout plus memory-profile evidence for the current large initial snapshot and projected-row diff fixtures; still needs network/canary-scale and skewed distributions |
+| Subscription initial snapshots and fanout | `BenchmarkRegisterSetInitialQueryAllRows`, `BenchmarkProjectedRowsBeforeLargeBags`, `BenchmarkFanOut1KClientsSameQuery`, `BenchmarkFanOut1KClientsVariedQueries`, `BenchmarkFanOut1KClientsSkewedHotKey`, `BenchmarkFanOut1KClientsMultiTableVariedQueries` | partial; covers deterministic same-query, varied single-table, skewed hot-key, and varied two-table fanout plus memory-profile evidence for the current large initial snapshot, projected-row diff, and skewed fanout fixtures; still needs network/canary-scale and workload-derived distributions |
 | Subscription joins and candidate pruning | `BenchmarkJoinFragmentEval`, `BenchmarkMultiWayLiveJoinEvalSizes`, `BenchmarkDeltaIndexConstruction`, `BenchmarkCandidateCollection` | covered for two-table joins plus deterministic small/medium/large multi-way live joins with table-shaped and aggregate deltas; `rows_512` has memory-profile evidence |
 
 Known benchmark gaps for v1 envelopes:
@@ -210,8 +210,9 @@ Known benchmark gaps for v1 envelopes:
   including slow-reader writer/write-timeout backpressure paths and
   canary-scale fanout. Deterministic sender-level full-buffer rejection now has
   benchmark coverage.
-- broader fanout distributions beyond deterministic in-process same-query,
-  single-table, and two-table varied predicate fixtures
+- workload-derived or canary fanout distributions beyond deterministic
+  in-process same-query, varied single-table, skewed hot-key, and varied
+  two-table predicate fixtures
 - external canary workload, including canary-scale backup/restore timing
 - memory profiles outside the current subscription large fixtures
 
@@ -234,14 +235,17 @@ Current performance read:
 - Reducer write-path coverage now includes the existing internal executor
   round trip plus a queued 64-command burst fixture; app-level and canary
   throughput remain outside the local benchmark envelope.
+- Subscription fanout coverage now includes deterministic same-query, varied
+  single-table, skewed hot-key, and varied two-table fixtures; workload-derived
+  and canary distributions remain open.
 - Local offline backup/restore timing now covers a complete small DataDir copy
   workflow; canary-scale backup/restore timing remains open.
 - Memory-profile evidence now covers the existing large subscription initial
-  snapshot, projected-row diff, `rows_512` multi-way join, small local
-  backup/restore, single-WebSocket subscribe, 16- and 64-client WebSocket
-  fanout, and deterministic sender-level full-buffer backpressure fixtures;
-  canary-scale, slow-reader network paths, and larger backup/restore profiles
-  remain open.
+  snapshot, projected-row diff, skewed fanout, `rows_512` multi-way join,
+  small local backup/restore, single-WebSocket subscribe, 16- and 64-client
+  WebSocket fanout, and deterministic sender-level full-buffer backpressure
+  fixtures; canary-scale, slow-reader network paths, and larger
+  backup/restore profiles remain open.
 - Current measured rows are advisory. The repo does not yet define hard
   performance thresholds.
 
