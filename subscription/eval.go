@@ -601,46 +601,57 @@ func evalFilteredCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin)
 	leftDeletes := dv.DeletedRows(p.Left)
 	rightDeletes := dv.DeletedRows(p.Right)
 
-	leftAfter, err := tableRowsAfter(ctx, dv.CommittedView(), p.Left)
-	if err != nil {
-		return nil, nil, err
+	var insertFragments [][]types.ProductValue
+	var deleteFragments [][]types.ProductValue
+
+	if len(leftInserts) > 0 {
+		rightAfter, err := tableRowsAfter(ctx, dv.CommittedView(), p.Right)
+		if err != nil {
+			return nil, nil, err
+		}
+		insertFromLeft, err := crossJoinProjectedRows(ctx, p, leftInserts, rightAfter)
+		if err != nil {
+			return nil, nil, err
+		}
+		insertFragments = append(insertFragments, insertFromLeft)
 	}
-	rightAfter, err := tableRowsAfter(ctx, dv.CommittedView(), p.Right)
-	if err != nil {
-		return nil, nil, err
+	if len(rightInserts) > 0 {
+		leftAfter, err := tableRowsAfter(ctx, dv.CommittedView(), p.Left)
+		if err != nil {
+			return nil, nil, err
+		}
+		leftAfterWithoutInserts := subtractProjectedRowsByKey(leftAfter, leftInserts)
+		insertFromRight, err := crossJoinProjectedRows(ctx, p, leftAfterWithoutInserts, rightInserts)
+		if err != nil {
+			return nil, nil, err
+		}
+		insertFragments = append(insertFragments, insertFromRight)
 	}
-	leftBefore, err := projectedRowsBefore(ctx, dv, p.Left)
-	if err != nil {
-		return nil, nil, err
+	if len(leftDeletes) > 0 {
+		rightBefore, err := projectedRowsBefore(ctx, dv, p.Right)
+		if err != nil {
+			return nil, nil, err
+		}
+		deleteFromLeft, err := crossJoinProjectedRows(ctx, p, leftDeletes, rightBefore)
+		if err != nil {
+			return nil, nil, err
+		}
+		deleteFragments = append(deleteFragments, deleteFromLeft)
 	}
-	rightBefore, err := projectedRowsBefore(ctx, dv, p.Right)
-	if err != nil {
-		return nil, nil, err
+	if len(rightDeletes) > 0 {
+		leftBefore, err := projectedRowsBefore(ctx, dv, p.Left)
+		if err != nil {
+			return nil, nil, err
+		}
+		leftBeforeWithoutDeletes := subtractProjectedRowsByKey(leftBefore, leftDeletes)
+		deleteFromRight, err := crossJoinProjectedRows(ctx, p, leftBeforeWithoutDeletes, rightDeletes)
+		if err != nil {
+			return nil, nil, err
+		}
+		deleteFragments = append(deleteFragments, deleteFromRight)
 	}
 
-	leftAfterWithoutInserts := subtractProjectedRowsByKey(leftAfter, leftInserts)
-	leftBeforeWithoutDeletes := subtractProjectedRowsByKey(leftBefore, leftDeletes)
-
-	insertFromLeft, err := crossJoinProjectedRows(ctx, p, leftInserts, rightAfter)
-	if err != nil {
-		return nil, nil, err
-	}
-	insertFromRight, err := crossJoinProjectedRows(ctx, p, leftAfterWithoutInserts, rightInserts)
-	if err != nil {
-		return nil, nil, err
-	}
-	deleteFromLeft, err := crossJoinProjectedRows(ctx, p, leftDeletes, rightBefore)
-	if err != nil {
-		return nil, nil, err
-	}
-	deleteFromRight, err := crossJoinProjectedRows(ctx, p, leftBeforeWithoutDeletes, rightDeletes)
-	if err != nil {
-		return nil, nil, err
-	}
-	ins, del := ReconcileJoinDelta(
-		[][]types.ProductValue{insertFromLeft, insertFromRight},
-		[][]types.ProductValue{deleteFromLeft, deleteFromRight},
-	)
+	ins, del := ReconcileJoinDelta(insertFragments, deleteFragments)
 	return ins, del, nil
 }
 

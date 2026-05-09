@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"errors"
+	"iter"
 	"reflect"
 	"slices"
 	"strings"
@@ -13,6 +14,19 @@ import (
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
+
+type tableScanCountingCommitted struct {
+	store.CommittedReadView
+	scans map[TableID]int
+}
+
+func (v *tableScanCountingCommitted) TableScan(id TableID) iter.Seq2[types.RowID, types.ProductValue] {
+	if v.scans == nil {
+		v.scans = make(map[TableID]int)
+	}
+	v.scans[id]++
+	return v.CommittedReadView.TableScan(id)
+}
 
 func TestEvalNoActiveSubsReturnsImmediately(t *testing.T) {
 	s := testSchema()
@@ -2085,6 +2099,74 @@ func TestEvalFilteredCrossJoinLocalFilterPrunesMismatch(t *testing.T) {
 	if updates := msg.Fanout[types.ConnectionID{1}]; len(updates) != 0 {
 		t.Fatalf("filtered cross join mismatch produced fanout: %v", updates)
 	}
+}
+
+func TestEvalFilteredCrossJoinDeltaScansOnlyChangedBranches(t *testing.T) {
+	t.Run("left insert scans right after only", func(t *testing.T) {
+		base := newMockCommitted()
+		base.addRow(2, 1, types.ProductValue{types.NewUint64(10)})
+		base.addRow(2, 2, types.ProductValue{types.NewUint64(20)})
+		view := &tableScanCountingCommitted{CommittedReadView: base}
+		left := types.ProductValue{types.NewUint64(1)}
+		cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+			1: {TableID: 1, Inserts: []types.ProductValue{left}},
+		}}
+		dv := NewDeltaView(view, cs, nil)
+		defer dv.Release()
+
+		pred := CrossJoin{
+			Left:  1,
+			Right: 2,
+			Filter: ColEq{
+				Table:  2,
+				Column: 0,
+				Value:  types.NewUint64(10),
+			},
+		}
+		gotIns, gotDel, err := evalFilteredCrossJoinDelta(context.Background(), dv, pred)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(gotIns) != 1 || !gotIns[0].Equal(left) || len(gotDel) != 0 {
+			t.Fatalf("delta inserts=%v deletes=%v, want one left insert and no deletes", gotIns, gotDel)
+		}
+		if view.scans[1] != 0 || view.scans[2] != 1 {
+			t.Fatalf("TableScan counts = %v, want only right table scanned once", view.scans)
+		}
+	})
+
+	t.Run("right delete scans left before only", func(t *testing.T) {
+		base := newMockCommitted()
+		left := types.ProductValue{types.NewUint64(1)}
+		right := types.ProductValue{types.NewUint64(10)}
+		base.addRow(1, 1, left)
+		view := &tableScanCountingCommitted{CommittedReadView: base}
+		cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+			2: {TableID: 2, Deletes: []types.ProductValue{right}},
+		}}
+		dv := NewDeltaView(view, cs, nil)
+		defer dv.Release()
+
+		pred := CrossJoin{
+			Left:  1,
+			Right: 2,
+			Filter: ColEq{
+				Table:  1,
+				Column: 0,
+				Value:  types.NewUint64(1),
+			},
+		}
+		gotIns, gotDel, err := evalFilteredCrossJoinDelta(context.Background(), dv, pred)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(gotIns) != 0 || len(gotDel) != 1 || !gotDel[0].Equal(left) {
+			t.Fatalf("delta inserts=%v deletes=%v, want one left delete projection", gotIns, gotDel)
+		}
+		if view.scans[1] != 1 || view.scans[2] != 0 {
+			t.Fatalf("TableScan counts = %v, want only left table scanned once", view.scans)
+		}
+	})
 }
 
 func TestEvalFilteredCrossJoinDeltaMatchesFullBagDiff(t *testing.T) {
