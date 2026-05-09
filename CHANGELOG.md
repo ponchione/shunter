@@ -8,6 +8,16 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Live subscription initial row limits now apply after supported
   `ORDER BY`/`OFFSET`/`LIMIT` initial-snapshot windowing, and streaming
   single-table `LIMIT` snapshots stop scanning once enough rows are gathered.
+- Ordered live subscription initial snapshots now bound their retained row window
+  when `LIMIT`, `OFFSET`, or `InitialRowLimit` makes the final result bounded.
+- Protocol server writes now use a configurable `ProtocolConfig.WriteTimeout`
+  and negotiated gzip skips small frames below the compression threshold.
+- Store commit changesets now emit per-table insert/delete rows in stable RowID
+  order.
+- Subscription fanout now records blocked enqueue duration and supports an
+  optional fanout enqueue context.
+- Multi-way live subscription deltas now expand from changed relation rows
+  instead of diffing full before/after join products.
 - Runtime durability waits no longer report success when a pending durability
   waiter is closed without confirming the requested transaction.
 - Protocol, BSATN, and commit-log encoders now reject oversized length-prefixed
