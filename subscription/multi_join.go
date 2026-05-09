@@ -71,18 +71,6 @@ func multiJoinDeltaRowsByRelation(beforeRows, afterRows [][]types.ProductValue, 
 	return rowsByRelation
 }
 
-func multiJoinRowsAfter(ctx context.Context, view store.CommittedReadView, p MultiJoin) ([]types.ProductValue, error) {
-	return multiJoinRowsFromView(ctx, view, p, 0)
-}
-
-func multiJoinRowsBefore(ctx context.Context, dv *DeltaView, p MultiJoin) ([]types.ProductValue, error) {
-	rowsByRelation, err := multiJoinRowsByRelationBefore(ctx, dv, p)
-	if err != nil {
-		return nil, err
-	}
-	return collectMultiJoinProjectedRows(ctx, p, rowsByRelation, 0)
-}
-
 func multiJoinRowsByRelationBefore(ctx context.Context, dv *DeltaView, p MultiJoin) ([][]types.ProductValue, error) {
 	rowsByRelation := make([][]types.ProductValue, len(p.Relations))
 	for i, rel := range p.Relations {
