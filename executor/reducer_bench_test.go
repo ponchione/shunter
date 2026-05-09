@@ -40,7 +40,9 @@ func (benchmarkSubscriptions) DrainDroppedClients() []types.ConnectionID { retur
 
 func (benchmarkSubscriptions) DisconnectClient(types.ConnectionID) error { return nil }
 
-func BenchmarkExecutorReducerCommitRoundTrip(b *testing.B) {
+func newBenchmarkReducerExecutor(b *testing.B, inboxCapacity int) *Executor {
+	b.Helper()
+
 	builder := schema.NewBuilder()
 	builder.SchemaVersion(1)
 	builder.TableDef(schema.TableDefinition{
@@ -83,13 +85,22 @@ func BenchmarkExecutorReducerCommitRoundTrip(b *testing.B) {
 	reducers.Freeze()
 
 	exec := NewExecutor(ExecutorConfig{
-		InboxCapacity: 1024,
+		InboxCapacity: inboxCapacity,
 		Durability:    benchmarkDurability{},
 		Subscriptions: benchmarkSubscriptions{},
 	}, reducers, committed, reg, 0)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	go exec.Run(ctx)
+	b.Cleanup(func() {
+		exec.Shutdown()
+		cancel()
+	})
+
+	return exec
+}
+
+func BenchmarkExecutorReducerCommitRoundTrip(b *testing.B) {
+	exec := newBenchmarkReducerExecutor(b, 1024)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -105,5 +116,35 @@ func BenchmarkExecutorReducerCommitRoundTrip(b *testing.B) {
 		if resp.Status != StatusCommitted {
 			b.Fatalf("status=%d err=%v, want committed", resp.Status, resp.Error)
 		}
+	}
+}
+
+func BenchmarkExecutorReducerCommitBurst64(b *testing.B) {
+	const burstSize = 64
+	exec := newBenchmarkReducerExecutor(b, burstSize)
+	respChans := make([]chan ReducerResponse, burstSize)
+	for i := range respChans {
+		respChans[i] = make(chan ReducerResponse, 1)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; {
+		n := min(burstSize, b.N-i)
+		for j := 0; j < n; j++ {
+			if err := exec.Submit(CallReducerCmd{
+				Request:    ReducerRequest{ReducerName: "InsertEvent", Source: CallSourceExternal},
+				ResponseCh: respChans[j],
+			}); err != nil {
+				b.Fatalf("Submit: %v", err)
+			}
+		}
+		for j := 0; j < n; j++ {
+			resp := <-respChans[j]
+			if resp.Status != StatusCommitted {
+				b.Fatalf("status=%d err=%v, want committed", resp.Status, resp.Error)
+			}
+		}
+		i += n
 	}
 }
