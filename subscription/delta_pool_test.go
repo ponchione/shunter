@@ -49,6 +49,19 @@ func TestBufferPoolDropsOversizedBuffers(t *testing.T) {
 	}
 }
 
+func TestProductValueSlicePoolDropsOversizedSlices(t *testing.T) {
+	oversized := make([]types.ProductValue, 1, pooledProductValueSliceMaxCap*2)
+	ptr := slicePtr(oversized)
+	releaseProductValueSlice(oversized)
+
+	next := acquireProductValueSlice(1)
+	next = append(next, types.ProductValue{types.NewUint64(1)})
+	if slicePtr(next) == ptr {
+		t.Fatal("oversized ProductValue slice backing array should not be retained in the pool")
+	}
+	releaseProductValueSlice(next)
+}
+
 func TestCandidateScratchReleaseClearsMapsBeforeReuse(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		st := acquireCandidateScratch()

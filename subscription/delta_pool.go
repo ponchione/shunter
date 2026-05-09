@@ -6,7 +6,11 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-const pooledBufferDefaultCap = 4 * 1024
+const (
+	pooledBufferDefaultCap        = 4 * 1024
+	pooledProductValueSliceMaxCap = 4096
+	pooledScratchMapMaxLen        = 4096
+)
 
 // dedupState is the reusable bag-dedup scratch state. It holds the insert
 // and delete count maps so they can be cleared and reused across transactions
@@ -113,8 +117,16 @@ func acquireCandidateScratch() *candidateScratch {
 }
 
 func releaseCandidateScratch(st *candidateScratch) {
-	clear(st.candidates)
-	clear(st.distinct)
+	if len(st.candidates) > pooledScratchMapMaxLen {
+		st.candidates = make(map[QueryHash]struct{})
+	} else {
+		clear(st.candidates)
+	}
+	if len(st.distinct) > pooledScratchMapMaxLen {
+		st.distinct = make(map[valueKey]Value)
+	} else {
+		clear(st.distinct)
+	}
 	candidateScratchPool.Put(st)
 }
 
@@ -127,6 +139,9 @@ func acquireProductValueSlice(minCap int) []types.ProductValue {
 }
 
 func releaseProductValueSlice(rows []types.ProductValue) {
+	if cap(rows) > pooledProductValueSliceMaxCap {
+		return
+	}
 	clear(rows)
 	rows = rows[:0]
 	productValueSlicePool.Put(&rows)
@@ -140,6 +155,9 @@ func releaseTableDeltaIndex(byCol map[ColID]map[valueKey][]int) {
 	for _, byVal := range byCol {
 		releaseValuePositionIndex(byVal)
 	}
+	if len(byCol) > pooledScratchMapMaxLen {
+		return
+	}
 	clear(byCol)
 	tableDeltaIndexPool.Put(byCol)
 }
@@ -149,6 +167,9 @@ func acquireValuePositionIndex() map[valueKey][]int {
 }
 
 func releaseValuePositionIndex(byVal map[valueKey][]int) {
+	if len(byVal) > pooledScratchMapMaxLen {
+		return
+	}
 	clear(byVal)
 	valuePositionIndexPool.Put(byVal)
 }
@@ -182,12 +203,36 @@ func releaseDeltaView(dv *DeltaView) {
 
 // clear empties all internal maps while preserving capacity.
 func (s *dedupState) clear() {
-	clear(s.insertCounts)
-	clear(s.insertRows)
-	clear(s.insertOrder)
-	s.insertOrder = s.insertOrder[:0]
-	clear(s.deleteCounts)
-	clear(s.deleteRows)
-	clear(s.deleteOrder)
-	s.deleteOrder = s.deleteOrder[:0]
+	if len(s.insertCounts) > pooledScratchMapMaxLen {
+		s.insertCounts = make(map[string]int)
+	} else {
+		clear(s.insertCounts)
+	}
+	if len(s.insertRows) > pooledScratchMapMaxLen {
+		s.insertRows = make(map[string]types.ProductValue)
+	} else {
+		clear(s.insertRows)
+	}
+	if cap(s.insertOrder) > pooledProductValueSliceMaxCap {
+		s.insertOrder = make([]string, 0, 8)
+	} else {
+		clear(s.insertOrder)
+		s.insertOrder = s.insertOrder[:0]
+	}
+	if len(s.deleteCounts) > pooledScratchMapMaxLen {
+		s.deleteCounts = make(map[string]int)
+	} else {
+		clear(s.deleteCounts)
+	}
+	if len(s.deleteRows) > pooledScratchMapMaxLen {
+		s.deleteRows = make(map[string]types.ProductValue)
+	} else {
+		clear(s.deleteRows)
+	}
+	if cap(s.deleteOrder) > pooledProductValueSliceMaxCap {
+		s.deleteOrder = make([]string, 0, 8)
+	} else {
+		clear(s.deleteOrder)
+		s.deleteOrder = s.deleteOrder[:0]
+	}
 }
