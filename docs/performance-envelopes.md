@@ -185,7 +185,9 @@ Findings:
 
 Operations and network memory profiles were spot-checked on 2026-05-09 from a
 clean detached worktree at Shunter commit
-`446d7c124a3128fa954d7c3a31aeda6c8a9b9309`.
+`446d7c124a3128fa954d7c3a31aeda6c8a9b9309`. The 16-client WebSocket
+fanout profile was spot-checked at Shunter commit
+`5d768686238922af86044a9b607ca99707b6d093`.
 
 Commands:
 
@@ -194,6 +196,8 @@ go test -run '^$' -bench 'BenchmarkBackupRestoreDataDirWorkflow' -benchmem -memp
 rtk go tool pprof -top -alloc_space /tmp/shunter-backup-restore-mem.out
 go test -run '^$' -bench 'BenchmarkSubscribeSingleWebSocketRoundTrip' -benchmem -memprofile /tmp/shunter-websocket-subscribe-mem.out ./protocol
 rtk go tool pprof -top -alloc_space /tmp/shunter-websocket-subscribe-mem.out
+go test -run '^$' -bench 'BenchmarkWebSocketFanout16ClientsLightUpdate' -benchmem -memprofile /tmp/shunter-websocket-fanout-mem.out ./protocol
+rtk go tool pprof -top -alloc_space /tmp/shunter-websocket-fanout-mem.out
 ```
 
 Findings:
@@ -208,6 +212,12 @@ Findings:
   machinery, with top samples in `query/sql.tokenize`, `io.ReadAll`,
   `context.AfterFunc`, `compileRawSubscribeAdmissionPlan`, and
   `normalizePredicate`.
+- `BenchmarkWebSocketFanout16ClientsLightUpdate-24`: 69.272us/op,
+  42,405 B/op, 624 allocs/op. Allocation space is dominated by WebSocket
+  client reads and write timeout machinery across the 16 connections, with top
+  samples in `io.ReadAll`, `context.(*cancelCtx).propagateCancel`,
+  `context.AfterFunc`, `context.WithDeadlineCause`, `time.newTimer`,
+  `websocket.(*Conn).prepareRead`, and protocol sender enqueue.
 
 ## Known Gaps
 
@@ -219,6 +229,7 @@ These remain outside the current benchmark envelope:
 - broader fanout distributions beyond deterministic in-process same-query,
   single-table, and two-table varied predicate fixtures
 - external canary workload, including canary-scale backup/restore timing
-- memory profiles outside the current subscription, single-WebSocket, and small
-  local backup/restore fixtures, including canary-scale, broader network
-  fanout/backpressure, and larger backup/restore workloads
+- memory profiles outside the current subscription, single-WebSocket,
+  16-client WebSocket fanout, and small local backup/restore fixtures,
+  including canary-scale, backpressure-heavy network paths, and larger
+  backup/restore workloads
