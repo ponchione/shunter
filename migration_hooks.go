@@ -172,7 +172,8 @@ func RunModuleDataDirMigrations(ctx context.Context, mod *Module, cfg Config) (M
 }
 
 func (r *Runtime) runMigrationHooks(ctx context.Context, durability *commitlog.DurabilityWorker) error {
-	if len(r.module.migrationHooks) == 0 {
+	hooks := copyMigrationHooks(r.module.migrationHooks)
+	if len(hooks) == 0 {
 		return nil
 	}
 	if durability == nil {
@@ -187,7 +188,7 @@ func (r *Runtime) runMigrationHooks(ctx context.Context, durability *commitlog.D
 		currentTxID:   r.recoveredTxID,
 		durableTxID:   r.durableTxID,
 	}
-	if _, err := exec.runHooks(ctx, r.module.migrationHooks); err != nil {
+	if _, err := exec.runHooks(ctx, hooks); err != nil {
 		return err
 	}
 	r.recoveredTxID = exec.currentTxID

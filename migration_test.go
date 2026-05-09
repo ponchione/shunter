@@ -232,6 +232,50 @@ func TestMigrationHookCommitsDurablyBeforeRuntimeReady(t *testing.T) {
 	requireMigrationMessageBodies(t, restarted, "seed", "after")
 }
 
+func TestRuntimeStartSnapshotsRegisteredMigrationHooks(t *testing.T) {
+	dir := t.TempDir()
+	var calls []string
+	mod := validChatModule()
+	mod.MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+		calls = append(calls, "first")
+		mod.migrationHooks[1] = func(context.Context, *MigrationContext) error {
+			calls = append(calls, "mutated")
+			return fmt.Errorf("mutated hook ran during runtime start")
+		}
+		tableID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("first-start-hook")})
+		return err
+	})
+	mod.MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+		calls = append(calls, "second")
+		if mc.CommittedTxID() != 1 {
+			return fmt.Errorf("committed tx id = %d, want first hook horizon", mc.CommittedTxID())
+		}
+		tableID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(2), types.NewString("second-start-hook")})
+		return err
+	})
+
+	rt, err := Build(mod, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build with snapshot startup hooks: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start with snapshot startup hooks: %v", err)
+	}
+	defer rt.Close()
+	if len(calls) != 2 || calls[0] != "first" || calls[1] != "second" {
+		t.Fatalf("startup migration hook calls = %#v, want first then second", calls)
+	}
+	requireMigrationMessageBodies(t, rt, "first-start-hook", "second-start-hook")
+}
+
 func TestMigrationHookFailureRollsBackAndBlocksStart(t *testing.T) {
 	dir := t.TempDir()
 	boom := errors.New("boom")
