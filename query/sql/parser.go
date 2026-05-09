@@ -431,21 +431,28 @@ func tokenize(s string) ([]token, error) {
 
 func scanDelimitedSQLText(s string, start int, quote byte, label string, allowEmpty bool) (string, int, error) {
 	i := start + 1
+	textStart := i
 	var sb strings.Builder
 	for i < len(s) {
 		if s[i] == quote {
 			if i+1 < len(s) && s[i+1] == quote {
+				sb.WriteString(s[textStart:i])
 				sb.WriteByte(quote)
 				i += 2
+				textStart = i
 				continue
 			}
+			text := s[textStart:i]
+			if sb.Len() != 0 {
+				sb.WriteString(text)
+				text = sb.String()
+			}
 			i++
-			if !allowEmpty && sb.Len() == 0 {
+			if !allowEmpty && len(text) == 0 {
 				return "", 0, fmt.Errorf("%w: empty %s at position %d", ErrUnsupportedSQL, label, start)
 			}
-			return sb.String(), i, nil
+			return text, i, nil
 		}
-		sb.WriteByte(s[i])
 		i++
 	}
 	return "", 0, fmt.Errorf("%w: unterminated %s at position %d", ErrUnsupportedSQL, label, start)
