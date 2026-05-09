@@ -151,7 +151,7 @@ Release-candidate hardening commands:
 rtk go test ./... -count=1
 rtk go vet ./...
 rtk go tool staticcheck ./...
-rtk go test . -run 'RuntimeGauntlet|ReleaseCandidateExampleApp' -count=1
+rtk go test ./internal/gauntlettests -run 'RuntimeGauntlet|ReleaseCandidateExampleApp' -count=1
 rtk go test ./... -run 'RuntimeGauntlet|ReleaseCandidateExampleApp|ShortSoak' -count=1
 rtk go test -race . ./executor ./protocol ./subscription ./store ./commitlog -count=1
 ```
