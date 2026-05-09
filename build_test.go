@@ -232,6 +232,20 @@ func TestCheckDataDirCompatibilityAcceptsMissingAndMatchingDataDir(t *testing.T)
 	}
 }
 
+func TestCheckDataDirCompatibilityAcceptsEmptyDataDirWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	if err := CheckDataDirCompatibility(validChatModule(), Config{DataDir: dir}); err != nil {
+		t.Fatalf("CheckDataDirCompatibility empty DataDir returned error: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read empty DataDir after preflight: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("empty DataDir entries after preflight = %#v, want none", entries)
+	}
+}
+
 func TestCheckDataDirCompatibilityReportsSchemaMismatch(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Build(validChatModule(), Config{DataDir: dir}); err != nil {
