@@ -49,9 +49,13 @@ func encodeChangesetWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecor
 	if size > maxAlloc {
 		return nil, fmt.Errorf("%w: changeset payload %d exceeds max allocation %d", ErrTraversal, size, maxAlloc)
 	}
+	tableCount, err := checkedChangesetCount("table count", len(tableIDs))
+	if err != nil {
+		return nil, err
+	}
 	out := make([]byte, 0, int(size))
 	out = append(out, changesetVersion)
-	out = appendUint32LE(out, uint32(len(tableIDs)))
+	out = appendUint32LE(out, tableCount)
 
 	for _, id := range tableIDs {
 		tc := cs.Tables[id]
@@ -81,6 +85,9 @@ func encodeChangesetWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecor
 }
 
 func encodedChangesetRowsSize(rows []types.ProductValue, ts *schema.TableSchema, maxRowBytes uint32) (uint64, error) {
+	if _, err := checkedChangesetCount("row count", len(rows)); err != nil {
+		return 0, err
+	}
 	size := uint64(4)
 	for _, row := range rows {
 		rowLen, err := bsatn.EncodedProductValueSizeForSchema(row, ts)
@@ -96,7 +103,11 @@ func encodedChangesetRowsSize(rows []types.ProductValue, ts *schema.TableSchema,
 }
 
 func appendChangesetRows(out []byte, rows []types.ProductValue, ts *schema.TableSchema, maxRowBytes uint32) ([]byte, error) {
-	out = appendUint32LE(out, uint32(len(rows)))
+	count, err := checkedChangesetCount("row count", len(rows))
+	if err != nil {
+		return out, err
+	}
+	out = appendUint32LE(out, count)
 	for _, row := range rows {
 		rowLen, err := bsatn.EncodedProductValueSizeForSchema(row, ts)
 		if err != nil {
@@ -116,6 +127,13 @@ func appendChangesetRows(out []byte, rows []types.ProductValue, ts *schema.Table
 		}
 	}
 	return out, nil
+}
+
+func checkedChangesetCount(label string, n int) (uint32, error) {
+	if n < 0 || uint64(n) > math.MaxUint32 {
+		return 0, fmt.Errorf("%w: changeset %s %d exceeds uint32 length", ErrTraversal, label, n)
+	}
+	return uint32(n), nil
 }
 
 func validateRowPayloadLen(rowLen int, maxRowBytes uint32) error {

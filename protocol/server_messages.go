@@ -153,19 +153,27 @@ func EncodeServerMessage(m any) ([]byte, error) {
 	case IdentityToken:
 		buf.WriteByte(TagIdentityToken)
 		buf.Write(msg.Identity[:])
-		writeString(&buf, msg.Token)
+		if err := writeString(&buf, msg.Token); err != nil {
+			return nil, err
+		}
 		buf.Write(msg.ConnectionID[:])
 	case SubscribeSingleApplied:
 		buf.WriteByte(TagSubscribeSingleApplied)
 		writeAppliedHeader(&buf, msg.RequestID, msg.TotalHostExecutionDurationMicros, msg.QueryID)
-		writeString(&buf, msg.TableName)
-		writeBytes(&buf, msg.Rows)
+		if err := writeString(&buf, msg.TableName); err != nil {
+			return nil, err
+		}
+		if err := writeBytes(&buf, msg.Rows); err != nil {
+			return nil, err
+		}
 	case UnsubscribeSingleApplied:
 		buf.WriteByte(TagUnsubscribeSingleApplied)
 		writeAppliedHeader(&buf, msg.RequestID, msg.TotalHostExecutionDurationMicros, msg.QueryID)
 		if msg.HasRows {
 			buf.WriteByte(1)
-			writeBytes(&buf, msg.Rows)
+			if err := writeBytes(&buf, msg.Rows); err != nil {
+				return nil, err
+			}
 		} else {
 			buf.WriteByte(0)
 		}
@@ -175,7 +183,9 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		writeOptionalUint32(&buf, msg.RequestID)
 		writeOptionalUint32(&buf, msg.QueryID)
 		writeOptionalTableID(&buf, msg.TableID)
-		writeString(&buf, msg.Error)
+		if err := writeString(&buf, msg.Error); err != nil {
+			return nil, err
+		}
 	case TransactionUpdate:
 		buf.WriteByte(TagTransactionUpdate)
 		if err := writeUpdateStatus(&buf, msg.Status); err != nil {
@@ -184,26 +194,40 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		writeInt64(&buf, msg.Timestamp)
 		buf.Write(msg.CallerIdentity[:])
 		buf.Write(msg.CallerConnectionID[:])
-		writeReducerCallInfo(&buf, msg.ReducerCall)
+		if err := writeReducerCallInfo(&buf, msg.ReducerCall); err != nil {
+			return nil, err
+		}
 		writeInt64(&buf, msg.TotalHostExecutionDuration)
 	case TransactionUpdateLight:
 		buf.WriteByte(TagTransactionUpdateLight)
 		writeUint32(&buf, msg.RequestID)
-		writeSubscriptionUpdates(&buf, msg.Update)
+		if err := writeSubscriptionUpdates(&buf, msg.Update); err != nil {
+			return nil, err
+		}
 	case OneOffQueryResponse:
 		buf.WriteByte(TagOneOffQueryResponse)
-		writeBytes(&buf, msg.MessageID)
-		writeOptionalString(&buf, msg.Error)
-		writeOneOffTables(&buf, msg.Tables)
+		if err := writeBytes(&buf, msg.MessageID); err != nil {
+			return nil, err
+		}
+		if err := writeOptionalString(&buf, msg.Error); err != nil {
+			return nil, err
+		}
+		if err := writeOneOffTables(&buf, msg.Tables); err != nil {
+			return nil, err
+		}
 		writeInt64(&buf, msg.TotalHostExecutionDuration)
 	case SubscribeMultiApplied:
 		buf.WriteByte(TagSubscribeMultiApplied)
 		writeAppliedHeader(&buf, msg.RequestID, msg.TotalHostExecutionDurationMicros, msg.QueryID)
-		writeSubscriptionUpdates(&buf, msg.Update)
+		if err := writeSubscriptionUpdates(&buf, msg.Update); err != nil {
+			return nil, err
+		}
 	case UnsubscribeMultiApplied:
 		buf.WriteByte(TagUnsubscribeMultiApplied)
 		writeAppliedHeader(&buf, msg.RequestID, msg.TotalHostExecutionDurationMicros, msg.QueryID)
-		writeSubscriptionUpdates(&buf, msg.Update)
+		if err := writeSubscriptionUpdates(&buf, msg.Update); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("%w: %T", ErrUnknownMessageTag, m)
 	}
@@ -418,12 +442,21 @@ func decodeOneOffQueryResponse(body []byte) (OneOffQueryResponse, error) {
 	return m, nil
 }
 
-func writeOneOffTables(buf *bytes.Buffer, tables []OneOffTable) {
-	writeUint32(buf, uint32(len(tables)))
-	for _, t := range tables {
-		writeString(buf, t.TableName)
-		writeBytes(buf, t.Rows)
+func writeOneOffTables(buf *bytes.Buffer, tables []OneOffTable) error {
+	count, err := checkedProtocolLen("OneOffTable count", len(tables))
+	if err != nil {
+		return err
 	}
+	writeUint32(buf, count)
+	for _, t := range tables {
+		if err := writeString(buf, t.TableName); err != nil {
+			return err
+		}
+		if err := writeBytes(buf, t.Rows); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func readOneOffTables(body []byte, off int) ([]OneOffTable, int, error) {
@@ -448,13 +481,13 @@ func readOneOffTables(body []byte, off int) ([]OneOffTable, int, error) {
 	return tables, off, nil
 }
 
-func writeOptionalString(buf *bytes.Buffer, v *string) {
+func writeOptionalString(buf *bytes.Buffer, v *string) error {
 	if v == nil {
 		buf.WriteByte(0)
-		return
+		return nil
 	}
 	buf.WriteByte(1)
-	writeString(buf, *v)
+	return writeString(buf, *v)
 }
 
 func readOptionalString(body []byte, off int) (*string, int, error) {
@@ -527,10 +560,14 @@ func writeUpdateStatus(buf *bytes.Buffer, s UpdateStatus) error {
 	switch v := s.(type) {
 	case StatusCommitted:
 		buf.WriteByte(updateStatusTagCommitted)
-		writeSubscriptionUpdates(buf, v.Update)
+		if err := writeSubscriptionUpdates(buf, v.Update); err != nil {
+			return err
+		}
 	case StatusFailed:
 		buf.WriteByte(updateStatusTagFailed)
-		writeString(buf, v.Error)
+		if err := writeString(buf, v.Error); err != nil {
+			return err
+		}
 	case nil:
 		return fmt.Errorf("%w: nil UpdateStatus", ErrMalformedMessage)
 	default:
@@ -563,11 +600,16 @@ func readUpdateStatus(body []byte, off int) (UpdateStatus, int, error) {
 	}
 }
 
-func writeReducerCallInfo(buf *bytes.Buffer, rci ReducerCallInfo) {
-	writeString(buf, rci.ReducerName)
+func writeReducerCallInfo(buf *bytes.Buffer, rci ReducerCallInfo) error {
+	if err := writeString(buf, rci.ReducerName); err != nil {
+		return err
+	}
 	writeUint32(buf, rci.ReducerID)
-	writeBytes(buf, rci.Args)
+	if err := writeBytes(buf, rci.Args); err != nil {
+		return err
+	}
 	writeUint32(buf, rci.RequestID)
+	return nil
 }
 
 func readReducerCallInfo(body []byte, off int) (ReducerCallInfo, int, error) {
@@ -590,14 +632,25 @@ func readReducerCallInfo(body []byte, off int) (ReducerCallInfo, int, error) {
 
 // --- SubscriptionUpdate array + integer primitives ---
 
-func writeSubscriptionUpdates(buf *bytes.Buffer, ups []SubscriptionUpdate) {
-	writeUint32(buf, uint32(len(ups)))
+func writeSubscriptionUpdates(buf *bytes.Buffer, ups []SubscriptionUpdate) error {
+	count, err := checkedProtocolLen("SubscriptionUpdate count", len(ups))
+	if err != nil {
+		return err
+	}
+	writeUint32(buf, count)
 	for _, u := range ups {
 		writeUint32(buf, u.QueryID)
-		writeString(buf, u.TableName)
-		writeBytes(buf, u.Inserts)
-		writeBytes(buf, u.Deletes)
+		if err := writeString(buf, u.TableName); err != nil {
+			return err
+		}
+		if err := writeBytes(buf, u.Inserts); err != nil {
+			return err
+		}
+		if err := writeBytes(buf, u.Deletes); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func readSubscriptionUpdates(body []byte, off int) ([]SubscriptionUpdate, int, error) {

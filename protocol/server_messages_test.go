@@ -350,8 +350,12 @@ func TestDecodeServerMessageRejectsImpossibleArrayCountsBeforeAllocation(t *test
 	t.Run("one-off tables", func(t *testing.T) {
 		var frame bytes.Buffer
 		frame.WriteByte(TagOneOffQueryResponse)
-		writeBytes(&frame, nil)
-		writeOptionalString(&frame, nil)
+		if err := writeBytes(&frame, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeOptionalString(&frame, nil); err != nil {
+			t.Fatal(err)
+		}
 		writeUint32(&frame, 1<<31)
 
 		_, _, err := DecodeServerMessage(frame.Bytes())

@@ -85,38 +85,60 @@ func EncodeClientMessage(m any) ([]byte, error) {
 		buf.WriteByte(TagSubscribeSingle)
 		writeUint32(&buf, msg.RequestID)
 		writeUint32(&buf, msg.QueryID)
-		writeString(&buf, msg.QueryString)
+		if err := writeString(&buf, msg.QueryString); err != nil {
+			return nil, err
+		}
 	case UnsubscribeSingleMsg:
 		buf.WriteByte(TagUnsubscribeSingle)
 		writeUint32(&buf, msg.RequestID)
 		writeUint32(&buf, msg.QueryID)
 	case CallReducerMsg:
 		buf.WriteByte(TagCallReducer)
-		writeString(&buf, msg.ReducerName)
-		writeBytes(&buf, msg.Args)
+		if err := writeString(&buf, msg.ReducerName); err != nil {
+			return nil, err
+		}
+		if err := writeBytes(&buf, msg.Args); err != nil {
+			return nil, err
+		}
 		writeUint32(&buf, msg.RequestID)
 		buf.WriteByte(msg.Flags)
 	case OneOffQueryMsg:
 		buf.WriteByte(TagOneOffQuery)
-		writeBytes(&buf, msg.MessageID)
-		writeString(&buf, msg.QueryString)
+		if err := writeBytes(&buf, msg.MessageID); err != nil {
+			return nil, err
+		}
+		if err := writeString(&buf, msg.QueryString); err != nil {
+			return nil, err
+		}
 	case DeclaredQueryMsg:
 		buf.WriteByte(TagDeclaredQuery)
-		writeBytes(&buf, msg.MessageID)
-		writeString(&buf, msg.Name)
+		if err := writeBytes(&buf, msg.MessageID); err != nil {
+			return nil, err
+		}
+		if err := writeString(&buf, msg.Name); err != nil {
+			return nil, err
+		}
 	case SubscribeMultiMsg:
 		buf.WriteByte(TagSubscribeMulti)
 		writeUint32(&buf, msg.RequestID)
 		writeUint32(&buf, msg.QueryID)
-		writeUint32(&buf, uint32(len(msg.QueryStrings)))
+		count, err := checkedProtocolLen("SubscribeMulti query string count", len(msg.QueryStrings))
+		if err != nil {
+			return nil, err
+		}
+		writeUint32(&buf, count)
 		for _, qs := range msg.QueryStrings {
-			writeString(&buf, qs)
+			if err := writeString(&buf, qs); err != nil {
+				return nil, err
+			}
 		}
 	case SubscribeDeclaredViewMsg:
 		buf.WriteByte(TagSubscribeDeclaredView)
 		writeUint32(&buf, msg.RequestID)
 		writeUint32(&buf, msg.QueryID)
-		writeString(&buf, msg.Name)
+		if err := writeString(&buf, msg.Name); err != nil {
+			return nil, err
+		}
 	case UnsubscribeMultiMsg:
 		buf.WriteByte(TagUnsubscribeMulti)
 		writeUint32(&buf, msg.RequestID)
@@ -332,14 +354,31 @@ func writeUint32(buf *bytes.Buffer, v uint32) {
 	buf.Write(tmp[:])
 }
 
-func writeString(buf *bytes.Buffer, s string) {
-	writeUint32(buf, uint32(len(s)))
+func writeString(buf *bytes.Buffer, s string) error {
+	n, err := checkedProtocolLen("string", len(s))
+	if err != nil {
+		return err
+	}
+	writeUint32(buf, n)
 	buf.WriteString(s)
+	return nil
 }
 
-func writeBytes(buf *bytes.Buffer, b []byte) {
-	writeUint32(buf, uint32(len(b)))
+func writeBytes(buf *bytes.Buffer, b []byte) error {
+	n, err := checkedProtocolLen("bytes", len(b))
+	if err != nil {
+		return err
+	}
+	writeUint32(buf, n)
 	buf.Write(b)
+	return nil
+}
+
+func checkedProtocolLen(label string, n int) (uint32, error) {
+	if n < 0 || uint64(n) > uint64(^uint32(0)) {
+		return 0, fmt.Errorf("%w: %s length %d exceeds uint32", ErrMessageTooLarge, label, n)
+	}
+	return uint32(n), nil
 }
 
 func readUint32(body []byte, off int) (uint32, int, error) {

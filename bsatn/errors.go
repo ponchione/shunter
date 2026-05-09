@@ -13,6 +13,7 @@ var (
 	ErrInvalidBool       = errors.New("bsatn: invalid bool")
 	ErrInvalidPresence   = errors.New("bsatn: invalid nullable presence marker")
 	ErrNullWithoutSchema = errors.New("bsatn: null value requires nullable column schema")
+	ErrValueTooLarge     = errors.New("bsatn: value too large")
 )
 
 type UnknownValueTagError struct{ Tag byte }

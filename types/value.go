@@ -664,10 +664,10 @@ func (v Value) writePayload(h hash.Hash64) {
 		binary.BigEndian.PutUint64(buf[:], uint64(v.i64))
 		h.Write(buf[:])
 	case KindArrayString:
-		binary.BigEndian.PutUint32(buf[:4], uint32(len(v.strArr)))
+		binary.BigEndian.PutUint32(buf[:4], checkedPayloadLen(len(v.strArr)))
 		h.Write(buf[:4])
 		for _, s := range v.strArr {
-			binary.BigEndian.PutUint32(buf[:4], uint32(len(s)))
+			binary.BigEndian.PutUint32(buf[:4], checkedPayloadLen(len(s)))
 			h.Write(buf[:4])
 			h.Write([]byte(s))
 		}
@@ -693,9 +693,9 @@ func (v Value) payloadLen() uint32 {
 	case KindFloat64:
 		return 8
 	case KindString:
-		return uint32(len(v.str))
+		return checkedPayloadLen(len(v.str))
 	case KindBytes, KindJSON:
-		return uint32(len(v.buf))
+		return checkedPayloadLen(len(v.buf))
 	case KindInt128, KindUint128:
 		return 16
 	case KindInt256, KindUint256:
@@ -703,14 +703,25 @@ func (v Value) payloadLen() uint32 {
 	case KindTimestamp, KindDuration:
 		return 8
 	case KindArrayString:
-		n := uint32(4)
+		n := uint64(4)
 		for _, s := range v.strArr {
-			n += 4 + uint32(len(s))
+			itemLen := uint64(checkedPayloadLen(len(s)))
+			n += 4 + itemLen
+			if n > math.MaxUint32 {
+				panic(fmt.Sprintf("shunter: %s payload length %d exceeds uint32", v.kind, n))
+			}
 		}
-		return n
+		return uint32(n)
 	case KindUUID:
 		return 16
 	default:
 		return 0
 	}
+}
+
+func checkedPayloadLen(n int) uint32 {
+	if n < 0 || uint64(n) > math.MaxUint32 {
+		panic(fmt.Sprintf("shunter: value payload length %d exceeds uint32", n))
+	}
+	return uint32(n)
 }

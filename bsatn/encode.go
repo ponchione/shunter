@@ -83,12 +83,20 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 		dst = append(dst, buf[:8]...)
 	case types.KindString:
 		s := v.AsString()
-		binary.LittleEndian.PutUint32(buf[:4], uint32(len(s)))
+		n, err := checkedUint32Len("string", len(s))
+		if err != nil {
+			return dst[:start], err
+		}
+		binary.LittleEndian.PutUint32(buf[:4], n)
 		dst = append(dst, buf[:4]...)
 		dst = append(dst, s...)
 	case types.KindBytes:
 		b := v.BytesView()
-		binary.LittleEndian.PutUint32(buf[:4], uint32(len(b)))
+		n, err := checkedUint32Len("bytes", len(b))
+		if err != nil {
+			return dst[:start], err
+		}
+		binary.LittleEndian.PutUint32(buf[:4], n)
 		dst = append(dst, buf[:4]...)
 		dst = append(dst, b...)
 	case types.KindInt128:
@@ -127,10 +135,18 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 		dst = append(dst, buf[:8]...)
 	case types.KindArrayString:
 		xs := v.ArrayStringView()
-		binary.LittleEndian.PutUint32(buf[:4], uint32(len(xs)))
+		count, err := checkedUint32Len("array string count", len(xs))
+		if err != nil {
+			return dst[:start], err
+		}
+		binary.LittleEndian.PutUint32(buf[:4], count)
 		dst = append(dst, buf[:4]...)
 		for _, s := range xs {
-			binary.LittleEndian.PutUint32(buf[:4], uint32(len(s)))
+			n, err := checkedUint32Len("array string item", len(s))
+			if err != nil {
+				return dst[:start], err
+			}
+			binary.LittleEndian.PutUint32(buf[:4], n)
 			dst = append(dst, buf[:4]...)
 			dst = append(dst, s...)
 		}
@@ -139,13 +155,24 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 		dst = append(dst, u[:]...)
 	case types.KindJSON:
 		b := v.JSONView()
-		binary.LittleEndian.PutUint32(buf[:4], uint32(len(b)))
+		n, err := checkedUint32Len("json", len(b))
+		if err != nil {
+			return dst[:start], err
+		}
+		binary.LittleEndian.PutUint32(buf[:4], n)
 		dst = append(dst, buf[:4]...)
 		dst = append(dst, b...)
 	default:
 		return dst[:start], &UnknownValueTagError{Tag: tag}
 	}
 	return dst, nil
+}
+
+func checkedUint32Len(label string, n int) (uint32, error) {
+	if n < 0 || uint64(n) > math.MaxUint32 {
+		return 0, fmt.Errorf("%w: %s length %d exceeds uint32", ErrValueTooLarge, label, n)
+	}
+	return uint32(n), nil
 }
 
 // EncodeValue writes a Value in BSATN format: tag byte + LE payload.

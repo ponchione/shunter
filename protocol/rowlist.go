@@ -11,40 +11,74 @@ import (
 
 // EncodeRowList encodes a batch of raw BSATN-encoded rows per SPEC-005
 // §3.4: `[row_count: u32 LE] [for each row: [row_len: u32 LE] [row_data]]`.
-// A nil or empty input encodes as 4 zero bytes.
+// A nil or empty input encodes as 4 zero bytes. Oversized input panics; use
+// EncodeRowListChecked when the caller needs an error return.
 func EncodeRowList(rows [][]byte) []byte {
-	size := 4
-	for _, r := range rows {
-		size += 4 + len(r)
+	out, err := EncodeRowListChecked(rows)
+	if err != nil {
+		panic(err)
 	}
-	out := make([]byte, size)
-	binary.LittleEndian.PutUint32(out[0:4], uint32(len(rows)))
+	return out
+}
+
+// EncodeRowListChecked is EncodeRowList with explicit size errors.
+func EncodeRowListChecked(rows [][]byte) ([]byte, error) {
+	count, err := checkedProtocolLen("rowlist row count", len(rows))
+	if err != nil {
+		return nil, err
+	}
+	size := uint64(4)
+	rowSizes := make([]uint32, len(rows))
+	for i, r := range rows {
+		rowLen, err := checkedProtocolLen("rowlist row", len(r))
+		if err != nil {
+			return nil, err
+		}
+		rowSizes[i] = rowLen
+		size += 4 + uint64(len(r))
+		if size > maxProtocolAlloc() {
+			return nil, fmt.Errorf("%w: rowlist payload size %d exceeds max allocation", ErrMessageTooLarge, size)
+		}
+	}
+	out := make([]byte, int(size))
+	binary.LittleEndian.PutUint32(out[0:4], count)
 	off := 4
-	for _, r := range rows {
-		binary.LittleEndian.PutUint32(out[off:off+4], uint32(len(r)))
+	for i, r := range rows {
+		binary.LittleEndian.PutUint32(out[off:off+4], rowSizes[i])
 		off += 4
 		copy(out[off:off+len(r)], r)
 		off += len(r)
 	}
-	return out
+	return out, nil
 }
 
 // EncodeProductRows encodes schema-aligned ProductValue rows into the RowList
 // payload carried by protocol messages. Row payloads are treated as read-only:
 // bsatn.EncodeProductValue must not mutate shared ProductValue backing arrays.
 func EncodeProductRows(rows []types.ProductValue) ([]byte, error) {
-	size := 4
-	rowSizes := make([]int, len(rows))
+	count, err := checkedProtocolLen("product row count", len(rows))
+	if err != nil {
+		return nil, err
+	}
+	size := uint64(4)
+	rowSizes := make([]uint32, len(rows))
 	for i, row := range rows {
 		n := bsatn.EncodedProductValueSize(row)
-		rowSizes[i] = n
-		size += 4 + n
+		rowLen, err := checkedProtocolLen("product row", n)
+		if err != nil {
+			return nil, err
+		}
+		rowSizes[i] = rowLen
+		size += 4 + uint64(n)
+		if size > maxProtocolAlloc() {
+			return nil, fmt.Errorf("%w: encoded product rows size %d exceeds max allocation", ErrMessageTooLarge, size)
+		}
 	}
-	out := make([]byte, 4, size)
-	binary.LittleEndian.PutUint32(out[0:4], uint32(len(rows)))
+	out := make([]byte, 4, int(size))
+	binary.LittleEndian.PutUint32(out[0:4], count)
 	var scratch [4]byte
 	for i, row := range rows {
-		binary.LittleEndian.PutUint32(scratch[:], uint32(rowSizes[i]))
+		binary.LittleEndian.PutUint32(scratch[:], rowSizes[i])
 		out = append(out, scratch[:]...)
 		before := len(out)
 		var err error
@@ -52,7 +86,7 @@ func EncodeProductRows(rows []types.ProductValue) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if got := len(out) - before; got != rowSizes[i] {
+		if got := len(out) - before; got != int(rowSizes[i]) {
 			return nil, fmt.Errorf("protocol: encoded row size changed from %d to %d", rowSizes[i], got)
 		}
 	}
@@ -69,21 +103,32 @@ func EncodeProductRowsForSchema(rows []types.ProductValue, ts *schema.TableSchem
 
 // EncodeProductRowsForColumns encodes ProductValue rows using nullable metadata from columns.
 func EncodeProductRowsForColumns(rows []types.ProductValue, columns []schema.ColumnSchema) ([]byte, error) {
-	size := 4
-	rowSizes := make([]int, len(rows))
+	count, err := checkedProtocolLen("product row count", len(rows))
+	if err != nil {
+		return nil, err
+	}
+	size := uint64(4)
+	rowSizes := make([]uint32, len(rows))
 	for i, row := range rows {
 		n, err := bsatn.EncodedProductValueSizeForColumns(row, columns)
 		if err != nil {
 			return nil, err
 		}
-		rowSizes[i] = n
-		size += 4 + n
+		rowLen, err := checkedProtocolLen("product row", n)
+		if err != nil {
+			return nil, err
+		}
+		rowSizes[i] = rowLen
+		size += 4 + uint64(n)
+		if size > maxProtocolAlloc() {
+			return nil, fmt.Errorf("%w: encoded product rows size %d exceeds max allocation", ErrMessageTooLarge, size)
+		}
 	}
-	out := make([]byte, 4, size)
-	binary.LittleEndian.PutUint32(out[0:4], uint32(len(rows)))
+	out := make([]byte, 4, int(size))
+	binary.LittleEndian.PutUint32(out[0:4], count)
 	var scratch [4]byte
 	for i, row := range rows {
-		binary.LittleEndian.PutUint32(scratch[:], uint32(rowSizes[i]))
+		binary.LittleEndian.PutUint32(scratch[:], rowSizes[i])
 		out = append(out, scratch[:]...)
 		before := len(out)
 		var err error
@@ -91,11 +136,15 @@ func EncodeProductRowsForColumns(rows []types.ProductValue, columns []schema.Col
 		if err != nil {
 			return nil, err
 		}
-		if got := len(out) - before; got != rowSizes[i] {
+		if got := len(out) - before; got != int(rowSizes[i]) {
 			return nil, fmt.Errorf("protocol: encoded row size changed from %d to %d", rowSizes[i], got)
 		}
 	}
 	return out, nil
+}
+
+func maxProtocolAlloc() uint64 {
+	return uint64(int(^uint(0) >> 1))
 }
 
 // DecodeRowList parses the wire format emitted by EncodeRowList.

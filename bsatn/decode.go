@@ -191,7 +191,7 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 			return types.Value{}, err
 		}
 		count := binary.LittleEndian.Uint32(buf[:4])
-		xs := make([]string, 0)
+		xs := make([]string, 0, initialArrayStringCap(count))
 		for range count {
 			if _, err := io.ReadFull(r, buf[:4]); err != nil {
 				return types.Value{}, err
@@ -232,15 +232,34 @@ func readLengthPrefixedPayload(r io.Reader, n uint32) ([]byte, error) {
 	if n == 0 {
 		return []byte{}, nil
 	}
-	lr := &io.LimitedReader{R: r, N: int64(n)}
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(lr); err != nil {
+	const maxDirectPayloadRead = 64 << 20
+	if n > maxDirectPayloadRead {
+		lr := &io.LimitedReader{R: r, N: int64(n)}
+		var buf bytes.Buffer
+		if _, err := buf.ReadFrom(lr); err != nil {
+			return nil, err
+		}
+		if lr.N != 0 {
+			return nil, io.ErrUnexpectedEOF
+		}
+		return buf.Bytes(), nil
+	}
+	data := make([]byte, n)
+	if _, err := io.ReadFull(r, data); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, io.ErrUnexpectedEOF
+		}
 		return nil, err
 	}
-	if lr.N != 0 {
-		return nil, io.ErrUnexpectedEOF
+	return data, nil
+}
+
+func initialArrayStringCap(count uint32) int {
+	const maxInitialCap = 1024
+	if count > maxInitialCap {
+		return maxInitialCap
 	}
-	return buf.Bytes(), nil
+	return int(count)
 }
 
 // DecodeProductValue reads a schema-validated row.
