@@ -211,36 +211,22 @@ Known benchmark gaps for v1 envelopes:
 
 Latest baseline snapshot:
 
-- Date: 2026-04-30
-- Command: `go test -run '^$' -bench . -benchmem ./protocol ./commitlog ./subscription`
-- Environment: linux/amd64, `Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz`
-- Context: after the wide performance cleanup that reduced BSATN/RowList
-  buffering, subscription pruning allocations, BTreeIndex write shifts, and
-  snapshot lock-held encoding work.
-
-| Benchmark | ns/op | B/op | allocs/op |
-| --- | ---: | ---: | ---: |
-| `BenchmarkWrapCompressedGzip-12` | 37655 | 270 | 3 |
-| `BenchmarkUnwrapCompressedGzip-12` | 8634 | 4725 | 7 |
-| `BenchmarkCreateSnapshotLarge-12` | 64121239 | 1872629 | 9487 |
-| `BenchmarkEvalEqualitySubs1K-12` | 10002 | 869 | 12 |
-| `BenchmarkEvalEqualitySubs10K-12` | 5165 | 864 | 12 |
-| `BenchmarkRegisterUnregister-12` | 12620 | 3824 | 34 |
-| `BenchmarkRegisterSetInitialQueryAllRows-12` | 347748 | 72776 | 62 |
-| `BenchmarkProjectedRowsBeforeLargeBags-12` | 5603712 | 892110 | 12320 |
-| `BenchmarkFanOut1KClientsSameQuery-12` | 1155945 | 296511 | 2031 |
-| `BenchmarkJoinFragmentEval-12` | 580740 | 49188 | 210 |
-| `BenchmarkDeltaIndexConstruction-12` | 176698 | 4169 | 501 |
-| `BenchmarkCandidateCollection-12` | 6224 | 480 | 3 |
+- Date: 2026-05-09
+- Shunter commit: `452cdebb433af76f3c4bb65f6c95b90c26a0af4f`
+- Command: `go test -run '^$' -bench . -benchmem -count=10 ./protocol ./commitlog ./subscription > /tmp/shunter-bench-new.txt`
+- Environment: linux/amd64, `go1.26.2`,
+  `AMD Ryzen 9 9900X 12-Core Processor`
+- Detailed advisory row table: `docs/performance-envelopes.md`
 
 Current performance read:
 
 - Equality subscription evaluation and candidate collection are the healthiest
   hot paths.
-- Large bag diff and delta index construction remain the clearest allocation
-  targets.
-- Snapshot creation is still latency-heavy, but allocation pressure and
-  lock-held encoding work were reduced by the cleanup.
+- Large bag diffing, large snapshot-plus-tail recovery, segmented log replay,
+  and multi-way joins at larger row counts are the clearest allocation and
+  latency targets in the current coverage.
+- Current measured rows are advisory. The repo does not yet define hard
+  performance thresholds.
 
 ## Remaining Drivers
 
@@ -324,8 +310,9 @@ Tasks:
   replay/recovery, restore latency, network-level subscription workloads,
   varied-query fanout, large initial snapshots, memory profiles, and the
   external canary workload.
-- Publish an envelope table under `docs/` with command, machine notes, data
-  size, commit hash, and whether each threshold is advisory or release-gating.
+- Keep the envelope table under `docs/performance-envelopes.md` current with
+  command, machine notes, data size, commit hash, and whether each threshold is
+  advisory or release-gating.
 - Keep app-author indexing guidance aligned with measured scan, predicate,
   subscription, and join limits.
 

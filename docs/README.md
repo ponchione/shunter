@@ -16,8 +16,10 @@ notes, and roadmap material live under `../working-docs/`.
    surface choices that Go doc alone does not explain.
 
 Use [authentication](authentication.md) for the full current auth contract,
-[operations](operations.md) for backup/restore and release runbooks, and
-[v1 compatibility](v1-compatibility.md) for the current support matrix.
+[operations](operations.md) for backup/restore and release runbooks,
+[performance envelopes](performance-envelopes.md) for the current advisory
+benchmark snapshot, and [v1 compatibility](v1-compatibility.md) for the current
+support matrix.
 
 ## Current Docs
 
@@ -31,6 +33,8 @@ Use [authentication](authentication.md) for the full current auth contract,
   permissions, visibility, key replacement, and production checklist.
 - [Operations](operations.md) - `DataDir` lifecycle, backup/restore,
   migrations, upgrades, and release checklist.
+- [Performance envelopes](performance-envelopes.md) - current advisory
+  benchmark snapshot, workload fixtures, and known measurement gaps.
 - [v1 compatibility](v1-compatibility.md) - support matrix for root APIs,
   protocol, contract JSON, codegen, read surfaces, and host behavior.
 
