@@ -147,8 +147,13 @@ func EncodeServerMessage(m any) ([]byte, error) {
 	if err := validateServerMessageForEncode(m); err != nil {
 		return nil, err
 	}
+	size, err := encodedServerMessageSize(m)
+	if err != nil {
+		return nil, err
+	}
 
 	var buf bytes.Buffer
+	buf.Grow(size)
 	switch msg := m.(type) {
 	case IdentityToken:
 		buf.WriteByte(TagIdentityToken)

@@ -78,8 +78,13 @@ func EncodeClientMessage(m any) ([]byte, error) {
 	if err := validateClientMessageForEncode(m); err != nil {
 		return nil, err
 	}
+	size, err := encodedClientMessageSize(m)
+	if err != nil {
+		return nil, err
+	}
 
 	var buf bytes.Buffer
+	buf.Grow(size)
 	switch msg := m.(type) {
 	case SubscribeSingleMsg:
 		buf.WriteByte(TagSubscribeSingle)
