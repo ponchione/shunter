@@ -193,6 +193,7 @@ Current benchmark coverage:
 | --- | --- | --- |
 | Protocol compression | `BenchmarkWrapCompressedGzip`, `BenchmarkUnwrapCompressedGzip` | covered |
 | Commitlog snapshot and log recovery | `BenchmarkCreateSnapshotLarge`, `BenchmarkOpenAndRecoverSnapshotOnly`, `BenchmarkOpenAndRecoverSnapshotWithTailReplay`, `BenchmarkReplayLogSegmentedLog`, `BenchmarkOpenAndRecoverSegmentedLog` | covered for snapshot creation, snapshot-only recovery, snapshot-plus-tail recovery, and segmented log replay/recovery without snapshots |
+| Offline operations | `BenchmarkBackupRestoreDataDirWorkflow` | covered for complete DataDir backup followed by restore on a small local fixture |
 | Reducer write path | `BenchmarkExecutorReducerCommitRoundTrip` | partial; needs throughput fixtures |
 | Scheduler scans | `BenchmarkSchedulerScanEnqueue` | covered for enqueue scan hot path |
 | One-off SQL | `BenchmarkExecuteCompiledSQLQueryCommonPaths`, `BenchmarkExecuteCompiledSQLQueryJoinReadShapes` | covered for common single-table, join, multi-way aggregate, projection, ordering, and limit paths |
@@ -207,7 +208,7 @@ Known benchmark gaps for v1 envelopes:
 - WebSocket network-level subscription workloads beyond handler admission
 - broader fanout distributions beyond deterministic same-query and varied
   single-table predicate fixtures
-- external canary workload and backup/restore workflow
+- external canary workload, including canary-scale backup/restore timing
 - memory profiles outside the current subscription large fixtures
 
 Latest baseline snapshot:
@@ -226,6 +227,8 @@ Current performance read:
 - Large bag diffing, large snapshot-plus-tail recovery, segmented log replay,
   and multi-way joins at larger row counts are the clearest allocation and
   latency targets in the current coverage.
+- Local offline backup/restore timing now covers a complete small DataDir copy
+  workflow; canary-scale backup/restore timing remains open.
 - Subscription memory-profile evidence now covers the existing large initial
   snapshot, projected-row diff, and `rows_512` multi-way join fixtures; broader
   network, canary, and backup/restore profiles remain open.

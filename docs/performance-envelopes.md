@@ -1,8 +1,8 @@
 # Shunter Performance Envelopes
 
 Status: current advisory v1 release-qualification snapshot
-Scope: existing Go benchmarks for protocol, commitlog, and subscription hot
-paths.
+Scope: existing Go benchmarks for protocol, commitlog, subscription, and
+offline operations hot paths.
 
 This page records measured behavior for the benchmark coverage that already
 exists. The rows are advisory for v1 release qualification unless a future
@@ -32,6 +32,14 @@ with:
 ```bash
 go test -run '^$' -bench 'BenchmarkFanOut1KClients' -benchmem -count=10 ./subscription > /tmp/shunter-fanout-bench.txt
 rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-fanout-bench.txt
+```
+
+The backup/restore row was measured at Shunter commit
+`a66fb83629879cd2b1628bd6d0e7d540de49279b` with:
+
+```bash
+go test -run '^$' -bench 'BenchmarkBackupRestoreDataDirWorkflow' -benchmem -count=10 . > /tmp/shunter-backup-restore-bench.txt
+rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-backup-restore-bench.txt
 ```
 
 Every row is advisory.
@@ -67,6 +75,12 @@ Every row is advisory.
 | Snapshot plus tail replay | `OpenAndRecoverSnapshotWithTailReplay/large-24` | 4,096 snapshot rows, 512 tail records | 1.456s +/- 10% | 1.700Gi +/- 0% | 6.936M | advisory |
 | Snapshot creation | `CreateSnapshotLarge-24` | 4,096 rows | 24.04ms +/- 8% | 2.867Mi +/- 0% | 25.23k | advisory |
 
+## Operations
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Offline backup/restore | `BackupRestoreDataDirWorkflow-24` | 512.5 KiB DataDir: 4 log segments, 2 snapshots, metadata; backup then restore | 71.67ms +/- 10% | 31.44Ki +/- 2% | 364 | advisory |
+
 ## Subscription
 
 | Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
@@ -95,6 +109,9 @@ Every row is advisory.
 - Large bag diffing, large snapshot-plus-tail recovery, segmented log replay,
   and multi-way joins at 512 rows per table are the clearest allocation and
   latency targets in the current coverage.
+- Offline backup/restore is covered for a small complete DataDir fixture and is
+  expected to be I/O dominated; this row does not replace canary-scale
+  backup/restore timing.
 - The current rows are not release-blocking thresholds. Treat regressions here
   as investigation triggers until the release process defines hard limits.
 
@@ -142,6 +159,6 @@ These remain outside the current benchmark envelope:
 - WebSocket network-level subscription workloads beyond handler admission
 - broader fanout distributions beyond deterministic same-query and varied
   single-table predicate fixtures
-- external canary workload and backup/restore workflow
+- external canary workload, including canary-scale backup/restore timing
 - memory profiles outside the current subscription large fixtures, including
   network-level, canary, and backup/restore workloads
