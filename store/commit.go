@@ -105,7 +105,7 @@ func revalidateCommit(cs *CommittedState, txState *TxState) error {
 			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
 		for rowID := range deletes {
-			if _, ok := table.GetRow(rowID); !ok {
+			if _, ok := table.rowView(rowID); !ok {
 				return fmt.Errorf("%w: %d", ErrRowNotFound, rowID)
 			}
 		}
@@ -140,7 +140,7 @@ func revalidateInsertRowID(tableID schema.TableID, table *Table, rowID types.Row
 	if txState.IsDeleted(tableID, rowID) {
 		return nil
 	}
-	if _, exists := table.GetRow(rowID); exists {
+	if _, exists := table.rowView(rowID); exists {
 		return fmt.Errorf("%w: %d", ErrDuplicateRowID, rowID)
 	}
 	return nil
@@ -218,7 +218,7 @@ func revalidateInsertAgainstCommitted(tableID schema.TableID, table *Table, row 
 			if txState.IsDeleted(tableID, rid) {
 				continue
 			}
-			if existing, ok := table.GetRow(rid); ok && existing.Equal(row) {
+			if existing, ok := table.rowView(rid); ok && existing.Equal(row) {
 				return ErrDuplicateRow
 			}
 		}

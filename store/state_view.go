@@ -133,7 +133,7 @@ func (sv *StateView) seekIndexRows(tableID schema.TableID, indexID schema.IndexI
 			if sv.tx.IsDeleted(tableID, rid) {
 				continue
 			}
-			if _, ok := table.GetRow(rid); !ok {
+			if _, ok := table.rowView(rid); !ok {
 				continue
 			}
 			if !yield(rid) {

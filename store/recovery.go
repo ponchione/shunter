@@ -90,7 +90,7 @@ func findReplayDeleteRowID(table *Table, row types.ProductValue) (types.RowID, b
 	if pk := table.PrimaryIndex(); pk != nil {
 		key := pk.ExtractKey(row)
 		for _, rid := range pk.Seek(key) {
-			committedRow, ok := table.GetRow(rid)
+			committedRow, ok := table.rowView(rid)
 			if ok && committedRow.Equal(row) {
 				return rid, true
 			}
@@ -100,7 +100,7 @@ func findReplayDeleteRowID(table *Table, row types.ProductValue) (types.RowID, b
 
 	h := row.Hash64()
 	for _, rid := range table.rowHashIndex[h] {
-		committedRow, ok := table.GetRow(rid)
+		committedRow, ok := table.rowView(rid)
 		if ok && committedRow.Equal(row) {
 			return rid, true
 		}

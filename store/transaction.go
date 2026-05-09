@@ -260,7 +260,7 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 			if t.tx.IsDeleted(tableID, rid) {
 				continue
 			}
-			if committedRow, ok := table.GetRow(rid); ok && committedRow.Equal(row) {
+			if committedRow, ok := table.rowView(rid); ok && committedRow.Equal(row) {
 				return 0, ErrDuplicateRow
 			}
 		}
@@ -485,7 +485,7 @@ func (t *Transaction) tryUndeleteRowIDs(tableID schema.TableID, table *Table, ro
 		if !t.tx.IsDeleted(tableID, rid) {
 			continue
 		}
-		committedRow, ok := table.GetRow(rid)
+		committedRow, ok := table.rowView(rid)
 		if !ok {
 			continue
 		}
@@ -533,7 +533,7 @@ func (t *Transaction) Delete(tableID schema.TableID, rowID types.RowID) error {
 	}
 
 	// Check committed state.
-	if _, ok := table.GetRow(rowID); !ok {
+	if _, ok := table.rowView(rowID); !ok {
 		return fmt.Errorf("%w: %d", ErrRowNotFound, rowID)
 	}
 

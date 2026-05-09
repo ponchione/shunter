@@ -124,6 +124,13 @@ func (t *Table) GetRow(id types.RowID) (types.ProductValue, bool) {
 	return row.Copy(), true
 }
 
+// rowView returns the stored row without copying. It is package-internal and
+// callers must treat the returned ProductValue as read-only.
+func (t *Table) rowView(id types.RowID) (types.ProductValue, bool) {
+	row, ok := t.rows[id]
+	return row, ok
+}
+
 // Scan yields all rows in unordered iteration.
 func (t *Table) Scan() iter.Seq2[types.RowID, types.ProductValue] {
 	return func(yield func(types.RowID, types.ProductValue) bool) {
