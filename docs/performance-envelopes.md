@@ -98,6 +98,43 @@ Every row is advisory.
 - The current rows are not release-blocking thresholds. Treat regressions here
   as investigation triggers until the release process defines hard limits.
 
+## Memory Profile Notes
+
+Subscription large-fixture memory profiles were spot-checked on 2026-05-09 at
+Shunter commit `59f838f960a762e95b623408b1749dfe7678d6c1`, using the same
+host and Go toolchain as the snapshot above. Profiles were written under
+`/tmp` and are not repo artifacts.
+
+Commands:
+
+```bash
+go test -run '^$' -bench 'BenchmarkRegisterSetInitialQueryAllRows|BenchmarkProjectedRowsBeforeLargeBags|BenchmarkMultiWayLiveJoinEvalSizes/rows_512|BenchmarkFanOut1KClientsVariedQueries' -benchmem -memprofile /tmp/shunter-subscription-mem.out ./subscription
+rtk go tool pprof -top -alloc_space /tmp/shunter-subscription-mem.out
+go test -run '^$' -bench 'BenchmarkProjectedRowsBeforeLargeBags$' -benchmem -memprofile /tmp/shunter-projected-rows-mem.out ./subscription
+go test -run '^$' -bench 'BenchmarkMultiWayLiveJoinEvalSizes/rows_512' -benchmem -memprofile /tmp/shunter-multiway-512-mem.out ./subscription
+go test -run '^$' -bench 'BenchmarkRegisterSetInitialQueryAllRows$' -benchmem -memprofile /tmp/shunter-initial-rows-mem.out ./subscription
+rtk go tool pprof -top -alloc_space /tmp/shunter-projected-rows-mem.out
+rtk go tool pprof -top -alloc_space /tmp/shunter-multiway-512-mem.out
+rtk go tool pprof -top -alloc_space /tmp/shunter-initial-rows-mem.out
+```
+
+Findings:
+
+- `BenchmarkRegisterSetInitialQueryAllRows-24`: 56.125us/op,
+  72,921 B/op, 77 allocs/op. Allocation space is dominated by initial
+  snapshot row accumulation in `(*initialRowScanWindow).add` at about 80% of
+  sampled allocation space, with `sortedRowIDs` around 12%.
+- `BenchmarkProjectedRowsBeforeLargeBags-24`: 784.982us/op,
+  892,502 B/op, 12,321 allocs/op. Allocation space is concentrated in
+  `projectedRowsBefore` row collection, `subtractProjectedRowsByKey`, row-key
+  encoding, and pooled canonical encoder release.
+- `BenchmarkMultiWayLiveJoinEvalSizes/rows_512`: `table_shape` measured
+  4.125ms/op, 289,611 B/op, 1,153 allocs/op; `count` measured
+  24.880ms/op, 289,655 B/op, 1,155 allocs/op. Allocation space is mainly
+  from before/after row materialization and projected-row diffing
+  (`projectedRowsBefore`, `tableRowsAfter`, `subtractProjectedRowsByKey`,
+  `encodeRowKey`) inside `evalMultiJoinDelta`.
+
 ## Known Gaps
 
 These remain outside the current benchmark envelope:
@@ -106,4 +143,5 @@ These remain outside the current benchmark envelope:
 - broader fanout distributions beyond deterministic same-query and varied
   single-table predicate fixtures
 - external canary workload and backup/restore workflow
-- memory profiles for large joins and initial snapshots
+- memory profiles outside the current subscription large fixtures, including
+  network-level, canary, and backup/restore workloads

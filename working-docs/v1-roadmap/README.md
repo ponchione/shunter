@@ -199,8 +199,8 @@ Current benchmark coverage:
 | Declared reads | `BenchmarkDeclaredReadRuntimeSurfaces` | covered for local declared query execution and declared live-view initial rows, including projection/order/limit and aggregate shapes |
 | Raw subscription protocol admission | `BenchmarkHandleSubscribeSingleAdmissionReadShapes` | covered for single-table, two-table join, and multi-way join SubscribeSingle admission |
 | Subscription equality and lifecycle | `BenchmarkEvalEqualitySubs1K`, `BenchmarkEvalEqualitySubs10K`, `BenchmarkRegisterUnregister` | covered for core hot paths |
-| Subscription initial snapshots and fanout | `BenchmarkRegisterSetInitialQueryAllRows`, `BenchmarkProjectedRowsBeforeLargeBags`, `BenchmarkFanOut1KClientsSameQuery`, `BenchmarkFanOut1KClientsVariedQueries` | partial; covers deterministic same-query and varied single-table fanout; still needs broader distributions and memory-profile coverage |
-| Subscription joins and candidate pruning | `BenchmarkJoinFragmentEval`, `BenchmarkMultiWayLiveJoinEvalSizes`, `BenchmarkDeltaIndexConstruction`, `BenchmarkCandidateCollection` | covered for two-table joins plus deterministic small/medium/large multi-way live joins with table-shaped and aggregate deltas |
+| Subscription initial snapshots and fanout | `BenchmarkRegisterSetInitialQueryAllRows`, `BenchmarkProjectedRowsBeforeLargeBags`, `BenchmarkFanOut1KClientsSameQuery`, `BenchmarkFanOut1KClientsVariedQueries` | partial; covers deterministic same-query and varied single-table fanout plus memory-profile evidence for the current large initial snapshot and projected-row diff fixtures; still needs broader distributions |
+| Subscription joins and candidate pruning | `BenchmarkJoinFragmentEval`, `BenchmarkMultiWayLiveJoinEvalSizes`, `BenchmarkDeltaIndexConstruction`, `BenchmarkCandidateCollection` | covered for two-table joins plus deterministic small/medium/large multi-way live joins with table-shaped and aggregate deltas; `rows_512` has memory-profile evidence |
 
 Known benchmark gaps for v1 envelopes:
 
@@ -208,7 +208,7 @@ Known benchmark gaps for v1 envelopes:
 - broader fanout distributions beyond deterministic same-query and varied
   single-table predicate fixtures
 - external canary workload and backup/restore workflow
-- memory profiles for large joins and initial snapshots
+- memory profiles outside the current subscription large fixtures
 
 Latest baseline snapshot:
 
@@ -226,6 +226,9 @@ Current performance read:
 - Large bag diffing, large snapshot-plus-tail recovery, segmented log replay,
   and multi-way joins at larger row counts are the clearest allocation and
   latency targets in the current coverage.
+- Subscription memory-profile evidence now covers the existing large initial
+  snapshot, projected-row diff, and `rows_512` multi-way join fixtures; broader
+  network, canary, and backup/restore profiles remain open.
 - Current measured rows are advisory. The repo does not yet define hard
   performance thresholds.
 
