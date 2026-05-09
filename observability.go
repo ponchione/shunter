@@ -19,6 +19,7 @@ import (
 const (
 	defaultObservabilityRuntimeLabel         = "default"
 	defaultObservabilityErrorMessageMaxBytes = 1024
+	redactionLookaheadBytes                  = 4096
 )
 
 const (
@@ -1151,7 +1152,15 @@ func (o *runtimeObservability) redactError(err error) string {
 }
 
 func (o *runtimeObservability) redactErrorString(raw string) string {
-	return boundUTF8(redactSensitive(strings.ToValidUTF8(raw, "")), o.errorMessageMaxBytes())
+	maxBytes := o.errorMessageMaxBytes()
+	scanBytes := maxBytes + redactionLookaheadBytes
+	if scanBytes < maxBytes {
+		scanBytes = maxBytes
+	}
+	if len(raw) > scanBytes {
+		raw = raw[:scanBytes]
+	}
+	return boundUTF8(redactSensitive(strings.ToValidUTF8(raw, "")), maxBytes)
 }
 
 func (o *runtimeObservability) debugSQLString(raw string) (string, bool) {

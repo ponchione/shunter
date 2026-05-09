@@ -279,6 +279,28 @@ func TestObservabilityRedactionInvalidUTF8AndTruncation(t *testing.T) {
 	}
 }
 
+func TestObservabilityRedactionBoundsLongSensitiveValue(t *testing.T) {
+	obs := newRuntimeObservability("chat", ObservabilityConfig{
+		RuntimeLabel: "default",
+		Redaction:    RedactionConfig{ErrorMessageMaxBytes: 32},
+	})
+
+	raw := "token=" + strings.Repeat("secret", 1<<16)
+	got := obs.redactErrorString(raw)
+	if !utf8.ValidString(got) {
+		t.Fatalf("redacted string is invalid UTF-8: %q", got)
+	}
+	if len(got) > 32 {
+		t.Fatalf("redacted length = %d, want <= 32", len(got))
+	}
+	if strings.Contains(got, "secret") {
+		t.Fatalf("redacted output leaked sensitive value: %q", got)
+	}
+	if !strings.Contains(got, "[redacted]") {
+		t.Fatalf("redacted output = %q, want redaction marker", got)
+	}
+}
+
 func FuzzObservabilityRedactErrorString(f *testing.F) {
 	for _, seed := range []struct {
 		raw      string
