@@ -505,6 +505,66 @@ func TestRunDataDirMigrationsNoopHookDoesNotConsumeTxID(t *testing.T) {
 	}
 }
 
+func TestRunDataDirMigrationsNoHooksDoesNotBootstrapMissingDataDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "missing-data-dir")
+	result, err := RunDataDirMigrations(context.Background(), validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("RunDataDirMigrations no hooks: %v", err)
+	}
+	if result.DataDir != dir || result.RecoveredTxID != 0 || result.DurableTxID != 0 || len(result.Hooks) != 0 {
+		t.Fatalf("no-hook migration result = %+v, want data dir only", result)
+	}
+	if _, statErr := os.Stat(dir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("data dir stat after no-hook migration = %v, want not exist", statErr)
+	}
+}
+
+func TestRunDataDirMigrationsSkipsNilHooksWithoutConsumingIndexOrTxID(t *testing.T) {
+	dir := t.TempDir()
+	result, err := RunDataDirMigrations(context.Background(), validChatModule(), Config{DataDir: dir},
+		func(_ context.Context, mc *MigrationContext) error {
+			tableID, _, ok := mc.Schema().TableByName("messages")
+			if !ok {
+				return fmt.Errorf("messages table missing from migration schema")
+			}
+			_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("first-hook")})
+			return err
+		},
+		nil,
+		func(_ context.Context, mc *MigrationContext) error {
+			if mc.CommittedTxID() != 1 {
+				return fmt.Errorf("committed tx id = %d, want first hook horizon", mc.CommittedTxID())
+			}
+			tableID, _, ok := mc.Schema().TableByName("messages")
+			if !ok {
+				return fmt.Errorf("messages table missing from migration schema")
+			}
+			_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(2), types.NewString("third-hook")})
+			return err
+		},
+	)
+	if err != nil {
+		t.Fatalf("RunDataDirMigrations nil hook: %v", err)
+	}
+	if result.RecoveredTxID != 0 || result.DurableTxID != 2 {
+		t.Fatalf("nil-hook result tx ids recovered/durable = %d/%d, want 0/2", result.RecoveredTxID, result.DurableTxID)
+	}
+	requireMigrationHookResults(t, result.Hooks,
+		MigrationHookResult{Index: 0, TxID: 1, Changed: true},
+		MigrationHookResult{Index: 2, TxID: 2, Changed: true},
+	)
+
+	rt, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build after nil-hook migration runner: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start after nil-hook migration runner: %v", err)
+	}
+	defer rt.Close()
+	requireMigrationMessageBodies(t, rt, "first-hook", "third-hook")
+}
+
 func TestRunDataDirMigrationsFailureRollsBackHookTransaction(t *testing.T) {
 	dir := t.TempDir()
 	boom := errors.New("offline boom")
