@@ -1,8 +1,8 @@
 # Shunter Performance Envelopes
 
 Status: current advisory v1 release-qualification snapshot
-Scope: existing Go benchmarks for protocol, commitlog, subscription, and
-offline operations hot paths.
+Scope: existing Go benchmarks for protocol, executor, commitlog, subscription,
+and offline operations hot paths.
 
 This page records measured behavior for the benchmark coverage that already
 exists. The rows are advisory for v1 release qualification unless a future
@@ -83,6 +83,14 @@ go test -run '^$' -bench 'Benchmark.*Backpressure.*' -benchmem -count=10 ./proto
 rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-backpressure-bench.txt
 ```
 
+The executor reducer rows were measured at Shunter commit
+`10c7b4c64b387441d9e2cd67caadcc62e36ff16c` with:
+
+```bash
+go test -run '^$' -bench 'BenchmarkExecutorReducerCommit' -benchmem -count=10 ./executor > /tmp/shunter-executor-reducer-bench.txt
+rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-executor-reducer-bench.txt
+```
+
 Every row is advisory.
 
 ## Protocol
@@ -105,6 +113,13 @@ Every row is advisory.
 | Fanout WebSocket | `WebSocketFanout16ClientsLightUpdate-24` | 16 persistent WebSocket clients; protocol light update fanout through `ConnManager`, sender enqueue, outbound writers, and client reads | 85.07us +/- 8% | 41.41Ki +/- 0% | 624 | advisory |
 | Fanout WebSocket | `WebSocketFanout64ClientsLightUpdate-24` | 64 persistent WebSocket clients; protocol light update fanout through `ConnManager`, sender enqueue, outbound writers, and client reads | 340.2us +/- 5% | 165.5Ki +/- 0% | 2.496k | advisory |
 | Backpressure sender | `ClientSenderBackpressureFullBuffer-24` | one registered connection with a one-slot outbound queue already full; `SendTransactionUpdateLight` encodes a light update and rejects the non-blocking enqueue with `ErrClientBufferFull`; no WebSocket writer or async disconnect teardown in the timed loop | 420.1ns +/- 5% | 376 B +/- 0% | 10 | advisory |
+
+## Executor
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Reducer commit | `ExecutorReducerCommitRoundTrip-24` | one executor goroutine; submit one external reducer call, insert one row, commit, run durability and subscription fakes, wait for response | 6.275us +/- 12% | 6.640Ki +/- 0% | 72 | advisory |
+| Reducer commit | `ExecutorReducerCommitBurst64-24` | one executor goroutine; queue reducer commits in 64-command bursts, insert one row per reducer, commit each, then drain responses | 4.981us +/- 3% | 6.515Ki +/- 0% | 70 | advisory |
 
 ## Commitlog
 
@@ -155,6 +170,9 @@ Every row is advisory.
 - Large bag diffing, large snapshot-plus-tail recovery, segmented log replay,
   and multi-way joins at 512 rows per table are the clearest allocation and
   latency targets in the current coverage.
+- Executor reducer commit coverage now includes one-at-a-time round trips and
+  a queued 64-command burst fixture. These are internal executor fixtures, not
+  public app or canary throughput measurements.
 - Offline backup/restore is covered for a small complete DataDir fixture and is
   expected to be I/O dominated; this row does not replace canary-scale
   backup/restore timing.
@@ -212,6 +230,8 @@ fanout profile was spot-checked at Shunter commit
 `f0de4eb465f9e586802179b7eeaba2fb575af1e0`. The sender-level
 backpressure profile was spot-checked from a clean detached worktree at
 Shunter commit `b23f871e4f248e05f6430520f1d84d85e4d9072c`.
+Executor reducer commit profiles were spot-checked at Shunter commit
+`10c7b4c64b387441d9e2cd67caadcc62e36ff16c`.
 
 Commands:
 
@@ -226,6 +246,8 @@ go test -run '^$' -bench 'BenchmarkWebSocketFanout64ClientsLightUpdate' -benchme
 rtk go tool pprof -top -alloc_space /tmp/shunter-websocket-fanout-64-mem.out
 go test -run '^$' -bench 'Benchmark.*Backpressure.*' -benchmem -memprofile /tmp/shunter-backpressure-mem.out ./protocol
 rtk go tool pprof -top -alloc_space /tmp/shunter-backpressure-mem.out
+go test -run '^$' -bench 'BenchmarkExecutorReducerCommit' -benchmem -memprofile /tmp/shunter-executor-reducer-mem.out ./executor
+rtk go tool pprof -top -alloc_space /tmp/shunter-executor-reducer-mem.out
 ```
 
 Findings:
@@ -261,6 +283,13 @@ Findings:
   subscription update validation, and connection ID formatting. This profile
   covers the deterministic full-buffer sender path and does not include
   WebSocket writes or async disconnect teardown.
+- `BenchmarkExecutorReducerCommitRoundTrip-24`: 6.077us/op,
+  6,791 B/op, 72 allocs/op, and
+  `BenchmarkExecutorReducerCommitBurst64-24`: 5.201us/op, 6,683 B/op,
+  70 allocs/op. Allocation space is dominated by row/value copying, primary
+  key extraction, transaction insert tracking, commit revalidation, table
+  insertion, transaction setup, and the benchmark durability acknowledgement
+  channel.
 
 ## Known Gaps
 
@@ -275,6 +304,6 @@ These remain outside the current benchmark envelope:
   single-table, and two-table varied predicate fixtures
 - external canary workload, including canary-scale backup/restore timing
 - memory profiles outside the current subscription, single-WebSocket,
-  16/64-client WebSocket fanout, sender-level backpressure, and small local
-  backup/restore fixtures, including canary-scale, slow-reader network paths,
-  and larger backup/restore workloads
+  16/64-client WebSocket fanout, sender-level backpressure, executor reducer
+  commit, and small local backup/restore fixtures, including canary-scale,
+  slow-reader network paths, and larger backup/restore workloads

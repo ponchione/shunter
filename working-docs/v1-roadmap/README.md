@@ -194,7 +194,7 @@ Current benchmark coverage:
 | Protocol compression | `BenchmarkWrapCompressedGzip`, `BenchmarkUnwrapCompressedGzip` | covered |
 | Commitlog snapshot and log recovery | `BenchmarkCreateSnapshotLarge`, `BenchmarkOpenAndRecoverSnapshotOnly`, `BenchmarkOpenAndRecoverSnapshotWithTailReplay`, `BenchmarkReplayLogSegmentedLog`, `BenchmarkOpenAndRecoverSegmentedLog` | covered for snapshot creation, snapshot-only recovery, snapshot-plus-tail recovery, and segmented log replay/recovery without snapshots |
 | Offline operations | `BenchmarkBackupRestoreDataDirWorkflow` | covered for complete DataDir backup followed by restore on a small local fixture |
-| Reducer write path | `BenchmarkExecutorReducerCommitRoundTrip` | partial; needs throughput fixtures |
+| Reducer write path | `BenchmarkExecutorReducerCommitRoundTrip`, `BenchmarkExecutorReducerCommitBurst64` | covered for internal executor one-at-a-time commit round trips and queued 64-command burst throughput; app-level and canary throughput remain outside the local envelope |
 | Scheduler scans | `BenchmarkSchedulerScanEnqueue` | covered for enqueue scan hot path |
 | One-off SQL | `BenchmarkExecuteCompiledSQLQueryCommonPaths`, `BenchmarkExecuteCompiledSQLQueryJoinReadShapes` | covered for common single-table, join, multi-way aggregate, projection, ordering, and limit paths |
 | Declared reads | `BenchmarkDeclaredReadRuntimeSurfaces` | covered for local declared query execution and declared live-view initial rows, including projection/order/limit and aggregate shapes |
@@ -231,6 +231,9 @@ Current performance read:
 - Large bag diffing, large snapshot-plus-tail recovery, segmented log replay,
   and multi-way joins at larger row counts are the clearest allocation and
   latency targets in the current coverage.
+- Reducer write-path coverage now includes the existing internal executor
+  round trip plus a queued 64-command burst fixture; app-level and canary
+  throughput remain outside the local benchmark envelope.
 - Local offline backup/restore timing now covers a complete small DataDir copy
   workflow; canary-scale backup/restore timing remains open.
 - Memory-profile evidence now covers the existing large subscription initial
