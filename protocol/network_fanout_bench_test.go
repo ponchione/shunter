@@ -16,8 +16,14 @@ import (
 )
 
 func BenchmarkWebSocketFanout16ClientsLightUpdate(b *testing.B) {
-	const clientCount = 16
+	benchmarkWebSocketFanoutLightUpdate(b, 16)
+}
 
+func BenchmarkWebSocketFanout64ClientsLightUpdate(b *testing.B) {
+	benchmarkWebSocketFanoutLightUpdate(b, 64)
+}
+
+func benchmarkWebSocketFanoutLightUpdate(b *testing.B, clientCount int) {
 	h := newBenchmarkWebSocketFanoutHarness(b, clientCount)
 	fanout := make(map[types.ConnectionID][]SubscriptionUpdate, clientCount)
 	rows := EncodeRowList([][]byte{{0x01, 0x02, 0x03, 0x04}})
