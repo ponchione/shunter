@@ -64,15 +64,17 @@ func TestTracingRecordsRequiredSpansAndAttributes(t *testing.T) {
 	}
 	defer rt.Close()
 
+	client, identityToken := dialDeclaredReadProtocolWithIdentity(t, rt, mintDeclaredReadProtocolToken(t, "trace-client"))
+	connID := types.ConnectionID(identityToken.ConnectionID)
+	if _, err := rt.SubscribeView(context.Background(), "live_messages", 17, WithDeclaredReadConnectionID(connID)); err != nil {
+		t.Fatalf("SubscribeView: %v", err)
+	}
 	if res, err := rt.CallReducer(context.Background(), "insert_message", []byte("hello")); err != nil || res.Status != StatusCommitted {
 		t.Fatalf("CallReducer = (%v, %v), want committed", res, err)
 	}
-	if _, err := rt.SubscribeView(context.Background(), "live_messages", 17); err != nil {
-		t.Fatalf("SubscribeView: %v", err)
-	}
-	unregisterRuntimeSubscription(t, rt, types.ConnectionID{}, 17)
+	requireDeclaredReadDeltaRows(t, client, 17, "messages", 1, 0)
+	unregisterRuntimeSubscription(t, rt, connID, 17)
 
-	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "trace-client"))
 	writeDeclaredReadProtocolMessage(t, client, protocol.OneOffQueryMsg{
 		MessageID:   []byte("trace-query"),
 		QueryString: "SELECT * FROM messages WHERE body = 'token=secret'",
@@ -121,8 +123,7 @@ func TestTracingRecordsRequiredSpansAndAttributes(t *testing.T) {
 	requireTraceAttrPresent(t, tracer, "shunter.durability.batch", "tx_id")
 	requireTraceAttr(t, tracer, "shunter.subscription.eval", "result", "ok")
 	requireTraceAttrPresent(t, tracer, "shunter.subscription.eval", "tx_id")
-	requireTraceAttr(t, tracer, "shunter.subscription.fanout", "result", "error")
-	requireTraceAttr(t, tracer, "shunter.subscription.fanout", "reason", "connection_closed")
+	requireTraceAttr(t, tracer, "shunter.subscription.fanout", "result", "ok")
 	requireTraceAttr(t, tracer, "shunter.query.one_off", "result", "validation_error")
 	requireTraceAttr(t, tracer, "shunter.subscription.register", "result", "ok")
 	requireTraceAttr(t, tracer, "shunter.subscription.unregister", "result", "ok")

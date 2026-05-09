@@ -90,6 +90,10 @@ type fakeSubs struct {
 	disconns []types.ConnectionID // DisconnectClient invocations, in order
 	discErr  func(types.ConnectionID) error
 	panicOn  bool
+
+	hasPostCommitPlan bool
+	needsBroadcast    bool
+	needsView         bool
 }
 
 func (f *fakeSubs) RegisterSet(subscription.SubscriptionSetRegisterRequest, store.CommittedReadView) (subscription.SubscriptionSetRegisterResult, error) {
@@ -117,6 +121,20 @@ func (f *fakeSubs) EvalAndBroadcast(txID types.TxID, cs *store.Changeset, view s
 	f.metas = append(f.metas, meta)
 	f.mu.Unlock()
 	f.rec.add("eval-end")
+}
+
+func (f *fakeSubs) NeedsPostCommitBroadcast(*store.Changeset, subscription.PostCommitMeta) bool {
+	if f.hasPostCommitPlan {
+		return f.needsBroadcast
+	}
+	return true
+}
+
+func (f *fakeSubs) NeedsPostCommitView(*store.Changeset, subscription.PostCommitMeta) bool {
+	if f.hasPostCommitPlan {
+		return f.needsView
+	}
+	return true
 }
 
 func (f *fakeSubs) DrainDroppedClients() []types.ConnectionID {
@@ -329,6 +347,63 @@ func TestPostCommitSnapshotLifetime(t *testing.T) {
 		if events[i] != w {
 			t.Fatalf("events[%d] = %s, want %s (full=%v)", i, events[i], w, events)
 		}
+	}
+}
+
+func TestPostCommitSkipsSnapshotAndEvalWhenSubscriptionsHaveNoWork(t *testing.T) {
+	h := newPipelineHarness(t)
+	h.subs.hasPostCommitPlan = true
+	h.subs.needsBroadcast = false
+	h.subs.needsView = false
+	h.exec.snapshotFn = func() store.CommittedReadView {
+		t.Fatal("snapshot should not be acquired when subscription post-commit work is skipped")
+		return nil
+	}
+	changeset := &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}}
+
+	status := h.exec.postCommit(types.TxID(88), changeset, nil, CallReducerCmd{}, postCommitOptions{source: CallSourceLifecycle})
+	if status != StatusCommitted {
+		t.Fatalf("status = %d, want StatusCommitted", status)
+	}
+	h.subs.mu.Lock()
+	got := len(h.subs.txIDs)
+	h.subs.mu.Unlock()
+	if got != 0 {
+		t.Fatalf("EvalAndBroadcast calls = %d, want 0", got)
+	}
+}
+
+func TestPostCommitCallerOnlyFanoutSkipsSnapshot(t *testing.T) {
+	h := newPipelineHarness(t)
+	h.subs.hasPostCommitPlan = true
+	h.subs.needsBroadcast = true
+	h.subs.needsView = false
+	h.exec.snapshotFn = func() store.CommittedReadView {
+		t.Fatal("caller-only fanout should not need a committed read view")
+		return nil
+	}
+	connID := types.ConnectionID{9}
+	changeset := &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}}
+
+	status := h.exec.postCommit(types.TxID(89), changeset, nil, CallReducerCmd{}, postCommitOptions{
+		source:          CallSourceExternal,
+		callerConnID:    &connID,
+		callerRequestID: 7,
+		startTime:       time.Now(),
+	})
+	if status != StatusCommitted {
+		t.Fatalf("status = %d, want StatusCommitted", status)
+	}
+	h.subs.mu.Lock()
+	defer h.subs.mu.Unlock()
+	if len(h.subs.metas) != 1 {
+		t.Fatalf("metas = %d, want 1", len(h.subs.metas))
+	}
+	if h.subs.viewSaw[0] != nil {
+		t.Fatal("caller-only EvalAndBroadcast received non-nil view")
+	}
+	if h.subs.metas[0].CallerOutcome == nil {
+		t.Fatal("CallerOutcome = nil, want populated outcome")
 	}
 }
 
@@ -570,6 +645,44 @@ func TestPostCommitExternalReducerPropagatesCallerMetadata(t *testing.T) {
 		t.Fatalf("CallerOutcome.Kind=%d want CallerOutcomeCommitted", meta.CallerOutcome.Kind)
 	}
 	_ = resp
+}
+
+func TestPostCommitExternalReducerZeroConnectionDoesNotExportCallerFanout(t *testing.T) {
+	h := newPipelineHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.exec.Run(ctx)
+
+	ch := make(chan ReducerResponse, 1)
+	if err := h.exec.Submit(CallReducerCmd{
+		Request: ReducerRequest{
+			ReducerName: "InsertPlayer",
+			Source:      CallSourceExternal,
+			RequestID:   77,
+		},
+		ResponseCh: ch,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var resp ReducerResponse
+	select {
+	case resp = <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for response")
+	}
+	if resp.Status != StatusCommitted {
+		t.Fatalf("status = %d err=%v", resp.Status, resp.Error)
+	}
+
+	h.subs.mu.Lock()
+	defer h.subs.mu.Unlock()
+	if len(h.subs.metas) != 1 {
+		t.Fatalf("metas=%d want 1", len(h.subs.metas))
+	}
+	meta := h.subs.metas[0]
+	if meta.CallerConnID != nil || meta.CallerOutcome != nil {
+		t.Fatalf("zero connection should not produce caller fanout metadata: %+v", meta)
+	}
 }
 
 // TestPostCommitPropagatesCallerFlags pins the outcome-model contract:

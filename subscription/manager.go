@@ -98,6 +98,7 @@ type Manager struct {
 	droppedPending    map[types.ConnectionID]struct{}
 	droppedOrder      []types.ConnectionID
 	deltaIndexColumns map[TableID]map[ColID]int
+	updateColumns     map[TableID][]schema.ColumnSchema
 	querySets         map[types.ConnectionID]map[uint32][]types.SubscriptionID
 	nextSubID         types.SubscriptionID
 	activeSets        atomic.Int64
@@ -134,14 +135,15 @@ func WithObserver(observer Observer) ManagerOption {
 }
 
 // NewManager constructs a Manager.
-func NewManager(schema SchemaLookup, resolver IndexResolver, opts ...ManagerOption) *Manager {
+func NewManager(lookup SchemaLookup, resolver IndexResolver, opts ...ManagerOption) *Manager {
 	m := &Manager{
-		schema:            schema,
+		schema:            lookup,
 		resolver:          resolver,
 		registry:          newQueryRegistry(),
 		indexes:           NewPruningIndexes(),
 		droppedPending:    make(map[types.ConnectionID]struct{}),
 		deltaIndexColumns: make(map[TableID]map[ColID]int),
+		updateColumns:     make(map[TableID][]schema.ColumnSchema),
 		querySets:         make(map[types.ConnectionID]map[uint32][]types.SubscriptionID),
 		fanoutClosedCh:    make(chan struct{}),
 	}
@@ -156,6 +158,9 @@ type tableSchemaLookup interface {
 }
 
 func (m *Manager) columnsForUpdate(tableID TableID) []schema.ColumnSchema {
+	if cols, ok := m.updateColumns[tableID]; ok {
+		return cols
+	}
 	lookup, ok := m.schema.(tableSchemaLookup)
 	if !ok {
 		return nil
@@ -164,7 +169,30 @@ func (m *Manager) columnsForUpdate(tableID TableID) []schema.ColumnSchema {
 	if !ok || ts == nil {
 		return nil
 	}
-	return append([]schema.ColumnSchema(nil), ts.Columns...)
+	cols := append([]schema.ColumnSchema(nil), ts.Columns...)
+	m.updateColumns[tableID] = cols
+	return cols
+}
+
+// NeedsPostCommitBroadcast reports whether a committed transaction needs to
+// call EvalAndBroadcast at all. The executor uses it to skip subscription work
+// without duplicating registry internals.
+func (m *Manager) NeedsPostCommitBroadcast(changeset *store.Changeset, meta PostCommitMeta) bool {
+	return m.needsPostCommitEvaluation(changeset) || hasPostCommitCaller(meta)
+}
+
+// NeedsPostCommitView reports whether EvalAndBroadcast will evaluate active
+// queries and therefore needs a committed read view.
+func (m *Manager) NeedsPostCommitView(changeset *store.Changeset, meta PostCommitMeta) bool {
+	return m.needsPostCommitEvaluation(changeset)
+}
+
+func (m *Manager) needsPostCommitEvaluation(changeset *store.Changeset) bool {
+	return m.registry.hasActive() && changeset != nil && !changeset.IsEmpty()
+}
+
+func hasPostCommitCaller(meta PostCommitMeta) bool {
+	return meta.CallerConnID != nil && (meta.CallerOutcome != nil || meta.CaptureCallerUpdates != nil)
 }
 
 // CloseFanOut unblocks post-commit fan-out enqueue attempts during shutdown.

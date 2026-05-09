@@ -1011,10 +1011,8 @@ func (e *Executor) postCommit(
 	}()
 
 	e.durability.EnqueueCommitted(txID, changeset)
-	view := e.snapshotFn()
-	defer view.Close()
 	meta := subscription.PostCommitMeta{TxDurable: e.durability.WaitUntilDurable(txID)}
-	if opts.source == CallSourceExternal && opts.callerConnID != nil {
+	if opts.source == CallSourceExternal && opts.callerConnID != nil && !opts.callerConnID.IsZero() {
 		callerConnID := *opts.callerConnID
 		callerOutcome := subscription.CallerOutcome{
 			Kind:                       subscription.CallerOutcomeCommitted,
@@ -1045,7 +1043,15 @@ func (e *Executor) postCommit(
 			meta.CallerOutcome = &callerOutcome
 		}
 	}
-	e.subs.EvalAndBroadcast(txID, changeset, view, meta)
+	needsBroadcast, needsView := e.postCommitNeeds(changeset, meta)
+	if needsBroadcast {
+		var view store.CommittedReadView
+		if needsView {
+			view = e.snapshotFn()
+			defer view.Close()
+		}
+		e.subs.EvalAndBroadcast(txID, changeset, view, meta)
+	}
 
 	responded = e.sendCallReducerResponse(cmd, ReducerResponse{
 		Status:      StatusCommitted,
@@ -1059,6 +1065,14 @@ func (e *Executor) postCommit(
 	// must not block the others.
 	e.drainDroppedClients()
 	return status
+}
+
+func (e *Executor) postCommitNeeds(changeset *store.Changeset, meta subscription.PostCommitMeta) (broadcast bool, view bool) {
+	planner, ok := e.subs.(subscriptionPostCommitPlanner)
+	if !ok {
+		return true, true
+	}
+	return planner.NeedsPostCommitBroadcast(changeset, meta), planner.NeedsPostCommitView(changeset, meta)
 }
 
 func (e *Executor) drainDroppedClients() {
@@ -1089,6 +1103,11 @@ func (noopDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
 func (noopDurability) WaitUntilDurable(types.TxID) <-chan types.TxID { return nil }
 func (noopDurability) FatalError() error                             { return nil }
 
+type subscriptionPostCommitPlanner interface {
+	NeedsPostCommitBroadcast(*store.Changeset, subscription.PostCommitMeta) bool
+	NeedsPostCommitView(*store.Changeset, subscription.PostCommitMeta) bool
+}
+
 type noopSubs struct{}
 
 func (noopSubs) RegisterSet(subscription.SubscriptionSetRegisterRequest, store.CommittedReadView) (subscription.SubscriptionSetRegisterResult, error) {
@@ -1099,5 +1118,9 @@ func (noopSubs) UnregisterSet(types.ConnectionID, uint32, store.CommittedReadVie
 }
 func (noopSubs) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView, subscription.PostCommitMeta) {
 }
-func (noopSubs) DrainDroppedClients() []types.ConnectionID { return nil }
-func (noopSubs) DisconnectClient(types.ConnectionID) error { return nil }
+func (noopSubs) NeedsPostCommitBroadcast(*store.Changeset, subscription.PostCommitMeta) bool {
+	return false
+}
+func (noopSubs) NeedsPostCommitView(*store.Changeset, subscription.PostCommitMeta) bool { return false }
+func (noopSubs) DrainDroppedClients() []types.ConnectionID                              { return nil }
+func (noopSubs) DisconnectClient(types.ConnectionID) error                              { return nil }

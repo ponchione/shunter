@@ -36,6 +36,39 @@ func TestEvalNoActiveSubsReturnsImmediately(t *testing.T) {
 	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 }
 
+func TestPostCommitNeedsSkipIdleManagerView(t *testing.T) {
+	s := testSchema()
+	mgr := NewManager(s, s)
+	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("a")}}, nil)
+	if mgr.NeedsPostCommitBroadcast(cs, PostCommitMeta{}) {
+		t.Fatal("idle manager should not need post-commit broadcast")
+	}
+	if mgr.NeedsPostCommitView(cs, PostCommitMeta{}) {
+		t.Fatal("idle manager should not need committed view")
+	}
+
+	caller := types.ConnectionID{9}
+	meta := PostCommitMeta{CallerConnID: &caller, CallerOutcome: &CallerOutcome{Kind: CallerOutcomeCommitted}}
+	if !mgr.NeedsPostCommitBroadcast(nil, meta) {
+		t.Fatal("caller-only outcome should still need post-commit broadcast")
+	}
+	if mgr.NeedsPostCommitView(nil, meta) {
+		t.Fatal("caller-only outcome should not need committed view")
+	}
+
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    1,
+		Predicates: []Predicate{AllRows{Table: 1}},
+	}, nil)
+	if !mgr.NeedsPostCommitBroadcast(cs, PostCommitMeta{}) {
+		t.Fatal("active manager with non-empty changeset should need post-commit broadcast")
+	}
+	if !mgr.NeedsPostCommitView(cs, PostCommitMeta{}) {
+		t.Fatal("active manager with non-empty changeset should need committed view")
+	}
+}
+
 func TestEvalAndBroadcastUnblocksWhenFanOutClosed(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage)
@@ -2167,6 +2200,38 @@ func TestEvalFilteredCrossJoinDeltaScansOnlyChangedBranches(t *testing.T) {
 			t.Fatalf("TableScan counts = %v, want only left table scanned once", view.scans)
 		}
 	})
+}
+
+func TestEvalFilteredSelfCrossJoinDeltaScansTableOncePerSnapshot(t *testing.T) {
+	base := newMockCommitted()
+	before := types.ProductValue{types.NewUint64(1)}
+	inserted := types.ProductValue{types.NewUint64(2)}
+	base.addRow(1, 1, before)
+	base.addRow(1, 2, inserted)
+	view := &tableScanCountingCommitted{CommittedReadView: base}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {TableID: 1, Inserts: []types.ProductValue{inserted}},
+	}}
+	dv := NewDeltaView(view, cs, nil)
+	defer dv.Release()
+
+	pred := CrossJoin{
+		Left:       1,
+		Right:      1,
+		LeftAlias:  0,
+		RightAlias: 1,
+		Filter:     AllRows{Table: 1},
+	}
+	gotIns, gotDel, err := evalCrossJoinDelta(context.Background(), dv, pred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotIns) != 3 || len(gotDel) != 0 {
+		t.Fatalf("delta inserts=%v deletes=%v, want three inserts and no deletes", gotIns, gotDel)
+	}
+	if view.scans[1] != 2 {
+		t.Fatalf("TableScan counts = %v, want one before scan and one after scan", view.scans)
+	}
 }
 
 func TestEvalFilteredCrossJoinDeltaMatchesFullBagDiff(t *testing.T) {

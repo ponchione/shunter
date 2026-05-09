@@ -19,8 +19,8 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	hasCaller := meta.CallerConnID != nil && (meta.CallerOutcome != nil || meta.CaptureCallerUpdates != nil)
-	nothingToEvaluate := !m.registry.hasActive() || changeset == nil || changeset.IsEmpty()
+	hasCaller := hasPostCommitCaller(meta)
+	nothingToEvaluate := !m.needsPostCommitEvaluation(changeset)
 	if nothingToEvaluate && !hasCaller {
 		return
 	}
@@ -556,10 +556,7 @@ func evalCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin) (insert
 		if err != nil {
 			return nil, nil, err
 		}
-		rightBefore, err := projectedRowsBefore(ctx, dv, p.Right)
-		if err != nil {
-			return nil, nil, err
-		}
+		rightBefore := leftBefore
 		before, err := crossJoinProjectedRows(ctx, p, leftBefore, rightBefore)
 		if err != nil {
 			return nil, nil, err
@@ -568,10 +565,7 @@ func evalCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin) (insert
 		if err != nil {
 			return nil, nil, err
 		}
-		rightAfter, err := tableRowsAfter(ctx, dv.CommittedView(), p.Right)
-		if err != nil {
-			return nil, nil, err
-		}
+		rightAfter := leftAfter
 		after, err := crossJoinProjectedRows(ctx, p, leftAfter, rightAfter)
 		if err != nil {
 			return nil, nil, err
