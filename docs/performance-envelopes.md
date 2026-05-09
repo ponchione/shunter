@@ -42,6 +42,14 @@ go test -run '^$' -bench 'BenchmarkBackupRestoreDataDirWorkflow' -benchmem -coun
 rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-backup-restore-bench.txt
 ```
 
+The larger backup/restore row was measured at Shunter commit
+`21fdde75ffeb82ff054ad3622297d332b4549694` with:
+
+```bash
+go test -run '^$' -bench 'BenchmarkBackupRestoreDataDirWorkflow' -benchmem -count=10 . > /tmp/shunter-backup-restore-large-bench.txt
+rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-backup-restore-large-bench.txt
+```
+
 The multi-table varied-query fanout row was measured at Shunter commit
 `3632780dd46c07333b51f5201dde3cb031aa243f` with:
 
@@ -148,6 +156,7 @@ Every row is advisory.
 | Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
 | --- | --- | --- | ---: | ---: | ---: | --- |
 | Offline backup/restore | `BackupRestoreDataDirWorkflow-24` | 512.5 KiB DataDir: 4 log segments, 2 snapshots, metadata; backup then restore | 71.67ms +/- 10% | 31.44Ki +/- 2% | 364 | advisory |
+| Offline backup/restore | `BackupRestoreDataDirWorkflowLarge-24` | 6.001 MiB DataDir: 16 log segments, 4 snapshots, metadata; backup then restore | 227.8ms +/- 13% | 78.96Ki +/- 2% | 838 | advisory |
 
 ## Subscription
 
@@ -185,9 +194,9 @@ Every row is advisory.
 - Executor reducer commit coverage now includes one-at-a-time round trips and
   a queued 64-command burst fixture. These are internal executor fixtures, not
   public app or canary throughput measurements.
-- Offline backup/restore is covered for a small complete DataDir fixture and is
-  expected to be I/O dominated; this row does not replace canary-scale
-  backup/restore timing.
+- Offline backup/restore is covered for small and larger complete local
+  DataDir fixtures and is expected to be I/O dominated; these rows do not
+  replace canary-scale backup/restore timing.
 - WebSocket coverage now includes a single SubscribeSingle round trip and
   16- and 64-client light-update fanout fixtures. Deterministic sender-level
   full-buffer rejection now has an advisory row, but slow-reader WebSocket
@@ -253,12 +262,16 @@ backpressure profile was spot-checked from a clean detached worktree at
 Shunter commit `b23f871e4f248e05f6430520f1d84d85e4d9072c`.
 Executor reducer commit profiles were spot-checked at Shunter commit
 `10c7b4c64b387441d9e2cd67caadcc62e36ff16c`.
+The larger backup/restore profile was spot-checked at Shunter commit
+`21fdde75ffeb82ff054ad3622297d332b4549694`.
 
 Commands:
 
 ```bash
 go test -run '^$' -bench 'BenchmarkBackupRestoreDataDirWorkflow' -benchmem -memprofile /tmp/shunter-backup-restore-mem.out .
 rtk go tool pprof -top -alloc_space /tmp/shunter-backup-restore-mem.out
+go test -run '^$' -bench 'BenchmarkBackupRestoreDataDirWorkflowLarge' -benchmem -memprofile /tmp/shunter-backup-restore-large-mem.out .
+rtk go tool pprof -top -alloc_space /tmp/shunter-backup-restore-large-mem.out
 go test -run '^$' -bench 'BenchmarkSubscribeSingleWebSocketRoundTrip' -benchmem -memprofile /tmp/shunter-websocket-subscribe-mem.out ./protocol
 rtk go tool pprof -top -alloc_space /tmp/shunter-websocket-subscribe-mem.out
 go test -run '^$' -bench 'BenchmarkWebSocketFanout16ClientsLightUpdate' -benchmem -memprofile /tmp/shunter-websocket-fanout-mem.out ./protocol
@@ -277,6 +290,12 @@ Findings:
   30,522 B/op, 363 allocs/op. The allocation-space profile is small and mixed
   with benchmark fixture setup; the timed copy path shows allocation through
   `copyDirectoryContents`, `filepath.WalkDir`, `filepath.Join`, and `os.Lstat`.
+- `BenchmarkBackupRestoreDataDirWorkflowLarge-24`: 226.297ms/op,
+  82,036 B/op, 839 allocs/op. The allocation-space profile is also mixed with
+  benchmark fixture setup; fixture file creation dominates the sample, while
+  the timed copy path remains mostly visible through directory walking, stat,
+  file open, and cleanup allocations. The workload is still a local 6.001 MiB
+  fixture, not canary-scale backup/restore evidence.
 - `BenchmarkSubscribeSingleWebSocketRoundTrip-24`: 16.137us/op,
   6,609 B/op, 82 allocs/op. Allocation space is dominated by SQL
   tokenization/parse/query-plan construction and WebSocket read/write timeout
@@ -327,5 +346,6 @@ These remain outside the current benchmark envelope:
 - external canary workload, including canary-scale backup/restore timing
 - memory profiles outside the current subscription, single-WebSocket,
   16/64-client WebSocket fanout, sender-level backpressure, executor reducer
-  commit, and small local backup/restore fixtures, including canary-scale,
-  slow-reader network paths, and larger backup/restore workloads
+  commit, and small/larger local backup/restore fixtures, including
+  canary-scale, slow-reader network paths, and production-sized
+  backup/restore workloads

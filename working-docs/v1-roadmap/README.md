@@ -193,7 +193,7 @@ Current benchmark coverage:
 | --- | --- | --- |
 | Protocol compression | `BenchmarkWrapCompressedGzip`, `BenchmarkUnwrapCompressedGzip` | covered |
 | Commitlog snapshot and log recovery | `BenchmarkCreateSnapshotLarge`, `BenchmarkOpenAndRecoverSnapshotOnly`, `BenchmarkOpenAndRecoverSnapshotWithTailReplay`, `BenchmarkReplayLogSegmentedLog`, `BenchmarkOpenAndRecoverSegmentedLog` | covered for snapshot creation, snapshot-only recovery, snapshot-plus-tail recovery, and segmented log replay/recovery without snapshots |
-| Offline operations | `BenchmarkBackupRestoreDataDirWorkflow` | covered for complete DataDir backup followed by restore on a small local fixture |
+| Offline operations | `BenchmarkBackupRestoreDataDirWorkflow`, `BenchmarkBackupRestoreDataDirWorkflowLarge` | covered for complete DataDir backup followed by restore on small and larger local fixtures; canary-scale timing remains outside the local envelope |
 | Reducer write path | `BenchmarkExecutorReducerCommitRoundTrip`, `BenchmarkExecutorReducerCommitBurst64` | covered for internal executor one-at-a-time commit round trips and queued 64-command burst throughput; app-level and canary throughput remain outside the local envelope |
 | Scheduler scans | `BenchmarkSchedulerScanEnqueue` | covered for enqueue scan hot path |
 | One-off SQL | `BenchmarkExecuteCompiledSQLQueryCommonPaths`, `BenchmarkExecuteCompiledSQLQueryJoinReadShapes` | covered for common single-table, join, multi-way aggregate, projection, ordering, and limit paths |
@@ -238,14 +238,14 @@ Current performance read:
 - Subscription fanout coverage now includes deterministic same-query, varied
   single-table, skewed hot-key, and varied two-table fixtures; workload-derived
   and canary distributions remain open.
-- Local offline backup/restore timing now covers a complete small DataDir copy
-  workflow; canary-scale backup/restore timing remains open.
+- Local offline backup/restore timing now covers complete small and larger
+  DataDir copy workflows; canary-scale backup/restore timing remains open.
 - Memory-profile evidence now covers the existing large subscription initial
   snapshot, projected-row diff, skewed fanout, `rows_512` multi-way join,
-  small local backup/restore, single-WebSocket subscribe, 16- and 64-client
-  WebSocket fanout, and deterministic sender-level full-buffer backpressure
-  fixtures; canary-scale, slow-reader network paths, and larger
-  backup/restore profiles remain open.
+  small/larger local backup/restore, single-WebSocket subscribe, 16- and
+  64-client WebSocket fanout, and deterministic sender-level full-buffer
+  backpressure fixtures; canary-scale, slow-reader network paths, and
+  production-sized backup/restore profiles remain open.
 - Current measured rows are advisory. The repo does not yet define hard
   performance thresholds.
 
