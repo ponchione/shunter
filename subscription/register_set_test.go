@@ -53,6 +53,23 @@ type cancelOnTableScanView struct {
 	yielded int
 }
 
+type countingTableScanView struct {
+	*mockCommitted
+	scanned int
+}
+
+func (v *countingTableScanView) TableScan(id TableID) iter.Seq2[types.RowID, types.ProductValue] {
+	base := v.mockCommitted.TableScan(id)
+	return func(yield func(types.RowID, types.ProductValue) bool) {
+		for rid, row := range base {
+			v.scanned++
+			if !yield(rid, row) {
+				return
+			}
+		}
+	}
+}
+
 func (v *cancelOnTableScanView) TableScan(id TableID) iter.Seq2[types.RowID, types.ProductValue] {
 	base := v.mockCommitted.TableScan(id)
 	return func(yield func(types.RowID, types.ProductValue) bool) {
@@ -446,6 +463,28 @@ func TestRegisterSetLimitAffectsSameConnectionQueryIdentity(t *testing.T) {
 	}
 	if len(limited.Update) != 1 || len(limited.Update[0].Inserts) != 1 {
 		t.Fatalf("limited Update = %+v, want fresh one-row initial snapshot distinct from unlimited hash", limited.Update)
+	}
+}
+
+func TestRegisterSetLimitStopsStreamingInitialScan(t *testing.T) {
+	mgr, base := newRegisterSetTestManagerWithRows(t)
+	view := &countingTableScanView{mockCommitted: base}
+	limitOne := uint64(1)
+
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    21,
+		Predicates: []Predicate{AllRows{Table: 1}},
+		Limits:     []*uint64{&limitOne},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet limited scan: %v", err)
+	}
+	if len(res.Update) != 1 || len(res.Update[0].Inserts) != 1 {
+		t.Fatalf("limited update = %+v, want one initial row", res.Update)
+	}
+	if view.scanned != 1 {
+		t.Fatalf("TableScan yielded %d rows, want 1 for streaming LIMIT 1", view.scanned)
 	}
 }
 

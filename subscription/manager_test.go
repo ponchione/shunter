@@ -1723,6 +1723,36 @@ func TestRegisterInitialRowLimit(t *testing.T) {
 	}
 }
 
+func TestRegisterInitialRowLimitAppliesAfterWindow(t *testing.T) {
+	s := testSchema()
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewString("b")},
+			{types.NewUint64(3), types.NewString("c")},
+		},
+	})
+	limitOne := uint64(1)
+	offsetTwo := uint64(2)
+	mgr := NewManager(s, s, WithInitialRowLimit(1))
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    10,
+		Predicates: []Predicate{AllRows{Table: 1}},
+		Limits:     []*uint64{&limitOne},
+		Offsets:    []*uint64{&offsetTwo},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet with window under initial cap = %v", err)
+	}
+	if len(res.Update) != 1 || len(res.Update[0].Inserts) != 1 {
+		t.Fatalf("initial update = %+v, want one returned row", res.Update)
+	}
+	if got := res.Update[0].Inserts[0][0].AsUint64(); got != 3 {
+		t.Fatalf("windowed initial row id = %d, want 3", got)
+	}
+}
+
 func TestRegisterAppearsInPruningIndexes(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)

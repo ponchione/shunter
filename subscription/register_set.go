@@ -46,15 +46,25 @@ func (c *initialRowCollector) err() error {
 	return c.ctx.Err()
 }
 
-func (c *initialRowCollector) add(out *[]types.ProductValue, row types.ProductValue) error {
+func (c *initialRowCollector) remainingPlusOne() int {
+	if c == nil || c.limit <= 0 {
+		return 0
+	}
+	remaining := c.limit - c.count
+	if remaining < 0 {
+		return 1
+	}
+	return remaining + 1
+}
+
+func (c *initialRowCollector) addReturned(n int) error {
 	if err := c.err(); err != nil {
 		return err
 	}
-	if c.limit > 0 && c.count >= c.limit {
+	c.count += n
+	if c.limit > 0 && c.count > c.limit {
 		return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, c.limit)
 	}
-	*out = append(*out, row)
-	c.count++
 	return nil
 }
 
@@ -111,21 +121,22 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection
 		if err := collector.err(); err != nil {
 			return nil, err
 		}
+		window := initialRowWindow{orderBy: orderBy, limit: limit, offset: offset}
 		updates := make([]SubscriptionUpdate, 0, len(tables))
 		for _, tableID := range tables {
-			rows, err := m.initialRowsForTable(collector, pred, view, tableID)
+			rows, err := m.initialRowsForTable(collector, pred, view, tableID, window)
 			if err != nil {
 				return nil, err
 			}
-			if len(rows) == 0 {
-				continue
+			if !window.streamable() {
+				rows, err = window.apply(rows)
+				if err != nil {
+					return nil, err
+				}
 			}
-			rows, err = orderInitialRows(rows, orderBy)
-			if err != nil {
+			if err := collector.addReturned(len(rows)); err != nil {
 				return nil, err
 			}
-			rows = offsetInitialRows(rows, offset)
-			rows = limitInitialRows(rows, limit)
 			if len(rows) == 0 {
 				continue
 			}
@@ -142,7 +153,73 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection
 	}
 }
 
-func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predicate, view store.CommittedReadView, table TableID) ([]types.ProductValue, error) {
+type initialRowWindow struct {
+	orderBy []OrderByColumn
+	limit   *uint64
+	offset  *uint64
+}
+
+func (w initialRowWindow) streamable() bool {
+	return len(w.orderBy) == 0
+}
+
+func (w initialRowWindow) streamOutputLimit(collector *initialRowCollector) int {
+	sqlLimit := initialUint64LimitAsInt(w.limit)
+	capLimit := 0
+	if collector != nil {
+		capLimit = collector.remainingPlusOne()
+	}
+	switch {
+	case sqlLimit == 0:
+		return capLimit
+	case capLimit == 0 || sqlLimit < capLimit:
+		return sqlLimit
+	default:
+		return capLimit
+	}
+}
+
+func (w initialRowWindow) apply(rows []types.ProductValue) ([]types.ProductValue, error) {
+	var err error
+	rows, err = orderInitialRows(rows, w.orderBy)
+	if err != nil {
+		return nil, err
+	}
+	rows = offsetInitialRows(rows, w.offset)
+	rows = limitInitialRows(rows, w.limit)
+	return rows, nil
+}
+
+func initialUint64LimitAsInt(v *uint64) int {
+	if v == nil {
+		return 0
+	}
+	maxInt := int(^uint(0) >> 1)
+	if *v > uint64(maxInt) {
+		return maxInt
+	}
+	return int(*v)
+}
+
+type initialRowScanWindow struct {
+	offset      *uint64
+	skipped     uint64
+	outputLimit int
+}
+
+func (w *initialRowScanWindow) add(out *[]types.ProductValue, row types.ProductValue) bool {
+	if w.offset != nil && w.skipped < *w.offset {
+		w.skipped++
+		return true
+	}
+	if w.outputLimit > 0 && len(*out) >= w.outputLimit {
+		return false
+	}
+	*out = append(*out, row)
+	return w.outputLimit == 0 || len(*out) < w.outputLimit
+}
+
+func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predicate, view store.CommittedReadView, table TableID, window initialRowWindow) ([]types.ProductValue, error) {
 	if view == nil {
 		return nil, nil
 	}
@@ -150,6 +227,11 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 		return nil, err
 	}
 	var out []types.ProductValue
+	scan := initialRowScanWindow{}
+	if window.streamable() {
+		scan.offset = window.offset
+		scan.outputLimit = window.streamOutputLimit(collector)
+	}
 	if m.resolver != nil {
 		if eq, idxID, ok := initialIndexedEquality(pred, table, m.resolver); ok {
 			key := store.NewIndexKey(eq.Value)
@@ -162,8 +244,8 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 					continue
 				}
 				if MatchRow(pred, table, row) {
-					if err := collector.add(&out, row); err != nil {
-						return nil, err
+					if !scan.add(&out, row) {
+						break
 					}
 				}
 			}
@@ -179,8 +261,8 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 				if !MatchRow(pred, table, row) {
 					continue
 				}
-				if err := collector.add(&out, row); err != nil {
-					return nil, err
+				if !scan.add(&out, row) {
+					break
 				}
 			}
 			return out, nil
@@ -191,8 +273,8 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 			return nil, err
 		}
 		if MatchRow(pred, table, row) {
-			if err := collector.add(&out, row); err != nil {
-				return nil, err
+			if !scan.add(&out, row) {
+				break
 			}
 		}
 	}
