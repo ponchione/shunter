@@ -63,8 +63,8 @@ func TestWatchReducerResponseDeliversOnRespCh(t *testing.T) {
 	default:
 		t.Fatal("expected TransactionUpdate frame on OutboundCh")
 	}
-	if frame[0] != CompressionGzip {
-		t.Fatalf("compression byte = %d, want CompressionGzip", frame[0])
+	if frame[0] != CompressionNone {
+		t.Fatalf("compression byte = %d, want CompressionNone for small negotiated frame", frame[0])
 	}
 	tag, decoded := decodeOutboundServerFrame(t, conn, frame)
 	if tag != TagTransactionUpdate {

@@ -124,7 +124,7 @@ func FuzzUnwrapCompressedEnvelope(f *testing.F) {
 	if err != nil {
 		panic(err)
 	}
-	validGzip, err := WrapCompressed(TagTransactionUpdate, bytes.Repeat([]byte{0x55}, 128), CompressionGzip)
+	validGzip, err := WrapCompressed(TagTransactionUpdate, bytes.Repeat([]byte{0x55}, DefaultGzipMinBytes), CompressionGzip)
 	if err != nil {
 		panic(err)
 	}

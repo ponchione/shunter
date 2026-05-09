@@ -39,6 +39,9 @@ func buildProtocolOptions(cfg ProtocolConfig) (protocol.ProtocolOptions, error) 
 	if cfg.CloseHandshakeTimeout < 0 {
 		return protocol.ProtocolOptions{}, fmt.Errorf("protocol close handshake timeout must not be negative")
 	}
+	if cfg.WriteTimeout < 0 {
+		return protocol.ProtocolOptions{}, fmt.Errorf("protocol write timeout must not be negative")
+	}
 	if cfg.DisconnectTimeout < 0 {
 		return protocol.ProtocolOptions{}, fmt.Errorf("protocol disconnect timeout must not be negative")
 	}
@@ -61,6 +64,9 @@ func buildProtocolOptions(cfg ProtocolConfig) (protocol.ProtocolOptions, error) 
 	}
 	if cfg.CloseHandshakeTimeout != 0 {
 		opts.CloseHandshakeTimeout = cfg.CloseHandshakeTimeout
+	}
+	if cfg.WriteTimeout != 0 {
+		opts.WriteTimeout = cfg.WriteTimeout
 	}
 	if cfg.DisconnectTimeout != 0 {
 		opts.DisconnectTimeout = cfg.DisconnectTimeout

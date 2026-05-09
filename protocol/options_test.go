@@ -16,6 +16,9 @@ func TestDefaultProtocolOptions(t *testing.T) {
 	if opts.CloseHandshakeTimeout != 250*time.Millisecond {
 		t.Errorf("CloseHandshakeTimeout = %v, want 250ms", opts.CloseHandshakeTimeout)
 	}
+	if opts.WriteTimeout != 5*time.Second {
+		t.Errorf("WriteTimeout = %v, want 5s", opts.WriteTimeout)
+	}
 	if opts.DisconnectTimeout != 5*time.Second {
 		t.Errorf("DisconnectTimeout = %v, want 5s", opts.DisconnectTimeout)
 	}
@@ -43,6 +46,9 @@ func TestNormalizeProtocolOptionsFillsDefaults(t *testing.T) {
 func TestNormalizeProtocolOptionsRejectsNegativeValues(t *testing.T) {
 	if _, err := normalizeProtocolOptions(ProtocolOptions{IncomingQueueMessages: -1}); err == nil {
 		t.Fatal("expected negative IncomingQueueMessages to be rejected")
+	}
+	if _, err := normalizeProtocolOptions(ProtocolOptions{WriteTimeout: -1}); err == nil {
+		t.Fatal("expected negative WriteTimeout to be rejected")
 	}
 }
 

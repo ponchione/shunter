@@ -40,7 +40,7 @@ func TestSendEnqueuesFrame(t *testing.T) {
 	}
 }
 
-func TestSendWithCompressionWrapsGzipEnvelope(t *testing.T) {
+func TestSendWithCompressionWrapsNegotiatedEnvelope(t *testing.T) {
 	c, id := testConn(true)
 	mgr := NewConnManager()
 	mgr.Add(c)
@@ -51,8 +51,8 @@ func TestSendWithCompressionWrapsGzipEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	frame := <-c.OutboundCh
-	if frame[0] != CompressionGzip {
-		t.Fatalf("compression byte = %d, want CompressionGzip", frame[0])
+	if frame[0] != CompressionNone {
+		t.Fatalf("compression byte = %d, want CompressionNone for small negotiated frame", frame[0])
 	}
 	tag, decoded := decodeOutboundServerFrame(t, c, frame)
 	if tag != TagSubscribeSingleApplied {

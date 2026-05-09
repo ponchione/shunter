@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"context"
+	"time"
 
 	"github.com/ponchione/websocket"
 )
@@ -17,25 +18,49 @@ func (c *Conn) runOutboundWriter(ctx context.Context) {
 		}
 
 		select {
-		case <-ctx.Done():
-			return
-		case frame := <-c.OutboundCh:
-			if err := c.ws.Write(ctx, websocket.MessageBinary, frame); err != nil {
-				logProtocolError(c.Observer, "unknown", "send_failed", err)
+			case <-ctx.Done():
 				return
-			}
-		case <-c.closed:
-			for {
-				select {
-				case frame := <-c.OutboundCh:
-					if err := c.ws.Write(ctx, websocket.MessageBinary, frame); err != nil {
-						logProtocolError(c.Observer, "unknown", "send_failed", err)
-						return
-					}
+			case frame := <-c.OutboundCh:
+				if err := c.writeBinary(ctx, frame); err != nil {
+					logProtocolError(c.Observer, "unknown", "send_failed", err)
+					return
+				}
+			case <-c.closed:
+				for {
+					select {
+					case frame := <-c.OutboundCh:
+						if err := c.writeBinary(ctx, frame); err != nil {
+							logProtocolError(c.Observer, "unknown", "send_failed", err)
+							return
+						}
 				default:
 					return
 				}
 			}
 		}
 	}
+}
+
+func (c *Conn) writeBinary(ctx context.Context, frame []byte) error {
+	writeCtx, cancel := c.outboundWriteContext(ctx)
+	defer cancel()
+	return c.ws.Write(writeCtx, websocket.MessageBinary, frame)
+}
+
+func (c *Conn) outboundWriteContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timeout := c.writeTimeout()
+	if timeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
+func (c *Conn) writeTimeout() time.Duration {
+	if c != nil && c.opts != nil && c.opts.WriteTimeout > 0 {
+		return c.opts.WriteTimeout
+	}
+	return DefaultProtocolOptions().WriteTimeout
 }

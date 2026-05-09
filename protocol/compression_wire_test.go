@@ -29,7 +29,7 @@ func TestShunterCompressionTagByteValues(t *testing.T) {
 // byte sequence so a reference-compatible client sees gzip signaled as
 // 0x02.
 func TestShunterCompressionGzipEnvelopeByte(t *testing.T) {
-	frame, err := WrapCompressed(TagTransactionUpdate, []byte("body"),
+	frame, err := WrapCompressed(TagTransactionUpdate, bytes.Repeat([]byte("b"), DefaultGzipMinBytes),
 		CompressionGzip)
 	if err != nil {
 		t.Fatalf("WrapCompressed gzip: %v", err)
@@ -87,7 +87,7 @@ func TestShunterNegotiatedGzipSenderFrame(t *testing.T) {
 	msg := TransactionUpdateLight{
 		RequestID: 42,
 		Update: []SubscriptionUpdate{
-			{QueryID: 7, TableName: "messages", Inserts: bytes.Repeat([]byte{0x42}, 128)},
+			{QueryID: 7, TableName: "messages", Inserts: bytes.Repeat([]byte{0x42}, DefaultGzipMinBytes)},
 		},
 	}
 	if err := sender.SendTransactionUpdateLight(id, &msg); err != nil {

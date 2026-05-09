@@ -42,6 +42,7 @@ type ProtocolConfig struct {
 	PingInterval           time.Duration
 	IdleTimeout            time.Duration
 	CloseHandshakeTimeout  time.Duration
+	WriteTimeout           time.Duration
 	DisconnectTimeout      time.Duration
 	OutgoingBufferMessages int
 	IncomingQueueMessages  int

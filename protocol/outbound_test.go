@@ -92,3 +92,18 @@ func TestOutboundWriterExitsOnDisconnectSignal(t *testing.T) {
 		t.Fatal("writer goroutine did not exit after c.closed")
 	}
 }
+
+func TestOutboundWriteContextUsesConfiguredTimeout(t *testing.T) {
+	opts := DefaultProtocolOptions()
+	opts.WriteTimeout = 5 * time.Millisecond
+	c := &Conn{opts: &opts}
+
+	ctx, cancel := c.outboundWriteContext(context.Background())
+	defer cancel()
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("outbound write context did not expire at configured timeout")
+	}
+}

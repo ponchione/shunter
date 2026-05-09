@@ -27,6 +27,11 @@ const (
 	CompressionGzip   uint8 = 0x02
 )
 
+// DefaultGzipMinBytes is the minimum body size that is gzipped when gzip is
+// negotiated. Smaller bodies keep the compression envelope but use
+// CompressionNone because gzip headers usually cost more than they save.
+const DefaultGzipMinBytes = 256
+
 // ErrUnknownCompressionTag is returned when the compression byte is
 // not a recognized value.
 var ErrUnknownCompressionTag = errors.New("protocol: unknown compression tag")
@@ -44,7 +49,7 @@ var ErrDecompressionFailed = errors.New("protocol: decompression failed")
 // is false the frame is `[tag][body]` with no compression byte, per
 // SPEC-005 §3.3 when compression is negotiated as none at connection
 // setup. When true, an explicit compression byte is always present;
-// mode controls whether the body is gzipped or passed through.
+// mode controls whether the body may be gzipped or passed through.
 func EncodeFrame(tag uint8, body []byte, compressionEnabled bool, mode uint8) []byte {
 	if !compressionEnabled {
 		out := make([]byte, 1+len(body))
@@ -67,8 +72,9 @@ func EncodeFrame(tag uint8, body []byte, compressionEnabled bool, mode uint8) []
 }
 
 // WrapCompressed applies the compression envelope:
-// `[compression][tag][maybe-gzip(body)]`. Returns
-// ErrUnknownCompressionTag if mode is not a known value.
+// `[compression][tag][maybe-gzip(body)]`. Gzip mode uses CompressionNone for
+// bodies smaller than DefaultGzipMinBytes. Returns ErrUnknownCompressionTag if
+// mode is not a known value.
 func WrapCompressed(tag uint8, body []byte, mode uint8) ([]byte, error) {
 	switch mode {
 	case CompressionNone:
@@ -80,6 +86,9 @@ func WrapCompressed(tag uint8, body []byte, mode uint8) ([]byte, error) {
 	case CompressionBrotli:
 		return nil, ErrBrotliUnsupported
 	case CompressionGzip:
+		if len(body) < DefaultGzipMinBytes {
+			return WrapCompressed(tag, body, CompressionNone)
+		}
 		var buf bytes.Buffer
 		buf.WriteByte(CompressionGzip)
 		buf.WriteByte(tag)

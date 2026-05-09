@@ -25,6 +25,8 @@ type ProtocolOptions struct {
 	// the peer's acknowledgement before the socket is forcibly torn
 	// down.
 	CloseHandshakeTimeout time.Duration
+	// WriteTimeout bounds each server-to-client WebSocket data write.
+	WriteTimeout time.Duration
 	// DisconnectTimeout bounds detached teardown work before local close proceeds.
 	DisconnectTimeout time.Duration
 	// OutgoingBufferMessages caps the per-connection outbound queue.
@@ -44,11 +46,12 @@ const DefaultOutgoingBufferMessages = 16 * 1024
 // DefaultProtocolOptions returns SPEC-005 §12 default values.
 func DefaultProtocolOptions() ProtocolOptions {
 	return ProtocolOptions{
-		PingInterval:           15 * time.Second,
-		IdleTimeout:            30 * time.Second,
-		CloseHandshakeTimeout:  250 * time.Millisecond,
-		DisconnectTimeout:      5 * time.Second,
-		OutgoingBufferMessages: DefaultOutgoingBufferMessages,
+			PingInterval:           15 * time.Second,
+			IdleTimeout:            30 * time.Second,
+			CloseHandshakeTimeout:  250 * time.Millisecond,
+			WriteTimeout:           5 * time.Second,
+			DisconnectTimeout:      5 * time.Second,
+			OutgoingBufferMessages: DefaultOutgoingBufferMessages,
 		IncomingQueueMessages:  64,
 		MaxMessageSize:         4 * 1024 * 1024,
 	}
@@ -63,6 +66,9 @@ func normalizeProtocolOptions(opts ProtocolOptions) (ProtocolOptions, error) {
 	}
 	if opts.CloseHandshakeTimeout < 0 {
 		return ProtocolOptions{}, fmt.Errorf("close handshake timeout must not be negative")
+	}
+	if opts.WriteTimeout < 0 {
+		return ProtocolOptions{}, fmt.Errorf("write timeout must not be negative")
 	}
 	if opts.DisconnectTimeout < 0 {
 		return ProtocolOptions{}, fmt.Errorf("disconnect timeout must not be negative")
@@ -86,6 +92,9 @@ func normalizeProtocolOptions(opts ProtocolOptions) (ProtocolOptions, error) {
 	}
 	if opts.CloseHandshakeTimeout == 0 {
 		opts.CloseHandshakeTimeout = defaults.CloseHandshakeTimeout
+	}
+	if opts.WriteTimeout == 0 {
+		opts.WriteTimeout = defaults.WriteTimeout
 	}
 	if opts.DisconnectTimeout == 0 {
 		opts.DisconnectTimeout = defaults.DisconnectTimeout

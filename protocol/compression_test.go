@@ -28,7 +28,7 @@ func TestEncodeFrameEnabledModeNone(t *testing.T) {
 }
 
 func TestEncodeFrameEnabledModeGzip(t *testing.T) {
-	body := bytes.Repeat([]byte{0x42}, 256)
+	body := bytes.Repeat([]byte{0x42}, DefaultGzipMinBytes)
 	frame := EncodeFrame(TagTransactionUpdate, body, true, CompressionGzip)
 	if frame[0] != CompressionGzip {
 		t.Errorf("compression byte = %d, want CompressionGzip", frame[0])
@@ -39,6 +39,15 @@ func TestEncodeFrameEnabledModeGzip(t *testing.T) {
 	// gzip should have reduced the repetitive body meaningfully.
 	if len(frame) >= 1+1+256 {
 		t.Errorf("gzip frame too large: %d bytes for 256-byte repetitive body", len(frame))
+	}
+}
+
+func TestEncodeFrameGzipSmallBodyUsesNoneEnvelope(t *testing.T) {
+	body := []byte("small")
+	frame := EncodeFrame(TagTransactionUpdate, body, true, CompressionGzip)
+	want := append([]byte{CompressionNone, TagTransactionUpdate}, body...)
+	if !bytes.Equal(frame, want) {
+		t.Fatalf("small gzip frame = % x, want % x", frame, want)
 	}
 }
 
@@ -90,9 +99,12 @@ func TestUnwrapCompressedGzipInvalid(t *testing.T) {
 	}
 }
 
-func TestUnwrapCompressedEmptyBodyGzip(t *testing.T) {
-	// gzip of empty body round-trips.
+func TestUnwrapCompressedEmptyBodyGzipModeUsesNoneEnvelope(t *testing.T) {
+	// Gzip mode uses the uncompressed envelope for bodies below the threshold.
 	frame := EncodeFrame(TagSubscribeSingleApplied, nil, true, CompressionGzip)
+	if frame[0] != CompressionNone {
+		t.Fatalf("compression byte = %d, want CompressionNone", frame[0])
+	}
 	tag, body, err := UnwrapCompressed(frame)
 	if err != nil {
 		t.Fatal(err)
