@@ -144,7 +144,6 @@ Current gaps:
   Delete/update predicate deltas and caller-specific visibility transitions now
   have root gauntlet coverage.
 - Soak/load tests that run outside the normal short local loop.
-- Maintained external reference-app workload in the release gate.
 
 Release-candidate hardening commands:
 

@@ -305,6 +305,13 @@ func TestDataDirHelpersRejectUnsafePaths(t *testing.T) {
 			},
 			wantErr: "must not be inside source data dir",
 		},
+		{
+			name: "restore destination inside backup",
+			run: func() error {
+				return RestoreDataDir(dataDir, filepath.Join(dataDir, "restore"))
+			},
+			wantErr: "must not be inside source data dir",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.run()
@@ -343,6 +350,39 @@ func TestDataDirHelpersRejectSymlinkSourcesAndEntries(t *testing.T) {
 	}
 	assertErrorContains(t, err, "entry-link")
 	assertErrorContains(t, err, "is a symlink; refusing to copy")
+}
+
+func TestRestoreDataDirRejectsSymlinkBackupSourcesAndEntries(t *testing.T) {
+	dir := t.TempDir()
+	backupDir := filepath.Join(dir, "backup")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("create backup dir: %v", err)
+	}
+
+	backupLink := filepath.Join(dir, "backup-link")
+	if err := os.Symlink(backupDir, backupLink); err != nil {
+		t.Skipf("create symlink: %v", err)
+	}
+	err := RestoreDataDir(backupLink, filepath.Join(dir, "restore-from-link"))
+	if err == nil {
+		t.Fatal("RestoreDataDir returned nil for symlink backup")
+	}
+	assertErrorContains(t, err, "is a symlink; refusing to restore")
+
+	target := writeDataDirTestBytes(t, backupDir, "target", []byte("target"))
+	if err := os.Symlink(target, filepath.Join(backupDir, "entry-link")); err != nil {
+		t.Fatalf("create entry symlink: %v", err)
+	}
+	restoreDir := filepath.Join(dir, "restore-with-entry-link")
+	err = RestoreDataDir(backupDir, restoreDir)
+	if err == nil {
+		t.Fatal("RestoreDataDir returned nil for symlink backup entry")
+	}
+	assertErrorContains(t, err, "entry-link")
+	assertErrorContains(t, err, "is a symlink; refusing to copy")
+	if _, statErr := os.Stat(restoreDir); statErr != nil {
+		t.Fatalf("restore destination should exist for failed partial copy investigation: %v", statErr)
+	}
 }
 
 func dataDirBackupTestModule() *Module {
