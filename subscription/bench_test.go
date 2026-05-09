@@ -206,6 +206,51 @@ func BenchmarkFanOut1KClientsVariedQueries(b *testing.B) {
 	}
 }
 
+func BenchmarkFanOut1KClientsMultiTableVariedQueries(b *testing.B) {
+	const (
+		clientCount         = 1000
+		changedRowsPerTable = 256
+	)
+
+	s := benchSchema()
+	inbox := make(chan FanOutMessage, 1024)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	for i := 0; i < clientCount; i++ {
+		c := types.ConnectionID{}
+		c[0] = byte(i)
+		c[1] = byte(i >> 8)
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID:     c,
+			QueryID:    uint32(i),
+			Predicates: []Predicate{benchmarkMultiTableVariedFanoutPredicate(i, changedRowsPerTable)},
+		}, nil); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	tableOneRows := make([]types.ProductValue, changedRowsPerTable)
+	tableTwoRows := make([]types.ProductValue, changedRowsPerTable)
+	for i := range tableOneRows {
+		v := uint64(i)
+		tableOneRows[i] = types.ProductValue{types.NewUint64(v), benchmarkVariedFanoutBucket(v)}
+		tableTwoRows[i] = types.ProductValue{types.NewUint64(v), benchmarkMultiTableFanoutBucket(2, v)}
+	}
+	cs := &store.Changeset{
+		TxID: 1,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			1: {TableID: 1, TableName: "t1", Inserts: tableOneRows},
+			2: {TableID: 2, TableName: "t2", Inserts: tableTwoRows},
+		},
+	}
+	drainBenchmarkInbox(b, inbox)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		mgr.EvalAndBroadcast(types.TxID(uint64(i+1)), cs, nil, PostCommitMeta{})
+	}
+}
+
 func benchmarkVariedFanoutPredicate(i, changedRows int) Predicate {
 	value := uint64(i % changedRows)
 	switch i % 4 {
@@ -236,8 +281,50 @@ func benchmarkVariedFanoutPredicate(i, changedRows int) Predicate {
 	}
 }
 
+func benchmarkMultiTableVariedFanoutPredicate(i, changedRowsPerTable int) Predicate {
+	table := TableID(1)
+	if i%2 == 1 {
+		table = 2
+	}
+	value := uint64((i / 2) % changedRowsPerTable)
+	switch (i / 2) % 4 {
+	case 0:
+		return ColEq{Table: table, Column: 0, Value: types.NewUint64(value)}
+	case 1:
+		return ColRange{
+			Table:  table,
+			Column: 0,
+			Lower:  Bound{Value: types.NewUint64(value), Inclusive: true},
+			Upper:  Bound{Value: types.NewUint64(value), Inclusive: true},
+		}
+	case 2:
+		return And{
+			Left: ColRange{
+				Table:  table,
+				Column: 0,
+				Lower:  Bound{Value: types.NewUint64(value), Inclusive: true},
+				Upper:  Bound{Value: types.NewUint64(value + 3), Inclusive: true},
+			},
+			Right: ColEq{Table: table, Column: 1, Value: benchmarkMultiTableFanoutBucket(table, value)},
+		}
+	default:
+		other := (value + uint64(changedRowsPerTable/2)) % uint64(changedRowsPerTable)
+		return Or{
+			Left:  ColEq{Table: table, Column: 0, Value: types.NewUint64(value)},
+			Right: ColEq{Table: table, Column: 0, Value: types.NewUint64(other)},
+		}
+	}
+}
+
 func benchmarkVariedFanoutBucket(value uint64) types.Value {
 	return types.NewString(fmt.Sprintf("bucket-%02d", value%4))
+}
+
+func benchmarkMultiTableFanoutBucket(table TableID, value uint64) types.Value {
+	if table == 2 {
+		return types.NewInt32(int32(value % 4))
+	}
+	return benchmarkVariedFanoutBucket(value)
 }
 
 // BenchmarkJoinFragmentEval measures end-to-end EvalAndBroadcast cost for one
