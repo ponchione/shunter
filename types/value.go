@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"hash"
-	"hash/fnv"
 	"math"
 	"slices"
 	"time"
@@ -595,6 +594,47 @@ func (v Value) Compare(other Value) int {
 
 // --- Hashing (Story 1.4) ---
 
+const (
+	fnv64aOffset uint64 = 14695981039346656037
+	fnv64aPrime  uint64 = 1099511628211
+)
+
+func fnv64aWriteByte(sum uint64, b byte) uint64 {
+	return (sum ^ uint64(b)) * fnv64aPrime
+}
+
+func fnv64aWriteBytes(sum uint64, bs []byte) uint64 {
+	for _, b := range bs {
+		sum = fnv64aWriteByte(sum, b)
+	}
+	return sum
+}
+
+func fnv64aWriteString(sum uint64, s string) uint64 {
+	for i := 0; i < len(s); i++ {
+		sum = fnv64aWriteByte(sum, s[i])
+	}
+	return sum
+}
+
+func fnv64aWriteUint32BE(sum uint64, v uint32) uint64 {
+	sum = fnv64aWriteByte(sum, byte(v>>24))
+	sum = fnv64aWriteByte(sum, byte(v>>16))
+	sum = fnv64aWriteByte(sum, byte(v>>8))
+	return fnv64aWriteByte(sum, byte(v))
+}
+
+func fnv64aWriteUint64BE(sum uint64, v uint64) uint64 {
+	sum = fnv64aWriteByte(sum, byte(v>>56))
+	sum = fnv64aWriteByte(sum, byte(v>>48))
+	sum = fnv64aWriteByte(sum, byte(v>>40))
+	sum = fnv64aWriteByte(sum, byte(v>>32))
+	sum = fnv64aWriteByte(sum, byte(v>>24))
+	sum = fnv64aWriteByte(sum, byte(v>>16))
+	sum = fnv64aWriteByte(sum, byte(v>>8))
+	return fnv64aWriteByte(sum, byte(v))
+}
+
 // Hash feeds the canonical hash representation of v into h.
 // Format: kind byte, null marker, then canonical payload bytes when present.
 func (v Value) Hash(h hash.Hash64) {
@@ -609,9 +649,16 @@ func (v Value) Hash(h hash.Hash64) {
 
 // Hash64 returns a hash using fnv64a.
 func (v Value) Hash64() uint64 {
-	h := fnv.New64a()
-	v.Hash(h)
-	return h.Sum64()
+	return v.hash64Into(fnv64aOffset)
+}
+
+func (v Value) hash64Into(sum uint64) uint64 {
+	sum = fnv64aWriteByte(sum, byte(v.kind))
+	if v.isNull {
+		return fnv64aWriteByte(sum, 0)
+	}
+	sum = fnv64aWriteByte(sum, 1)
+	return v.hashPayload64Into(sum)
 }
 
 // writePayload writes canonical payload bytes (without kind) into h.
@@ -673,6 +720,60 @@ func (v Value) writePayload(h hash.Hash64) {
 		}
 	case KindUUID:
 		h.Write(v.uuid[:])
+	}
+}
+
+func (v Value) hashPayload64Into(sum uint64) uint64 {
+	if v.isNull {
+		return sum
+	}
+	switch v.kind {
+	case KindBool:
+		if v.b {
+			return fnv64aWriteByte(sum, 1)
+		}
+		return fnv64aWriteByte(sum, 0)
+	case KindInt8, KindInt16, KindInt32, KindInt64:
+		return fnv64aWriteUint64BE(sum, uint64(v.i64))
+	case KindUint8, KindUint16, KindUint32, KindUint64:
+		return fnv64aWriteUint64BE(sum, v.u64)
+	case KindFloat32:
+		bits := uint32(0)
+		if v.f32 != 0 {
+			bits = math.Float32bits(v.f32)
+		}
+		return fnv64aWriteUint32BE(sum, bits)
+	case KindFloat64:
+		bits := uint64(0)
+		if v.f64 != 0 {
+			bits = math.Float64bits(v.f64)
+		}
+		return fnv64aWriteUint64BE(sum, bits)
+	case KindString:
+		return fnv64aWriteString(sum, v.str)
+	case KindBytes, KindJSON:
+		return fnv64aWriteBytes(sum, v.buf)
+	case KindInt128, KindUint128:
+		sum = fnv64aWriteUint64BE(sum, v.hi128)
+		return fnv64aWriteUint64BE(sum, v.lo128)
+	case KindInt256, KindUint256:
+		for i := range 4 {
+			sum = fnv64aWriteUint64BE(sum, v.w256[i])
+		}
+		return sum
+	case KindTimestamp, KindDuration:
+		return fnv64aWriteUint64BE(sum, uint64(v.i64))
+	case KindArrayString:
+		sum = fnv64aWriteUint32BE(sum, checkedPayloadLen(len(v.strArr)))
+		for _, s := range v.strArr {
+			sum = fnv64aWriteUint32BE(sum, checkedPayloadLen(len(s)))
+			sum = fnv64aWriteString(sum, s)
+		}
+		return sum
+	case KindUUID:
+		return fnv64aWriteBytes(sum, v.uuid[:])
+	default:
+		return sum
 	}
 }
 

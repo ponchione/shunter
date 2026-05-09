@@ -3,7 +3,6 @@ package types
 import (
 	"encoding/binary"
 	"hash"
-	"hash/fnv"
 	"slices"
 )
 
@@ -38,9 +37,19 @@ func (pv ProductValue) Hash(h hash.Hash64) {
 
 // Hash64 returns a hash using fnv64a.
 func (pv ProductValue) Hash64() uint64 {
-	h := fnv.New64a()
-	pv.Hash(h)
-	return h.Sum64()
+	sum := fnv64aOffset
+	for _, v := range pv {
+		sum = fnv64aWriteByte(sum, byte(v.kind))
+		if v.isNull {
+			sum = fnv64aWriteByte(sum, 0)
+			sum = fnv64aWriteUint32BE(sum, 0)
+			continue
+		}
+		sum = fnv64aWriteByte(sum, 1)
+		sum = fnv64aWriteUint32BE(sum, v.payloadLen())
+		sum = v.hashPayload64Into(sum)
+	}
+	return sum
 }
 
 // Copy returns a deep copy. Slice-backed values get their own slices; strings

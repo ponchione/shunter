@@ -1,10 +1,6 @@
 package store
 
-import (
-	"hash/fnv"
-
-	"github.com/ponchione/shunter/types"
-)
+import "github.com/ponchione/shunter/types"
 
 // IndexKey is an ordered tuple of Values used as a B-tree key.
 type IndexKey struct {
@@ -50,9 +46,7 @@ func (k IndexKey) Equal(other IndexKey) bool {
 }
 
 func (k IndexKey) hash64() uint64 {
-	h := fnv.New64a()
-	types.ProductValue(k.parts).Hash(h)
-	return h.Sum64()
+	return types.ProductValue(k.parts).Hash64()
 }
 
 // Bound represents one endpoint of an index range.

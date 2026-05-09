@@ -1,6 +1,9 @@
 package types
 
-import "testing"
+import (
+	"hash/fnv"
+	"testing"
+)
 
 // =============================================================
 // Story 1.5: ProductValue
@@ -113,6 +116,21 @@ func TestProductValueEmptyHash(t *testing.T) {
 	// Should not panic.
 	pv := ProductValue{}
 	_ = pv.Hash64()
+}
+
+func TestProductValueHash64MatchesStreamingHash(t *testing.T) {
+	pv := ProductValue{
+		NewUint64(1),
+		NewString("a"),
+		NewBytes([]byte{2, 3}),
+		NewNull(KindString),
+		NewArrayString([]string{"x", "yz"}),
+	}
+	h := fnv.New64a()
+	pv.Hash(h)
+	if got, want := pv.Hash64(), h.Sum64(); got != want {
+		t.Fatalf("ProductValue.Hash64 = %d, want streaming hash %d", got, want)
+	}
 }
 
 func TestProductValueCopyNil(t *testing.T) {

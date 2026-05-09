@@ -75,15 +75,13 @@ var crc32cTable = crc32.MakeTable(crc32.Castagnoli)
 
 // ComputeRecordCRC computes CRC32C over the record header + payload.
 func ComputeRecordCRC(rec *Record) uint32 {
-	h := crc32.New(crc32cTable)
 	var buf [RecordHeaderSize]byte
 	binary.LittleEndian.PutUint64(buf[:8], rec.TxID)
 	buf[8] = rec.RecordType
 	buf[9] = rec.Flags
 	binary.LittleEndian.PutUint32(buf[10:14], checkedRecordPayloadLen(rec))
-	h.Write(buf[:])
-	h.Write(rec.Payload)
-	return h.Sum32()
+	sum := crc32.Update(0, crc32cTable, buf[:])
+	return crc32.Update(sum, crc32cTable, rec.Payload)
 }
 
 func checkedRecordPayloadLen(rec *Record) uint32 {

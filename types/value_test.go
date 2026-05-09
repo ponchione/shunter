@@ -3,6 +3,7 @@ package types
 import (
 	"bytes"
 	"errors"
+	"hash/fnv"
 	"math"
 	"testing"
 	"time"
@@ -1159,5 +1160,28 @@ func TestHashDeterministic(t *testing.T) {
 	h2 := v.Hash64()
 	if h1 != h2 {
 		t.Fatal("Hash64 should be deterministic across calls")
+	}
+}
+
+func TestHash64MatchesStreamingHash(t *testing.T) {
+	values := []Value{
+		NewBool(true),
+		NewInt64(-42),
+		NewUint64(42),
+		mustFloat32(t, 1.25),
+		mustFloat64(t, 2.5),
+		NewString("hello"),
+		NewBytes([]byte{1, 2, 3}),
+		NewArrayString([]string{"a", "bc"}),
+		mustParseUUID(t, "00112233-4455-6677-8899-aabbccddeeff"),
+		mustJSON(t, `{"a":1}`),
+		NewNull(KindString),
+	}
+	for _, v := range values {
+		h := fnv.New64a()
+		v.Hash(h)
+		if got, want := v.Hash64(), h.Sum64(); got != want {
+			t.Fatalf("%s Hash64 = %d, want streaming hash %d", v.Kind(), got, want)
+		}
 	}
 }
