@@ -5,6 +5,17 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 ## v0.1.1-dev
 
 - Current development line.
+- Runtime startup now requires rebuilding a fresh Runtime before retrying when
+  a startup migration mutates in-memory state but fails before durability
+  confirmation.
+- Snapshot creation through `Runtime.CreateSnapshot` now captures the current
+  committed horizon and snapshot body under one read lock.
+- Executor response delivery now uses nonblocking sends, and subscription
+  register/unregister commands skip snapshot acquisition when already canceled.
+- Commit-log CRC and store value/index hash paths now avoid per-call hasher
+  allocations.
+- Subscription fanout backpressure now waits directly on inbox capacity,
+  shutdown, or context cancellation instead of polling with short timers.
 - Hardened protocol outbound delivery against externally closed outbound queues.
 - Commit log durability workers now reject non-positive segment sizes and drain
   batch sizes at startup.
