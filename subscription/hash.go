@@ -87,8 +87,15 @@ func (e *canonicalEncoder) writeU64(v uint64) {
 	e.buf = append(e.buf, tmp[:]...)
 }
 
+func (e *canonicalEncoder) writeLen(n int) {
+	if uint64(n) > uint64(^uint32(0)) {
+		panic("subscription: canonical length exceeds uint32")
+	}
+	e.writeU32(uint32(n))
+}
+
 func (e *canonicalEncoder) writeString(v string) {
-	e.writeU32(uint32(len(v)))
+	e.writeLen(len(v))
 	e.buf = append(e.buf, v...)
 }
 
@@ -492,7 +499,13 @@ func ComputeQueryWindowedShapeHash(pred Predicate, projection []ProjectionColumn
 	if pred == nil {
 		panic("subscription: ComputeQueryHash on nil predicate")
 	}
-	pred = canonicalizePredicate(pred)
+	return computeQueryWindowedShapeHashCanonical(canonicalizePredicate(pred), projection, aggregate, orderBy, limit, offset, clientID)
+}
+
+func computeQueryWindowedShapeHashCanonical(pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, orderBy []OrderByColumn, limit *uint64, offset *uint64, clientID *types.Identity) QueryHash {
+	if pred == nil {
+		panic("subscription: ComputeQueryHash on nil predicate")
+	}
 	enc := acquireCanonicalEncoder()
 	defer releaseCanonicalEncoder(enc)
 	encodePredicate(enc, pred)
@@ -513,7 +526,7 @@ func encodeProjection(e *canonicalEncoder, projection []ProjectionColumn) {
 		return
 	}
 	e.writeByte(tagProjection)
-	e.writeU32(uint32(len(projection)))
+	e.writeLen(len(projection))
 	for _, col := range projection {
 		e.writeU32(uint32(col.Table))
 		e.writeU32(uint32(col.Column))
@@ -557,7 +570,7 @@ func encodeOrderBy(e *canonicalEncoder, orderBy []OrderByColumn) {
 		return
 	}
 	e.writeByte(tagOrderBy)
-	e.writeU32(uint32(len(orderBy)))
+	e.writeLen(len(orderBy))
 	for _, col := range orderBy {
 		e.writeU32(uint32(col.Table))
 		e.writeU32(uint32(col.Column))
@@ -679,13 +692,13 @@ func encodePredicate(e *canonicalEncoder, pred Predicate) {
 		}
 	case MultiJoin:
 		e.writeByte(tagMultiJoin)
-		e.writeU32(uint32(len(p.Relations)))
+		e.writeLen(len(p.Relations))
 		for _, rel := range p.Relations {
 			e.writeU32(uint32(rel.Table))
 			e.writeByte(rel.Alias)
 		}
 		e.writeU32(uint32(p.ProjectedRelation))
-		e.writeU32(uint32(len(p.Conditions)))
+		e.writeLen(len(p.Conditions))
 		for _, condition := range p.Conditions {
 			encodeMultiJoinColumnRef(e, condition.Left)
 			encodeMultiJoinColumnRef(e, condition.Right)
@@ -759,11 +772,11 @@ func encodeValue(e *canonicalEncoder, v Value) {
 		e.writeU64(canonicalFloat64Bits(v.AsFloat64()))
 	case types.KindString:
 		s := v.AsString()
-		e.writeU32(uint32(len(s)))
+		e.writeLen(len(s))
 		e.buf = append(e.buf, s...)
 	case types.KindBytes:
 		b := v.BytesView()
-		e.writeU32(uint32(len(b)))
+		e.writeLen(len(b))
 		e.buf = append(e.buf, b...)
 	case types.KindInt128:
 		hi, lo := v.AsInt128()
@@ -791,9 +804,9 @@ func encodeValue(e *canonicalEncoder, v Value) {
 		e.writeU64(uint64(v.AsDurationMicros()))
 	case types.KindArrayString:
 		xs := v.ArrayStringView()
-		e.writeU32(uint32(len(xs)))
+		e.writeLen(len(xs))
 		for _, s := range xs {
-			e.writeU32(uint32(len(s)))
+			e.writeLen(len(s))
 			e.buf = append(e.buf, s...)
 		}
 	case types.KindUUID:
@@ -801,7 +814,7 @@ func encodeValue(e *canonicalEncoder, v Value) {
 		e.buf = append(e.buf, u[:]...)
 	case types.KindJSON:
 		b := v.JSONView()
-		e.writeU32(uint32(len(b)))
+		e.writeLen(len(b))
 		e.buf = append(e.buf, b...)
 	default:
 		panic("subscription: encodeValue unhandled kind")

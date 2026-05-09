@@ -66,30 +66,51 @@ type SchemaRegistry interface {
 }
 
 type schemaRegistry struct {
-	tables       []TableSchema
-	byID         map[TableID]int
-	byName       map[string]int
-	tableIDs     []TableID // user tables first, then system
-	reducers     map[string]ReducerHandler
-	reducerNames []string
-	onConnect    func(*ReducerContext) error
-	onDisconnect func(*ReducerContext) error
-	version      uint32
+	tables        []TableSchema
+	byID          map[TableID]int
+	byName        map[string]int
+	byFoldedName  map[string]int
+	indexByColumn map[tableColumn]IndexID
+	tableIDs      []TableID // user tables first, then system
+	reducers      map[string]ReducerHandler
+	reducerNames  []string
+	onConnect     func(*ReducerContext) error
+	onDisconnect  func(*ReducerContext) error
+	version       uint32
 }
+
+type tableColumn struct {
+	table TableID
+	col   types.ColID
+}
+
+const ambiguousFoldedTableName = -1
 
 func newSchemaRegistry(schemas []TableSchema, b *Builder) SchemaRegistry {
 	r := &schemaRegistry{
-		tables:   schemas,
-		byID:     make(map[TableID]int, len(schemas)),
-		byName:   make(map[string]int, len(schemas)),
-		tableIDs: make([]TableID, len(schemas)),
-		reducers: make(map[string]ReducerHandler, len(b.reducers)),
-		version:  b.version,
+		tables:        schemas,
+		byID:          make(map[TableID]int, len(schemas)),
+		byName:        make(map[string]int, len(schemas)),
+		byFoldedName:  make(map[string]int, len(schemas)),
+		indexByColumn: make(map[tableColumn]IndexID),
+		tableIDs:      make([]TableID, len(schemas)),
+		reducers:      make(map[string]ReducerHandler, len(b.reducers)),
+		version:       b.version,
 	}
 
 	for i := range schemas {
 		r.byID[schemas[i].ID] = i
 		r.byName[schemas[i].Name] = i
+		r.addFoldedTableName(strings.ToLower(schemas[i].Name), i)
+		for _, idx := range schemas[i].Indexes {
+			if len(idx.Columns) != 1 {
+				continue
+			}
+			key := tableColumn{table: schemas[i].ID, col: types.ColID(idx.Columns[0])}
+			if _, exists := r.indexByColumn[key]; !exists {
+				r.indexByColumn[key] = idx.ID
+			}
+		}
 		r.tableIDs[i] = schemas[i].ID
 	}
 
@@ -102,6 +123,14 @@ func newSchemaRegistry(schemas []TableSchema, b *Builder) SchemaRegistry {
 	r.onConnect = b.onConnect
 	r.onDisconnect = b.onDisconnect
 	return r
+}
+
+func (r *schemaRegistry) addFoldedTableName(folded string, i int) {
+	if existing, ok := r.byFoldedName[folded]; ok && existing != i {
+		r.byFoldedName[folded] = ambiguousFoldedTableName
+		return
+	}
+	r.byFoldedName[folded] = i
 }
 
 func (r *schemaRegistry) Table(id TableID) (*TableSchema, bool) {
@@ -117,17 +146,8 @@ func (r *schemaRegistry) TableByName(name string) (TableID, *TableSchema, bool) 
 		ts := cloneTableSchema(r.tables[i])
 		return ts.ID, &ts, true
 	}
-	match := -1
-	for i := range r.tables {
-		if strings.EqualFold(r.tables[i].Name, name) {
-			if match != -1 {
-				return 0, nil, false
-			}
-			match = i
-		}
-	}
-	if match != -1 {
-		ts := cloneTableSchema(r.tables[match])
+	if i, ok := r.byFoldedName[strings.ToLower(name)]; ok && i != ambiguousFoldedTableName {
+		ts := cloneTableSchema(r.tables[i])
 		return ts.ID, &ts, true
 	}
 	return 0, nil, false
@@ -176,14 +196,8 @@ func (r *schemaRegistry) IndexIDForColumn(table TableID, col types.ColID) (Index
 }
 
 func (r *schemaRegistry) indexIDForColumn(table TableID, col types.ColID) (IndexID, bool) {
-	if i, ok := r.byID[table]; ok {
-		for _, idx := range r.tables[i].Indexes {
-			if len(idx.Columns) == 1 && idx.Columns[0] == int(col) {
-				return idx.ID, true
-			}
-		}
-	}
-	return 0, false
+	idx, ok := r.indexByColumn[tableColumn{table: table, col: col}]
+	return idx, ok
 }
 
 func (r *schemaRegistry) Tables() []TableID {

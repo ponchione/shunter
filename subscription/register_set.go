@@ -760,10 +760,10 @@ func (m *Manager) RegisterSet(
 	dedupedOrderBys := make([][]OrderByColumn, 0, len(canonicalPreds))
 	dedupedLimits := make([]*uint64, 0, len(canonicalPreds))
 	dedupedOffsets := make([]*uint64, 0, len(canonicalPreds))
-	dedupedHashIdentities := make([]*types.Identity, 0, len(canonicalPreds))
+	dedupedHashes := make([]QueryHash, 0, len(canonicalPreds))
 	seen := make(map[QueryHash]struct{}, len(canonicalPreds))
 	for i, p := range canonicalPreds {
-		h := ComputeQueryWindowedShapeHash(p, projections[i], aggregates[i], orderBys[i], limits[i], offsets[i], hashIdentities[i])
+		h := computeQueryWindowedShapeHashCanonical(p, projections[i], aggregates[i], orderBys[i], limits[i], offsets[i], hashIdentities[i])
 		if _, dup := seen[h]; dup {
 			continue
 		}
@@ -774,7 +774,7 @@ func (m *Manager) RegisterSet(
 		dedupedOrderBys = append(dedupedOrderBys, orderBys[i])
 		dedupedLimits = append(dedupedLimits, limits[i])
 		dedupedOffsets = append(dedupedOffsets, offsets[i])
-		dedupedHashIdentities = append(dedupedHashIdentities, hashIdentities[i])
+		dedupedHashes = append(dedupedHashes, h)
 	}
 	if uint64(len(deduped)) > uint64(^types.SubscriptionID(0))-uint64(m.nextSubID) {
 		return SubscriptionSetRegisterResult{}, fmt.Errorf("%w: next=%d requested=%d", ErrSubscriptionIDOverflow, m.nextSubID, len(deduped))
@@ -790,7 +790,7 @@ func (m *Manager) RegisterSet(
 		orderBy := dedupedOrderBys[i]
 		limit := dedupedLimits[i]
 		offset := dedupedOffsets[i]
-		hash := ComputeQueryWindowedShapeHash(p, projection, aggregate, orderBy, limit, offset, dedupedHashIdentities[i])
+		hash := dedupedHashes[i]
 		// Reusing this hash on the same connection skips a duplicate initial
 		// snapshot but still allocates an internal subscription ID.
 		existing := m.registry.getQuery(hash)

@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"math"
+	"strconv"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -15,6 +16,20 @@ func TestQueryHashDeterministic(t *testing.T) {
 	if h1 != h2 {
 		t.Fatalf("deterministic: %v != %v", h1, h2)
 	}
+}
+
+func TestCanonicalEncoderRejectsOversizedLength(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("oversized uint32 length requires 64-bit int")
+	}
+	enc := acquireCanonicalEncoder()
+	defer releaseCanonicalEncoder(enc)
+	defer func() {
+		if recover() == nil {
+			t.Fatal("writeLen accepted a length larger than uint32")
+		}
+	}()
+	enc.writeLen(int(uint64(^uint32(0)) + 1))
 }
 
 func TestQueryHashValueDifferent(t *testing.T) {
