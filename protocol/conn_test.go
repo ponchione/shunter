@@ -64,6 +64,25 @@ func TestConnManagerAddGetRemove(t *testing.T) {
 	}
 }
 
+func TestConnManagerRejectsZeroConnectionID(t *testing.T) {
+	m := NewConnManager()
+	opts := DefaultProtocolOptions()
+	conn := NewConn(types.ConnectionID{}, types.Identity{}, "", false, nil, &opts)
+
+	if err := m.Add(conn); err != ErrZeroConnectionID {
+		t.Fatalf("Add zero connection err = %v, want ErrZeroConnectionID", err)
+	}
+	if err := m.reserve(conn); err != ErrZeroConnectionID {
+		t.Fatalf("reserve zero connection err = %v, want ErrZeroConnectionID", err)
+	}
+	if got := m.ActiveCount(); got != 0 {
+		t.Fatalf("ActiveCount = %d, want 0", got)
+	}
+	if got := m.AcceptedCount(); got != 0 {
+		t.Fatalf("AcceptedCount = %d, want 0", got)
+	}
+}
+
 func TestConnManagerGetMissingReturnsNil(t *testing.T) {
 	m := NewConnManager()
 	var id types.ConnectionID

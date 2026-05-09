@@ -185,6 +185,9 @@ func (m *ConnManager) reserve(conn *Conn) error {
 	if m == nil || conn == nil {
 		return nil
 	}
+	if conn.ID.IsZero() {
+		return ErrZeroConnectionID
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if existing := m.conns[conn.ID]; existing != nil && existing != conn && !connIsClosed(existing) {
@@ -212,6 +215,12 @@ func (m *ConnManager) releaseReservation(conn *Conn) {
 // ConnectionID is rejected so fan-out, subscription, and disconnect state remain
 // bound to a single connection owner.
 func (m *ConnManager) Add(conn *Conn) error {
+	if conn == nil {
+		return nil
+	}
+	if conn.ID.IsZero() {
+		return ErrZeroConnectionID
+	}
 	m.mu.Lock()
 	if existing := m.conns[conn.ID]; existing != nil && existing != conn && !connIsClosed(existing) {
 		m.mu.Unlock()
