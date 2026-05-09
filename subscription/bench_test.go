@@ -206,6 +206,45 @@ func BenchmarkFanOut1KClientsVariedQueries(b *testing.B) {
 	}
 }
 
+func BenchmarkFanOut1KClientsSkewedHotKey(b *testing.B) {
+	const (
+		clientCount = 1000
+		hotClients  = 800
+		changedRows = 64
+		hotValue    = 7
+	)
+
+	s := benchSchema()
+	inbox := make(chan FanOutMessage, 1024)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	for i := 0; i < clientCount; i++ {
+		c := types.ConnectionID{}
+		c[0] = byte(i)
+		c[1] = byte(i >> 8)
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID:     c,
+			QueryID:    uint32(i),
+			Predicates: []Predicate{benchmarkSkewedFanoutPredicate(i, hotClients, changedRows, hotValue)},
+		}, nil); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	rows := make([]types.ProductValue, changedRows)
+	for i := range rows {
+		v := uint64(i)
+		rows[i] = types.ProductValue{types.NewUint64(v), benchmarkVariedFanoutBucket(v)}
+	}
+	cs := simpleChangeset(1, rows, nil)
+	drainBenchmarkInbox(b, inbox)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		mgr.EvalAndBroadcast(types.TxID(uint64(i+1)), cs, nil, PostCommitMeta{})
+	}
+}
+
 func BenchmarkFanOut1KClientsMultiTableVariedQueries(b *testing.B) {
 	const (
 		clientCount         = 1000
@@ -248,6 +287,42 @@ func BenchmarkFanOut1KClientsMultiTableVariedQueries(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		mgr.EvalAndBroadcast(types.TxID(uint64(i+1)), cs, nil, PostCommitMeta{})
+	}
+}
+
+func benchmarkSkewedFanoutPredicate(i, hotClients, changedRows, hotValue int) Predicate {
+	if i < hotClients {
+		return ColEq{Table: 1, Column: 0, Value: types.NewUint64(uint64(hotValue))}
+	}
+	value := uint64((i - hotClients) % changedRows)
+	if value == uint64(hotValue) {
+		value = (value + 1) % uint64(changedRows)
+	}
+	switch (i - hotClients) % 4 {
+	case 0:
+		return ColEq{Table: 1, Column: 0, Value: types.NewUint64(value)}
+	case 1:
+		return ColRange{
+			Table:  1,
+			Column: 0,
+			Lower:  Bound{Value: types.NewUint64(value), Inclusive: true},
+			Upper:  Bound{Value: types.NewUint64(value + 1), Inclusive: true},
+		}
+	case 2:
+		return And{
+			Left: ColRange{
+				Table:  1,
+				Column: 0,
+				Lower:  Bound{Value: types.NewUint64(value), Inclusive: true},
+				Upper:  Bound{Value: types.NewUint64(value + 3), Inclusive: true},
+			},
+			Right: ColEq{Table: 1, Column: 1, Value: benchmarkVariedFanoutBucket(value)},
+		}
+	default:
+		return Or{
+			Left:  ColEq{Table: 1, Column: 0, Value: types.NewUint64(value)},
+			Right: ColEq{Table: 1, Column: 0, Value: types.NewUint64((value + uint64(changedRows/2)) % uint64(changedRows))},
+		}
 	}
 }
 
