@@ -611,12 +611,7 @@ func TestRuntimeCloseDuringMigrationHookKeepsRuntimeNotReadyAndCloseIdempotent(t
 	if err := rt.Close(); err != nil {
 		t.Fatalf("Close during migration hook: %v", err)
 	}
-	if rt.Ready() {
-		t.Fatal("runtime ready immediately after Close during migration hook")
-	}
-	if got := rt.Health().State; got != RuntimeStateClosed {
-		t.Fatalf("state after Close during migration hook = %q, want closed", got)
-	}
+	requireRuntimeClosedWithoutStartupResources(t, rt)
 	if err := rt.Close(); err != nil {
 		t.Fatalf("second Close during blocked startup: %v", err)
 	}
@@ -628,17 +623,7 @@ func TestRuntimeCloseDuringMigrationHookKeepsRuntimeNotReadyAndCloseIdempotent(t
 	if hookCalls != 1 {
 		t.Fatalf("hook calls = %d, want 1", hookCalls)
 	}
-	if rt.Ready() {
-		t.Fatal("runtime ready after Start unwound from Close during migration hook")
-	}
-	health := rt.Health()
-	if health.State != RuntimeStateClosed || health.Ready ||
-		health.Durability.Started || health.Executor.Started || health.Subscriptions.Started {
-		t.Fatalf("health after Start unwound from Close during migration hook = %+v, want closed with stopped subsystems", health)
-	}
-	if rt.durability != nil || rt.executor != nil || rt.scheduler != nil || rt.fanOutWorker != nil || rt.subscriptions != nil {
-		t.Fatalf("partial resources retained after Close during migration hook: health=%+v", health)
-	}
+	requireRuntimeClosedWithoutStartupResources(t, rt)
 
 	restarted, err := Build(validChatModule(), Config{DataDir: dir})
 	if err != nil {
@@ -649,6 +634,74 @@ func TestRuntimeCloseDuringMigrationHookKeepsRuntimeNotReadyAndCloseIdempotent(t
 	}
 	defer restarted.Close()
 	requireMigrationMessageBodies(t, restarted)
+}
+
+func TestRuntimeCloseDuringMigrationAfterDurableHookKeepsDurableStateRecoverable(t *testing.T) {
+	dir := t.TempDir()
+	secondHookStarted := make(chan struct{})
+	releaseSecondHook := make(chan struct{})
+	firstCalls := 0
+	secondCalls := 0
+	mod := validChatModule().
+		MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+			firstCalls++
+			tableID, _, ok := mc.Schema().TableByName("messages")
+			if !ok {
+				return fmt.Errorf("messages table missing from migration schema")
+			}
+			_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("durable-before-close")})
+			return err
+		}).
+		MigrationHook(func(ctx context.Context, mc *MigrationContext) error {
+			secondCalls++
+			if mc.CommittedTxID() != 1 {
+				return fmt.Errorf("second hook committed tx id = %d, want durable first hook horizon", mc.CommittedTxID())
+			}
+			close(secondHookStarted)
+			select {
+			case <-releaseSecondHook:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+
+	rt, err := Build(mod, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	startErr := make(chan error, 1)
+	go func() {
+		startErr <- rt.Start(context.Background())
+	}()
+	<-secondHookStarted
+
+	if firstCalls != 1 || secondCalls != 1 {
+		t.Fatalf("hook calls before Close first/second = %d/%d, want 1/1", firstCalls, secondCalls)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close after durable migration hook: %v", err)
+	}
+	requireRuntimeClosedWithoutStartupResources(t, rt)
+	if err := rt.Close(); err != nil {
+		t.Fatalf("second Close after durable migration hook: %v", err)
+	}
+
+	close(releaseSecondHook)
+	if err := <-startErr; !errors.Is(err, ErrRuntimeClosed) {
+		t.Fatalf("Start after Close following durable migration hook error = %v, want ErrRuntimeClosed", err)
+	}
+	requireRuntimeClosedWithoutStartupResources(t, rt)
+
+	restarted, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("restarted Build: %v", err)
+	}
+	if err := restarted.Start(context.Background()); err != nil {
+		t.Fatalf("restarted Start: %v", err)
+	}
+	defer restarted.Close()
+	requireMigrationMessageBodies(t, restarted, "durable-before-close")
 }
 
 func TestRunDataDirMigrationsExecutesOfflineAndLeavesModuleBuildable(t *testing.T) {
@@ -1123,6 +1176,21 @@ func requireMigrationMessageBodies(t *testing.T, rt *Runtime, want ...string) {
 		if got[body] != 1 {
 			t.Fatalf("message bodies = %#v, want one %q", got, body)
 		}
+	}
+}
+
+func requireRuntimeClosedWithoutStartupResources(t *testing.T, rt *Runtime) {
+	t.Helper()
+	if rt.Ready() {
+		t.Fatal("runtime ready after Close during startup")
+	}
+	health := rt.Health()
+	if health.State != RuntimeStateClosed || health.Ready ||
+		health.Durability.Started || health.Executor.Started || health.Subscriptions.Started {
+		t.Fatalf("health after Close during startup = %+v, want closed with stopped subsystems", health)
+	}
+	if rt.durability != nil || rt.executor != nil || rt.scheduler != nil || rt.fanOutWorker != nil || rt.subscriptions != nil {
+		t.Fatalf("partial resources retained after Close during startup: health=%+v", health)
 	}
 }
 
