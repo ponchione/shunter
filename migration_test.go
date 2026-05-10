@@ -517,6 +517,93 @@ func TestMigrationHookDurabilityFailureBlocksSameRuntimeRetry(t *testing.T) {
 	requireMigrationMessageBodies(t, restarted, "dirty-only")
 }
 
+func TestMigrationHookLaterDirtyFailurePreservesEarlierDurableHookAndBlocksSameRuntimeRetry(t *testing.T) {
+	dir := t.TempDir()
+	injected := errors.New("injected second hook durability failure")
+	injectFailure := true
+	prevHook := migrationAfterCommitBeforeDurabilityHook
+	migrationAfterCommitBeforeDurabilityHook = func(txID types.TxID, _ *store.Changeset) error {
+		if injectFailure && txID == 2 {
+			return injected
+		}
+		return nil
+	}
+	t.Cleanup(func() {
+		migrationAfterCommitBeforeDurabilityHook = prevHook
+	})
+
+	firstCalls := 0
+	secondCalls := 0
+	firstHook := func(_ context.Context, mc *MigrationContext) error {
+		firstCalls++
+		if mc.CommittedTxID() != 0 {
+			return nil
+		}
+		tableID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("durable-before-dirty-second")})
+		return err
+	}
+	secondHook := func(_ context.Context, mc *MigrationContext) error {
+		secondCalls++
+		if mc.CommittedTxID() != 1 {
+			return nil
+		}
+		tableID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(2), types.NewString("second-after-dirty-rebuild")})
+		return err
+	}
+	newMod := func() *Module {
+		return validChatModule().
+			MigrationHook(firstHook).
+			MigrationHook(secondHook)
+	}
+
+	rt, err := Build(newMod(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	err = rt.Start(context.Background())
+	if !errors.Is(err, ErrRuntimeRestartRequired) || !errors.Is(err, injected) {
+		t.Fatalf("Start error = %v, want ErrRuntimeRestartRequired wrapping injected failure", err)
+	}
+	if firstCalls != 1 || secondCalls != 1 {
+		t.Fatalf("hook calls after dirty second hook failure first/second = %d/%d, want 1/1", firstCalls, secondCalls)
+	}
+	health := rt.Health()
+	if health.State != RuntimeStateFailed || health.Ready || !health.Degraded || health.LastError == "" {
+		t.Fatalf("health after dirty second hook failure = %+v, want failed not-ready degraded with LastError", health)
+	}
+	requireRuntimeWithoutStartupResources(t, rt)
+
+	err = rt.Start(context.Background())
+	if !errors.Is(err, ErrRuntimeRestartRequired) || !errors.Is(err, injected) {
+		t.Fatalf("same-runtime retry error = %v, want ErrRuntimeRestartRequired wrapping injected failure", err)
+	}
+	if firstCalls != 1 || secondCalls != 1 {
+		t.Fatalf("blocked same-runtime retry reran hooks first/second = %d/%d, want 1/1", firstCalls, secondCalls)
+	}
+
+	injectFailure = false
+	restarted, err := Build(newMod(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("restarted Build: %v", err)
+	}
+	if err := restarted.Start(context.Background()); err != nil {
+		t.Fatalf("restarted Start: %v", err)
+	}
+	defer restarted.Close()
+	if firstCalls != 2 || secondCalls != 2 {
+		t.Fatalf("fresh-runtime retry hook calls first/second = %d/%d, want 2/2", firstCalls, secondCalls)
+	}
+	requireMigrationMessageBodies(t, restarted, "durable-before-dirty-second", "second-after-dirty-rebuild")
+}
+
 func TestMigrationHookLaterFailureAllowsSameRuntimeRetryFromDurableHorizon(t *testing.T) {
 	dir := t.TempDir()
 	boom := errors.New("later hook failed")
