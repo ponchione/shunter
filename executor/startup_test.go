@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sync/atomic"
@@ -319,6 +320,67 @@ func TestStartup_DurabilityFatalFailsClosedBeforeSweep(t *testing.T) {
 	}
 	if got := len(h.dur.txIDs); got != 0 {
 		t.Fatalf("durability calls after failed Startup = %d, want 0", got)
+	}
+}
+
+func TestStartup_DurabilityFatalMidSweepLeavesGateClosedAndPreservesPartialCommit(t *testing.T) {
+	injected := errors.New("disk lost after first sweep commit")
+	firstConn := types.ConnectionID{1}
+	secondConn := types.ConnectionID{2}
+	h := newStartupHarness(t, startupSeed{
+		clients: []sysClientsSeed{
+			{conn: firstConn, identity: types.Identity{11}},
+			{conn: secondConn, identity: types.Identity{22}},
+		},
+	})
+
+	firstEval := true
+	h.subs.onEval = func(store.CommittedReadView) {
+		if firstEval {
+			firstEval = false
+			h.dur.fatalErr = injected
+		}
+	}
+
+	err := h.exec.Startup(context.Background(), nil)
+	if !errors.Is(err, ErrExecutorFatal) || !errors.Is(err, injected) {
+		t.Fatalf("Startup error = %v, want ErrExecutorFatal wrapping injected fatal", err)
+	}
+	if !h.exec.fatal.Load() {
+		t.Fatal("executor fatal latch was not set")
+	}
+	if h.exec.externalReady.Load() {
+		t.Fatal("externalReady should remain false after mid-sweep durability fatal")
+	}
+	rows := h.sysClientsRows()
+	if len(rows) != 1 {
+		t.Fatalf("sys_clients rows after failed Startup = %d, want 1", len(rows))
+	}
+	if got := rows[0].ConnID; !bytes.Equal(got, firstConn[:]) && !bytes.Equal(got, secondConn[:]) {
+		t.Fatalf("remaining conn bytes=%x, want one of %x or %x", got, firstConn[:], secondConn[:])
+	}
+	if got := h.cs.CommittedTxID(); got != 1 {
+		t.Fatalf("committed horizon after partial sweep = %d, want 1", got)
+	}
+	if len(h.dur.txIDs) != 1 || h.dur.txIDs[0] != 1 {
+		t.Fatalf("durability txIDs after failed Startup = %#v, want [1]", h.dur.txIDs)
+	}
+	if len(h.subs.txIDs) != 1 || h.subs.txIDs[0] != 1 {
+		t.Fatalf("subscription txIDs after failed Startup = %#v, want [1]", h.subs.txIDs)
+	}
+
+	err = h.exec.Startup(context.Background(), nil)
+	if !errors.Is(err, ErrExecutorFatal) || !errors.Is(err, injected) {
+		t.Fatalf("second Startup error = %v, want original ErrExecutorFatal wrapping injected fatal", err)
+	}
+	if h.exec.externalReady.Load() {
+		t.Fatal("externalReady should remain false after failed Startup retry")
+	}
+	if rows := h.sysClientsRows(); len(rows) != 1 {
+		t.Fatalf("sys_clients rows after failed retry = %d, want 1", len(rows))
+	}
+	if len(h.dur.txIDs) != 1 || len(h.subs.txIDs) != 1 {
+		t.Fatalf("failed retry performed more post-commit work: durability=%#v subscriptions=%#v", h.dur.txIDs, h.subs.txIDs)
 	}
 }
 
