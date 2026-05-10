@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -580,6 +581,100 @@ func TestMigrationHookLaterFailureAllowsSameRuntimeRetryFromDurableHorizon(t *te
 		t.Fatalf("hook calls after same-runtime retry first/second = %d/%d, want 2/2", firstCalls, secondCalls)
 	}
 	requireMigrationMessageBodies(t, rt, "durable-first", "second-after-retry")
+}
+
+func TestRuntimeExecutorStartupCancelAfterDurableMigrationAllowsRetryFromDurableHorizon(t *testing.T) {
+	dir := t.TempDir()
+	startCtx, cancel := context.WithCancel(context.Background())
+	metrics := &cancelOnStoreCommitMetricsRecorder{
+		recordingMetricsRecorder: &recordingMetricsRecorder{},
+		cancel:                   cancel,
+	}
+	hookCalls := 0
+	mod := validChatModule().MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+		hookCalls++
+		if mc.CommittedTxID() != 0 {
+			return nil
+		}
+		messagesID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		if _, err := mc.Transaction().Insert(messagesID, types.ProductValue{types.NewUint64(1), types.NewString("durable-before-executor-startup-cancel")}); err != nil {
+			return err
+		}
+		sysClientsID, _, ok := mc.Schema().TableByName("sys_clients")
+		if !ok {
+			return fmt.Errorf("sys_clients table missing from migration schema")
+		}
+		clients := []struct {
+			conn     types.ConnectionID
+			identity types.Identity
+		}{
+			{conn: types.ConnectionID{1}, identity: types.Identity{11}},
+			{conn: types.ConnectionID{2}, identity: types.Identity{22}},
+		}
+		for i, client := range clients {
+			_, err := mc.Transaction().Insert(sysClientsID, types.ProductValue{
+				types.NewBytes(client.conn[:]),
+				types.NewBytes(client.identity[:]),
+				types.NewInt64(int64(100 + i)),
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	rt, err := Build(mod, Config{
+		DataDir: dir,
+		Observability: ObservabilityConfig{
+			RuntimeLabel: "executor-startup-cancel-a",
+			Metrics: MetricsConfig{
+				Enabled:  true,
+				Recorder: metrics,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	err = rt.Start(startCtx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Start error = %v, want context.Canceled from executor startup sweep", err)
+	}
+	if hookCalls != 1 {
+		t.Fatalf("hook calls after canceled executor startup = %d, want 1", hookCalls)
+	}
+	health := rt.Health()
+	if health.State != RuntimeStateFailed || health.Ready || health.LastError == "" {
+		t.Fatalf("health after canceled executor startup = %+v, want failed not-ready with LastError", health)
+	}
+	requireRuntimeWithoutStartupResources(t, rt)
+
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("same-runtime retry after canceled executor startup: %v", err)
+	}
+	if hookCalls != 2 {
+		t.Fatalf("hook calls after same-runtime retry = %d, want 2", hookCalls)
+	}
+	requireMigrationMessageBodies(t, rt, "durable-before-executor-startup-cancel")
+	requireRuntimeTableRowCount(t, rt, "sys_clients", 0)
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close after same-runtime retry: %v", err)
+	}
+
+	restarted, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("restarted Build: %v", err)
+	}
+	if err := restarted.Start(context.Background()); err != nil {
+		t.Fatalf("restarted Start: %v", err)
+	}
+	defer restarted.Close()
+	requireMigrationMessageBodies(t, restarted, "durable-before-executor-startup-cancel")
+	requireRuntimeTableRowCount(t, restarted, "sys_clients", 0)
 }
 
 func TestRuntimeCloseDuringMigrationHookKeepsRuntimeNotReadyAndCloseIdempotent(t *testing.T) {
@@ -1185,12 +1280,54 @@ func requireRuntimeClosedWithoutStartupResources(t *testing.T, rt *Runtime) {
 		t.Fatal("runtime ready after Close during startup")
 	}
 	health := rt.Health()
-	if health.State != RuntimeStateClosed || health.Ready ||
-		health.Durability.Started || health.Executor.Started || health.Subscriptions.Started {
-		t.Fatalf("health after Close during startup = %+v, want closed with stopped subsystems", health)
+	if health.State != RuntimeStateClosed || health.Ready {
+		t.Fatalf("health after Close during startup = %+v, want closed not-ready", health)
+	}
+	requireRuntimeWithoutStartupResources(t, rt)
+}
+
+func requireRuntimeWithoutStartupResources(t *testing.T, rt *Runtime) {
+	t.Helper()
+	health := rt.Health()
+	if health.Durability.Started || health.Executor.Started || health.Subscriptions.Started {
+		t.Fatalf("health after failed startup = %+v, want stopped subsystems", health)
 	}
 	if rt.durability != nil || rt.executor != nil || rt.scheduler != nil || rt.fanOutWorker != nil || rt.subscriptions != nil {
-		t.Fatalf("partial resources retained after Close during startup: health=%+v", health)
+		t.Fatalf("partial resources retained after startup failure: health=%+v", health)
+	}
+}
+
+func requireRuntimeTableRowCount(t *testing.T, rt *Runtime, tableName string, want int) {
+	t.Helper()
+	tableID, _, ok := rt.registry.TableByName(tableName)
+	if !ok {
+		t.Fatalf("%s table missing from runtime schema", tableName)
+	}
+	got := 0
+	err := rt.Read(context.Background(), func(view LocalReadView) error {
+		for range view.TableScan(tableID) {
+			got++
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Read %s rows: %v", tableName, err)
+	}
+	if got != want {
+		t.Fatalf("%s rows = %d, want %d", tableName, got, want)
+	}
+}
+
+type cancelOnStoreCommitMetricsRecorder struct {
+	*recordingMetricsRecorder
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (r *cancelOnStoreCommitMetricsRecorder) ObserveHistogram(name MetricName, labels MetricLabels, value float64) {
+	r.recordingMetricsRecorder.ObserveHistogram(name, labels, value)
+	if name == MetricStoreCommitDurationSeconds && labels.Result == "ok" {
+		r.once.Do(r.cancel)
 	}
 }
 
