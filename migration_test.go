@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
@@ -886,6 +887,101 @@ func TestRuntimeCloseDuringMigrationAfterDurableHookKeepsDurableStateRecoverable
 	requireMigrationMessageBodies(t, restarted, "durable-before-close")
 }
 
+func TestRuntimeCloseDuringExecutorStartupAfterDurableMigrationUnwindsCleanly(t *testing.T) {
+	dir := t.TempDir()
+	metrics := &blockOnStoreCommitMetricsRecorder{
+		recordingMetricsRecorder: &recordingMetricsRecorder{},
+		blocked:                  make(chan struct{}),
+		release:                  make(chan struct{}),
+	}
+	defer metrics.releaseBlock()
+
+	hookCalls := 0
+	mod := validChatModule().MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+		hookCalls++
+		messagesID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		if _, err := mc.Transaction().Insert(messagesID, types.ProductValue{types.NewUint64(1), types.NewString("durable-before-executor-close")}); err != nil {
+			return err
+		}
+		sysClientsID, _, ok := mc.Schema().TableByName("sys_clients")
+		if !ok {
+			return fmt.Errorf("sys_clients table missing from migration schema")
+		}
+		conn := types.ConnectionID{42}
+		identity := types.Identity{99}
+		_, err := mc.Transaction().Insert(sysClientsID, types.ProductValue{
+			types.NewBytes(conn[:]),
+			types.NewBytes(identity[:]),
+			types.NewInt64(123),
+		})
+		return err
+	})
+
+	rt, err := Build(mod, Config{
+		DataDir:        dir,
+		EnableProtocol: true,
+		Observability: ObservabilityConfig{
+			RuntimeLabel: "executor-startup-close-a",
+			Metrics: MetricsConfig{
+				Enabled:  true,
+				Recorder: metrics,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	startErr := make(chan error, 1)
+	go func() {
+		startErr <- rt.Start(context.Background())
+	}()
+	select {
+	case <-metrics.blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime did not enter executor startup sweep")
+	}
+	if hookCalls != 1 {
+		t.Fatalf("hook calls before Close = %d, want 1", hookCalls)
+	}
+	if rt.Ready() {
+		t.Fatal("runtime ready while blocked in executor startup")
+	}
+
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close during executor startup: %v", err)
+	}
+	requireRuntimeClosedWithoutStartupResources(t, rt)
+	if err := rt.Close(); err != nil {
+		t.Fatalf("second Close during executor startup: %v", err)
+	}
+
+	metrics.releaseBlock()
+	select {
+	case err := <-startErr:
+		if !errors.Is(err, ErrRuntimeClosed) {
+			t.Fatalf("Start after Close during executor startup error = %v, want ErrRuntimeClosed", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start did not unwind after Close during executor startup")
+	}
+	requireRuntimeClosedWithoutStartupResources(t, rt)
+
+	restarted, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("restarted Build: %v", err)
+	}
+	if err := restarted.Start(context.Background()); err != nil {
+		t.Fatalf("restarted Start: %v", err)
+	}
+	defer restarted.Close()
+	requireMigrationMessageBodies(t, restarted, "durable-before-executor-close")
+	requireRuntimeTableRowCount(t, restarted, "sys_clients", 0)
+}
+
 func TestRunDataDirMigrationsExecutesOfflineAndLeavesModuleBuildable(t *testing.T) {
 	dir := t.TempDir()
 	mod := validChatModule()
@@ -1382,6 +1478,9 @@ func requireRuntimeWithoutStartupResources(t *testing.T, rt *Runtime) {
 	if rt.durability != nil || rt.executor != nil || rt.scheduler != nil || rt.fanOutWorker != nil || rt.subscriptions != nil {
 		t.Fatalf("partial resources retained after startup failure: health=%+v", health)
 	}
+	if rt.protocolConns != nil || rt.protocolInbox != nil || rt.protocolSender != nil || rt.protocolServer != nil {
+		t.Fatalf("partial protocol resources retained after startup failure: health=%+v", health)
+	}
 }
 
 func requireRuntimeTableRowCount(t *testing.T, rt *Runtime, tableName string, want int) {
@@ -1416,6 +1515,29 @@ func (r *cancelOnStoreCommitMetricsRecorder) ObserveHistogram(name MetricName, l
 	if name == MetricStoreCommitDurationSeconds && labels.Result == "ok" {
 		r.once.Do(r.cancel)
 	}
+}
+
+type blockOnStoreCommitMetricsRecorder struct {
+	*recordingMetricsRecorder
+	blocked     chan struct{}
+	release     chan struct{}
+	blockOnce   sync.Once
+	releaseOnce sync.Once
+}
+
+func (r *blockOnStoreCommitMetricsRecorder) ObserveHistogram(name MetricName, labels MetricLabels, value float64) {
+	r.recordingMetricsRecorder.ObserveHistogram(name, labels, value)
+	if name != MetricStoreCommitDurationSeconds || labels.Result != "ok" {
+		return
+	}
+	r.blockOnce.Do(func() {
+		close(r.blocked)
+		<-r.release
+	})
+}
+
+func (r *blockOnStoreCommitMetricsRecorder) releaseBlock() {
+	r.releaseOnce.Do(func() { close(r.release) })
 }
 
 func requireMigrationHookResults(t *testing.T, got []MigrationHookResult, want ...MigrationHookResult) {
