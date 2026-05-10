@@ -357,11 +357,18 @@ func TestMigrationHookContextCancelAfterHookRollsBackAndBlocksStart(t *testing.T
 	requireMigrationMessageBodies(t, restarted)
 }
 
-func TestMigrationHookContextCancelAfterSecondHookPreservesDurableFirstHook(t *testing.T) {
+func TestMigrationHookContextCancelAfterSecondHookAllowsSameRuntimeRetryFromDurableHorizon(t *testing.T) {
 	dir := t.TempDir()
-	ctx, cancel := context.WithCancel(context.Background())
+	startCtx, cancel := context.WithCancel(context.Background())
+	cancelFirstAttempt := true
+	firstCalls := 0
+	secondCalls := 0
 	mod := validChatModule().
 		MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+			firstCalls++
+			if mc.CommittedTxID() != 0 {
+				return nil
+			}
 			tableID, _, ok := mc.Schema().TableByName("messages")
 			if !ok {
 				return fmt.Errorf("messages table missing from migration schema")
@@ -370,27 +377,57 @@ func TestMigrationHookContextCancelAfterSecondHookPreservesDurableFirstHook(t *t
 			return err
 		}).
 		MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+			secondCalls++
+			if mc.CommittedTxID() != 1 {
+				return fmt.Errorf("second hook committed tx id = %d, want durable first hook horizon", mc.CommittedTxID())
+			}
 			tableID, _, ok := mc.Schema().TableByName("messages")
 			if !ok {
 				return fmt.Errorf("messages table missing from migration schema")
 			}
-			if _, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(2), types.NewString("startup-second-canceled")}); err != nil {
+			body := "startup-second-after-retry"
+			if cancelFirstAttempt {
+				body = "startup-second-canceled"
+			}
+			_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(2), types.NewString(body)})
+			if err != nil {
 				return err
 			}
-			cancel()
-			return nil
+			if cancelFirstAttempt {
+				cancel()
+			}
+			return err
 		})
 
 	rt, err := Build(mod, Config{DataDir: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	err = rt.Start(ctx)
+	err = rt.Start(startCtx)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Start error = %v, want context.Canceled", err)
 	}
 	if rt.Ready() {
 		t.Fatal("runtime ready after canceled second migration hook")
+	}
+	if firstCalls != 1 || secondCalls != 1 {
+		t.Fatalf("hook calls after cancellation first/second = %d/%d, want 1/1", firstCalls, secondCalls)
+	}
+	health := rt.Health()
+	if health.State != RuntimeStateFailed || health.Ready || health.LastError == "" {
+		t.Fatalf("health after canceled second migration hook = %+v, want failed not-ready with LastError", health)
+	}
+
+	cancelFirstAttempt = false
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("same-runtime retry after canceled second migration hook: %v", err)
+	}
+	if firstCalls != 2 || secondCalls != 2 {
+		t.Fatalf("hook calls after same-runtime retry first/second = %d/%d, want 2/2", firstCalls, secondCalls)
+	}
+	requireMigrationMessageBodies(t, rt, "startup-first", "startup-second-after-retry")
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close after same-runtime retry: %v", err)
 	}
 
 	restarted, err := Build(validChatModule(), Config{DataDir: dir})
@@ -401,7 +438,7 @@ func TestMigrationHookContextCancelAfterSecondHookPreservesDurableFirstHook(t *t
 		t.Fatalf("restarted Start: %v", err)
 	}
 	defer restarted.Close()
-	requireMigrationMessageBodies(t, restarted, "startup-first")
+	requireMigrationMessageBodies(t, restarted, "startup-first", "startup-second-after-retry")
 }
 
 func TestMigrationHookDurabilityFailureBlocksSameRuntimeRetry(t *testing.T) {
