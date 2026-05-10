@@ -107,6 +107,29 @@ func (o *executorMetricObserver) requireCommandDuration(t *testing.T, kind, resu
 	t.Fatalf("missing command duration kind=%q result=%q in %+v", kind, result, o.commandDurations)
 }
 
+func (o *executorMetricObserver) waitCommandDuration(t *testing.T, kind, result string) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		o.mu.Lock()
+		for _, got := range o.commandDurations {
+			if got.kind == kind && got.result == result {
+				o.mu.Unlock()
+				return
+			}
+		}
+		o.mu.Unlock()
+		select {
+		case <-tick.C:
+		case <-deadline:
+			o.requireCommandDuration(t, kind, result)
+			return
+		}
+	}
+}
+
 func (o *executorMetricObserver) requireNoCommandDuration(t *testing.T, kind, result string) {
 	t.Helper()
 	o.mu.Lock()
@@ -235,6 +258,7 @@ func TestExecutorMetricsCommandDurationRecordsOnlyDequeuedCommands(t *testing.T)
 	if resp.Status != StatusCommitted {
 		t.Fatalf("status = %d, err=%v, want committed", resp.Status, resp.Error)
 	}
+	observer.waitCommandDuration(t, "call_reducer", "ok")
 	observer.requireCommand(t, "call_reducer", "ok")
 	observer.requireCommandDuration(t, "call_reducer", "ok")
 	observer.requireStoreCommitDuration(t, "ok")
