@@ -114,7 +114,10 @@ func (r *Runtime) Start(ctx context.Context) error {
 	cleanupDurability := true
 	defer func() {
 		if cleanupDurability {
-			_, _ = durability.Close()
+			finalDurableTxID, closeErr := durability.Close()
+			if closeErr == nil {
+				r.refreshStartupRecoveryAfterDurabilityClose(types.TxID(finalDurableTxID))
+			}
 		}
 	}()
 
@@ -376,6 +379,36 @@ func (r *Runtime) blockStartRetry(err error) {
 	if r.stateName == RuntimeStateFailed {
 		r.startRetryBlockedErr = err
 	}
+	r.mu.Unlock()
+}
+
+func (r *Runtime) refreshStartupRecoveryAfterDurabilityClose(finalDurableTxID types.TxID) {
+	if finalDurableTxID == 0 {
+		return
+	}
+	r.mu.Lock()
+	previousNextTxID := r.resumePlan.NextTxID
+	r.mu.Unlock()
+	if previousNextTxID == 0 || finalDurableTxID < previousNextTxID {
+		return
+	}
+
+	// Startup owns a temporary durability worker before r.durability is
+	// installed. If it durably appends migration records and a later startup
+	// step fails, a same-runtime retry must resume from the new log horizon.
+	state, recoveredTxID, resumePlan, recoveryReport, err := openOrBootstrapState(r.dataDir, r.registry)
+	if err != nil {
+		return
+	}
+	state.SetObserver(r.observability)
+	state.RecordMemoryUsage()
+
+	r.mu.Lock()
+	r.state = state
+	r.recoveredTxID = recoveredTxID
+	r.durableTxID = recoveredTxID
+	r.resumePlan = resumePlan
+	r.recovery = newSuccessfulRuntimeRecoveryFacts(recoveryReport)
 	r.mu.Unlock()
 }
 

@@ -8,6 +8,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Runtime startup now requires rebuilding a fresh Runtime before retrying when
   a startup migration mutates in-memory state but fails before durability
   confirmation.
+- Runtime startup now refreshes recovered state and commit-log resume state
+  after a failed startup that already durably committed migration hooks, so
+  non-dirty migration failures can be retried on the same Runtime.
 - Snapshot creation through `Runtime.CreateSnapshot` now captures the current
   committed horizon and snapshot body under one read lock.
 - Executor response delivery now uses nonblocking sends, and subscription

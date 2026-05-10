@@ -407,8 +407,12 @@ func TestMigrationHookContextCancelAfterSecondHookPreservesDurableFirstHook(t *t
 func TestMigrationHookDurabilityFailureBlocksSameRuntimeRetry(t *testing.T) {
 	dir := t.TempDir()
 	injected := errors.New("injected durability failure")
+	injectFailure := true
 	prevHook := migrationAfterCommitBeforeDurabilityHook
 	migrationAfterCommitBeforeDurabilityHook = func(types.TxID, *store.Changeset) error {
+		if !injectFailure {
+			return nil
+		}
 		return injected
 	}
 	t.Cleanup(func() {
@@ -416,7 +420,7 @@ func TestMigrationHookDurabilityFailureBlocksSameRuntimeRetry(t *testing.T) {
 	})
 
 	hookCalls := 0
-	mod := validChatModule().MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+	hook := func(_ context.Context, mc *MigrationContext) error {
 		hookCalls++
 		tableID, _, ok := mc.Schema().TableByName("messages")
 		if !ok {
@@ -424,7 +428,8 @@ func TestMigrationHookDurabilityFailureBlocksSameRuntimeRetry(t *testing.T) {
 		}
 		_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("dirty-only")})
 		return err
-	})
+	}
+	mod := validChatModule().MigrationHook(hook)
 
 	rt, err := Build(mod, Config{DataDir: dir})
 	if err != nil {
@@ -440,13 +445,162 @@ func TestMigrationHookDurabilityFailureBlocksSameRuntimeRetry(t *testing.T) {
 	if rt.Ready() {
 		t.Fatal("runtime ready after dirty migration durability failure")
 	}
+	health := rt.Health()
+	if health.State != RuntimeStateFailed || health.Ready || !health.Degraded {
+		t.Fatalf("health after dirty migration failure = %+v, want failed not-ready degraded", health)
+	}
+	if health.LastError == "" {
+		t.Fatal("LastError not recorded after dirty migration durability failure")
+	}
 
 	err = rt.Start(context.Background())
-	if !errors.Is(err, ErrRuntimeRestartRequired) {
-		t.Fatalf("same-runtime retry error = %v, want ErrRuntimeRestartRequired", err)
+	if !errors.Is(err, ErrRuntimeRestartRequired) || !errors.Is(err, injected) {
+		t.Fatalf("same-runtime retry error = %v, want ErrRuntimeRestartRequired wrapping injected failure", err)
 	}
 	if hookCalls != 1 {
 		t.Fatalf("same-runtime retry reran migration hook; calls = %d, want 1", hookCalls)
+	}
+	if rt.Ready() {
+		t.Fatal("runtime ready after blocked same-runtime retry")
+	}
+
+	injectFailure = false
+	restarted, err := Build(validChatModule().MigrationHook(hook), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("restarted Build: %v", err)
+	}
+	if err := restarted.Start(context.Background()); err != nil {
+		t.Fatalf("restarted Start: %v", err)
+	}
+	defer restarted.Close()
+	if hookCalls != 2 {
+		t.Fatalf("fresh-runtime retry hook calls = %d, want 2", hookCalls)
+	}
+	requireMigrationMessageBodies(t, restarted, "dirty-only")
+}
+
+func TestMigrationHookLaterFailureAllowsSameRuntimeRetryFromDurableHorizon(t *testing.T) {
+	dir := t.TempDir()
+	boom := errors.New("later hook failed")
+	secondFails := true
+	firstCalls := 0
+	secondCalls := 0
+
+	mod := validChatModule().
+		MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+			firstCalls++
+			if mc.CommittedTxID() != 0 {
+				return nil
+			}
+			tableID, _, ok := mc.Schema().TableByName("messages")
+			if !ok {
+				return fmt.Errorf("messages table missing from migration schema")
+			}
+			_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("durable-first")})
+			return err
+		}).
+		MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+			secondCalls++
+			if secondFails {
+				return boom
+			}
+			if mc.CommittedTxID() != 1 {
+				return fmt.Errorf("second hook committed tx id = %d, want durable first hook horizon", mc.CommittedTxID())
+			}
+			tableID, _, ok := mc.Schema().TableByName("messages")
+			if !ok {
+				return fmt.Errorf("messages table missing from migration schema")
+			}
+			_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(2), types.NewString("second-after-retry")})
+			return err
+		})
+
+	rt, err := Build(mod, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	err = rt.Start(context.Background())
+	if err == nil || !errors.Is(err, boom) {
+		t.Fatalf("Start error = %v, want later hook failure", err)
+	}
+	if rt.Ready() {
+		t.Fatal("runtime ready after later migration hook failure")
+	}
+	if firstCalls != 1 || secondCalls != 1 {
+		t.Fatalf("hook calls after failure first/second = %d/%d, want 1/1", firstCalls, secondCalls)
+	}
+	health := rt.Health()
+	if health.State != RuntimeStateFailed || health.Ready || health.LastError == "" {
+		t.Fatalf("health after later hook failure = %+v, want failed not-ready with LastError", health)
+	}
+
+	secondFails = false
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("same-runtime retry after non-dirty later hook failure: %v", err)
+	}
+	defer rt.Close()
+	if firstCalls != 2 || secondCalls != 2 {
+		t.Fatalf("hook calls after same-runtime retry first/second = %d/%d, want 2/2", firstCalls, secondCalls)
+	}
+	requireMigrationMessageBodies(t, rt, "durable-first", "second-after-retry")
+}
+
+func TestRuntimeCloseDuringMigrationHookKeepsRuntimeNotReadyAndCloseIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	hookStarted := make(chan struct{})
+	releaseHook := make(chan struct{})
+	hookCalls := 0
+	mod := validChatModule().MigrationHook(func(ctx context.Context, _ *MigrationContext) error {
+		hookCalls++
+		close(hookStarted)
+		select {
+		case <-releaseHook:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+
+	rt, err := Build(mod, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	startErr := make(chan error, 1)
+	go func() {
+		startErr <- rt.Start(context.Background())
+	}()
+	<-hookStarted
+
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close during migration hook: %v", err)
+	}
+	if rt.Ready() {
+		t.Fatal("runtime ready immediately after Close during migration hook")
+	}
+	if got := rt.Health().State; got != RuntimeStateClosed {
+		t.Fatalf("state after Close during migration hook = %q, want closed", got)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("second Close during blocked startup: %v", err)
+	}
+
+	close(releaseHook)
+	if err := <-startErr; !errors.Is(err, ErrRuntimeClosed) {
+		t.Fatalf("Start after Close during migration hook error = %v, want ErrRuntimeClosed", err)
+	}
+	if hookCalls != 1 {
+		t.Fatalf("hook calls = %d, want 1", hookCalls)
+	}
+	if rt.Ready() {
+		t.Fatal("runtime ready after Start unwound from Close during migration hook")
+	}
+	health := rt.Health()
+	if health.State != RuntimeStateClosed || health.Ready ||
+		health.Durability.Started || health.Executor.Started || health.Subscriptions.Started {
+		t.Fatalf("health after Start unwound from Close during migration hook = %+v, want closed with stopped subsystems", health)
+	}
+	if rt.durability != nil || rt.executor != nil || rt.scheduler != nil || rt.fanOutWorker != nil || rt.subscriptions != nil {
+		t.Fatalf("partial resources retained after Close during migration hook: health=%+v", health)
 	}
 
 	restarted, err := Build(validChatModule(), Config{DataDir: dir})
