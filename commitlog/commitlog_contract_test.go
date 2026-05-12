@@ -270,6 +270,20 @@ func TestSegmentWriterEnforcesStartTxAlignment(t *testing.T) {
 	if err := sw.Append(&Record{TxID: 100, RecordType: RecordTypeChangeset, Payload: []byte("good")}); err != nil {
 		t.Fatalf("first append at startTx should succeed: %v", err)
 	}
+	sizeAfterFirst := sw.Size()
+	offsetAfterFirst, ok := sw.LastRecordByteOffset()
+	if !ok {
+		t.Fatal("last record offset should be set after first append")
+	}
+	if err := sw.Append(&Record{TxID: 102, RecordType: RecordTypeChangeset, Payload: []byte("gap")}); err == nil {
+		t.Fatal("expected skipped tx append to fail")
+	}
+	if got := sw.Size(); got != sizeAfterFirst {
+		t.Fatalf("size after rejected gap append = %d, want %d", got, sizeAfterFirst)
+	}
+	if off, ok := sw.LastRecordByteOffset(); !ok || off != offsetAfterFirst {
+		t.Fatalf("last record offset after rejected gap append = (%d, %v), want (%d, true)", off, ok, offsetAfterFirst)
+	}
 	if err := sw.Append(&Record{TxID: 101, RecordType: RecordTypeChangeset, Payload: []byte("next")}); err != nil {
 		t.Fatalf("second append after aligned first append should succeed: %v", err)
 	}
@@ -437,6 +451,37 @@ func TestChangesetCodecDeterministicOrderingAndLengthPrefixes(t *testing.T) {
 	}
 }
 
+func TestDecodeSchemaSnapshotRejectsNullableAutoIncrementColumn(t *testing.T) {
+	var buf bytes.Buffer
+	write := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(writeUint32Full(&buf, 1)) // schema version
+	write(writeUint32Full(&buf, 1)) // table count
+	write(writeUint32Full(&buf, 0)) // table ID
+	write(writeString(&buf, "players"))
+	write(writeUint32Full(&buf, 1)) // column count
+	write(writeUint32Full(&buf, 0)) // column index
+	write(writeString(&buf, "id"))
+	write(writeFull(&buf, []byte{byte(schema.KindUint64), 1, 1}))
+	write(writeUint32Full(&buf, 1)) // index count
+	write(writeString(&buf, "primary"))
+	write(writeFull(&buf, []byte{1, 1}))
+	write(writeUint32Full(&buf, 1)) // index column count
+	write(writeUint32Full(&buf, 0))
+
+	_, _, err := DecodeSchemaSnapshot(bytes.NewReader(buf.Bytes()))
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot", err)
+	}
+	if !strings.Contains(err.Error(), "nullable auto_increment") {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want nullable auto_increment detail", err)
+	}
+}
+
 func TestDurabilityWorkerBatchesAndTracksDurableTx(t *testing.T) {
 	dir := t.TempDir()
 	opts := DefaultCommitLogOptions()
@@ -476,6 +521,33 @@ func TestDurabilityWorkerRejectsBadLifecycleCalls(t *testing.T) {
 		_, _ = dw.Close()
 	}()
 	dw.EnqueueCommitted(1, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
+}
+
+func TestDurabilityWorkerRejectsSkippedCommittedTxID(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 8
+	dw, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(1, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
+	defer func() {
+		if _, err := dw.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	}()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected skipped tx panic")
+		}
+		got, ok := r.(string)
+		if !ok || !strings.Contains(got, "want 2") {
+			t.Fatalf("skipped tx panic = %#v, want detail containing want 2", r)
+		}
+	}()
+	dw.EnqueueCommitted(3, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
 }
 
 func TestDurabilityWorkerCloseThenEnqueuePanics(t *testing.T) {
@@ -520,6 +592,7 @@ func TestDurabilityWorkerCloseWhileEnqueueBlockedReturnsControlledClosePanic(t *
 		ch:      make(chan durabilityItem, 1),
 		closeCh: make(chan struct{}),
 		done:    make(chan struct{}),
+		lastEnq: 1,
 		opts:    CommitLogOptions{DrainBatchSize: 1},
 	}
 	close(dw.done)

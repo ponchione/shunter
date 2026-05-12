@@ -13,6 +13,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   calling the Go networking stack.
 - Protocol auth rejection responses now return generic client-safe messages
   while preserving detailed causes for internal observation.
+- Commit-log segment appends and durability enqueue now reject skipped
+  transaction IDs before writing unrecoverable history gaps.
+- Snapshot schema decoding now rejects nullable auto-increment columns before
+  row recovery can inspect incompatible values.
 - The preferred Go toolchain is now pinned to Go 1.26.3, which includes fixes
   for standard-library vulnerabilities reported against Go 1.26.2.
 

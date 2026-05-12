@@ -312,9 +312,16 @@ func (dw *DurabilityWorker) EnqueueCommitted(txID uint64, cs *store.Changeset) {
 		dw.stateMu.Unlock()
 		panic("commitlog: enqueue after close")
 	}
-	if txID <= dw.lastEnq {
+	want, ok := dw.nextEnqueuedTxIDLocked()
+	if !ok {
+		last := dw.lastEnq
 		dw.stateMu.Unlock()
-		panic(fmt.Sprintf("commitlog: enqueue tx %d after %d", txID, dw.lastEnq))
+		panic(fmt.Sprintf("commitlog: enqueue tx %d after maximum tx_id %d", txID, last))
+	}
+	if txID != want {
+		last := dw.lastEnq
+		dw.stateMu.Unlock()
+		panic(fmt.Sprintf("commitlog: enqueue tx %d after %d, want %d", txID, last, want))
 	}
 	dw.lastEnq = txID
 	dw.sends.Add(1)
@@ -339,6 +346,19 @@ func (dw *DurabilityWorker) EnqueueCommitted(txID uint64, cs *store.Changeset) {
 		}
 		panic("commitlog: enqueue after worker stop")
 	}
+}
+
+func (dw *DurabilityWorker) nextEnqueuedTxIDLocked() (uint64, bool) {
+	if dw.lastEnq != 0 {
+		if dw.lastEnq == ^uint64(0) {
+			return 0, false
+		}
+		return dw.lastEnq + 1, true
+	}
+	if dw.seg != nil && dw.seg.startTx != 0 {
+		return dw.seg.startTx, true
+	}
+	return 1, true
 }
 
 // DurableTxID returns the latest durably written TxID.

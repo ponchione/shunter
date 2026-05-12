@@ -94,58 +94,58 @@ func TestSegmentWriterRejectsBootstrapStartTx(t *testing.T) {
 // Pin 14.
 func TestSegmentReaderSeekToTxIDUsesIndex(t *testing.T) {
 	dir := t.TempDir()
-	entries := buildSegmentWithTxIDs(t, dir, []uint64{10, 20, 30, 40, 50})
+	entries := buildSegmentWithTxIDs(t, dir, []uint64{10, 11, 12, 13, 14})
 
-	sparse := []OffsetIndexEntry{entries[0], entries[2], entries[4]} // {10, 30, 50}
+	sparse := []OffsetIndexEntry{entries[0], entries[2], entries[4]} // {10, 12, 14}
 	idx := populateSparseIndex(t, filepath.Join(dir, "00000000000000000010.idx"), 16, sparse)
 	defer idx.Close()
 
 	sr := openSegmentReader(t, dir, 10)
 	defer sr.Close()
 
-	if err := sr.SeekToTxID(35, idx); err != nil {
-		t.Fatalf("SeekToTxID(35): %v", err)
+	if err := sr.SeekToTxID(13, idx); err != nil {
+		t.Fatalf("SeekToTxID(13): %v", err)
 	}
 	rec, err := sr.Next()
 	if err != nil {
 		t.Fatalf("Next after seek: %v", err)
 	}
-	if rec.TxID != 40 {
-		t.Fatalf("landed on TxID %d, want 40", rec.TxID)
+	if rec.TxID != 13 {
+		t.Fatalf("landed on TxID %d, want 13", rec.TxID)
 	}
 }
 
 // Pin 15.
 func TestSegmentReaderSeekToTxIDFallsBackWithoutIndex(t *testing.T) {
 	dir := t.TempDir()
-	buildSegmentWithTxIDs(t, dir, []uint64{10, 20, 30, 40, 50})
+	buildSegmentWithTxIDs(t, dir, []uint64{10, 11, 12, 13, 14})
 
 	sr := openSegmentReader(t, dir, 10)
 	defer sr.Close()
 
-	if err := sr.SeekToTxID(35, nil); err != nil {
-		t.Fatalf("SeekToTxID(35, nil): %v", err)
+	if err := sr.SeekToTxID(13, nil); err != nil {
+		t.Fatalf("SeekToTxID(13, nil): %v", err)
 	}
 	rec, err := sr.Next()
 	if err != nil {
 		t.Fatalf("Next after seek: %v", err)
 	}
-	if rec.TxID != 40 {
-		t.Fatalf("landed on TxID %d, want 40", rec.TxID)
+	if rec.TxID != 13 {
+		t.Fatalf("landed on TxID %d, want 13", rec.TxID)
 	}
 
 	// Exact hit: target present in segment.
 	sr2 := openSegmentReader(t, dir, 10)
 	defer sr2.Close()
-	if err := sr2.SeekToTxID(30, nil); err != nil {
-		t.Fatalf("SeekToTxID(30, nil): %v", err)
+	if err := sr2.SeekToTxID(12, nil); err != nil {
+		t.Fatalf("SeekToTxID(12, nil): %v", err)
 	}
 	rec, err = sr2.Next()
 	if err != nil {
 		t.Fatalf("Next after seek: %v", err)
 	}
-	if rec.TxID != 30 {
-		t.Fatalf("landed on TxID %d, want 30", rec.TxID)
+	if rec.TxID != 12 {
+		t.Fatalf("landed on TxID %d, want 12", rec.TxID)
 	}
 
 	// Target past end: EOF on Next.
@@ -162,30 +162,30 @@ func TestSegmentReaderSeekToTxIDFallsBackWithoutIndex(t *testing.T) {
 // Pin 16.
 func TestSegmentReaderSeekToTxIDFallsBackOnMissingKey(t *testing.T) {
 	dir := t.TempDir()
-	entries := buildSegmentWithTxIDs(t, dir, []uint64{10, 20, 30, 40, 50})
+	entries := buildSegmentWithTxIDs(t, dir, []uint64{10, 11, 12, 13, 14})
 
-	// Populate the index starting at TxID 30 so KeyLookup(15) returns
-	// ErrOffsetIndexKeyNotFound (15 is below the first indexed key).
-	sparse := []OffsetIndexEntry{entries[2], entries[4]} // {30, 50}
+	// Populate the index starting at TxID 12 so KeyLookup(11) returns
+	// ErrOffsetIndexKeyNotFound (11 is below the first indexed key).
+	sparse := []OffsetIndexEntry{entries[2], entries[4]} // {12, 14}
 	idx := populateSparseIndex(t, filepath.Join(dir, "00000000000000000010.idx"), 16, sparse)
 	defer idx.Close()
 
-	if _, _, err := idx.KeyLookup(15); !errors.Is(err, ErrOffsetIndexKeyNotFound) {
-		t.Fatalf("precondition: KeyLookup(15) = %v, want ErrOffsetIndexKeyNotFound", err)
+	if _, _, err := idx.KeyLookup(11); !errors.Is(err, ErrOffsetIndexKeyNotFound) {
+		t.Fatalf("precondition: KeyLookup(11) = %v, want ErrOffsetIndexKeyNotFound", err)
 	}
 
 	sr := openSegmentReader(t, dir, 10)
 	defer sr.Close()
 
-	if err := sr.SeekToTxID(15, idx); err != nil {
-		t.Fatalf("SeekToTxID(15): %v", err)
+	if err := sr.SeekToTxID(11, idx); err != nil {
+		t.Fatalf("SeekToTxID(11): %v", err)
 	}
 	rec, err := sr.Next()
 	if err != nil {
 		t.Fatalf("Next after seek: %v", err)
 	}
-	if rec.TxID != 20 {
-		t.Fatalf("landed on TxID %d, want 20", rec.TxID)
+	if rec.TxID != 11 {
+		t.Fatalf("landed on TxID %d, want 11", rec.TxID)
 	}
 }
 
@@ -222,7 +222,7 @@ func TestSegmentReaderSeekToTxIDFallsBackOnInvalidIndexOffset(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			entries := buildSegmentWithTxIDs(t, dir, []uint64{10, 20, 30, 40, 50})
+			entries := buildSegmentWithTxIDs(t, dir, []uint64{10, 11, 12, 13, 14})
 
 			idxPath := filepath.Join(dir, OffsetIndexFileName(10))
 			mut, err := CreateOffsetIndex(idxPath, 4)
@@ -245,15 +245,15 @@ func TestSegmentReaderSeekToTxIDFallsBackOnInvalidIndexOffset(t *testing.T) {
 			sr := openSegmentReader(t, dir, 10)
 			defer sr.Close()
 
-			if err := sr.SeekToTxID(25, idx); err != nil {
-				t.Fatalf("SeekToTxID(25): %v", err)
+			if err := sr.SeekToTxID(12, idx); err != nil {
+				t.Fatalf("SeekToTxID(12): %v", err)
 			}
 			rec, err := sr.Next()
 			if err != nil {
 				t.Fatalf("Next after seek: %v", err)
 			}
-			if rec.TxID != 30 {
-				t.Fatalf("landed on TxID %d, want 30 after linear fallback", rec.TxID)
+			if rec.TxID != 12 {
+				t.Fatalf("landed on TxID %d, want 12 after linear fallback", rec.TxID)
 			}
 		})
 	}

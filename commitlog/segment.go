@@ -373,7 +373,7 @@ func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) 
 	}, nil
 }
 
-// Append writes a record. TxID must be monotonically increasing.
+// Append writes a record. TxID must be contiguous within the segment.
 func (sw *SegmentWriter) Append(rec *Record) error {
 	if rec.RecordType != RecordTypeChangeset {
 		return &UnknownRecordTypeError{Type: rec.RecordType}
@@ -381,12 +381,18 @@ func (sw *SegmentWriter) Append(rec *Record) error {
 	if rec.Flags != 0 {
 		return ErrBadFlags
 	}
-	if sw.lastTx == 0 {
+	if !sw.hasLastRecord {
 		if rec.TxID != sw.startTx {
 			return fmt.Errorf("commitlog: first tx_id %d must equal segment start %d", rec.TxID, sw.startTx)
 		}
-	} else if rec.TxID <= sw.lastTx {
-		return fmt.Errorf("commitlog: tx_id %d not > last %d", rec.TxID, sw.lastTx)
+	} else {
+		if sw.lastTx == ^uint64(0) {
+			return fmt.Errorf("commitlog: tx_id %d after maximum tx_id %d", rec.TxID, sw.lastTx)
+		}
+		want := sw.lastTx + 1
+		if rec.TxID != want {
+			return fmt.Errorf("commitlog: tx_id %d after %d, want %d", rec.TxID, sw.lastTx, want)
+		}
 	}
 	byteOffset := sw.size
 	if err := EncodeRecord(sw.bw, rec); err != nil {

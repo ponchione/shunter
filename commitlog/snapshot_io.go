@@ -209,6 +209,9 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 				return nil, 0, err
 			}
 			if autoIncrement {
+				if nullable {
+					return nil, 0, fmt.Errorf("%w: schema snapshot column %q in table %d has nullable auto_increment", ErrSnapshot, colName, tableID)
+				}
 				if _, _, ok := schema.AutoIncrementBounds(kind); !ok {
 					return nil, 0, fmt.Errorf("%w: schema snapshot column %q in table %d has invalid auto_increment type %s", ErrSnapshot, colName, tableID, kind)
 				}

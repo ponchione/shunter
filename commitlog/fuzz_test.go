@@ -767,10 +767,7 @@ func segmentSeekFuzzTxIDs(r *fuzzByteReader, maxRecords int) []uint64 {
 	txs := make([]uint64, n)
 	txID := uint64(r.txID(8)) + 1
 	for i := range txs {
-		if i > 0 {
-			txID += uint64(r.txID(5)) + 1
-		}
-		txs[i] = txID
+		txs[i] = txID + uint64(i)
 	}
 	return txs
 }
