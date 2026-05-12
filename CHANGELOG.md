@@ -2,6 +2,10 @@
 
 Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
+## v0.1.2-dev
+
+- Current development line.
+
 ## v0.1.1 - 2026-05-12
 
 - Added network-level protocol coverage for slow WebSocket readers and
