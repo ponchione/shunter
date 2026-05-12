@@ -147,6 +147,26 @@ override the TypeScript runtime import specifier for app-scoped package paths,
 future owned npm scopes, workspace packages, `file:` dependencies, or vendored
 paths.
 
+The v1 TypeScript runtime is package-shaped for private local installs. Apps can
+depend on `@shunter/client` through a local tarball, `file:` path, or npm
+workspace package; public npm publishing is not part of the v1 requirement. Apps
+that use an app-scoped local runtime name must generate bindings with the same
+runtime import override, for example `@app/shunter-runtime`, so generated code
+does not reach into repo-relative source paths.
+
+Generated `shunterContract` metadata can be passed to `createShunterClient()`.
+When supplied, the client validates contract format/version and protocol
+metadata before opening a WebSocket. Apps that know the expected module name or
+module version can call `assertGeneratedContractCompatible()` with those values
+to catch stale or wrong-module generated bindings before connecting.
+
+The supported TypeScript runtime target is browsers and Electron renderers with
+standard Web APIs. Reconnect and resubscription are opt-in, and disconnected
+intervals are cache boundaries; callers should re-read or use the replayed
+initial snapshot after reconnect for an authoritative view. Server-side SDK APIs,
+framework adapters, and broad non-browser host matrices remain out of scope for
+v1.
+
 Generated identifier normalization and collision suffixes are stable for v1
 codegen output. Names are emitted as TypeScript-safe identifiers by splitting
 on non-letter and non-digit separators, applying the category's camel or Pascal

@@ -1,7 +1,10 @@
 import {
   SHUNTER_SUBPROTOCOL_V1,
+  SHUNTER_MODULE_CONTRACT_FORMAT,
+  assertGeneratedContractCompatible,
   callReducerWithEncodedArgs,
   callReducerWithEncodedArgsResult,
+  checkGeneratedContractCompatibility,
   decodeDeclaredQueryResult,
   encodeReducerArgs,
   encodeDeclaredQueryRequest,
@@ -31,6 +34,8 @@ import type {
   RawSubscriptionUpdate,
   EncodedReducerCallOptions,
   EncodedReducerCallResultOptions,
+  GeneratedContractCompatibilityIssue,
+  GeneratedContractCompatibilityResult,
   GeneratedContractMetadata,
   ReducerArgEncoder,
   ReducerCallResult,
@@ -102,6 +107,10 @@ import type {
   TableSubscriber,
   TableSubscriptionOptions as GeneratedTableSubscriptionOptions,
 } from "../../../codegen/testdata/v1_module_contract";
+import {
+  shunterContract as appScopedShunterContract,
+  shunterProtocol as appScopedShunterProtocol,
+} from "../../../codegen/testdata/v1_module_contract_app_runtime";
 
 const generatedProtocolMetadata: ProtocolMetadata = generatedProtocol;
 const runtimeProtocolMetadata: ProtocolMetadata = runtimeProtocol;
@@ -110,6 +119,22 @@ const generatedContractMetadata: GeneratedContractMetadata<typeof generatedProto
 const generatedContractProtocolMetadata: ProtocolMetadata =
   generatedContractMetadata.protocol;
 const generatedModuleName: string | undefined = generatedContractMetadata.moduleName;
+const generatedContractFormat: typeof SHUNTER_MODULE_CONTRACT_FORMAT =
+  shunterContract.contractFormat;
+const appScopedContractMetadata: GeneratedContractMetadata<typeof appScopedShunterProtocol> =
+  appScopedShunterContract;
+const contractCompatibility: GeneratedContractCompatibilityResult =
+  checkGeneratedContractCompatibility(shunterContract, {
+    protocol: generatedProtocol,
+    moduleName: "v1_guardrails",
+    moduleVersion: "v1.0.0",
+  });
+const compatibleContract: GeneratedContractMetadata<typeof generatedProtocol> =
+  assertGeneratedContractCompatible(shunterContract, {
+    protocol: generatedProtocol,
+  });
+const contractCompatibilityIssue: GeneratedContractCompatibilityIssue | undefined =
+  contractCompatibility.ok ? undefined : contractCompatibility.issue;
 const selectedSubprotocol: typeof SHUNTER_SUBPROTOCOL_V1 =
   generatedProtocol.defaultSubprotocol;
 
@@ -515,6 +540,10 @@ async function exerciseGeneratedBindings(): Promise<void> {
 
 void connectedState;
 void runtimeProtocolMetadata;
+void generatedContractFormat;
+void appScopedContractMetadata;
+void compatibleContract;
+void contractCompatibilityIssue;
 void authErrorKind;
 void mismatch;
 void activeMessages;

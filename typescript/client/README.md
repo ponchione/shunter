@@ -10,6 +10,64 @@ source maps. Downstream apps should consume it through a workspace dependency,
 `file:` dependency, or locally packed tarball that still resolves as
 `@shunter/client`.
 
+## Local installs
+
+Use local package paths for v1. Public npm publishing and ownership of the
+`@shunter` scope are not required.
+
+`file:` dependency from an app:
+
+```json
+{
+  "dependencies": {
+    "@shunter/client": "file:../shunter/typescript/client"
+  }
+}
+```
+
+Packed tarball dependency from an app:
+
+```json
+{
+  "dependencies": {
+    "@shunter/client": "file:./vendor/shunter-client-1.0.0.tgz"
+  }
+}
+```
+
+Workspace root:
+
+```json
+{
+  "private": true,
+  "workspaces": ["vendor/shunter-client", "app"]
+}
+```
+
+Workspace app:
+
+```json
+{
+  "dependencies": {
+    "@shunter/client": "1.0.0"
+  }
+}
+```
+
+Apps that need an app-scoped local runtime name can copy the package under that
+name, for example `@app/shunter-runtime`, and generate bindings with the
+TypeScript runtime import override set to the same specifier. The package smoke
+test covers that path without using public npm.
+
+Supported hosts are browsers and Electron renderers with standard Web APIs.
+Non-browser hosts must provide a compatible `webSocketFactory` when global
+`WebSocket` is absent. Server-side SDK APIs, React/framework adapters, and a
+broad Node/Deno/Bun/Workers compatibility matrix are v1 non-goals.
+
+Reconnect is opt-in. A disconnected interval is a cache boundary: callers that
+need an authoritative view after reconnect should re-read or use the replayed
+initial snapshot rather than assuming continuous delta delivery across the gap.
+
 This package owns the shared TypeScript runtime surface that generated Shunter
 bindings import. The current slice includes constants, protocol compatibility
 helpers, state and error types, a minimal `createShunterClient` WebSocket
@@ -79,6 +137,13 @@ WebSocket is created.
 Apps can pass generated `shunterContract` metadata into `createShunterClient()`;
 successful connection metadata then carries the same contract object alongside
 identity and protocol data.
+`checkGeneratedContractCompatibility()` and
+`assertGeneratedContractCompatible()` validate generated `shunterContract`
+metadata for contract format/version, protocol metadata, and optional expected
+module name/version. `createShunterClient()` performs the format/version/
+protocol check before opening a WebSocket when `contract` is supplied; apps can
+call the helper directly with expected module metadata to catch stale generated
+bindings earlier.
 Unsupported or malformed connected server frames fail the client as protocol
 errors, rejecting pending operations and closing active managed handles.
 Server-side subscription evaluation errors that are not scoped to a pending

@@ -25,6 +25,22 @@ func TestV1CompatibilityTypeScriptGolden(t *testing.T) {
 	assertCodegenGoldenBytes(t, filepath.Join("testdata", "v1_module_contract.ts"), got)
 }
 
+func TestV1CompatibilityTypeScriptRuntimeImportOverrideGolden(t *testing.T) {
+	contractJSON, err := os.ReadFile(filepath.Join("..", "testdata", "v1_module_contract.json"))
+	if err != nil {
+		t.Fatalf("read v1 contract fixture: %v", err)
+	}
+	got, err := GenerateFromJSON(contractJSON, Options{
+		Language:                LanguageTypeScript,
+		TypeScriptRuntimeImport: "@app/shunter-runtime",
+	})
+	if err != nil {
+		t.Fatalf("GenerateFromJSON returned error: %v", err)
+	}
+
+	assertCodegenGoldenBytes(t, filepath.Join("testdata", "v1_module_contract_app_runtime.ts"), got)
+}
+
 func TestV1CompatibilityTypeScriptEntryPointsMatchGolden(t *testing.T) {
 	contractJSON, err := os.ReadFile(filepath.Join("..", "testdata", "v1_module_contract.json"))
 	if err != nil {

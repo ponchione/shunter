@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,10 +21,27 @@ const expectedPackFiles = [
   "package.json",
 ];
 
+const defaultRuntimePackageName = "@shunter/client";
+const defaultGeneratedFixture = join(repoRoot, "codegen", "testdata", "v1_module_contract.ts");
+const appScopedRuntimePackageName = "@app/shunter-runtime";
+const appScopedGeneratedFixture = join(
+  repoRoot,
+  "codegen",
+  "testdata",
+  "v1_module_contract_app_runtime.ts",
+);
+
 const fileDependency = (fromDir, toPath) =>
   `file:${relative(fromDir, toPath).replaceAll("\\", "/")}`;
 
-const writeFixtureApp = (appRoot, dependency) => {
+const writeFixtureApp = (
+  appRoot,
+  dependency,
+  {
+    runtimePackageName = defaultRuntimePackageName,
+    generatedFixture = defaultGeneratedFixture,
+  } = {},
+) => {
   mkdirSync(appRoot, { recursive: true });
   writeFileSync(
     join(appRoot, "package.json"),
@@ -33,7 +50,7 @@ const writeFixtureApp = (appRoot, dependency) => {
         private: true,
         type: "module",
         dependencies: {
-          "@shunter/client": dependency,
+          [runtimePackageName]: dependency,
         },
         devDependencies: {
           typescript: "^5.9.0",
@@ -46,14 +63,14 @@ const writeFixtureApp = (appRoot, dependency) => {
 
   mkdirSync(join(appRoot, "generated"), { recursive: true });
   cpSync(
-    join(repoRoot, "codegen", "testdata", "v1_module_contract.ts"),
+    generatedFixture,
     join(appRoot, "generated", "v1_module_contract.ts"),
   );
 
   mkdirSync(join(appRoot, "src"), { recursive: true });
   writeFileSync(
     join(appRoot, "src", "index.ts"),
-    `import { SHUNTER_SUBPROTOCOL_V1, shunterProtocol as runtimeProtocol } from "@shunter/client";
+    `import { SHUNTER_SUBPROTOCOL_V1, shunterProtocol as runtimeProtocol } from "${runtimePackageName}";
 import {
   reducers,
   shunterContract,
@@ -93,7 +110,7 @@ console.log(runtimeProtocol.defaultSubprotocol, protocol, contractFormat, module
   );
 };
 
-const verifyFixtureApp = (appRoot) => {
+const verifyFixtureApp = (appRoot, runtimePackageName = defaultRuntimePackageName) => {
   run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], appRoot);
   run("npm", ["exec", "--", "tsc", "-p", "tsconfig.json", "--noEmit"], appRoot);
   run(
@@ -101,15 +118,18 @@ const verifyFixtureApp = (appRoot) => {
     [
       "--input-type=module",
       "--eval",
-      "import('@shunter/client').then((sdk) => { if (sdk.shunterProtocol.defaultSubprotocol !== 'v1.bsatn.shunter') process.exit(1); })",
+      `import(${JSON.stringify(runtimePackageName)}).then((sdk) => { if (sdk.shunterProtocol.defaultSubprotocol !== 'v1.bsatn.shunter') process.exit(1); })`,
     ],
     appRoot,
   );
 };
 
-const writeWorkspaceClientPackage = (clientRoot) => {
+const writeWorkspaceClientPackage = (clientRoot, packageName = defaultRuntimePackageName) => {
   mkdirSync(clientRoot, { recursive: true });
-  cpSync(join(packageRoot, "package.json"), join(clientRoot, "package.json"));
+  const clientPackage = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+  clientPackage.name = packageName;
+  clientPackage.private = true;
+  writeFileSync(join(clientRoot, "package.json"), JSON.stringify(clientPackage, null, 2) + "\n");
   cpSync(join(packageRoot, "README.md"), join(clientRoot, "README.md"));
   cpSync(join(packageRoot, "dist"), join(clientRoot, "dist"), { recursive: true });
 };
@@ -157,6 +177,19 @@ verifyFixtureApp(tarballAppRoot);
 const fileAppRoot = join(smokeRoot, "file-app");
 writeFixtureApp(fileAppRoot, fileDependency(fileAppRoot, packageRoot));
 verifyFixtureApp(fileAppRoot);
+
+const appScopedRuntimeRoot = join(smokeRoot, "app-scoped-runtime");
+writeWorkspaceClientPackage(appScopedRuntimeRoot, appScopedRuntimePackageName);
+const appScopedFileAppRoot = join(smokeRoot, "app-scoped-file-app");
+writeFixtureApp(
+  appScopedFileAppRoot,
+  fileDependency(appScopedFileAppRoot, appScopedRuntimeRoot),
+  {
+    runtimePackageName: appScopedRuntimePackageName,
+    generatedFixture: appScopedGeneratedFixture,
+  },
+);
+verifyFixtureApp(appScopedFileAppRoot, appScopedRuntimePackageName);
 
 const workspaceRoot = join(smokeRoot, "workspace");
 const workspaceAppRoot = join(workspaceRoot, "app");

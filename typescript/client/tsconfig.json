@@ -9,6 +9,7 @@
     "noEmit": true,
     "verbatimModuleSyntax": true,
     "paths": {
+      "@app/shunter-runtime": ["./src/index.ts"],
       "@shunter/client": ["./src/index.ts"]
     }
   },
