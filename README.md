@@ -5,9 +5,10 @@ combines module definition, embedded relational storage, durable commit logging,
 serialized reducer execution, subscription delta evaluation, and WebSocket
 delivery behind a single runtime-owned API.
 
-The project is under active development. Core subsystems are implemented and
-covered by meaningful tests, while the top-level developer experience is still
-being refined.
+The v1 line is focused on self-hosted Go applications that embed Shunter as a
+runtime library. Core subsystems are implemented and covered by the v1
+compatibility matrix, hardening tests, TypeScript SDK tests, and the external
+`opsboard-canary` release gate.
 
 ## Project Status
 
@@ -22,9 +23,10 @@ The supported app-facing entrypoint is the root `shunter` package:
   contract/schema export, HTTP serving, snapshots, compaction, and graceful
   shutdown.
 
-Shunter is not currently positioned as a production-ready database or managed
-service. It is best understood as an implementation-focused runtime project
-with substantial subsystem coverage and an emerging hosted-runtime API.
+Shunter v1 is a self-hosted embedded runtime, not a managed database service.
+The stable v1 surfaces are the root package APIs, Shunter-native protocol,
+contract JSON, generated TypeScript, read surfaces, and documented operations
+listed in the v1 compatibility matrix.
 
 ## Goals
 
@@ -107,15 +109,16 @@ captures a stable integration pattern worth maintaining.
 The runtime has meaningful implementation depth, but several areas are still
 early or intentionally narrow:
 
-- no bundled canonical example application is maintained in this repo
-- client bindings and code generation exist, but onboarding material around
-  them is still limited
+- no bundled canonical example application is maintained in this repo; the
+  maintained release canary is the external `opsboard-canary` application
+- generated TypeScript and the public `@shunter/client` runtime are the v1
+  client path
 - SQL support is scoped to the v1 read-surface matrix; Shunter does not promise
   broad SQL database compatibility
-- protocol, recovery, subscription, and reducer semantics are still being
-  hardened through focused tests and debt reconciliation
-- public API stability should be expected to evolve while the hosted-runtime
-  surface settles
+- performance rows are advisory unless a future release introduces hard
+  thresholds
+- lower-level runtime packages remain implementation details unless the v1
+  compatibility matrix names a stable subset
 
 ## Versioning
 
@@ -131,7 +134,7 @@ rtk go run ./cmd/shunter version
 Release builds can stamp exact build metadata without changing source files:
 
 ```bash
-rtk go build -ldflags "-X github.com/ponchione/shunter.Version=v0.1.0 -X github.com/ponchione/shunter.Commit=<git-sha> -X github.com/ponchione/shunter.Date=<utc-rfc3339>" ./cmd/shunter
+rtk go build -ldflags "-X github.com/ponchione/shunter.Version=v1.0.0 -X github.com/ponchione/shunter.Commit=<git-sha> -X github.com/ponchione/shunter.Date=<utc-rfc3339>" ./cmd/shunter
 ```
 
 Use `vX.Y.Z` git tags for releases. `Module.Version(...)` is separate: it is

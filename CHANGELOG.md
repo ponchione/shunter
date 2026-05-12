@@ -2,9 +2,12 @@
 
 Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
-## v0.1.2-dev
+## v1.0.0 - 2026-05-12
 
-- Current development line.
+- Promoted the Shunter v1 compatibility line to the stable `v1.0.0` release
+  version after release qualification.
+- Release qualification covers the Go hardening command set, TypeScript SDK
+  tests, and the external `opsboard-canary` quick/full gates.
 
 ## v0.1.1 - 2026-05-12
 

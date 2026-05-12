@@ -240,7 +240,6 @@ The fixture includes reducer product schemas, declared-read row schemas/result
 shapes, and a nullable column so conditional metadata keys are pinned when
 present.
 
-Remaining v1 contract maintenance before cutting `v1.0.0`:
-
-- Re-audit root exports and lower-level package comments after later
-  implementation slices land.
+The root exports and lower-level package comments named by this matrix were
+re-audited for the `v1.0.0` release candidate with `rtk go doc` and
+`rtk go list -json ./...`; this matrix remains the supported v1 story.

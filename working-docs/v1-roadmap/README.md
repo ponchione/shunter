@@ -1,8 +1,8 @@
 # Shunter v1 Roadmap
 
-Status: active implementation driver
-Scope: remaining work, release gates, auth coverage, hardening, and performance
-status required before cutting a real `v1.0.0`.
+Status: v1 release qualification driver
+Scope: release gates, auth coverage, hardening, performance status, and
+remaining v1.x maintenance after the `v1.0.0` line is cut.
 
 Shunter v1 should stay focused on self-hosted Go applications with
 reducer-owned writes, durable state, typed clients, permission-aware reads, and
@@ -179,8 +179,8 @@ rtk go test ./subscription -run '^$' -fuzz Fuzz -fuzztime=30s
 Run Go benchmarks directly, not through RTK:
 
 ```bash
-go test -run '^$' -bench . -benchmem ./protocol ./commitlog ./subscription
-go test -run '^$' -bench . -benchmem -count=10 ./protocol ./commitlog ./subscription > /tmp/shunter-bench-new.txt
+go test -run '^$' -bench . -benchmem . ./executor ./protocol ./commitlog ./subscription
+go test -run '^$' -bench . -benchmem -count=10 . ./executor ./protocol ./commitlog ./subscription > /tmp/shunter-v1.0.0-bench.txt
 ```
 
 RTK may summarize benchmark commands and suppress the raw
@@ -218,9 +218,9 @@ Known benchmark gaps for v1 envelopes:
 
 Latest baseline snapshot:
 
-- Date: 2026-05-09
-- Shunter commit: `8d3306b2ff85b26f47ffa8bfbc4899355545b6e5`
-- Command: `go test -run '^$' -bench . -benchmem -count=10 ./protocol ./commitlog ./subscription > /tmp/shunter-bench-new.txt`
+- Date: 2026-05-12
+- Shunter commit: `23d6bc1566f35c6e85e2f46afae7c4c7590875cc`
+- Command: `go test -run '^$' -bench . -benchmem -count=10 . ./executor ./protocol ./commitlog ./subscription > /tmp/shunter-v1.0.0-bench.txt`
 - Environment: linux/amd64, `go1.26.2`,
   `AMD Ryzen 9 9900X 12-Core Processor`
 - Detailed advisory row table: `docs/performance-envelopes.md`
