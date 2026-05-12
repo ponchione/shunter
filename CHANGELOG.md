@@ -135,6 +135,12 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added TypeScript decoding for the initial server `IdentityToken` frame so
   `createShunterClient().connect()` resolves with identity and connection ID
   metadata.
+- Made the private `@shunter/client` TypeScript SDK package-shaped for local
+  workspace, `file:`, and tarball installs, with built ESM and declaration
+  artifacts plus package smoke coverage.
+- Added a TypeScript codegen runtime import override and generated
+  `shunterContract` metadata for stale-binding and protocol compatibility
+  checks.
 - Added raw TypeScript reducer request encoding and a connected-client
   `callReducer` send path for the v1 `CallReducerMsg` wire shape.
 - Added minimal TypeScript reducer response correlation for full-update

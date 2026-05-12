@@ -2,6 +2,14 @@
 
 Status: checked-in v1 SDK runtime foundation.
 
+`typescript/client` is a private package-shaped SDK for local/workspace Shunter
+apps. It is named `@shunter/client` so generated bindings have a stable runtime
+import target, but `"private": true` keeps v1 out of public npm publishing.
+Build output is emitted to `dist/` as ESM JavaScript plus `.d.ts` files and
+source maps. Downstream apps should consume it through a workspace dependency,
+`file:` dependency, or locally packed tarball that still resolves as
+`@shunter/client`.
+
 This package owns the shared TypeScript runtime surface that generated Shunter
 bindings import. The current slice includes constants, protocol compatibility
 helpers, state and error types, a minimal `createShunterClient` WebSocket
@@ -68,6 +76,9 @@ injected WebSocket factory for Node tests or host-specific transports.
 transport failures with configurable bounded backoff.
 Token providers must resolve to strings; invalid results fail before a
 WebSocket is created.
+Apps can pass generated `shunterContract` metadata into `createShunterClient()`;
+successful connection metadata then carries the same contract object alongside
+identity and protocol data.
 Unsupported or malformed connected server frames fail the client as protocol
 errors, rejecting pending operations and closing active managed handles.
 Server-side subscription evaluation errors that are not scoped to a pending
@@ -131,14 +142,22 @@ declared-query helpers install contract-derived decoders by default when row
 metadata exists. Consumers that need raw RowList bytes can keep using
 `decodeRawDeclaredQueryResult()`.
 
-Generated module bindings should import types from `@shunter/client` and keep
-module-specific table, reducer, query, and view names in the generated file.
-They also export module-scoped aliases for reducer result and raw
-declared-query result envelopes so helper code can keep those surfaces tied to
-generated name unions.
+Generated module bindings import runtime types and helpers from
+`@shunter/client` by default and keep module-specific table, reducer, query,
+and view names in the generated file. Codegen callers can override the runtime
+import specifier for app-scoped packages, a future owned npm scope, workspace
+packages, `file:` dependencies, or vendored paths. Generated bindings also
+export `shunterContract` alongside `shunterProtocol` so apps can inspect
+contract format/version, module name/version, and protocol metadata for stale
+binding and compatibility checks. They also export module-scoped aliases for
+reducer result and raw declared-query result envelopes so helper code can keep
+those surfaces tied to generated name unions.
 
 ## Verification
 
 ```bash
 rtk npm --prefix typescript/client run test
+rtk npm --prefix typescript/client run build
+rtk npm --prefix typescript/client pack ./typescript/client --dry-run
+rtk npm --prefix typescript/client run smoke:package
 ```
