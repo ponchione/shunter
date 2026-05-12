@@ -21,6 +21,10 @@ export const SHUNTER_SERVER_MESSAGE_SUBSCRIBE_MULTI_APPLIED = 9 as const;
 export const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_MULTI_APPLIED = 10 as const;
 export const SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE = 0 as const;
 export const SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY = 1 as const;
+export const SHUNTER_MODULE_CONTRACT_FORMAT = "shunter.module_contract" as const;
+export const SHUNTER_MODULE_CONTRACT_VERSION_V1 = 1 as const;
+export const SHUNTER_MIN_SUPPORTED_MODULE_CONTRACT_VERSION = SHUNTER_MODULE_CONTRACT_VERSION_V1;
+export const SHUNTER_CURRENT_MODULE_CONTRACT_VERSION = SHUNTER_MODULE_CONTRACT_VERSION_V1;
 
 export type ShunterSubprotocol = typeof SHUNTER_SUBPROTOCOL_V1;
 
@@ -55,6 +59,7 @@ export type ProtocolCompatibilityResult =
 
 export type ShunterErrorKind =
   | "auth"
+  | "contract_mismatch"
   | "validation"
   | "protocol"
   | "protocol_mismatch"
@@ -238,6 +243,20 @@ export function selectShunterSubprotocol(protocol: ProtocolMetadata): ShunterSub
   return assertProtocolCompatible(protocol);
 }
 
+function sameProtocolMetadata(left: ProtocolMetadata, right: ProtocolMetadata): boolean {
+  return left.minSupportedVersion === right.minSupportedVersion &&
+    left.currentVersion === right.currentVersion &&
+    left.defaultSubprotocol === right.defaultSubprotocol &&
+    sameStringList(left.supportedSubprotocols, right.supportedSubprotocols);
+}
+
+function sameStringList(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((value, index) => value === right[index]);
+}
+
 export type ConnectionStatus =
   | "idle"
   | "connecting"
@@ -253,6 +272,168 @@ export interface GeneratedContractMetadata<Protocol extends ProtocolMetadata = P
   readonly moduleName?: string;
   readonly moduleVersion?: string;
   readonly protocol: Protocol;
+}
+
+export interface GeneratedContractCompatibilityOptions {
+  readonly protocol?: ProtocolMetadata;
+  readonly selectedSubprotocol?: string;
+  readonly moduleName?: string;
+  readonly moduleVersion?: string;
+}
+
+export interface GeneratedContractCompatibilityIssue {
+  readonly code:
+    | "unsupported_contract_format"
+    | "generated_contract_too_new"
+    | "generated_contract_too_old"
+    | "protocol_metadata_mismatch"
+    | "protocol_compatibility"
+    | "module_name_mismatch"
+    | "module_version_mismatch";
+  readonly message: string;
+  readonly receivedFormat?: string;
+  readonly receivedVersion?: number;
+  readonly receivedModuleName?: string;
+  readonly receivedModuleVersion?: string;
+  readonly protocolIssue?: ProtocolCompatibilityIssue;
+}
+
+export type GeneratedContractCompatibilityResult<
+  Contract extends GeneratedContractMetadata = GeneratedContractMetadata,
+> =
+  | { readonly ok: true; readonly contract: Contract }
+  | {
+      readonly ok: false;
+      readonly contract: Contract;
+      readonly issue: GeneratedContractCompatibilityIssue;
+    };
+
+export interface ShunterContractMismatchErrorOptions extends ShunterErrorOptions {
+  readonly contract: GeneratedContractMetadata;
+  readonly issue: GeneratedContractCompatibilityIssue;
+}
+
+export class ShunterContractMismatchError extends ShunterError {
+  readonly contract: GeneratedContractMetadata;
+  readonly issue: GeneratedContractCompatibilityIssue;
+
+  constructor(message: string, options: ShunterContractMismatchErrorOptions) {
+    super("contract_mismatch", message, options);
+    this.contract = options.contract;
+    this.issue = options.issue;
+  }
+}
+
+export function checkGeneratedContractCompatibility<
+  Contract extends GeneratedContractMetadata,
+>(
+  contract: Contract,
+  options: GeneratedContractCompatibilityOptions = {},
+): GeneratedContractCompatibilityResult<Contract> {
+  if (contract.contractFormat !== SHUNTER_MODULE_CONTRACT_FORMAT) {
+    return {
+      ok: false,
+      contract,
+      issue: {
+        code: "unsupported_contract_format",
+        message: "Generated bindings use an unsupported Shunter contract format.",
+        receivedFormat: contract.contractFormat,
+      },
+    };
+  }
+  if (contract.contractVersion > SHUNTER_CURRENT_MODULE_CONTRACT_VERSION) {
+    return {
+      ok: false,
+      contract,
+      issue: {
+        code: "generated_contract_too_new",
+        message: "Generated bindings require a newer Shunter contract format than this client runtime supports.",
+        receivedVersion: contract.contractVersion,
+      },
+    };
+  }
+  if (contract.contractVersion < SHUNTER_MIN_SUPPORTED_MODULE_CONTRACT_VERSION) {
+    return {
+      ok: false,
+      contract,
+      issue: {
+        code: "generated_contract_too_old",
+        message: "Generated bindings target an older Shunter contract format than this client runtime supports.",
+        receivedVersion: contract.contractVersion,
+      },
+    };
+  }
+  if (options.protocol !== undefined && !sameProtocolMetadata(contract.protocol, options.protocol)) {
+    return {
+      ok: false,
+      contract,
+      issue: {
+        code: "protocol_metadata_mismatch",
+        message: "Generated contract metadata does not match the protocol metadata used to create the client.",
+      },
+    };
+  }
+
+  const protocolCompatibility = checkProtocolCompatibility(
+    contract.protocol,
+    options.selectedSubprotocol,
+  );
+  if (!protocolCompatibility.ok) {
+    return {
+      ok: false,
+      contract,
+      issue: {
+        code: "protocol_compatibility",
+        message: protocolCompatibility.issue.message,
+        receivedVersion: protocolCompatibility.issue.receivedVersion,
+        receivedFormat: contract.contractFormat,
+        protocolIssue: protocolCompatibility.issue,
+      },
+    };
+  }
+
+  if (options.moduleName !== undefined && contract.moduleName !== options.moduleName) {
+    return {
+      ok: false,
+      contract,
+      issue: {
+        code: "module_name_mismatch",
+        message: "Generated bindings are for a different Shunter module.",
+        receivedModuleName: contract.moduleName,
+      },
+    };
+  }
+  if (options.moduleVersion !== undefined && contract.moduleVersion !== options.moduleVersion) {
+    return {
+      ok: false,
+      contract,
+      issue: {
+        code: "module_version_mismatch",
+        message: "Generated bindings are stale for the expected Shunter module version.",
+        receivedModuleVersion: contract.moduleVersion,
+      },
+    };
+  }
+
+  return { ok: true, contract };
+}
+
+export function assertGeneratedContractCompatible<
+  Contract extends GeneratedContractMetadata,
+>(
+  contract: Contract,
+  options: GeneratedContractCompatibilityOptions = {},
+): Contract {
+  const result = checkGeneratedContractCompatibility(contract, options);
+  if (result.ok) {
+    return result.contract;
+  }
+  throw new ShunterContractMismatchError(result.issue.message, {
+    code: result.issue.code,
+    details: result.issue,
+    contract,
+    issue: result.issue,
+  });
 }
 
 export interface ConnectionMetadata<Protocol extends ProtocolMetadata = ProtocolMetadata> {
@@ -1512,6 +1693,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         let url: string;
         let tokenAwaitStarted = false;
         try {
+          if (options.contract !== undefined) {
+            assertGeneratedContractCompatible(options.contract, { protocol: options.protocol });
+          }
           offeredSubprotocol = selectShunterSubprotocol(options.protocol);
           tokenAwaitStarted = true;
           const token = await resolveToken(options.token);

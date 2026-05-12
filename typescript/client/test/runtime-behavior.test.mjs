@@ -15,17 +15,23 @@ import {
   SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE_LIGHT,
   SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_SINGLE_APPLIED,
   SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_MULTI_APPLIED,
+  SHUNTER_CURRENT_MODULE_CONTRACT_VERSION,
+  SHUNTER_MODULE_CONTRACT_FORMAT,
+  SHUNTER_MODULE_CONTRACT_VERSION_V1,
   SHUNTER_SUBPROTOCOL_V1,
   ShunterAuthError,
   ShunterClosedClientError,
+  ShunterContractMismatchError,
   ShunterProtocolError,
   ShunterProtocolMismatchError,
   ShunterTransportError,
   ShunterValidationError,
+  assertGeneratedContractCompatible,
   assertProtocolCompatible,
   callReducerWithEncodedArgs,
   callReducerWithEncodedArgsResult,
   callReducerWithResult,
+  checkGeneratedContractCompatibility,
   checkProtocolCompatibility,
   createShunterClient,
   createSubscriptionHandle,
@@ -77,6 +83,53 @@ assert.throws(
 assert.throws(
   () => assertProtocolCompatible(shunterProtocol, "v1.bsatn.spacetimedb"),
   ShunterProtocolMismatchError,
+);
+
+assert.equal(SHUNTER_CURRENT_MODULE_CONTRACT_VERSION, SHUNTER_MODULE_CONTRACT_VERSION_V1);
+const compatibleContract = {
+  contractFormat: SHUNTER_MODULE_CONTRACT_FORMAT,
+  contractVersion: SHUNTER_MODULE_CONTRACT_VERSION_V1,
+  moduleName: "chat",
+  moduleVersion: "v1.0.0",
+  protocol: shunterProtocol,
+};
+assert.deepEqual(checkGeneratedContractCompatibility(compatibleContract), {
+  ok: true,
+  contract: compatibleContract,
+});
+assert.strictEqual(
+  assertGeneratedContractCompatible(compatibleContract, {
+    protocol: shunterProtocol,
+    moduleName: "chat",
+    moduleVersion: "v1.0.0",
+  }),
+  compatibleContract,
+);
+const staleModuleVersion = checkGeneratedContractCompatibility(compatibleContract, {
+  moduleVersion: "v1.0.1",
+});
+assert.equal(staleModuleVersion.ok, false);
+assert.equal(staleModuleVersion.issue.code, "module_version_mismatch");
+const wrongProtocolContract = {
+  ...compatibleContract,
+  protocol: { ...shunterProtocol, currentVersion: 0 },
+};
+const wrongProtocolContractResult = checkGeneratedContractCompatibility(wrongProtocolContract);
+assert.equal(wrongProtocolContractResult.ok, false);
+assert.equal(wrongProtocolContractResult.issue.code, "protocol_compatibility");
+assert.throws(
+  () => assertGeneratedContractCompatible({
+    ...compatibleContract,
+    contractFormat: "spacetimedb.module_contract",
+  }),
+  ShunterContractMismatchError,
+);
+assert.throws(
+  () => assertGeneratedContractCompatible({
+    ...compatibleContract,
+    contractVersion: SHUNTER_CURRENT_MODULE_CONTRACT_VERSION + 1,
+  }),
+  ShunterContractMismatchError,
 );
 
 const states = [];
@@ -778,6 +831,25 @@ const tokenQueryMetadata = await tokenQueryConnecting;
 assert.deepEqual(tokenQueryMetadata.contract, tokenQueryContract);
 assert.equal(tokenQueryClient.state.metadata.contract.moduleName, "chat");
 await tokenQueryClient.close();
+
+const contractMismatchSockets = [];
+const contractMismatchClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  contract: {
+    ...tokenQueryContract,
+    contractVersion: SHUNTER_CURRENT_MODULE_CONTRACT_VERSION + 1,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    contractMismatchSockets.push(socket);
+    return socket;
+  },
+});
+await assert.rejects(contractMismatchClient.connect(), ShunterContractMismatchError);
+assert.equal(contractMismatchSockets.length, 0);
+assert.equal(contractMismatchClient.state.status, "failed");
+assert.equal(contractMismatchClient.state.error.kind, "contract_mismatch");
 
 const asyncTokenSockets = [];
 let resolveAsyncToken;

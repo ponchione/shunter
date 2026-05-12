@@ -21,6 +21,10 @@ export declare const SHUNTER_SERVER_MESSAGE_SUBSCRIBE_MULTI_APPLIED: 9;
 export declare const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_MULTI_APPLIED: 10;
 export declare const SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE: 0;
 export declare const SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY: 1;
+export declare const SHUNTER_MODULE_CONTRACT_FORMAT: "shunter.module_contract";
+export declare const SHUNTER_MODULE_CONTRACT_VERSION_V1: 1;
+export declare const SHUNTER_MIN_SUPPORTED_MODULE_CONTRACT_VERSION: 1;
+export declare const SHUNTER_CURRENT_MODULE_CONTRACT_VERSION: 1;
 export type ShunterSubprotocol = typeof SHUNTER_SUBPROTOCOL_V1;
 export interface ProtocolMetadata<Subprotocol extends string = string> {
     readonly minSupportedVersion: number;
@@ -47,7 +51,7 @@ export type ProtocolCompatibilityResult = {
     readonly ok: false;
     readonly issue: ProtocolCompatibilityIssue;
 };
-export type ShunterErrorKind = "auth" | "validation" | "protocol" | "protocol_mismatch" | "transport" | "timeout" | "closed";
+export type ShunterErrorKind = "auth" | "contract_mismatch" | "validation" | "protocol" | "protocol_mismatch" | "transport" | "timeout" | "closed";
 export interface ShunterErrorOptions {
     readonly code?: string;
     readonly details?: unknown;
@@ -102,6 +106,40 @@ export interface GeneratedContractMetadata<Protocol extends ProtocolMetadata = P
     readonly moduleVersion?: string;
     readonly protocol: Protocol;
 }
+export interface GeneratedContractCompatibilityOptions {
+    readonly protocol?: ProtocolMetadata;
+    readonly selectedSubprotocol?: string;
+    readonly moduleName?: string;
+    readonly moduleVersion?: string;
+}
+export interface GeneratedContractCompatibilityIssue {
+    readonly code: "unsupported_contract_format" | "generated_contract_too_new" | "generated_contract_too_old" | "protocol_metadata_mismatch" | "protocol_compatibility" | "module_name_mismatch" | "module_version_mismatch";
+    readonly message: string;
+    readonly receivedFormat?: string;
+    readonly receivedVersion?: number;
+    readonly receivedModuleName?: string;
+    readonly receivedModuleVersion?: string;
+    readonly protocolIssue?: ProtocolCompatibilityIssue;
+}
+export type GeneratedContractCompatibilityResult<Contract extends GeneratedContractMetadata = GeneratedContractMetadata> = {
+    readonly ok: true;
+    readonly contract: Contract;
+} | {
+    readonly ok: false;
+    readonly contract: Contract;
+    readonly issue: GeneratedContractCompatibilityIssue;
+};
+export interface ShunterContractMismatchErrorOptions extends ShunterErrorOptions {
+    readonly contract: GeneratedContractMetadata;
+    readonly issue: GeneratedContractCompatibilityIssue;
+}
+export declare class ShunterContractMismatchError extends ShunterError {
+    readonly contract: GeneratedContractMetadata;
+    readonly issue: GeneratedContractCompatibilityIssue;
+    constructor(message: string, options: ShunterContractMismatchErrorOptions);
+}
+export declare function checkGeneratedContractCompatibility<Contract extends GeneratedContractMetadata>(contract: Contract, options?: GeneratedContractCompatibilityOptions): GeneratedContractCompatibilityResult<Contract>;
+export declare function assertGeneratedContractCompatible<Contract extends GeneratedContractMetadata>(contract: Contract, options?: GeneratedContractCompatibilityOptions): Contract;
 export interface ConnectionMetadata<Protocol extends ProtocolMetadata = ProtocolMetadata> {
     readonly protocol: Protocol;
     readonly subprotocol: Protocol["defaultSubprotocol"] | string;
