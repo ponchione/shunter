@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -368,6 +369,43 @@ func TestUpgradeInvalidTokenRejected(t *testing.T) {
 	}
 }
 
+func TestUpgradeInvalidTokenResponseIsSanitized(t *testing.T) {
+	s, _ := strictServer(t)
+	s.JWT.Issuers = []string{"trusted-issuer"}
+	s.JWT.Audiences = []string{"trusted-audience"}
+	srv := newTestServer(t, s)
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": "alice",
+		"iss": "attacker-issuer",
+		"aud": "attacker-audience",
+		"iat": time.Now().Unix(),
+	})
+	token, err := tok.SignedString(testSigningKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, resp, err := dialWS(t, srv, wsDialOpts{
+		authHeader:   "Bearer " + token,
+		subprotocols: []string{"v1.bsatn.shunter"},
+	})
+	if err == nil {
+		t.Fatal("dial should fail with rejected token claims")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %v, want 401", resp)
+	}
+	body := responseBodyString(t, resp)
+	if body != authRejectedInvalidToken+"\n" {
+		t.Fatalf("response body = %q, want sanitized invalid-token body", body)
+	}
+	for _, leaked := range []string{"trusted-issuer", "trusted-audience", "attacker-issuer", "attacker-audience", "issuer not", "audience not"} {
+		if strings.Contains(body, leaked) {
+			t.Fatalf("response body leaked %q: %q", leaked, body)
+		}
+	}
+}
+
 func TestUpgradeMissingJWTConfigRejected(t *testing.T) {
 	s := &Server{Options: DefaultProtocolOptions()}
 	srv := newTestServer(t, s)
@@ -380,6 +418,28 @@ func TestUpgradeMissingJWTConfigRejected(t *testing.T) {
 	}
 	if resp == nil || resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %v, want 500", resp)
+	}
+}
+
+func TestUpgradeAuthMisconfigurationResponseIsSanitized(t *testing.T) {
+	s := &Server{Options: DefaultProtocolOptions()}
+	srv := newTestServer(t, s)
+
+	_, resp, err := dialWS(t, srv, wsDialOpts{
+		subprotocols: []string{"v1.bsatn.shunter"},
+	})
+	if err == nil {
+		t.Fatal("dial should fail when JWT config is missing")
+	}
+	if resp == nil || resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %v, want 500", resp)
+	}
+	body := responseBodyString(t, resp)
+	if body != authRejectedUnavailable+"\n" {
+		t.Fatalf("response body = %q, want sanitized auth-unavailable body", body)
+	}
+	if strings.Contains(body, "JWT") || strings.Contains(body, "misconfigured") {
+		t.Fatalf("response body leaked internal auth configuration detail: %q", body)
 	}
 }
 
@@ -601,4 +661,17 @@ func TestBuildMessageHandlers_WiresOnlySatisfiedDependencies(t *testing.T) {
 	if h.OnOneOffQuery != nil {
 		t.Fatal("OnOneOffQuery should stay nil until schema and state are both wired")
 	}
+}
+
+func responseBodyString(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	if resp == nil || resp.Body == nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	return string(body)
 }

@@ -11,6 +11,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Runtime and Host HTTP serving now set defensive read-header and idle timeouts.
 - Runtime and Host serving now reject NUL-containing listen addresses before
   calling the Go networking stack.
+- Protocol auth rejection responses now return generic client-safe messages
+  while preserving detailed causes for internal observation.
 - The preferred Go toolchain is now pinned to Go 1.26.3, which includes fixes
   for standard-library vulnerabilities reported against Go 1.26.2.
 

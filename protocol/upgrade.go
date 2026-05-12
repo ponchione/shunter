@@ -86,13 +86,19 @@ type UpgradeContext struct {
 	Claims *auth.Claims
 }
 
+const (
+	authRejectedUnavailable  = "authentication unavailable"
+	authRejectedInvalidToken = "invalid token"
+	authRejectedMissingToken = "missing token"
+)
+
 // HandleSubscribe is the net/http handler for the `/subscribe`
 // endpoint (SPEC-005 §2.3). It authenticates, validates request
 // parameters, upgrades the connection, and hands control to s.Upgraded.
 func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	if s == nil || s.JWT == nil {
 		err := errors.New("server misconfigured: JWT config is required")
-		s.writeAuthRejected(w, err.Error(), http.StatusInternalServerError, "jwt_misconfigured", err)
+		s.writeAuthRejected(w, authRejectedUnavailable, http.StatusInternalServerError, "jwt_misconfigured", err)
 		return
 	}
 	options, err := normalizeProtocolOptions(s.Options)
@@ -111,7 +117,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	if hasToken {
 		c, err := auth.ValidateJWT(token, s.JWT)
 		if err != nil {
-			s.writeAuthRejected(w, "invalid token: "+err.Error(), http.StatusUnauthorized, "invalid_token", err)
+			s.writeAuthRejected(w, authRejectedInvalidToken, http.StatusUnauthorized, "invalid_token", err)
 			return
 		}
 		claims = c
@@ -121,17 +127,17 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	} else {
 		if s.JWT.AuthMode != auth.AuthModeAnonymous {
 			err := errors.New("no token and strict auth enabled")
-			s.writeAuthRejected(w, err.Error(), http.StatusUnauthorized, "missing_token", err)
+			s.writeAuthRejected(w, authRejectedMissingToken, http.StatusUnauthorized, "missing_token", err)
 			return
 		}
 		if s.Mint == nil {
 			err := errors.New("server misconfigured: anonymous mode requires Mint config")
-			s.writeAuthRejected(w, err.Error(), http.StatusInternalServerError, "mint_misconfigured", err)
+			s.writeAuthRejected(w, authRejectedUnavailable, http.StatusInternalServerError, "mint_misconfigured", err)
 			return
 		}
 		mt, id, err := auth.MintAnonymousToken(s.Mint)
 		if err != nil {
-			s.writeAuthRejected(w, "mint failed: "+err.Error(), http.StatusInternalServerError, "mint_failed", err)
+			s.writeAuthRejected(w, authRejectedUnavailable, http.StatusInternalServerError, "mint_failed", err)
 			return
 		}
 		mintedToken = mt
