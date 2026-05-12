@@ -554,6 +554,29 @@ func assertInvalidContractGenerateFileLeavesOutputUntouched(
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestGenerateFileCreatesNewOutputWithOwnerWritableMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits are POSIX-specific")
+	}
+
+	const trace = "trace=workflow-codegen-new-output-mode"
+	dir := t.TempDir()
+	contractPath := writeContractFixture(t, dir, "contract.json", workflowContractFixture())
+	outputPath := filepath.Join(dir, "client.ts")
+
+	if err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript}); err != nil {
+		t.Fatalf("%s GenerateFile returned error: %v", trace, err)
+	}
+	info, err := os.Stat(outputPath)
+	if err != nil {
+		t.Fatalf("%s stat output: %v", trace, err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Fatalf("%s output mode = %#o, want 0644", trace, got)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateFilePreservesExistingOutputPermissionsAcrossAtomicRewrite(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission bit preservation is POSIX-specific")

@@ -295,7 +295,7 @@ func readRequiredFile(label, path string) ([]byte, error) {
 
 func writeFile(path string, data []byte) error {
 	return atomicfile.WriteFile(path, data, atomicfile.Options{
-		Mode:         0o666,
+		Mode:         0o644,
 		PreserveMode: true,
 		SyncDir:      syncDir,
 	})

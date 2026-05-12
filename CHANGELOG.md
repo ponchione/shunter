@@ -6,6 +6,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 - Hardened offline DataDir backup/restore file copies against replaced source
   entries and preserved file permissions after process umask filtering.
+- Contract workflow outputs now create new generated files with owner-writable
+  `0644` permissions while still preserving existing output file modes.
 - Host data-directory conflict checks now resolve symlink aliases before
   comparing registered runtimes.
 - Runtime and Host HTTP serving now set defensive read-header and idle timeouts.
