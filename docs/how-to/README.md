@@ -22,7 +22,10 @@ Recommended order for a new app integration:
    shutdown cleanly, snapshot, compact, backup, restore, and run migrations.
 7. [Contract export and codegen](contract-export-and-codegen.md) - export
    contracts, review compatibility, and generate TypeScript bindings.
-8. [Testing Shunter modules](testing-shunter-modules.md) - test modules through
+8. [Use generated TypeScript clients](typescript-client.md) - install the local
+   SDK runtime package, connect clients, call reducers, read declared queries,
+   subscribe to views/tables, and opt into reconnect.
+9. [Testing Shunter modules](testing-shunter-modules.md) - test modules through
    the root runtime API.
 
 For a linear introduction, start with [Getting started](../getting-started.md).

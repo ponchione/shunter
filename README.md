@@ -111,8 +111,8 @@ early or intentionally narrow:
 
 - no bundled canonical example application is maintained in this repo; the
   maintained release canary is the external `opsboard-canary` application
-- generated TypeScript and the public `@shunter/client` runtime are the v1
-  client path
+- generated TypeScript and the private local package-shaped `@shunter/client`
+  runtime are the v1 client path
 - SQL support is scoped to the v1 read-surface matrix; Shunter does not promise
   broad SQL database compatibility
 - performance rows are advisory unless a future release introduces hard

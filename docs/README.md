@@ -11,7 +11,7 @@ notes, and roadmap material live under `../working-docs/`.
 2. [Concepts](concepts.md) defines the vocabulary used by the guides.
 3. [How-to guides](how-to/README.md) cover specific integration tasks such as
    declaring modules, writing reducers, serving protocol traffic, configuring
-   auth, persistence, contracts, and tests.
+   auth, persistence, contracts, generated TypeScript clients, and tests.
 4. [Reference notes](reference/README.md) summarize config, lifecycle, and read
    surface choices that Go doc alone does not explain.
 
@@ -27,6 +27,9 @@ support matrix.
 - [Concepts](concepts.md) - modules, runtimes, reducers, reads, contracts,
   protocol serving, durable state, and trust boundaries.
 - [How-to guides](how-to/README.md) - task-focused integration guides.
+- [Use generated TypeScript clients](how-to/typescript-client.md) - local
+  `@shunter/client` installs, generated bindings, reducer/query/view helpers,
+  managed subscriptions, and reconnect.
 - [Reference notes](reference/README.md) - compact decision guides for exported
   app-facing surfaces.
 - [Authentication](authentication.md) - dev/strict auth behavior, principals,

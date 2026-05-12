@@ -78,20 +78,30 @@ rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --lan
 Generated TypeScript imports the private local SDK package name
 `@shunter/client` by default. Use `codegen.Options.TypeScriptRuntimeImport` or
 `--runtime-import` only when an app vendors or renames the local runtime
-package:
+package. The generated import path must match the dependency name resolved by
+the app's package manager:
 
 ```bash
-rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --runtime-import @app/shunter-client --out client.ts
+rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --runtime-import @app/shunter-runtime --out client.ts
 ```
 
-Generated TypeScript currently includes row interfaces, table metadata,
-declared-read constants and helpers, reducer helper functions, permission
-metadata, read-model metadata, generated contract metadata, and protocol
+Generated TypeScript currently includes protocol and contract metadata, table
+row interfaces, `TableRows` and `tableRowDecoders`, table subscription helpers,
+read-policy and visibility metadata, reducer constants and helpers, schema-aware
+reducer argument encoders and result decoders when product schemas are exported,
+declared-query/view constants and helper functions, decoded declared-query/view
+row helpers when read metadata is exported, permissions, and read-model
 metadata.
 
-Generated helpers are contract-driven client bindings. They do not replace the
-application's reducer argument/result encoding choice; keep that encoding
-consistent across local calls, protocol clients, and tests.
+Generated helpers are contract-driven client bindings. Raw `Uint8Array`
+helpers remain available for every reducer. When reducer product schemas are not
+declared, keep the application's reducer argument/result encoding documented
+near the reducer and use the same encoding across local calls, protocol
+clients, and tests.
+
+See [Use generated TypeScript clients](typescript-client.md) for local
+`@shunter/client` installs, `createShunterClient`, stale-binding checks, typed
+reducers, decoded declared reads, managed subscriptions, and reconnect.
 
 ## What Contracts Are Good For
 

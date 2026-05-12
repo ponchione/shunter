@@ -51,7 +51,7 @@ Package: `github.com/ponchione/shunter`
 | `schema` | Stable for v1 subset | App-authored schema declaration/export types used through root APIs: table and column definitions, table options/read policy, reducer handler/context types, value kind export strings, and schema export metadata. Engine/builder internals remain advanced. |
 | `types` | Stable for v1 subset | Values, product rows, identities, connection IDs, transaction/row IDs, auth principal, reducer DB/context contracts, and value constructors/accessors used by root APIs, protocol rows, and BSATN. |
 | `bsatn` | Stable for v1 | Shunter's binary value and product-row encoding for v1 protocol/runtime boundaries. It is Shunter-native and not a promise of another runtime's byte-for-byte format. |
-| `codegen` | Stable for v1 TypeScript target | `Generate`, `GenerateFromJSON`, `GenerateTypeScript`, `Options`, and `LanguageTypeScript` for valid v1 `ModuleContract` inputs. |
+| `codegen` | Stable for v1 TypeScript target | `Generate`, `GenerateFromJSON`, `GenerateTypeScript`, `GenerateTypeScriptWithOptions`, `ValidateOptions`, `Options`, `TypeScriptOptions`, `LanguageTypeScript`, and `DefaultTypeScriptRuntimeImport` for valid v1 `ModuleContract` inputs. |
 | `protocol` | Preview/advanced Go API, stable wire contract | The wire protocol is stable as documented below. The Go package is a low-level client/server helper surface and may change where it is not part of the wire payload contract. |
 | `contractdiff` and `contractworkflow` | Preview/advanced | Useful review and CLI workflow helpers. Their policy checks now align with the stable v1 `ModuleContract` field, read-policy, permission, unknown-field, and codegen metadata rules, but the helper APIs remain workflow-oriented preview surfaces. |
 | `auth` and `observability/prometheus` | Preview/advanced | Supported for Shunter-owned runtime wiring and advanced integrations. Production auth/ops policy is still a separate v1 readiness track. |
@@ -127,7 +127,9 @@ helpers includes:
 - generated contract metadata containing contract format/version, module
   name/version, and protocol metadata
 - row interfaces for exported tables
-- `tables`, `TableName`, `TableRows`, and table read policies
+- `tables`, `TableName`, `TableRows`, `tableRowDecoders`, generated table row
+  decoder functions, generated table subscription helpers, and table read
+  policies
 - visibility filter metadata
 - reducer and lifecycle reducer constants
 - reducer call helper functions for non-lifecycle reducers
@@ -139,6 +141,8 @@ helpers includes:
 - declared-query/view projection row interfaces, product decoders, default
   typed declared-query result helpers, and typed declared-view subscription and
   handle helpers when executable declared-read metadata is present
+- module-scoped aliases for reducer result, declared-query result, declared-view
+  subscription, table subscription, and subscription-handle runtime types
 - permissions and read-model metadata
 - type mappings for the current exported Shunter value kinds
 
@@ -159,6 +163,13 @@ When supplied, the client validates contract format/version and protocol
 metadata before opening a WebSocket. Apps that know the expected module name or
 module version can call `assertGeneratedContractCompatible()` with those values
 to catch stale or wrong-module generated bindings before connecting.
+
+The runtime client exposes `connect`, `close`, `dispose`, raw reducer calls,
+raw declared queries, table subscriptions, and declared-view subscriptions.
+Generated helpers can layer schema-aware reducer argument encoding, reducer
+result envelopes, decoded declared-query results, generated table row decoders,
+decoded subscription callbacks, and managed subscription handles over those raw
+runtime methods.
 
 The supported TypeScript runtime target is browsers and Electron renderers with
 standard Web APIs. Reconnect and resubscription are opt-in, and disconnected
@@ -267,6 +278,6 @@ The fixture includes reducer product schemas, declared-read row schemas/result
 shapes, and a nullable column so conditional metadata keys are pinned when
 present.
 
-The root exports and lower-level package comments named by this matrix were
-re-audited for the `v1.0.0` release candidate with `rtk go doc` and
-`rtk go list -json ./...`; this matrix remains the supported v1 story.
+The root exports and lower-level package comments named by this matrix are
+checked against live code with `rtk go doc` and `rtk go list -json` when this
+matrix changes; this matrix remains the supported v1 story.
