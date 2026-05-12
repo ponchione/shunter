@@ -27,6 +27,14 @@ type typeScriptGenerationOptions struct {
 	runtimeImport string
 }
 
+type typeScriptRuntimeValueImports struct {
+	callReducerWithEncodedArgs bool
+	callReducerWithResult      bool
+	decodeBsatnProduct         bool
+	decodeDeclaredQueryResult  bool
+	encodeBsatnProduct         bool
+}
+
 func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerationOptions) ([]byte, error) {
 	var b bytes.Buffer
 
@@ -37,7 +45,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	}
 	b.WriteString("\n")
 	writeTypeScriptRuntimeImports(&b, opts.runtimeImport)
-	writeTypeScriptRuntimeValueImports(&b, opts.runtimeImport)
+	writeTypeScriptRuntimeValueImports(&b, opts.runtimeImport, typeScriptRuntimeValueImportUsage(contract))
 	if err := writeTypeScriptProtocolMetadata(&b); err != nil {
 		return nil, err
 	}
@@ -320,13 +328,68 @@ func writeTypeScriptRuntimeImports(b *bytes.Buffer, runtimeImport string) {
 	fmt.Fprintf(b, "} from %s;\n\n", strconv.Quote(runtimeImport))
 }
 
-func writeTypeScriptRuntimeValueImports(b *bytes.Buffer, runtimeImport string) {
+func typeScriptRuntimeValueImportUsage(contract shunter.ModuleContract) typeScriptRuntimeValueImports {
+	var usage typeScriptRuntimeValueImports
+	if len(contract.Schema.Tables) > 0 {
+		usage.decodeBsatnProduct = true
+	}
+	for _, reducer := range contract.Schema.Reducers {
+		if reducer.Lifecycle {
+			continue
+		}
+		usage.callReducerWithResult = true
+		if reducer.Args != nil {
+			usage.callReducerWithEncodedArgs = true
+			usage.encodeBsatnProduct = true
+		}
+		if reducer.Result != nil {
+			usage.decodeBsatnProduct = true
+		}
+	}
+	for _, query := range contract.Queries {
+		if strings.TrimSpace(query.SQL) == "" {
+			continue
+		}
+		usage.decodeDeclaredQueryResult = true
+		if query.RowSchema != nil && query.ResultShape != nil {
+			usage.decodeBsatnProduct = true
+		}
+	}
+	for _, view := range contract.Views {
+		if strings.TrimSpace(view.SQL) == "" {
+			continue
+		}
+		if view.RowSchema != nil && view.ResultShape != nil {
+			usage.decodeBsatnProduct = true
+		}
+	}
+	return usage
+}
+
+func writeTypeScriptRuntimeValueImports(b *bytes.Buffer, runtimeImport string, usage typeScriptRuntimeValueImports) {
+	if !usage.callReducerWithEncodedArgs &&
+		!usage.callReducerWithResult &&
+		!usage.decodeBsatnProduct &&
+		!usage.decodeDeclaredQueryResult &&
+		!usage.encodeBsatnProduct {
+		return
+	}
 	b.WriteString("import {\n")
-	b.WriteString("  callReducerWithEncodedArgs as shunterCallReducerWithEncodedArgs,\n")
-	b.WriteString("  callReducerWithResult as shunterCallReducerWithResult,\n")
-	b.WriteString("  decodeBsatnProduct as shunterDecodeBsatnProduct,\n")
-	b.WriteString("  decodeDeclaredQueryResult as shunterDecodeDeclaredQueryResult,\n")
-	b.WriteString("  encodeBsatnProduct as shunterEncodeBsatnProduct,\n")
+	if usage.callReducerWithEncodedArgs {
+		b.WriteString("  callReducerWithEncodedArgs as shunterCallReducerWithEncodedArgs,\n")
+	}
+	if usage.callReducerWithResult {
+		b.WriteString("  callReducerWithResult as shunterCallReducerWithResult,\n")
+	}
+	if usage.decodeBsatnProduct {
+		b.WriteString("  decodeBsatnProduct as shunterDecodeBsatnProduct,\n")
+	}
+	if usage.decodeDeclaredQueryResult {
+		b.WriteString("  decodeDeclaredQueryResult as shunterDecodeDeclaredQueryResult,\n")
+	}
+	if usage.encodeBsatnProduct {
+		b.WriteString("  encodeBsatnProduct as shunterEncodeBsatnProduct,\n")
+	}
 	fmt.Fprintf(b, "} from %s;\n\n", strconv.Quote(runtimeImport))
 }
 

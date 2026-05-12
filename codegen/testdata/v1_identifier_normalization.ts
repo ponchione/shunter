@@ -30,11 +30,9 @@ import type {
 } from "@shunter/client";
 
 import {
-  callReducerWithEncodedArgs as shunterCallReducerWithEncodedArgs,
   callReducerWithResult as shunterCallReducerWithResult,
   decodeBsatnProduct as shunterDecodeBsatnProduct,
   decodeDeclaredQueryResult as shunterDecodeDeclaredQueryResult,
-  encodeBsatnProduct as shunterEncodeBsatnProduct,
 } from "@shunter/client";
 
 export const shunterProtocol = {
