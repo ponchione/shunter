@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -94,6 +96,30 @@ func TestBuildRejectsSharedRuntimeDataDirModuleMismatch(t *testing.T) {
 	assertErrorMentions(t, err, "data dir metadata module name")
 	assertErrorMentions(t, err, "chat")
 	assertErrorMentions(t, err, "ops")
+}
+
+func TestHostDataDirKeyResolvesSymlinkAliases(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	link := filepath.Join(dir, "data-link")
+	if err := os.Symlink(dataDir, link); err != nil {
+		t.Skipf("create symlink: %v", err)
+	}
+
+	realKey, err := hostDataDirKey(dataDir)
+	if err != nil {
+		t.Fatalf("hostDataDirKey(real) returned error: %v", err)
+	}
+	linkKey, err := hostDataDirKey(link)
+	if err != nil {
+		t.Fatalf("hostDataDirKey(link) returned error: %v", err)
+	}
+	if realKey != linkKey {
+		t.Fatalf("host data dir keys differ for symlink aliases: real=%q link=%q", realKey, linkKey)
+	}
 }
 
 func TestHostStartsInRegistrationOrderAndCleansPartialStart(t *testing.T) {

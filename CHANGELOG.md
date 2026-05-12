@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Hardened offline DataDir backup/restore file copies against replaced source
+  entries and preserved file permissions after process umask filtering.
+- Host data-directory conflict checks now resolve symlink aliases before
+  comparing registered runtimes.
+
 ## v1.0.1 - 2026-05-12
 
 - Made the private `@shunter/client` TypeScript SDK package-shaped for local

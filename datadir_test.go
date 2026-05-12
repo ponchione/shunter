@@ -409,6 +409,39 @@ func TestDataDirHelpersRejectSymlinkSourcesAndEntries(t *testing.T) {
 	assertErrorContains(t, err, "is a symlink; refusing to copy")
 }
 
+func TestCopyRegularFileRejectsReplacedSource(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source")
+	dst := filepath.Join(dir, "copied")
+	if err := os.WriteFile(src, []byte("original"), 0o666); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	sourceInfo, err := os.Lstat(src)
+	if err != nil {
+		t.Fatalf("stat source: %v", err)
+	}
+
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("target"), 0o666); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Remove(src); err != nil {
+		t.Fatalf("remove source: %v", err)
+	}
+	if err := os.Symlink(target, src); err != nil {
+		t.Skipf("create source replacement symlink: %v", err)
+	}
+
+	err = copyRegularFile(src, dst, sourceInfo.Mode().Perm(), sourceInfo)
+	if err == nil {
+		t.Fatal("copyRegularFile returned nil for replaced source")
+	}
+	assertErrorContains(t, err, "changed while copying")
+	if _, statErr := os.Lstat(dst); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("destination stat after rejected copy = %v, want not exist", statErr)
+	}
+}
+
 func TestRestoreDataDirRejectsSymlinkBackupSourcesAndEntries(t *testing.T) {
 	dir := t.TempDir()
 	backupDir := filepath.Join(dir, "backup")

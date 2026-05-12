@@ -206,21 +206,32 @@ func copyDirectoryContents(src, dst string) error {
 			}
 			return nil
 		case mode.IsRegular():
-			return copyRegularFile(path, target, mode.Perm())
+			return copyRegularFile(path, target, mode.Perm(), info)
 		default:
 			return fmt.Errorf("source entry %s has unsupported mode %s", path, mode)
 		}
 	})
 }
 
-func copyRegularFile(src, dst string, mode fs.FileMode) (err error) {
+func copyRegularFile(src, dst string, mode fs.FileMode, expected fs.FileInfo) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open source file %s: %w", src, err)
 	}
 	defer in.Close()
 
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	srcInfo, err := in.Stat()
+	if err != nil {
+		return fmt.Errorf("stat source file %s: %w", src, err)
+	}
+	if !srcInfo.Mode().IsRegular() {
+		return fmt.Errorf("source entry %s has unsupported mode %s", src, srcInfo.Mode())
+	}
+	if expected != nil && !sameFileSnapshot(expected, srcInfo) {
+		return fmt.Errorf("source entry %s changed while copying; refusing to copy", src)
+	}
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("create destination file %s: %w", dst, err)
 	}
@@ -233,8 +244,18 @@ func copyRegularFile(src, dst string, mode fs.FileMode) (err error) {
 	if _, err := io.Copy(out, in); err != nil {
 		return fmt.Errorf("copy %s to %s: %w", src, dst, err)
 	}
+	if err := out.Chmod(mode); err != nil {
+		return fmt.Errorf("chmod destination file %s: %w", dst, err)
+	}
 	if err := out.Sync(); err != nil {
 		return fmt.Errorf("sync destination file %s: %w", dst, err)
 	}
 	return nil
+}
+
+func sameFileSnapshot(a, b fs.FileInfo) bool {
+	return os.SameFile(a, b) &&
+		a.Mode() == b.Mode() &&
+		a.Size() == b.Size() &&
+		a.ModTime() == b.ModTime()
 }

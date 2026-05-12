@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"path"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -363,9 +362,9 @@ func hostDataDirKey(dataDir string) (string, error) {
 	if strings.TrimSpace(dataDir) == "" {
 		return "", fmt.Errorf("must not be empty")
 	}
-	abs, err := filepath.Abs(dataDir)
+	resolved, err := resolvePathForContainment(dataDir)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Clean(abs), nil
+	return resolved, nil
 }
