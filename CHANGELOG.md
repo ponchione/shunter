@@ -2,9 +2,11 @@
 
 Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
-## v0.1.1-dev
+## v0.1.1 - 2026-05-12
 
-- Current development line.
+- Added network-level protocol coverage for slow WebSocket readers and
+  write-timeout backpressure, proving an unread client does not block or
+  corrupt unrelated fanout delivery.
 - Runtime startup now requires rebuilding a fresh Runtime before retrying when
   a startup migration mutates in-memory state but fails before durability
   confirmation.
