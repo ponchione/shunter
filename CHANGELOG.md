@@ -4,6 +4,16 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+## v1.0.1 - 2026-05-12
+
+- Made the private `@shunter/client` TypeScript SDK package-shaped for local
+  workspace, `file:`, and tarball installs, with built ESM and declaration
+  artifacts plus package smoke coverage.
+- Generated TypeScript bindings now support runtime import overrides and
+  `shunterContract` metadata for stale-binding and protocol compatibility
+  checks.
+- Hardened generated TypeScript runtime imports for package-scoped and
+  app-scoped local SDK installs.
 - Hardened DataDir backup/restore containment checks to resolve symlinked
   destination parents before rejecting nested copies.
 - Dev auth now includes the anonymous token issuer in configured issuer
@@ -142,12 +152,6 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added TypeScript decoding for the initial server `IdentityToken` frame so
   `createShunterClient().connect()` resolves with identity and connection ID
   metadata.
-- Made the private `@shunter/client` TypeScript SDK package-shaped for local
-  workspace, `file:`, and tarball installs, with built ESM and declaration
-  artifacts plus package smoke coverage.
-- Added a TypeScript codegen runtime import override and generated
-  `shunterContract` metadata for stale-binding and protocol compatibility
-  checks.
 - Added raw TypeScript reducer request encoding and a connected-client
   `callReducer` send path for the v1 `CallReducerMsg` wire shape.
 - Added minimal TypeScript reducer response correlation for full-update
