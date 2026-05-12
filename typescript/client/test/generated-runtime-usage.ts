@@ -31,6 +31,7 @@ import type {
   RawSubscriptionUpdate,
   EncodedReducerCallOptions,
   EncodedReducerCallResultOptions,
+  GeneratedContractMetadata,
   ReducerArgEncoder,
   ReducerCallResult,
   DeclaredViewHandleSubscriber,
@@ -63,6 +64,7 @@ import {
   queries,
   recentMessagesQueryRowDecoders,
   reducers,
+  shunterContract,
   shunterProtocol as generatedProtocol,
   subscribeLiveMessageCount,
   subscribeLiveMessageProjection,
@@ -103,6 +105,11 @@ import type {
 
 const generatedProtocolMetadata: ProtocolMetadata = generatedProtocol;
 const runtimeProtocolMetadata: ProtocolMetadata = runtimeProtocol;
+const generatedContractMetadata: GeneratedContractMetadata<typeof generatedProtocol> =
+  shunterContract;
+const generatedContractProtocolMetadata: ProtocolMetadata =
+  generatedContractMetadata.protocol;
+const generatedModuleName: string | undefined = generatedContractMetadata.moduleName;
 const selectedSubprotocol: typeof SHUNTER_SUBPROTOCOL_V1 =
   generatedProtocol.defaultSubprotocol;
 
@@ -131,6 +138,7 @@ const activeMessages: SubscriptionHandle<MessagesRow> = {
 const client = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe",
   protocol: generatedProtocol,
+  contract: shunterContract,
   token: async () => "token",
   webSocketFactory: () => ({
     protocol: SHUNTER_SUBPROTOCOL_V1,

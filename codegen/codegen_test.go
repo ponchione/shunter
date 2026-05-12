@@ -512,6 +512,22 @@ func TestGeneratorRejectsUnsupportedLanguageBeforeDecodingContractJSON(t *testin
 	}
 }
 
+func TestGeneratorRejectsInvalidTypeScriptRuntimeImportBeforeDecodingContractJSON(t *testing.T) {
+	_, err := GenerateFromJSON([]byte(`{`), Options{
+		Language:                LanguageTypeScript,
+		TypeScriptRuntimeImport: "@app/runtime\nnext",
+	})
+	if err == nil {
+		t.Fatal("GenerateFromJSON returned nil error, want invalid runtime import error")
+	}
+	if !strings.Contains(err.Error(), "invalid TypeScript runtime import specifier") {
+		t.Fatalf("GenerateFromJSON error = %v, want runtime import context", err)
+	}
+	if errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("GenerateFromJSON decoded contract before rejecting runtime import: %v", err)
+	}
+}
+
 func TestGeneratorRejectsUnusableContractJSON(t *testing.T) {
 	_, err := GenerateFromJSON([]byte(`{"version":1,"tables":[],"reducers":[]}`), Options{Language: LanguageTypeScript})
 	if err == nil {

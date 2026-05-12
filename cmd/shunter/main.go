@@ -178,6 +178,7 @@ func runContractCodegen(stdout, stderr io.Writer, args []string) int {
 	fs := newFlagSet(stderr, "shunter contract codegen")
 	contractPath := fs.String("contract", "", "contract JSON path")
 	language := fs.String("language", codegen.LanguageTypeScript, "generator target language")
+	runtimeImport := fs.String("runtime-import", "", "TypeScript runtime import specifier")
 	outputPath := fs.String("out", "", "generated output path")
 	if code, stop := parseFlags(fs, args); stop {
 		return code
@@ -192,7 +193,10 @@ func runContractCodegen(stdout, stderr io.Writer, args []string) int {
 		return code
 	}
 
-	if err := contractworkflow.GenerateFile(*contractPath, *outputPath, codegen.Options{Language: *language}); err != nil {
+	if err := contractworkflow.GenerateFile(*contractPath, *outputPath, codegen.Options{
+		Language:                *language,
+		TypeScriptRuntimeImport: *runtimeImport,
+	}); err != nil {
 		writeCLIError(stderr, err)
 		return 1
 	}

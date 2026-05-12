@@ -875,6 +875,31 @@ func TestContractCodegenCommandWritesTypeScript(t *testing.T) {
 	assertContains(t, stdout.String(), "wrote "+outputPath)
 }
 
+func TestContractCodegenCommandAcceptsTypeScriptRuntimeImport(t *testing.T) {
+	dir := t.TempDir()
+	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
+	outputPath := filepath.Join(dir, "client.ts")
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "codegen",
+		"--contract", contractPath,
+		"--language", "typescript",
+		"--runtime-import", "@app/shunter-runtime",
+		"--out", outputPath,
+	})
+	if code != 0 {
+		t.Fatalf("contract codegen exit code = %d, stderr = %s", code, stderr.String())
+	}
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read generated output: %v", err)
+	}
+	assertContains(t, string(data), `} from "@app/shunter-runtime";`)
+	assertNotContains(t, string(data), `} from "@shunter/client";`)
+	assertContains(t, stdout.String(), "wrote "+outputPath)
+}
+
 func TestContractCodegenRejectedInputsLeaveOutputUntouched(t *testing.T) {
 	validContract, err := cliContractFixture().MarshalCanonicalJSON()
 	if err != nil {
@@ -1308,6 +1333,13 @@ func assertContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {
 		t.Fatalf("missing %q in:\n%s", needle, haystack)
+	}
+}
+
+func assertNotContains(t *testing.T, haystack, needle string) {
+	t.Helper()
+	if strings.Contains(haystack, needle) {
+		t.Fatalf("unexpected %q in:\n%s", needle, haystack)
 	}
 }
 

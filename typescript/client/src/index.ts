@@ -247,11 +247,12 @@ export type ConnectionStatus =
   | "closed"
   | "failed";
 
-export interface GeneratedContractMetadata {
+export interface GeneratedContractMetadata<Protocol extends ProtocolMetadata = ProtocolMetadata> {
   readonly contractFormat: string;
   readonly contractVersion: number;
   readonly moduleName?: string;
   readonly moduleVersion?: string;
+  readonly protocol: Protocol;
 }
 
 export interface ConnectionMetadata<Protocol extends ProtocolMetadata = ProtocolMetadata> {
@@ -302,6 +303,7 @@ export interface ReconnectOptions {
 export interface RuntimeClientOptions<Protocol extends ProtocolMetadata = ProtocolMetadata> {
   readonly url: string;
   readonly protocol: Protocol;
+  readonly contract?: GeneratedContractMetadata<Protocol>;
   readonly token?: TokenSource;
   readonly signal?: AbortSignal;
   readonly webSocketFactory?: WebSocketFactory;
@@ -1590,6 +1592,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
                 identityToken: identityToken.token,
                 identity: identityToken.identity,
                 connectionId: identityToken.connectionId,
+                contract: options.contract,
               };
               cleanupOpeningAbort();
               hasConnected = true;

@@ -75,9 +75,19 @@ Or generate from an existing contract JSON file:
 rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
 ```
 
+Generated TypeScript imports the private local SDK package name
+`@shunter/client` by default. Use `codegen.Options.TypeScriptRuntimeImport` or
+`--runtime-import` only when an app vendors or renames the local runtime
+package:
+
+```bash
+rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --runtime-import @app/shunter-client --out client.ts
+```
+
 Generated TypeScript currently includes row interfaces, table metadata,
 declared-read constants and helpers, reducer helper functions, permission
-metadata, read-model metadata, and protocol metadata.
+metadata, read-model metadata, generated contract metadata, and protocol
+metadata.
 
 Generated helpers are contract-driven client bindings. They do not replace the
 application's reducer argument/result encoding choice; keep that encoding

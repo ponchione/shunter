@@ -124,6 +124,8 @@ Generated TypeScript from `codegen.GenerateTypeScript` or the contract workflow
 helpers includes:
 
 - protocol metadata from the runtime constants
+- generated contract metadata containing contract format/version, module
+  name/version, and protocol metadata
 - row interfaces for exported tables
 - `tables`, `TableName`, `TableRows`, and table read policies
 - visibility filter metadata
@@ -139,6 +141,11 @@ helpers includes:
   handle helpers when executable declared-read metadata is present
 - permissions and read-model metadata
 - type mappings for the current exported Shunter value kinds
+
+Generated bindings import `@shunter/client` by default. `codegen.Options` can
+override the TypeScript runtime import specifier for app-scoped package paths,
+future owned npm scopes, workspace packages, `file:` dependencies, or vendored
+paths.
 
 Generated identifier normalization and collision suffixes are stable for v1
 codegen output. Names are emitted as TypeScript-safe identifiers by splitting

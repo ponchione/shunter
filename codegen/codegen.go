@@ -12,6 +12,9 @@ import (
 const (
 	// LanguageTypeScript is the first supported client binding target.
 	LanguageTypeScript = "typescript"
+
+	// DefaultTypeScriptRuntimeImport is the stable local package name imported by generated bindings.
+	DefaultTypeScriptRuntimeImport = "@shunter/client"
 )
 
 var (
@@ -24,7 +27,13 @@ var (
 
 // Options configures client binding generation.
 type Options struct {
-	Language string
+	Language                string
+	TypeScriptRuntimeImport string
+}
+
+// TypeScriptOptions configures generated TypeScript bindings.
+type TypeScriptOptions struct {
+	RuntimeImport string
 }
 
 // GenerateFromJSON decodes canonical ModuleContract JSON and generates bindings.
@@ -46,7 +55,9 @@ func Generate(contract shunter.ModuleContract, opts Options) ([]byte, error) {
 	}
 	switch normalizedLanguage(opts) {
 	case LanguageTypeScript:
-		return GenerateTypeScript(contract)
+		return GenerateTypeScriptWithOptions(contract, TypeScriptOptions{
+			RuntimeImport: opts.TypeScriptRuntimeImport,
+		})
 	default:
 		return nil, fmt.Errorf("%w %q", ErrUnsupportedLanguage, opts.Language)
 	}
@@ -56,7 +67,8 @@ func Generate(contract shunter.ModuleContract, opts Options) ([]byte, error) {
 func ValidateOptions(opts Options) error {
 	switch normalizedLanguage(opts) {
 	case LanguageTypeScript:
-		return nil
+		_, err := normalizedTypeScriptRuntimeImport(opts.TypeScriptRuntimeImport)
+		return err
 	default:
 		return fmt.Errorf("%w %q", ErrUnsupportedLanguage, opts.Language)
 	}
@@ -68,10 +80,32 @@ func normalizedLanguage(opts Options) string {
 
 // GenerateTypeScript emits deterministic TypeScript bindings from a ModuleContract.
 func GenerateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
+	return GenerateTypeScriptWithOptions(contract, TypeScriptOptions{})
+}
+
+// GenerateTypeScriptWithOptions emits deterministic TypeScript bindings from a ModuleContract.
+func GenerateTypeScriptWithOptions(contract shunter.ModuleContract, opts TypeScriptOptions) ([]byte, error) {
 	if err := validateContract(contract); err != nil {
 		return nil, err
 	}
-	return generateTypeScript(contract)
+	runtimeImport, err := normalizedTypeScriptRuntimeImport(opts.RuntimeImport)
+	if err != nil {
+		return nil, err
+	}
+	return generateTypeScript(contract, typeScriptGenerationOptions{runtimeImport: runtimeImport})
+}
+
+func normalizedTypeScriptRuntimeImport(specifier string) (string, error) {
+	trimmed := strings.TrimSpace(specifier)
+	if trimmed == "" {
+		return DefaultTypeScriptRuntimeImport, nil
+	}
+	for _, r := range trimmed {
+		if r < 0x20 || r == 0x7f {
+			return "", fmt.Errorf("invalid TypeScript runtime import specifier %q: control characters are not allowed", specifier)
+		}
+	}
+	return trimmed, nil
 }
 
 func validateContract(contract shunter.ModuleContract) error {

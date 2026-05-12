@@ -746,9 +746,17 @@ assert.equal(activeSubscriptionError.error, "subscription eval denied");
 const clientStates = [];
 const encodedToken = "space token&equals=value/slash?";
 const tokenQuerySockets = [];
+const tokenQueryContract = {
+  contractFormat: "shunter.module_contract",
+  contractVersion: 1,
+  moduleName: "chat",
+  moduleVersion: "v1.0.0",
+  protocol: shunterProtocol,
+};
 const tokenQueryClient = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe?token=old-token&existing=1&token=stale-token",
   protocol: shunterProtocol,
+  contract: tokenQueryContract,
   token: encodedToken,
   webSocketFactory: (url, protocols) => {
     const socket = new FakeWebSocket(url, protocols);
@@ -766,7 +774,9 @@ assert(!tokenQuerySockets[0].url.includes("old-token"));
 assert(!tokenQuerySockets[0].url.includes("stale-token"));
 tokenQuerySockets[0].open();
 tokenQuerySockets[0].message(identityTokenFrame().buffer);
-await tokenQueryConnecting;
+const tokenQueryMetadata = await tokenQueryConnecting;
+assert.deepEqual(tokenQueryMetadata.contract, tokenQueryContract);
+assert.equal(tokenQueryClient.state.metadata.contract.moduleName, "chat");
 await tokenQueryClient.close();
 
 const asyncTokenSockets = [];

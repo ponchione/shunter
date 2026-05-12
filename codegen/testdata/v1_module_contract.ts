@@ -12,6 +12,7 @@ import type {
   DeclaredViewSubscriptionOptions as ShunterDeclaredViewSubscriptionOptions,
   EncodedReducerCallOptions as ShunterEncodedReducerCallOptions,
   EncodedReducerCallResultOptions as ShunterEncodedReducerCallResultOptions,
+  GeneratedContractMetadata as ShunterGeneratedContractMetadata,
   ProtocolMetadata as ShunterProtocolMetadata,
   QueryRunner as ShunterQueryRunner,
   RawDeclaredQueryResult as ShunterRawDeclaredQueryResult,
@@ -44,6 +45,14 @@ export const shunterProtocol = {
 } as const satisfies ShunterProtocolMetadata;
 
 export type ShunterSubprotocol = (typeof shunterProtocol.supportedSubprotocols)[number];
+
+export const shunterContract = {
+  contractFormat: "shunter.module_contract",
+  contractVersion: 1,
+  moduleName: "v1_guardrails",
+  moduleVersion: "v1.0.0",
+  protocol: shunterProtocol,
+} as const satisfies ShunterGeneratedContractMetadata<typeof shunterProtocol>;
 
 export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;
 export type EncodedReducerCallOptions<Args = unknown> = ShunterEncodedReducerCallOptions<Args>;
