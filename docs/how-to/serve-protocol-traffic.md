@@ -28,6 +28,7 @@ if err := rt.ListenAndServe(ctx); err != nil && !errors.Is(err, context.Canceled
 
 `ListenAndServe` starts the runtime if needed, serves `Runtime.HTTPHandler()`,
 and closes runtime ownership when the context is canceled.
+Runtime-owned HTTP serving uses defensive read-header and idle timeouts.
 
 ## App-Owned HTTP Server
 
@@ -64,6 +65,9 @@ If the app-owned server needs its own middleware, route `rt.HTTPHandler()` under
 the desired mount point after the runtime has started. Keep using local
 `CallReducer`, `Read`, `CallQuery`, and `SubscribeView` for trusted in-process
 work that does not need WebSocket protocol behavior.
+
+For WebSocket write backpressure tuning, use `Config.Protocol.WriteTimeout`.
+Zero values use Shunter's protocol defaults.
 
 ## Protocol Endpoint
 

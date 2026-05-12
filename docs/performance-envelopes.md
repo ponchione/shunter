@@ -1,12 +1,14 @@
 # Shunter Performance Envelopes
 
-Status: current advisory v1 release-qualification snapshot
+Status: latest recorded advisory v1 release-qualification snapshot
 Scope: existing Go benchmarks for protocol, declared reads, executor,
 commitlog, subscription, and offline operations hot paths.
 
 This page records measured behavior for the benchmark coverage that already
 exists. The rows are advisory for v1 release qualification unless a future
-release gate adds hard thresholds.
+release gate adds hard thresholds. The preferred repo toolchain is currently
+the `go.mod` `toolchain` value; the benchmark snapshot below has not been
+refreshed solely for a security-only toolchain bump.
 
 ## Snapshot
 
@@ -15,7 +17,8 @@ release gate adds hard thresholds.
 - Measurement worktree: release-candidate checkout based on the commit above;
   local changes during the run were release metadata and documentation only
 - Host: `Linux gernsback 6.17.0-23-generic`, linux/amd64
-- Go: `go1.26.2`
+- Go: `go1.26.2` for this recorded benchmark run; current checkout toolchain is
+  pinned in `go.mod`
 - CPU: `AMD Ryzen 9 9900X 12-Core Processor`, 12 cores, 24 logical CPUs
 
 Commands:
@@ -130,9 +133,9 @@ Every row is advisory.
   replace canary-scale backup/restore timing.
 - WebSocket coverage now includes a single SubscribeSingle round trip and
   16-, 64-, and 128-client light-update fanout fixtures. Deterministic
-  sender-level full-buffer rejection now has an advisory row, but slow-reader
-  WebSocket writer/write-timeout behavior and external canary-scale network
-  workloads remain outside the envelope.
+  sender-level full-buffer rejection now has an advisory row. Slow-reader
+  WebSocket writer/write-timeout behavior has network-level test coverage, but
+  not an advisory benchmark row.
 - The current rows are not release-blocking thresholds. Treat regressions here
   as investigation triggers until the release process defines hard limits.
 
@@ -280,9 +283,9 @@ These remain outside the current benchmark envelope:
 
 - WebSocket network-level subscription workloads beyond the current
   single-connection subscribe and 16/64/128-client light-update fanout
-  fixtures, including slow-reader writer/write-timeout backpressure paths and
-  external canary-scale fanout; deterministic sender-level full-buffer
-  rejection is covered separately
+  fixtures, including benchmark rows for slow-reader writer/write-timeout
+  backpressure paths and external canary-scale fanout; deterministic
+  sender-level full-buffer rejection is covered separately
 - workload-derived or canary fanout distributions beyond the deterministic
   in-process same-query, varied single-table, skewed hot-key, and varied
   two-table predicate fixtures

@@ -42,6 +42,7 @@ public service.
 - `PingInterval`
 - `IdleTimeout`
 - `CloseHandshakeTimeout`
+- `WriteTimeout`
 - `DisconnectTimeout`
 - `OutgoingBufferMessages`
 - `IncomingQueueMessages`
@@ -49,6 +50,8 @@ public service.
 
 Zero values use protocol package defaults. Set these only when you are tuning a
 measured serving workload or enforcing an application-specific message limit.
+`WriteTimeout` bounds each server-to-client WebSocket data write, which keeps a
+slow reader from blocking unrelated outbound delivery indefinitely.
 
 ## Observability Field
 
