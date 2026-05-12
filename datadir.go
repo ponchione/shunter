@@ -88,11 +88,11 @@ func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestinat
 }
 
 func rejectNestedCopy(src, dst string) error {
-	srcAbs, err := filepath.Abs(src)
+	srcAbs, err := resolvePathForContainment(src)
 	if err != nil {
 		return fmt.Errorf("resolve source path %s: %w", src, err)
 	}
-	dstAbs, err := filepath.Abs(dst)
+	dstAbs, err := resolvePathForContainment(dst)
 	if err != nil {
 		return fmt.Errorf("resolve destination path %s: %w", dst, err)
 	}
@@ -100,6 +100,36 @@ func rejectNestedCopy(src, dst string) error {
 		return fmt.Errorf("destination %s must not be inside source data dir %s", dst, src)
 	}
 	return nil
+}
+
+func resolvePathForContainment(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	existing := filepath.Clean(abs)
+	var missing []string
+	for {
+		if _, err := os.Lstat(existing); err == nil {
+			resolved, err := filepath.EvalSymlinks(existing)
+			if err != nil {
+				return "", err
+			}
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return filepath.Clean(resolved), nil
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return "", fs.ErrNotExist
+		}
+		missing = append(missing, filepath.Base(existing))
+		existing = parent
+	}
 }
 
 func sameOrNestedPath(parent, child string) bool {

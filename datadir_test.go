@@ -348,6 +348,38 @@ func TestDataDirHelpersRejectUnsafePaths(t *testing.T) {
 	}
 }
 
+func TestDataDirHelpersRejectDestinationsInsideSourceThroughSymlinkedParent(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	dataLink := filepath.Join(dir, "data-link")
+	if err := os.Symlink(dataDir, dataLink); err != nil {
+		t.Skipf("create symlink: %v", err)
+	}
+
+	backupViaLink := filepath.Join(dataLink, "backup")
+	err := BackupDataDir(dataDir, backupViaLink)
+	if err == nil {
+		t.Fatal("BackupDataDir returned nil for destination routed back through source symlink")
+	}
+	assertErrorContains(t, err, "must not be inside source data dir")
+	if _, statErr := os.Lstat(filepath.Join(dataDir, "backup")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("nested backup path stat = %v, want not exist", statErr)
+	}
+
+	restoreViaLink := filepath.Join(dataLink, "restore")
+	err = RestoreDataDir(dataDir, restoreViaLink)
+	if err == nil {
+		t.Fatal("RestoreDataDir returned nil for destination routed back through backup symlink")
+	}
+	assertErrorContains(t, err, "must not be inside source data dir")
+	if _, statErr := os.Lstat(filepath.Join(dataDir, "restore")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("nested restore path stat = %v, want not exist", statErr)
+	}
+}
+
 func TestDataDirHelpersRejectSymlinkSourcesAndEntries(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := filepath.Join(dir, "data")

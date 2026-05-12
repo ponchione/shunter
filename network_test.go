@@ -105,6 +105,27 @@ func TestBuildAuthConfigDevMintedTokenValidatesWithConfiguredAudiences(t *testin
 	}
 }
 
+func TestBuildAuthConfigDevMintedTokenValidatesWithConfiguredIssuers(t *testing.T) {
+	jwtCfg, mintCfg, err := buildAuthConfig(Config{
+		AuthMode:    AuthModeDev,
+		AuthIssuers: []string{"external"},
+	})
+	if err != nil {
+		t.Fatalf("buildAuthConfig returned error: %v", err)
+	}
+	if !stringSliceContains(jwtCfg.Issuers, mintCfg.Issuer) {
+		t.Fatalf("JWT issuers = %#v, want anonymous token issuer %q accepted", jwtCfg.Issuers, mintCfg.Issuer)
+	}
+
+	token, _, err := auth.MintAnonymousToken(mintCfg)
+	if err != nil {
+		t.Fatalf("MintAnonymousToken returned error: %v", err)
+	}
+	if _, err := auth.ValidateJWT(token, jwtCfg); err != nil {
+		t.Fatalf("minted token did not validate against runtime JWT config: %v", err)
+	}
+}
+
 func TestBuildAuthConfigDevExplicitAnonymousAudienceIsAccepted(t *testing.T) {
 	jwtCfg, mintCfg, err := buildAuthConfig(Config{
 		AuthMode:               AuthModeDev,

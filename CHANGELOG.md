@@ -2,6 +2,13 @@
 
 Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
+## Unreleased
+
+- Hardened DataDir backup/restore containment checks to resolve symlinked
+  destination parents before rejecting nested copies.
+- Dev auth now includes the anonymous token issuer in configured issuer
+  allowlists so minted anonymous tokens validate on reconnect.
+
 ## v1.0.0 - 2026-05-12
 
 - Promoted the Shunter v1 compatibility line to the stable `v1.0.0` release

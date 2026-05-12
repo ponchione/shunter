@@ -100,6 +100,9 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 		if issuer == "" {
 			issuer = "shunter-dev"
 		}
+		if len(issuers) > 0 && !stringSliceContains(issuers, issuer) {
+			issuers = append(issuers, issuer)
+		}
 		audience := cfg.AnonymousTokenAudience
 		if audience == "" {
 			if len(audiences) > 0 {
