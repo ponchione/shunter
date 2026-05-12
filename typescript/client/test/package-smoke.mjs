@@ -12,6 +12,15 @@ const run = (command, args, cwd) => {
   execFileSync(command, args, { cwd, stdio: "inherit" });
 };
 
+const expectedPackFiles = [
+  "README.md",
+  "dist/index.d.ts",
+  "dist/index.d.ts.map",
+  "dist/index.js",
+  "dist/index.js.map",
+  "package.json",
+];
+
 const fileDependency = (fromDir, toPath) =>
   `file:${relative(fromDir, toPath).replaceAll("\\", "/")}`;
 
@@ -108,14 +117,36 @@ const writeWorkspaceClientPackage = (clientRoot) => {
 rmSync(smokeRoot, { force: true, recursive: true });
 mkdirSync(smokeRoot, { recursive: true });
 
+const parsePackOutput = (output) => {
+  const parsed = JSON.parse(output);
+  assert.equal(parsed.length, 1, "npm pack should report one package");
+  return parsed[0];
+};
+
+const assertPackManifest = (manifest) => {
+  assert.equal(manifest.name, "@shunter/client");
+  assert.equal(manifest.version, "1.0.0");
+  assert.deepEqual(
+    manifest.files.map((file) => file.path),
+    expectedPackFiles,
+  );
+};
+
 run("npm", ["run", "build"], packageRoot);
 
-const packOutput = execFileSync("npm", ["pack", "--pack-destination", smokeRoot], {
+const dryRunManifest = parsePackOutput(execFileSync("npm", ["pack", "--dry-run", "--json"], {
   cwd: packageRoot,
   encoding: "utf8",
-});
-const tarball = packOutput.trim().split(/\r?\n/).at(-1);
-assert.ok(tarball, "npm pack should print the tarball name");
+}));
+assertPackManifest(dryRunManifest);
+
+const packManifest = parsePackOutput(execFileSync("npm", ["pack", "--json", "--pack-destination", smokeRoot], {
+  cwd: packageRoot,
+  encoding: "utf8",
+}));
+assertPackManifest(packManifest);
+const tarball = packManifest.filename;
+assert.ok(tarball, "npm pack should report the tarball name");
 
 const tarballPath = join(smokeRoot, tarball);
 

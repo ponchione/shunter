@@ -20,6 +20,7 @@
   ],
   "scripts": {
     "build": "npm exec --yes --package typescript -- tsc -p tsconfig.build.json",
+    "pack:dry-run": "npm pack --dry-run",
     "smoke:package": "node test/package-smoke.mjs",
     "test": "npm run typecheck && npm exec --yes --package typescript -- tsc -p tsconfig.runtime-test.json && node test/runtime-behavior.test.mjs",
     "typecheck": "npm exec --yes --package typescript -- tsc -p tsconfig.json --noEmit"

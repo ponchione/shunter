@@ -158,6 +158,6 @@ those surfaces tied to generated name unions.
 ```bash
 rtk npm --prefix typescript/client run test
 rtk npm --prefix typescript/client run build
-rtk npm --prefix typescript/client pack ./typescript/client --dry-run
+rtk npm --prefix typescript/client run pack:dry-run
 rtk npm --prefix typescript/client run smoke:package
 ```
