@@ -194,10 +194,10 @@ func (h *Host) ListenAndServe(ctx context.Context, addr string) error {
 	if strings.TrimSpace(addr) == "" {
 		addr = defaultListenAddr
 	}
-	ln, err := net.Listen("tcp", addr)
+	ln, err := listenTCP(ctx, addr)
 	if err != nil {
 		h.endServing()
-		return fmt.Errorf("listen %s: %w", addr, err)
+		return fmt.Errorf("listen %q: %w", addr, err)
 	}
 	return h.serveStarted(ctx, ln)
 }
@@ -243,7 +243,7 @@ func (h *Host) serveStarted(ctx context.Context, ln net.Listener) error {
 		return err
 	}
 
-	httpServer := &http.Server{Handler: h.HTTPHandler()}
+	httpServer := newServingHTTPServer(h.HTTPHandler())
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpServer.Serve(ln) }()
 

@@ -286,6 +286,29 @@ func TestHostListenAndServeDuplicateCallReturnsHostServing(t *testing.T) {
 	}
 }
 
+func TestHostListenAndServeRejectsNULListenAddrBeforeNetListen(t *testing.T) {
+	chat := buildHostTestRuntime(t, "chat", t.TempDir())
+	host, err := NewHost(HostRuntime{Name: "chat", RoutePrefix: "/chat", Runtime: chat})
+	if err != nil {
+		t.Fatalf("NewHost returned error: %v", err)
+	}
+
+	err = host.ListenAndServe(context.Background(), "127.0.0.1:0\x00")
+	if err == nil {
+		t.Fatal("Host.ListenAndServe succeeded with NUL listen address")
+	}
+	assertErrorMentions(t, err, "NUL")
+	host.lifecycleMu.Lock()
+	serving := host.serving
+	host.lifecycleMu.Unlock()
+	if serving {
+		t.Fatal("host serving flag remained set after listen-address rejection")
+	}
+	if chat.Ready() {
+		t.Fatal("host runtime started after listen-address rejection")
+	}
+}
+
 func TestHostHealthReportsPerModuleState(t *testing.T) {
 	chat := buildHostTestRuntime(t, "chat", t.TempDir())
 	ops := buildHostTestRuntime(t, "ops", t.TempDir())

@@ -8,6 +8,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   entries and preserved file permissions after process umask filtering.
 - Host data-directory conflict checks now resolve symlink aliases before
   comparing registered runtimes.
+- Runtime and Host HTTP serving now set defensive read-header and idle timeouts.
+- Runtime and Host serving now reject NUL-containing listen addresses before
+  calling the Go networking stack.
+- The preferred Go toolchain is now pinned to Go 1.26.3, which includes fixes
+  for standard-library vulnerabilities reported against Go 1.26.2.
 
 ## v1.0.1 - 2026-05-12
 

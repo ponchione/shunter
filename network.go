@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,7 +19,11 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-const defaultListenAddr = "127.0.0.1:3000"
+const (
+	defaultListenAddr            = "127.0.0.1:3000"
+	defaultHTTPReadHeaderTimeout = 5 * time.Second
+	defaultHTTPIdleTimeout       = 60 * time.Second
+)
 
 var (
 	// ErrAuthSigningKeyRequired reports that strict protocol auth lacks signing material.
@@ -176,12 +181,20 @@ func (r *Runtime) ListenAndServe(ctx context.Context) error {
 		return ErrRuntimeServing
 	}
 	addr := r.listenAddr()
-	ln, err := net.Listen("tcp", addr)
+	ln, err := listenTCP(ctx, addr)
 	if err != nil {
 		r.endServing()
-		return fmt.Errorf("listen %s: %w", addr, err)
+		return fmt.Errorf("listen %q: %w", addr, err)
 	}
 	return r.serveStarted(ctx, ln)
+}
+
+func listenTCP(ctx context.Context, addr string) (net.Listener, error) {
+	if strings.ContainsRune(addr, '\x00') {
+		return nil, fmt.Errorf("listen address must not contain NUL byte")
+	}
+	var listenConfig net.ListenConfig
+	return listenConfig.Listen(ctx, "tcp", addr)
 }
 
 func (r *Runtime) listenAddr() string {
@@ -229,7 +242,7 @@ func (r *Runtime) serveStarted(ctx context.Context, ln net.Listener) error {
 		return err
 	}
 
-	httpServer := &http.Server{Handler: r.HTTPHandler()}
+	httpServer := newServingHTTPServer(r.HTTPHandler())
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpServer.Serve(ln) }()
 
@@ -256,6 +269,14 @@ func (r *Runtime) serveStarted(ctx context.Context, ln net.Listener) error {
 			return err
 		}
 		return closeErr
+	}
+}
+
+func newServingHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: defaultHTTPReadHeaderTimeout,
+		IdleTimeout:       defaultHTTPIdleTimeout,
 	}
 }
 

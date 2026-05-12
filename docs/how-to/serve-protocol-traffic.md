@@ -49,8 +49,10 @@ if err := rt.Start(ctx); err != nil {
 }
 
 server := &http.Server{
-	Addr:    "127.0.0.1:3000",
-	Handler: rt.HTTPHandler(),
+	Addr:              "127.0.0.1:3000",
+	Handler:           rt.HTTPHandler(),
+	ReadHeaderTimeout: 5 * time.Second,
+	IdleTimeout:       60 * time.Second,
 }
 return server.ListenAndServe()
 ```
@@ -132,6 +134,7 @@ contracts.
 
 - Set `EnableProtocol: true`.
 - Choose `ListenAndServe` or app-owned `HTTPHandler` mounting.
+- Set HTTP read-header and idle timeouts when using an app-owned server.
 - Use a durable `DataDir`.
 - Use strict auth for public services.
 - Call `Start` before serving when using `HTTPHandler` directly.

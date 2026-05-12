@@ -252,6 +252,21 @@ func TestRuntimeListenAddrKeepsExplicitValue(t *testing.T) {
 	}
 }
 
+func TestServingHTTPServerSetsDefensiveTimeouts(t *testing.T) {
+	handler := http.NotFoundHandler()
+	srv := newServingHTTPServer(handler)
+
+	if srv.Handler == nil {
+		t.Fatal("server handler was not preserved")
+	}
+	if srv.ReadHeaderTimeout != defaultHTTPReadHeaderTimeout {
+		t.Fatalf("ReadHeaderTimeout = %v, want %v", srv.ReadHeaderTimeout, defaultHTTPReadHeaderTimeout)
+	}
+	if srv.IdleTimeout != defaultHTTPIdleTimeout {
+		t.Fatalf("IdleTimeout = %v, want %v", srv.IdleTimeout, defaultHTTPIdleTimeout)
+	}
+}
+
 func TestRuntimeStartStrictAuthWithoutSigningKeyFails(t *testing.T) {
 	rt, err := Build(validChatModule(), Config{DataDir: t.TempDir(), EnableProtocol: true, AuthMode: AuthModeStrict})
 	if err != nil {
@@ -438,6 +453,31 @@ func TestListenAndServeAfterClosePreservesClosedError(t *testing.T) {
 	err = rt.serve(context.Background(), ln)
 	if !errors.Is(err, ErrRuntimeClosed) {
 		t.Fatalf("serve after Close error = %v, want ErrRuntimeClosed", err)
+	}
+}
+
+func TestListenAndServeRejectsNULListenAddrBeforeNetListen(t *testing.T) {
+	rt, err := Build(validChatModule(), Config{
+		DataDir:    t.TempDir(),
+		ListenAddr: "127.0.0.1:0\x00",
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	err = rt.ListenAndServe(context.Background())
+	if err == nil {
+		t.Fatal("ListenAndServe succeeded with NUL listen address")
+	}
+	assertErrorMentions(t, err, "NUL")
+	rt.mu.Lock()
+	serving := rt.serving
+	rt.mu.Unlock()
+	if serving {
+		t.Fatal("runtime serving flag remained set after listen-address rejection")
+	}
+	if rt.Ready() {
+		t.Fatal("runtime started after listen-address rejection")
 	}
 }
 
