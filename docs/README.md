@@ -2,7 +2,7 @@
 
 This directory holds current user-facing documentation for application authors
 and operators. Implementation plans, subsystem specs, audits, source-reading
-notes, and roadmap material live under `../working-docs/`.
+notes, and future-work trackers live under `../working-docs/`.
 
 ## App-Author Learning Path
 
@@ -51,9 +51,10 @@ answer a dependency question.
   contracts.
 - `../working-docs/specs/README.md` - scope note for the numbered subsystem
   contracts.
-- `../working-docs/v1-roadmap/README.md` - active roadmap for remaining v1
-  implementation drivers, auth coverage, hardening, performance status, and
-  release qualification.
+- `../working-docs/v1.1-declared-read-parameters.md` - active implementation
+  plan for typed declared-read parameters.
+- `../working-docs/tech-debt.md` - non-blocking future work retired from stale
+  release roadmaps.
 - `../working-docs/shunter-design-decisions.md` - consolidated implementation
   decisions that code and tests still cite.
 

@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Moved stale v1 roadmap follow-up into `working-docs/tech-debt.md` and
+  restored the source version to a post-release development marker.
 - Hardened offline DataDir backup/restore file copies against replaced source
   entries and preserved file permissions after process umask filtering.
 - Contract workflow outputs now create new generated files with owner-writable

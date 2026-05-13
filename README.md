@@ -175,8 +175,9 @@ For automation or agent-driven work, follow `AGENTS.md` and `RTK.md` before
 running commands or editing files.
 
 App-author and codebase docs live under `docs/`. Implementation planning,
-baseline specs, audits, and roadmaps live under `working-docs/`. Prefer live
-code, tests, and the narrow spec section for the surface being touched.
+baseline specs, audits, and future-work trackers live under `working-docs/`.
+Prefer live code, tests, and the narrow spec section for the surface being
+touched.
 
 ## Validation
 
