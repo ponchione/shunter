@@ -424,7 +424,7 @@ func (w *FileSnapshotWriter) endSnapshot() {
 
 func (w *FileSnapshotWriter) createSnapshotFromBody(txID types.TxID, body snapshotBodyCapture) error {
 	snapshotDir := filepath.Join(w.baseDir, strconv.FormatUint(uint64(txID), 10))
-	if err := os.MkdirAll(snapshotDir, 0o700); err != nil {
+	if err := ensureSnapshotDirectory(snapshotDir); err != nil {
 		return &SnapshotCompletionError{Phase: "mkdir", Path: snapshotDir, Err: err}
 	}
 	if err := w.syncDir(w.baseDir); err != nil {
@@ -484,6 +484,26 @@ func (w *FileSnapshotWriter) createSnapshotFromBody(txID types.TxID, body snapsh
 	}
 	if err := w.syncDir(snapshotDir); err != nil {
 		return &SnapshotCompletionError{Phase: "sync-unlock", Path: snapshotDir, Err: err}
+	}
+	return nil
+}
+
+func ensureSnapshotDirectory(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%w: snapshot directory %s is a symlink", ErrSnapshot, path)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%w: snapshot directory %s is not a directory", ErrSnapshot, path)
 	}
 	return nil
 }

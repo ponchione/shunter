@@ -9,6 +9,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - New commit-log segments, offset indexes, snapshot files, and snapshot lock
   markers now use owner-only permissions so persisted application state is not
   world-readable under a permissive process umask.
+- Snapshot creation now rejects symlinked transaction snapshot directories
+  before writing lock, temporary, or published snapshot artifacts.
+- SQL decimal and exponent literals now stay floating-point unless their source
+  text is exactly integral, avoiding integer coercion through `float64`
+  boundary rounding.
 
 ## v1.1.0 - 2026-05-13
 

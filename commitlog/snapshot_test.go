@@ -1982,6 +1982,43 @@ func TestCreateSnapshotOpenTempRejectsSymlinkAndDoesNotTruncateTarget(t *testing
 	}
 }
 
+func TestCreateSnapshotRejectsSymlinkSnapshotDirectory(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	snapshotBase := filepath.Join(baseDir, "snapshots")
+	snapshotDir := filepath.Join(snapshotBase, "99")
+	targetDir := filepath.Join(baseDir, "external-snapshot-dir")
+	if err := os.MkdirAll(snapshotBase, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlinkOrSkip(t, targetDir, snapshotDir)
+	writer := NewSnapshotWriter(snapshotBase, reg)
+
+	cs.SetCommittedTxID(99)
+	err := writer.CreateSnapshot(cs, 99)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("snapshot directory symlink error should be categorized as snapshot error, got %v", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "mkdir" || completionErr.Path != snapshotDir {
+		t.Fatalf("completion error = %+v, want mkdir phase and snapshot dir", completionErr)
+	}
+	if info, statErr := os.Lstat(snapshotDir); statErr != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("snapshot directory symlink should remain unmodified, info=%v err=%v", info, statErr)
+	}
+	for _, name := range []string{".lock", snapshotTempFileName, snapshotFileName} {
+		if _, statErr := os.Lstat(filepath.Join(targetDir, name)); !os.IsNotExist(statErr) {
+			t.Fatalf("external target artifact %s stat err = %v, want not exist", name, statErr)
+		}
+	}
+}
+
 func TestCreateSnapshotTempFileFaultsReturnSnapshotCompletionErrorAndCleanArtifacts(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
