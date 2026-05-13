@@ -53,7 +53,7 @@ func snapshotMarkerExists(path string) bool {
 }
 
 func CreateLockFile(snapshotDir string) error {
-	f, err := os.OpenFile(filepath.Join(snapshotDir, ".lock"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(filepath.Join(snapshotDir, ".lock"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
@@ -364,7 +364,7 @@ func NewFileSnapshotWriterWithObserver(baseDir string, reg schema.SchemaRegistry
 }
 
 func openSnapshotTempFile(path string) (snapshotTempFile, error) {
-	return os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	return os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 }
 
 func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txID types.TxID) (err error) {
@@ -424,7 +424,7 @@ func (w *FileSnapshotWriter) endSnapshot() {
 
 func (w *FileSnapshotWriter) createSnapshotFromBody(txID types.TxID, body snapshotBodyCapture) error {
 	snapshotDir := filepath.Join(w.baseDir, strconv.FormatUint(uint64(txID), 10))
-	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+	if err := os.MkdirAll(snapshotDir, 0o700); err != nil {
 		return &SnapshotCompletionError{Phase: "mkdir", Path: snapshotDir, Err: err}
 	}
 	if err := w.syncDir(w.baseDir); err != nil {

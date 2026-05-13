@@ -56,7 +56,7 @@ func CreateOffsetIndex(path string, cap uint64) (*OffsetIndexMut, error) {
 	if err := requireCreatableOffsetIndexPath(path); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return nil, err
 	}

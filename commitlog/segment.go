@@ -251,7 +251,7 @@ func CreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
 	if err := requireCreatableSegmentPath(path); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o666)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}

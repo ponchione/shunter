@@ -6,6 +6,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 - Restored the source and private TypeScript client package metadata to the
   post-`v1.1.0` `v1.1.1-dev` development line.
+- New commit-log segments, offset indexes, snapshot files, and snapshot lock
+  markers now use owner-only permissions so persisted application state is not
+  world-readable under a permissive process umask.
 
 ## v1.1.0 - 2026-05-13
 
