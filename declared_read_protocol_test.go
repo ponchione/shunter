@@ -96,6 +96,171 @@ func TestProtocolV1ParameterizedDeclaredReadsRejectWithoutParams(t *testing.T) {
 	requireDeclaredReadSubscriptionError(t, client, 32, 42, `declared view "live_messages_by_body" requires 1 parameter(s)`)
 }
 
+func TestProtocolV2ParameterizedDeclaredReadsExecuteWithParams(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		Query(QueryDeclaration{
+			Name: "messages_by_body",
+			SQL:  "SELECT * FROM messages WHERE body = :body ORDER BY id",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages_by_body",
+			SQL:  "SELECT * FROM messages WHERE body = :body",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, "alpha")
+	insertMessageWithBody(t, rt, 2, "bravo")
+	insertMessageWithBody(t, rt, 3, "alpha")
+
+	paramColumns := []schema.ColumnSchema{{Name: "body", Type: types.KindString}}
+	messageColumns := []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: types.KindUint64},
+		{Index: 1, Name: "body", Type: types.KindString},
+	}
+	client := dialDeclaredReadProtocolV2(t, rt, mintDeclaredReadProtocolToken(t, "reader", "messages:read", "messages:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.DeclaredQueryWithParametersMsg{
+		MessageID: []byte("parameterized-declared-query-v2"),
+		Name:      "messages_by_body",
+		Params:    encodeDeclaredReadProtocolParams(t, paramColumns, types.ProductValue{types.NewString("alpha")}),
+	})
+	queryRows := requireDeclaredReadOneOffValues(t, client, "messages", messageColumns)
+	assertDeclaredReadVisibleMessageRows(t, queryRows, []uint64{1, 3}, "alpha", "v2 parameterized query")
+
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewWithParametersMsg{
+		RequestID: 33,
+		QueryID:   43,
+		Name:      "live_messages_by_body",
+		Params:    encodeDeclaredReadProtocolParams(t, paramColumns, types.ProductValue{types.NewString("bravo")}),
+	})
+	initialRows := requireDeclaredReadAppliedValues(t, client, 33, 43, "messages", messageColumns)
+	assertDeclaredReadVisibleMessageRows(t, initialRows, []uint64{2}, "bravo", "v2 parameterized view initial")
+
+	insertMessageWithBody(t, rt, 5, "bravo")
+	inserts, deletes := requireDeclaredReadDeltaValues(t, client, 43, "messages", messageColumns)
+	assertDeclaredReadVisibleMessageRows(t, inserts, []uint64{5}, "bravo", "v2 parameterized view delta")
+	if len(deletes) != 0 {
+		t.Fatalf("v2 parameterized view delta deletes = %#v, want none", deletes)
+	}
+}
+
+func TestProtocolV2DeclaredReadParametersComposeWithSender(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		Query(QueryDeclaration{
+			Name: "own_message_by_id",
+			SQL:  "SELECT * FROM messages WHERE body = :sender AND id = :message_id",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "message_id", Type: "uint64"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+
+	client, identityToken := dialDeclaredReadProtocolV2WithIdentity(t, rt, mintDeclaredReadProtocolToken(t, "sender-reader", "messages:read"))
+	owner := types.Identity(identityToken.Identity).Hex()
+	insertMessageWithBody(t, rt, 1, owner)
+	insertMessageWithBody(t, rt, 2, owner)
+	insertMessageWithBody(t, rt, 3, visibilityRuntimeIdentity(0x99).Hex())
+
+	paramColumns := []schema.ColumnSchema{{Name: "message_id", Type: types.KindUint64}}
+	messageColumns := []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: types.KindUint64},
+		{Index: 1, Name: "body", Type: types.KindString},
+	}
+	writeDeclaredReadProtocolMessage(t, client, protocol.DeclaredQueryWithParametersMsg{
+		MessageID: []byte("sender-parameterized-declared-query-v2"),
+		Name:      "own_message_by_id",
+		Params:    encodeDeclaredReadProtocolParams(t, paramColumns, types.ProductValue{types.NewUint64(2)}),
+	})
+	rows := requireDeclaredReadOneOffValues(t, client, "messages", messageColumns)
+	assertDeclaredReadVisibleMessageRows(t, rows, []uint64{2}, owner, "v2 sender plus parameter")
+}
+
+func TestProtocolV2ParameterizedDeclaredReadValidationErrors(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Query(QueryDeclaration{
+			Name:        "all_messages",
+			SQL:         "SELECT * FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}).
+		Query(QueryDeclaration{
+			Name: "messages_by_body",
+			SQL:  "SELECT * FROM messages WHERE body = :body",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages_by_body",
+			SQL:  "SELECT * FROM messages WHERE body = :body",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+
+	stringParamColumns := []schema.ColumnSchema{{Name: "body", Type: types.KindString}}
+	nullableStringParamColumns := []schema.ColumnSchema{{Name: "body", Type: types.KindString, Nullable: true}}
+	uint64ParamColumns := []schema.ColumnSchema{{Name: "body", Type: types.KindUint64}}
+	client := dialDeclaredReadProtocolV2(t, rt, mintDeclaredReadProtocolToken(t, "reader", "messages:read", "messages:subscribe"))
+
+	writeDeclaredReadProtocolMessage(t, client, protocol.DeclaredQueryWithParametersMsg{
+		MessageID: []byte("unexpected-query-params-v2"),
+		Name:      "all_messages",
+		Params:    encodeDeclaredReadProtocolParams(t, stringParamColumns, types.ProductValue{types.NewString("alpha")}),
+	})
+	requireDeclaredReadOneOffError(t, client, `declared query "all_messages" does not accept parameters`)
+
+	writeDeclaredReadProtocolMessage(t, client, protocol.DeclaredQueryWithParametersMsg{
+		MessageID: []byte("missing-query-params-v2"),
+		Name:      "messages_by_body",
+		Params:    nil,
+	})
+	requireDeclaredReadOneOffError(t, client, `parameter decode failed`)
+
+	writeDeclaredReadProtocolMessage(t, client, protocol.DeclaredQueryWithParametersMsg{
+		MessageID: []byte("wrong-query-arity-v2"),
+		Name:      "messages_by_body",
+		Params: encodeDeclaredReadProtocolParams(t, []schema.ColumnSchema{
+			{Name: "body", Type: types.KindString},
+			{Name: "extra", Type: types.KindString},
+		}, types.ProductValue{types.NewString("alpha"), types.NewString("bravo")}),
+	})
+	requireDeclaredReadOneOffError(t, client, `parameter decode failed`)
+
+	writeDeclaredReadProtocolMessage(t, client, protocol.DeclaredQueryWithParametersMsg{
+		MessageID: []byte("wrong-query-type-v2"),
+		Name:      "messages_by_body",
+		Params:    encodeDeclaredReadProtocolParams(t, uint64ParamColumns, types.ProductValue{types.NewUint64(1)}),
+	})
+	requireDeclaredReadOneOffError(t, client, `parameter decode failed`)
+
+	writeDeclaredReadProtocolMessage(t, client, protocol.DeclaredQueryWithParametersMsg{
+		MessageID: []byte("null-query-param-v2"),
+		Name:      "messages_by_body",
+		Params:    encodeDeclaredReadProtocolParams(t, nullableStringParamColumns, types.ProductValue{types.NewNull(types.KindString)}),
+	})
+	requireDeclaredReadOneOffError(t, client, `parameter 0 "body" is null but not nullable`)
+
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewWithParametersMsg{
+		RequestID: 34,
+		QueryID:   44,
+		Name:      "live_messages_by_body",
+		Params:    nil,
+	})
+	requireDeclaredReadSubscriptionError(t, client, 34, 44, `parameter decode failed`)
+}
+
 func TestProtocolDeclaredViewUnindexedJoinRejected(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, NewModule("protocol_unindexed_join_reads").
 		SchemaVersion(1).
@@ -957,6 +1122,19 @@ func dialDeclaredReadProtocol(t *testing.T, rt *Runtime, token string) *websocke
 }
 
 func dialDeclaredReadProtocolWithIdentity(t *testing.T, rt *Runtime, token string) (*websocket.Conn, protocol.IdentityToken) {
+	return dialDeclaredReadProtocolWithIdentityForSubprotocol(t, rt, token, protocol.SubprotocolV1)
+}
+
+func dialDeclaredReadProtocolV2(t *testing.T, rt *Runtime, token string) *websocket.Conn {
+	client, _ := dialDeclaredReadProtocolV2WithIdentity(t, rt, token)
+	return client
+}
+
+func dialDeclaredReadProtocolV2WithIdentity(t *testing.T, rt *Runtime, token string) (*websocket.Conn, protocol.IdentityToken) {
+	return dialDeclaredReadProtocolWithIdentityForSubprotocol(t, rt, token, protocol.SubprotocolV2)
+}
+
+func dialDeclaredReadProtocolWithIdentityForSubprotocol(t *testing.T, rt *Runtime, token string, subprotocol string) (*websocket.Conn, protocol.IdentityToken) {
 	t.Helper()
 	srv := httptest.NewServer(rt.HTTPHandler())
 	t.Cleanup(srv.Close)
@@ -967,7 +1145,7 @@ func dialDeclaredReadProtocolWithIdentity(t *testing.T, rt *Runtime, token strin
 	defer cancel()
 	client, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
 		HTTPHeader:   header,
-		Subprotocols: []string{protocol.SubprotocolV1},
+		Subprotocols: []string{subprotocol},
 	})
 	if err != nil {
 		t.Fatalf("dial runtime protocol: %v", err)
@@ -983,6 +1161,15 @@ func dialDeclaredReadProtocolWithIdentity(t *testing.T, rt *Runtime, token strin
 		t.Fatalf("first protocol msg = %T, want IdentityToken", msg)
 	}
 	return client, identityToken
+}
+
+func encodeDeclaredReadProtocolParams(t *testing.T, columns []schema.ColumnSchema, values types.ProductValue) []byte {
+	t.Helper()
+	data, err := bsatn.AppendProductValueForColumns(nil, values, columns)
+	if err != nil {
+		t.Fatalf("encode declared-read protocol params: %v", err)
+	}
+	return data
 }
 
 func writeDeclaredReadProtocolMessage(t *testing.T, client *websocket.Conn, msg any) {

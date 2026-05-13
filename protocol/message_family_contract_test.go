@@ -158,6 +158,18 @@ func TestShunterSubscribeMultiShape(t *testing.T) {
 	}
 }
 
+func TestShunterParameterizedDeclaredReadShapes(t *testing.T) {
+	queryFields := msgFieldNames(DeclaredQueryWithParametersMsg{})
+	if diff := cmp.Diff([]string{"MessageID", "Name", "Params"}, queryFields); diff != "" {
+		t.Fatalf("DeclaredQueryWithParametersMsg fields mismatch (-want +got):\n%s", diff)
+	}
+
+	viewFields := msgFieldNames(SubscribeDeclaredViewWithParametersMsg{})
+	if diff := cmp.Diff([]string{"RequestID", "QueryID", "Name", "Params"}, viewFields); diff != "" {
+		t.Fatalf("SubscribeDeclaredViewWithParametersMsg fields mismatch (-want +got):\n%s", diff)
+	}
+}
+
 // TestShunterUnsubscribeMultiShape pins the new single/multi variant envelope.
 // Reference: UnsubscribeMulti { request_id, query_id } at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:229.
@@ -259,6 +271,10 @@ func TestShunterTagByteStability(t *testing.T) {
 		{"TagOneOffQuery", TagOneOffQuery, 4},
 		{"TagSubscribeMulti", TagSubscribeMulti, 5},
 		{"TagUnsubscribeMulti", TagUnsubscribeMulti, 6},
+		{"TagDeclaredQuery", TagDeclaredQuery, 7},
+		{"TagSubscribeDeclaredView", TagSubscribeDeclaredView, 8},
+		{"TagDeclaredQueryWithParameters", TagDeclaredQueryWithParameters, 9},
+		{"TagSubscribeDeclaredViewWithParameters", TagSubscribeDeclaredViewWithParameters, 10},
 		{"TagIdentityToken", TagIdentityToken, 1},
 		{"TagSubscribeSingleApplied", TagSubscribeSingleApplied, 2},
 		{"TagUnsubscribeSingleApplied", TagUnsubscribeSingleApplied, 3},

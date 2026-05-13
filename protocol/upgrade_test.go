@@ -176,6 +176,29 @@ func TestUpgradeValidTokenHeaderSucceeds(t *testing.T) {
 	}
 }
 
+func TestUpgradePrefersProtocolV2WhenOffered(t *testing.T) {
+	s, rec := strictServer(t)
+	srv := newTestServer(t, s)
+
+	conn, resp, err := dialWS(t, srv, wsDialOpts{
+		authHeader:   "Bearer " + mintValidToken(t),
+		subprotocols: []string{SubprotocolV1, SubprotocolV2},
+	})
+	if err != nil {
+		t.Fatalf("dial failed: %v (resp=%v)", err, resp)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != SubprotocolV2 {
+		t.Errorf("Sec-WebSocket-Protocol echoed = %q, want %s", got, SubprotocolV2)
+	}
+
+	uc := rec.waitLast(t)
+	if uc.ProtocolVersion != ProtocolVersionV2 {
+		t.Errorf("ProtocolVersion = %s, want v2", uc.ProtocolVersion)
+	}
+}
+
 func TestUpgradeValidTokenHeaderSchemeCaseInsensitive(t *testing.T) {
 	for _, scheme := range []string{"bearer", "BEARER"} {
 		t.Run(scheme, func(t *testing.T) {

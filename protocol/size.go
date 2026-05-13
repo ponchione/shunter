@@ -100,6 +100,10 @@ func encodedClientMessageSize(m any) (int, error) {
 	case DeclaredQueryMsg:
 		s.bytes(msg.MessageID)
 		s.string(msg.Name)
+	case DeclaredQueryWithParametersMsg:
+		s.bytes(msg.MessageID)
+		s.string(msg.Name)
+		s.bytes(msg.Params)
 	case SubscribeMultiMsg:
 		s.add(sizeUint32 + sizeUint32)
 		s.count("SubscribeMulti query string count", len(msg.QueryStrings))
@@ -109,6 +113,10 @@ func encodedClientMessageSize(m any) (int, error) {
 	case SubscribeDeclaredViewMsg:
 		s.add(sizeUint32 + sizeUint32)
 		s.string(msg.Name)
+	case SubscribeDeclaredViewWithParametersMsg:
+		s.add(sizeUint32 + sizeUint32)
+		s.string(msg.Name)
+		s.bytes(msg.Params)
 	case UnsubscribeMultiMsg:
 		s.add(sizeUint32 + sizeUint32)
 	default:

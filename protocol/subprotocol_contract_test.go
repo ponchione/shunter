@@ -37,6 +37,24 @@ func TestSubprotocolShunterTokenAccepted(t *testing.T) {
 	}
 }
 
+func TestSubprotocolShunterV2TokenAccepted(t *testing.T) {
+	s, _ := anonymousServer(t)
+	srv := newTestServer(t, s)
+
+	conn, resp, err := dialWS(t, srv, wsDialOpts{
+		subprotocols: []string{SubprotocolV2},
+	})
+	if err != nil {
+		t.Fatalf("dial with Shunter v2 subprotocol: %v (resp=%v)", err, resp)
+	}
+	defer conn.CloseNow()
+
+	if got := conn.Subprotocol(); got != SubprotocolV2 {
+		t.Fatalf("server selected subprotocol = %q, want %q",
+			got, SubprotocolV2)
+	}
+}
+
 func TestSubprotocolShunterTokenSelectedWhenBothOffered(t *testing.T) {
 	s, _ := anonymousServer(t)
 	srv := newTestServer(t, s)
@@ -52,5 +70,23 @@ func TestSubprotocolShunterTokenSelectedWhenBothOffered(t *testing.T) {
 	if got := conn.Subprotocol(); got != SubprotocolV1 {
 		t.Fatalf("server selected subprotocol = %q, want %q",
 			got, SubprotocolV1)
+	}
+}
+
+func TestSubprotocolShunterV2PreferredWhenBothSupportedTokensOffered(t *testing.T) {
+	s, _ := anonymousServer(t)
+	srv := newTestServer(t, s)
+
+	conn, resp, err := dialWS(t, srv, wsDialOpts{
+		subprotocols: []string{SubprotocolV1, SubprotocolV2},
+	})
+	if err != nil {
+		t.Fatalf("dial with v1/v2 subprotocols: %v (resp=%v)", err, resp)
+	}
+	defer conn.CloseNow()
+
+	if got := conn.Subprotocol(); got != SubprotocolV2 {
+		t.Fatalf("server selected subprotocol = %q, want %q",
+			got, SubprotocolV2)
 	}
 }

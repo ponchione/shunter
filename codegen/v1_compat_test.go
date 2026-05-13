@@ -124,7 +124,7 @@ func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
 		`decodeDeclaredQueryResult as shunterDecodeDeclaredQueryResult,`,
 		`encodeBsatnProduct as shunterEncodeBsatnProduct,`,
 		`export const shunterProtocol = {`,
-		`defaultSubprotocol: "v1.bsatn.shunter",`,
+		`defaultSubprotocol: "v2.bsatn.shunter",`,
 		`} as const satisfies ShunterProtocolMetadata;`,
 		`export const shunterContract = {`,
 		`contractFormat: "shunter.module_contract",`,

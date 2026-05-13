@@ -20,6 +20,8 @@ func validateClientMessageForEncode(m any) error {
 		return requireValidWireString("OneOffQuery.QueryString", msg.QueryString)
 	case DeclaredQueryMsg:
 		return requireValidWireString("DeclaredQuery.Name", msg.Name)
+	case DeclaredQueryWithParametersMsg:
+		return requireValidWireString("DeclaredQueryWithParameters.Name", msg.Name)
 	case SubscribeMultiMsg:
 		for i, query := range msg.QueryStrings {
 			if err := requireValidWireString(fmt.Sprintf("SubscribeMulti.QueryStrings[%d]", i), query); err != nil {
@@ -28,6 +30,8 @@ func validateClientMessageForEncode(m any) error {
 		}
 	case SubscribeDeclaredViewMsg:
 		return requireValidWireString("SubscribeDeclaredView.Name", msg.Name)
+	case SubscribeDeclaredViewWithParametersMsg:
+		return requireValidWireString("SubscribeDeclaredViewWithParameters.Name", msg.Name)
 	}
 	return nil
 }

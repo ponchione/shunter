@@ -11,14 +11,16 @@ import (
 // the host. A nil field means the message type is not supported on this
 // connection -- the dispatch loop closes with 1002 if it encounters one.
 type MessageHandlers struct {
-	OnSubscribeSingle       func(ctx context.Context, conn *Conn, msg *SubscribeSingleMsg)
-	OnSubscribeMulti        func(ctx context.Context, conn *Conn, msg *SubscribeMultiMsg)
-	OnUnsubscribeSingle     func(ctx context.Context, conn *Conn, msg *UnsubscribeSingleMsg)
-	OnUnsubscribeMulti      func(ctx context.Context, conn *Conn, msg *UnsubscribeMultiMsg)
-	OnCallReducer           func(ctx context.Context, conn *Conn, msg *CallReducerMsg)
-	OnOneOffQuery           func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg)
-	OnDeclaredQuery         func(ctx context.Context, conn *Conn, msg *DeclaredQueryMsg)
-	OnSubscribeDeclaredView func(ctx context.Context, conn *Conn, msg *SubscribeDeclaredViewMsg)
+	OnSubscribeSingle                     func(ctx context.Context, conn *Conn, msg *SubscribeSingleMsg)
+	OnSubscribeMulti                      func(ctx context.Context, conn *Conn, msg *SubscribeMultiMsg)
+	OnUnsubscribeSingle                   func(ctx context.Context, conn *Conn, msg *UnsubscribeSingleMsg)
+	OnUnsubscribeMulti                    func(ctx context.Context, conn *Conn, msg *UnsubscribeMultiMsg)
+	OnCallReducer                         func(ctx context.Context, conn *Conn, msg *CallReducerMsg)
+	OnOneOffQuery                         func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg)
+	OnDeclaredQuery                       func(ctx context.Context, conn *Conn, msg *DeclaredQueryMsg)
+	OnDeclaredQueryWithParameters         func(ctx context.Context, conn *Conn, msg *DeclaredQueryWithParametersMsg)
+	OnSubscribeDeclaredView               func(ctx context.Context, conn *Conn, msg *SubscribeDeclaredViewMsg)
+	OnSubscribeDeclaredViewWithParameters func(ctx context.Context, conn *Conn, msg *SubscribeDeclaredViewWithParametersMsg)
 }
 
 // sendError encodes a server message, wraps it in the connection's
@@ -99,7 +101,7 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		if len(frame) > 0 {
 			kind = protocolKindFromTag(frame[0])
 		}
-		_, msg, decodeErr = DecodeClientMessage(frame)
+		_, msg, decodeErr = DecodeClientMessageForVersion(c.ProtocolVersion, frame)
 		if decodeErr != nil {
 			reason := decodeErr.Error()
 			recordProtocolMessage(c.Observer, kind, "malformed")
@@ -159,6 +161,13 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 				return
 			}
 			run = func() { handlers.OnDeclaredQuery(handlerCtx, c, &m) }
+		case DeclaredQueryWithParametersMsg:
+			if handlers.OnDeclaredQueryWithParameters == nil {
+				recordProtocolMessage(c.Observer, kind, "internal_error")
+				closeProtocolError(c, CloseReasonUnsupportedMessage)
+				return
+			}
+			run = func() { handlers.OnDeclaredQueryWithParameters(handlerCtx, c, &m) }
 		case SubscribeDeclaredViewMsg:
 			if handlers.OnSubscribeDeclaredView == nil {
 				recordProtocolMessage(c.Observer, kind, "internal_error")
@@ -166,6 +175,13 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 				return
 			}
 			run = func() { handlers.OnSubscribeDeclaredView(handlerCtx, c, &m) }
+		case SubscribeDeclaredViewWithParametersMsg:
+			if handlers.OnSubscribeDeclaredViewWithParameters == nil {
+				recordProtocolMessage(c.Observer, kind, "internal_error")
+				closeProtocolError(c, CloseReasonUnsupportedMessage)
+				return
+			}
+			run = func() { handlers.OnSubscribeDeclaredViewWithParameters(handlerCtx, c, &m) }
 		}
 
 		// Incoming backpressure (SPEC-005 §10.2, Story 6.2):

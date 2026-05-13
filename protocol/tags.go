@@ -12,6 +12,10 @@ const (
 	TagUnsubscribeMulti      uint8 = 6
 	TagDeclaredQuery         uint8 = 7
 	TagSubscribeDeclaredView uint8 = 8
+	// V2-only declared-read request messages. V1 connections reject these
+	// tags as unsupported for the negotiated protocol.
+	TagDeclaredQueryWithParameters         uint8 = 9
+	TagSubscribeDeclaredViewWithParameters uint8 = 10
 )
 
 // v1 reserved tag space. Zero is never a message tag. Tags 128–255 are

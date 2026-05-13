@@ -11,14 +11,20 @@ func TestProtocolV1CompatibilityPinsTokenAndVersionNumbers(t *testing.T) {
 	if ProtocolVersionV1 != 1 {
 		t.Fatalf("ProtocolVersionV1 = %d, want 1", ProtocolVersionV1)
 	}
+	if ProtocolVersionV2 != 2 {
+		t.Fatalf("ProtocolVersionV2 = %d, want 2", ProtocolVersionV2)
+	}
 	if MinSupportedProtocolVersion != 1 {
 		t.Fatalf("MinSupportedProtocolVersion = %d, want 1", MinSupportedProtocolVersion)
 	}
-	if CurrentProtocolVersion != 1 {
-		t.Fatalf("CurrentProtocolVersion = %d, want 1", CurrentProtocolVersion)
+	if CurrentProtocolVersion != 2 {
+		t.Fatalf("CurrentProtocolVersion = %d, want 2", CurrentProtocolVersion)
 	}
 	if SubprotocolV1 != "v1.bsatn.shunter" {
 		t.Fatalf("SubprotocolV1 = %q, want v1.bsatn.shunter", SubprotocolV1)
+	}
+	if SubprotocolV2 != "v2.bsatn.shunter" {
+		t.Fatalf("SubprotocolV2 = %q, want v2.bsatn.shunter", SubprotocolV2)
 	}
 
 	token, ok := SubprotocolForVersion(1)
@@ -141,7 +147,7 @@ func TestProtocolV1CompatibilityEncodesAndDecodesStableMessageFamilies(t *testin
 			if len(frame) == 0 || frame[0] != tc.tag {
 				t.Fatalf("EncodeClientMessage(%s) tag = %v, want %d", tc.name, frame, tc.tag)
 			}
-			tag, _, err := DecodeClientMessage(frame)
+			tag, _, err := DecodeClientMessageForVersion(ProtocolVersionV1, frame)
 			if err != nil {
 				t.Fatalf("DecodeClientMessage(%s) returned error: %v", tc.name, err)
 			}
@@ -252,7 +258,7 @@ func TestProtocolV1CompatibilityRejectsEveryUnassignedOrReservedTag(t *testing.T
 		if isAssignedV1ClientTag(tag) {
 			continue
 		}
-		_, _, err := DecodeClientMessage([]byte{tag})
+		_, _, err := DecodeClientMessageForVersion(ProtocolVersionV1, []byte{tag})
 		if !errors.Is(err, ErrUnknownMessageTag) {
 			t.Fatalf("DecodeClientMessage(tag=%d) err = %v, want ErrUnknownMessageTag", tag, err)
 		}

@@ -2,26 +2,26 @@ package protocol
 
 import "testing"
 
-func TestProtocolVersionPolicyV1(t *testing.T) {
+func TestProtocolVersionPolicy(t *testing.T) {
 	if MinSupportedProtocolVersion != ProtocolVersionV1 {
 		t.Fatalf("MinSupportedProtocolVersion = %s, want v1", MinSupportedProtocolVersion)
 	}
-	if CurrentProtocolVersion != ProtocolVersionV1 {
-		t.Fatalf("CurrentProtocolVersion = %s, want v1", CurrentProtocolVersion)
+	if CurrentProtocolVersion != ProtocolVersionV2 {
+		t.Fatalf("CurrentProtocolVersion = %s, want v2", CurrentProtocolVersion)
 	}
 
 	versions := SupportedProtocolVersions()
-	if len(versions) != 1 || versions[0] != ProtocolVersionV1 {
-		t.Fatalf("SupportedProtocolVersions = %#v, want [v1]", versions)
+	if len(versions) != 2 || versions[0] != ProtocolVersionV2 || versions[1] != ProtocolVersionV1 {
+		t.Fatalf("SupportedProtocolVersions = %#v, want [v2 v1]", versions)
 	}
 	versions[0] = ProtocolVersionUnknown
-	if got := SupportedProtocolVersions()[0]; got != ProtocolVersionV1 {
+	if got := SupportedProtocolVersions()[0]; got != ProtocolVersionV2 {
 		t.Fatalf("SupportedProtocolVersions returned mutable storage, got %s", got)
 	}
 
 	subprotocols := SupportedSubprotocols()
-	if len(subprotocols) != 1 || subprotocols[0] != SubprotocolV1 {
-		t.Fatalf("SupportedSubprotocols = %#v, want [%q]", subprotocols, SubprotocolV1)
+	if len(subprotocols) != 2 || subprotocols[0] != SubprotocolV2 || subprotocols[1] != SubprotocolV1 {
+		t.Fatalf("SupportedSubprotocols = %#v, want [%q %q]", subprotocols, SubprotocolV2, SubprotocolV1)
 	}
 
 	token, ok := SubprotocolForVersion(ProtocolVersionV1)
@@ -33,11 +33,13 @@ func TestProtocolVersionPolicyV1(t *testing.T) {
 		t.Fatalf("ProtocolVersionForSubprotocol(%q) = %s, %v; want v1, true", SubprotocolV1, version, ok)
 	}
 
-	if _, ok := SubprotocolForVersion(ProtocolVersion(2)); ok {
-		t.Fatal("SubprotocolForVersion(v2) reported supported")
+	token, ok = SubprotocolForVersion(ProtocolVersionV2)
+	if !ok || token != SubprotocolV2 {
+		t.Fatalf("SubprotocolForVersion(v2) = %q, %v; want %q, true", token, ok, SubprotocolV2)
 	}
-	if _, ok := ProtocolVersionForSubprotocol("v2.bsatn.shunter"); ok {
-		t.Fatal("ProtocolVersionForSubprotocol(v2 token) reported supported")
+	version, ok = ProtocolVersionForSubprotocol(SubprotocolV2)
+	if !ok || version != ProtocolVersionV2 {
+		t.Fatalf("ProtocolVersionForSubprotocol(%q) = %s, %v; want v2, true", SubprotocolV2, version, ok)
 	}
 }
 
@@ -48,6 +50,7 @@ func TestProtocolVersionString(t *testing.T) {
 	}{
 		{ProtocolVersionUnknown, "unknown"},
 		{ProtocolVersionV1, "v1"},
+		{ProtocolVersionV2, "v2"},
 		{ProtocolVersion(12), "v12"},
 	}
 	for _, tc := range cases {

@@ -9,6 +9,7 @@ func TestClientTagsDistinct(t *testing.T) {
 	tags := []uint8{
 		TagSubscribeSingle, TagUnsubscribeSingle, TagCallReducer, TagOneOffQuery,
 		TagSubscribeMulti, TagUnsubscribeMulti, TagDeclaredQuery, TagSubscribeDeclaredView,
+		TagDeclaredQueryWithParameters, TagSubscribeDeclaredViewWithParameters,
 	}
 	seen := map[uint8]bool{}
 	for _, tag := range tags {
@@ -24,6 +25,9 @@ func TestClientTagsDistinct(t *testing.T) {
 	if TagSubscribeMulti != 5 || TagUnsubscribeMulti != 6 ||
 		TagDeclaredQuery != 7 || TagSubscribeDeclaredView != 8 {
 		t.Errorf("Shunter-owned C2S tag values drifted")
+	}
+	if TagDeclaredQueryWithParameters != 9 || TagSubscribeDeclaredViewWithParameters != 10 {
+		t.Errorf("Shunter-owned V2 C2S tag values drifted")
 	}
 }
 
@@ -60,6 +64,7 @@ func TestReservedV1TagPolicy(t *testing.T) {
 	for _, tag := range []uint8{
 		TagSubscribeSingle,
 		TagSubscribeDeclaredView,
+		TagDeclaredQueryWithParameters,
 		TagIdentityToken,
 		TagUnsubscribeMultiApplied,
 	} {
@@ -81,7 +86,7 @@ func TestClientReservedAndUnassignedTagsRejected(t *testing.T) {
 		tag  uint8
 	}{
 		{"zero", TagReservedZero},
-		{"unassigned_low", TagSubscribeDeclaredView + 1},
+		{"unassigned_low", TagSubscribeDeclaredViewWithParameters + 1},
 		{"extension_start", TagReservedExtensionStart},
 		{"extension_end", TagReservedExtensionEnd},
 	}
@@ -92,6 +97,15 @@ func TestClientReservedAndUnassignedTagsRejected(t *testing.T) {
 				t.Fatalf("DecodeClientMessage(tag=%d) err = %v, want ErrUnknownMessageTag", tc.tag, err)
 			}
 		})
+	}
+}
+
+func TestClientV2TagsRejectedByV1Decoder(t *testing.T) {
+	for _, tag := range []uint8{TagDeclaredQueryWithParameters, TagSubscribeDeclaredViewWithParameters} {
+		_, _, err := DecodeClientMessageForVersion(ProtocolVersionV1, []byte{tag})
+		if !errors.Is(err, ErrUnknownMessageTag) {
+			t.Fatalf("DecodeClientMessageForVersion(v1, tag=%d) err = %v, want ErrUnknownMessageTag", tag, err)
+		}
 	}
 }
 

@@ -50,6 +50,15 @@ type DeclaredQueryMsg struct {
 	Name      string
 }
 
+// DeclaredQueryWithParametersMsg executes a module-owned QueryDeclaration by
+// name with a BSATN product row of ordered declared-read parameters. It is a
+// v2-only request message.
+type DeclaredQueryWithParametersMsg struct {
+	MessageID []byte
+	Name      string
+	Params    []byte
+}
+
 // SubscribeMultiMsg subscribes multiple SQL query strings under one QueryID.
 type SubscribeMultiMsg struct {
 	RequestID    uint32
@@ -63,6 +72,16 @@ type SubscribeDeclaredViewMsg struct {
 	RequestID uint32
 	QueryID   uint32
 	Name      string
+}
+
+// SubscribeDeclaredViewWithParametersMsg subscribes to a module-owned
+// ViewDeclaration by name with a BSATN product row of ordered declared-read
+// parameters. It is a v2-only request message.
+type SubscribeDeclaredViewWithParametersMsg struct {
+	RequestID uint32
+	QueryID   uint32
+	Name      string
+	Params    []byte
 }
 
 // UnsubscribeMultiMsg drops every query registered under the given
@@ -123,6 +142,17 @@ func EncodeClientMessage(m any) ([]byte, error) {
 		if err := writeString(&buf, msg.Name); err != nil {
 			return nil, err
 		}
+	case DeclaredQueryWithParametersMsg:
+		buf.WriteByte(TagDeclaredQueryWithParameters)
+		if err := writeBytes(&buf, msg.MessageID); err != nil {
+			return nil, err
+		}
+		if err := writeString(&buf, msg.Name); err != nil {
+			return nil, err
+		}
+		if err := writeBytes(&buf, msg.Params); err != nil {
+			return nil, err
+		}
 	case SubscribeMultiMsg:
 		buf.WriteByte(TagSubscribeMulti)
 		writeUint32(&buf, msg.RequestID)
@@ -144,6 +174,16 @@ func EncodeClientMessage(m any) ([]byte, error) {
 		if err := writeString(&buf, msg.Name); err != nil {
 			return nil, err
 		}
+	case SubscribeDeclaredViewWithParametersMsg:
+		buf.WriteByte(TagSubscribeDeclaredViewWithParameters)
+		writeUint32(&buf, msg.RequestID)
+		writeUint32(&buf, msg.QueryID)
+		if err := writeString(&buf, msg.Name); err != nil {
+			return nil, err
+		}
+		if err := writeBytes(&buf, msg.Params); err != nil {
+			return nil, err
+		}
 	case UnsubscribeMultiMsg:
 		buf.WriteByte(TagUnsubscribeMulti)
 		writeUint32(&buf, msg.RequestID)
@@ -154,16 +194,21 @@ func EncodeClientMessage(m any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// DecodeClientMessage parses a wire frame into its concrete message
-// type. The returned any is one of SubscribeSingleMsg, UnsubscribeSingleMsg,
-// CallReducerMsg, OneOffQueryMsg, DeclaredQueryMsg, SubscribeMultiMsg,
-// SubscribeDeclaredViewMsg, UnsubscribeMultiMsg — matching the tag byte.
+// DecodeClientMessage parses a wire frame for the current protocol version
+// into its concrete message type.
 func DecodeClientMessage(frame []byte) (uint8, any, error) {
+	return DecodeClientMessageForVersion(CurrentProtocolVersion, frame)
+}
+
+// DecodeClientMessageForVersion parses a wire frame for a negotiated protocol
+// version into its concrete message type. V2 accepts all V1 request messages
+// plus the V2-only parameterized declared-read request messages.
+func DecodeClientMessageForVersion(version ProtocolVersion, frame []byte) (uint8, any, error) {
 	if len(frame) < 1 {
 		return 0, nil, fmt.Errorf("%w: empty frame", ErrMalformedMessage)
 	}
 	tag := frame[0]
-	msg, err := decodeClientMessageParts(tag, frame[1:])
+	msg, err := decodeClientMessagePartsForVersion(version, tag, frame[1:])
 	if err != nil {
 		return 0, nil, err
 	}
@@ -171,6 +216,10 @@ func DecodeClientMessage(frame []byte) (uint8, any, error) {
 }
 
 func decodeClientMessageParts(tag uint8, body []byte) (any, error) {
+	return decodeClientMessagePartsForVersion(CurrentProtocolVersion, tag, body)
+}
+
+func decodeClientMessagePartsForVersion(version ProtocolVersion, tag uint8, body []byte) (any, error) {
 	switch tag {
 	case TagSubscribeSingle:
 		return decodeSubscribeSingle(body)
@@ -182,10 +231,20 @@ func decodeClientMessageParts(tag uint8, body []byte) (any, error) {
 		return decodeOneOffQuery(body)
 	case TagDeclaredQuery:
 		return decodeDeclaredQuery(body)
+	case TagDeclaredQueryWithParameters:
+		if version < ProtocolVersionV2 {
+			return nil, fmt.Errorf("%w: tag=%d unsupported for %s", ErrUnknownMessageTag, tag, version)
+		}
+		return decodeDeclaredQueryWithParameters(body)
 	case TagSubscribeMulti:
 		return decodeSubscribeMulti(body)
 	case TagSubscribeDeclaredView:
 		return decodeSubscribeDeclaredView(body)
+	case TagSubscribeDeclaredViewWithParameters:
+		if version < ProtocolVersionV2 {
+			return nil, fmt.Errorf("%w: tag=%d unsupported for %s", ErrUnknownMessageTag, tag, version)
+		}
+		return decodeSubscribeDeclaredViewWithParameters(body)
 	case TagUnsubscribeMulti:
 		return decodeUnsubscribeMulti(body)
 	default:
@@ -283,6 +342,25 @@ func decodeDeclaredQuery(body []byte) (DeclaredQueryMsg, error) {
 	return m, nil
 }
 
+func decodeDeclaredQueryWithParameters(body []byte) (DeclaredQueryWithParametersMsg, error) {
+	var m DeclaredQueryWithParametersMsg
+	var off int
+	var err error
+	if m.MessageID, off, err = readBytes(body, 0); err != nil {
+		return m, err
+	}
+	if m.Name, off, err = readString(body, off); err != nil {
+		return m, err
+	}
+	if m.Params, off, err = readBytes(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "DeclaredQueryWithParameters"); err != nil {
+		return m, err
+	}
+	return m, nil
+}
+
 func decodeSubscribeMulti(body []byte) (SubscribeMultiMsg, error) {
 	var m SubscribeMultiMsg
 	var off int
@@ -323,6 +401,25 @@ func decodeSubscribeDeclaredView(body []byte) (SubscribeDeclaredViewMsg, error) 
 		return m, err
 	}
 	if err := requireFullyConsumed(body, off, "SubscribeDeclaredView"); err != nil {
+		return m, err
+	}
+	return m, nil
+}
+
+func decodeSubscribeDeclaredViewWithParameters(body []byte) (SubscribeDeclaredViewWithParametersMsg, error) {
+	var m SubscribeDeclaredViewWithParametersMsg
+	var off int
+	var err error
+	if m.RequestID, m.QueryID, off, err = readRequestQueryID(body); err != nil {
+		return m, err
+	}
+	if m.Name, off, err = readString(body, off); err != nil {
+		return m, err
+	}
+	if m.Params, off, err = readBytes(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "SubscribeDeclaredViewWithParameters"); err != nil {
 		return m, err
 	}
 	return m, nil

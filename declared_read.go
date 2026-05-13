@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/executor"
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
@@ -512,21 +513,42 @@ func declaredViewColumns(plan declaredViewAdmissionPlan, updates []subscription.
 // HandleDeclaredQuery handles the protocol named-query message by delegating to
 // the runtime-owned declared read API.
 func (r *Runtime) HandleDeclaredQuery(ctx context.Context, conn *protocol.Conn, msg *protocol.DeclaredQueryMsg) {
+	r.handleProtocolDeclaredQuery(ctx, conn, msg.MessageID, msg.Name, nil)
+}
+
+// HandleDeclaredQueryWithParameters handles the v2 protocol named-query message
+// with BSATN-encoded ordered declared-read parameters.
+func (r *Runtime) HandleDeclaredQueryWithParameters(ctx context.Context, conn *protocol.Conn, msg *protocol.DeclaredQueryWithParametersMsg) {
 	receipt := time.Now()
-	result, err := r.CallQuery(ctx, msg.Name, protocolDeclaredReadOptions(conn, nil)...)
+	parameters, err := r.decodeProtocolDeclaredReadParameters(msg.Name, declaredReadKindQuery, conn, msg.Params)
 	if err != nil {
 		r.sendProtocolDeclaredQueryError(conn, msg.MessageID, err.Error(), receipt)
 		r.observability.RecordProtocolMessage("declared_query", protocolDeclaredReadMetricResult(err))
 		return
 	}
+	r.handleProtocolDeclaredQuery(ctx, conn, msg.MessageID, msg.Name, &parameters)
+}
+
+func (r *Runtime) handleProtocolDeclaredQuery(ctx context.Context, conn *protocol.Conn, messageID []byte, name string, parameters *types.ProductValue) {
+	receipt := time.Now()
+	opts := protocolDeclaredReadOptions(conn, nil)
+	if parameters != nil {
+		opts = append(opts, WithDeclaredReadParameters(*parameters))
+	}
+	result, err := r.CallQuery(ctx, name, opts...)
+	if err != nil {
+		r.sendProtocolDeclaredQueryError(conn, messageID, err.Error(), receipt)
+		r.observability.RecordProtocolMessage("declared_query", protocolDeclaredReadMetricResult(err))
+		return
+	}
 	rows, err := encodeDeclaredReadRows(result.Rows, result.Columns)
 	if err != nil {
-		r.sendProtocolDeclaredQueryError(conn, msg.MessageID, "encode error: "+err.Error(), receipt)
+		r.sendProtocolDeclaredQueryError(conn, messageID, "encode error: "+err.Error(), receipt)
 		r.observability.RecordProtocolMessage("declared_query", "internal_error")
 		return
 	}
 	if err := r.sendProtocolDeclaredReadMessage(conn, protocol.OneOffQueryResponse{
-		MessageID: msg.MessageID,
+		MessageID: messageID,
 		Tables: []protocol.OneOffTable{{
 			TableName: result.TableName,
 			Rows:      rows,
@@ -543,23 +565,44 @@ func (r *Runtime) HandleDeclaredQuery(ctx context.Context, conn *protocol.Conn, 
 // HandleSubscribeDeclaredView handles the protocol named-view subscription
 // message by delegating to the runtime-owned declared read API.
 func (r *Runtime) HandleSubscribeDeclaredView(ctx context.Context, conn *protocol.Conn, msg *protocol.SubscribeDeclaredViewMsg) {
+	r.handleProtocolSubscribeDeclaredView(ctx, conn, msg.RequestID, msg.QueryID, msg.Name, nil)
+}
+
+// HandleSubscribeDeclaredViewWithParameters handles the v2 protocol named-view
+// subscription message with BSATN-encoded ordered declared-read parameters.
+func (r *Runtime) HandleSubscribeDeclaredViewWithParameters(ctx context.Context, conn *protocol.Conn, msg *protocol.SubscribeDeclaredViewWithParametersMsg) {
 	receipt := time.Now()
-	sub, err := r.SubscribeView(ctx, msg.Name, msg.QueryID, protocolDeclaredReadOptions(conn, &msg.RequestID)...)
+	parameters, err := r.decodeProtocolDeclaredReadParameters(msg.Name, declaredReadKindView, conn, msg.Params)
 	if err != nil {
 		r.sendProtocolDeclaredViewError(conn, msg.RequestID, msg.QueryID, err.Error(), receipt)
 		r.observability.RecordProtocolMessage("subscribe_declared_view", protocolDeclaredReadMetricResult(err))
 		return
 	}
+	r.handleProtocolSubscribeDeclaredView(ctx, conn, msg.RequestID, msg.QueryID, msg.Name, &parameters)
+}
+
+func (r *Runtime) handleProtocolSubscribeDeclaredView(ctx context.Context, conn *protocol.Conn, requestID, queryID uint32, name string, parameters *types.ProductValue) {
+	receipt := time.Now()
+	opts := protocolDeclaredReadOptions(conn, &requestID)
+	if parameters != nil {
+		opts = append(opts, WithDeclaredReadParameters(*parameters))
+	}
+	sub, err := r.SubscribeView(ctx, name, queryID, opts...)
+	if err != nil {
+		r.sendProtocolDeclaredViewError(conn, requestID, queryID, err.Error(), receipt)
+		r.observability.RecordProtocolMessage("subscribe_declared_view", protocolDeclaredReadMetricResult(err))
+		return
+	}
 	rows, err := encodeDeclaredReadRows(sub.InitialRows, sub.Columns)
 	if err != nil {
-		r.sendProtocolDeclaredViewError(conn, msg.RequestID, msg.QueryID, "encode error: "+err.Error(), receipt)
+		r.sendProtocolDeclaredViewError(conn, requestID, queryID, "encode error: "+err.Error(), receipt)
 		r.observability.RecordProtocolMessage("subscribe_declared_view", "internal_error")
 		return
 	}
 	if err := r.sendProtocolDeclaredReadMessage(conn, protocol.SubscribeSingleApplied{
-		RequestID:                        msg.RequestID,
+		RequestID:                        requestID,
 		TotalHostExecutionDurationMicros: declaredReadElapsedMicrosU64(receipt),
-		QueryID:                          msg.QueryID,
+		QueryID:                          queryID,
 		TableName:                        sub.TableName,
 		Rows:                             rows,
 	}); err != nil {
@@ -568,6 +611,70 @@ func (r *Runtime) HandleSubscribeDeclaredView(ctx context.Context, conn *protoco
 		return
 	}
 	r.observability.RecordProtocolMessage("subscribe_declared_view", "ok")
+}
+
+func (r *Runtime) decodeProtocolDeclaredReadParameters(name string, kind declaredReadKind, conn *protocol.Conn, data []byte) (types.ProductValue, error) {
+	opts := r.applyDeclaredReadOptions(protocolDeclaredReadOptions(conn, nil))
+	entry, err := r.authorizedDeclaredRead(name, kind, opts.caller)
+	if err != nil {
+		return nil, err
+	}
+	if !declaredReadHasAppParameters(entry.Parameters) {
+		return nil, fmt.Errorf("shunter: declared %s %q does not accept parameters", entry.Kind, entry.Name)
+	}
+	columns, err := declaredReadParameterColumnSchemas(entry.Parameters)
+	if err != nil {
+		return nil, err
+	}
+	values, err := bsatn.DecodeProductValueFromBytes(data, &schema.TableSchema{Name: entry.Name, Columns: columns})
+	if err != nil {
+		if nullableValues, ok := decodeDeclaredReadProtocolNullableFallback(data, entry.Name, columns); ok {
+			if _, validationErr := declaredReadParameterBindings(entry, &nullableValues); validationErr != nil {
+				return nil, validationErr
+			}
+		}
+		return nil, fmt.Errorf("shunter: declared %s %q parameter decode failed: %v", entry.Kind, entry.Name, err)
+	}
+	if _, err := declaredReadParameterBindings(entry, &values); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+func decodeDeclaredReadProtocolNullableFallback(data []byte, name string, columns []schema.ColumnSchema) (types.ProductValue, bool) {
+	if len(columns) == 0 {
+		return nil, false
+	}
+	nullableColumns := make([]schema.ColumnSchema, len(columns))
+	copy(nullableColumns, columns)
+	for i := range nullableColumns {
+		nullableColumns[i].Nullable = true
+	}
+	values, err := bsatn.DecodeProductValueFromBytes(data, &schema.TableSchema{Name: name, Columns: nullableColumns})
+	if err != nil {
+		return nil, false
+	}
+	return values, true
+}
+
+func declaredReadParameterColumnSchemas(parameters *ProductSchema) ([]schema.ColumnSchema, error) {
+	if !declaredReadHasAppParameters(parameters) {
+		return nil, nil
+	}
+	columns := make([]schema.ColumnSchema, len(parameters.Columns))
+	for i, parameter := range parameters.Columns {
+		kind, ok := valueKindFromExportString(parameter.Type)
+		if !ok {
+			return nil, fmt.Errorf("shunter: declared read parameter %d %q has invalid type %q", i, parameter.Name, parameter.Type)
+		}
+		columns[i] = schema.ColumnSchema{
+			Index:    i,
+			Name:     parameter.Name,
+			Type:     kind,
+			Nullable: parameter.Nullable,
+		}
+	}
+	return columns, nil
 }
 
 func protocolDeclaredReadOptions(conn *protocol.Conn, requestID *uint32) []DeclaredReadOption {

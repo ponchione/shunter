@@ -11,6 +11,8 @@ const (
 	ProtocolVersionUnknown ProtocolVersion = 0
 	// ProtocolVersionV1 is the current Shunter-native BSATN protocol.
 	ProtocolVersionV1 ProtocolVersion = 1
+	// ProtocolVersionV2 adds parameterized declared-read request messages.
+	ProtocolVersionV2 ProtocolVersion = 2
 )
 
 const (
@@ -18,25 +20,31 @@ const (
 	// accepts.
 	MinSupportedProtocolVersion = ProtocolVersionV1
 	// CurrentProtocolVersion is the newest protocol version this server emits.
-	CurrentProtocolVersion = ProtocolVersionV1
+	CurrentProtocolVersion = ProtocolVersionV2
 )
 
 // SubprotocolV1 is the Shunter-native WebSocket subprotocol token,
-// and is the product protocol identifier Shunter-owned clients should use.
+// and remains supported for v1 clients.
 const SubprotocolV1 = "v1.bsatn.shunter"
+
+// SubprotocolV2 is the Shunter-native WebSocket subprotocol token for
+// parameterized declared-read request messages.
+const SubprotocolV2 = "v2.bsatn.shunter"
 
 var protocolSubprotocols = map[ProtocolVersion]string{
 	ProtocolVersionV1: SubprotocolV1,
+	ProtocolVersionV2: SubprotocolV2,
 }
 
 var protocolVersionsBySubprotocol = map[string]ProtocolVersion{
 	SubprotocolV1: ProtocolVersionV1,
+	SubprotocolV2: ProtocolVersionV2,
 }
 
 // SupportedProtocolVersions returns the supported protocol versions in server
 // preference order.
 func SupportedProtocolVersions() []ProtocolVersion {
-	return []ProtocolVersion{ProtocolVersionV1}
+	return []ProtocolVersion{ProtocolVersionV2, ProtocolVersionV1}
 }
 
 // SupportedSubprotocols returns the WebSocket subprotocol tokens accepted by
@@ -72,6 +80,8 @@ func (v ProtocolVersion) String() string {
 		return "unknown"
 	case ProtocolVersionV1:
 		return "v1"
+	case ProtocolVersionV2:
+		return "v2"
 	default:
 		return fmt.Sprintf("v%d", uint16(v))
 	}

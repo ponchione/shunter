@@ -180,6 +180,37 @@ func TestDeclaredQueryRoundTripName(t *testing.T) {
 	}
 }
 
+func TestDeclaredQueryWithParametersRoundTrip(t *testing.T) {
+	in := DeclaredQueryWithParametersMsg{
+		MessageID: []byte{0x07, 0x08},
+		Name:      "recent_messages",
+		Params:    []byte{0x0b, 0x05, 0, 0, 0, 'a', 'l', 'p', 'h', 'a'},
+	}
+	frame, err := EncodeClientMessage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame[0] != TagDeclaredQueryWithParameters {
+		t.Fatalf("tag = %d, want TagDeclaredQueryWithParameters", frame[0])
+	}
+	tag, out, err := DecodeClientMessageForVersion(ProtocolVersionV2, frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag != TagDeclaredQueryWithParameters {
+		t.Fatalf("tag = %d, want TagDeclaredQueryWithParameters", tag)
+	}
+	got := out.(DeclaredQueryWithParametersMsg)
+	if diff := cmp.Diff(in, got); diff != "" {
+		t.Errorf("DeclaredQueryWithParametersMsg round-trip mismatch (-want +got):\n%s", diff)
+	}
+
+	_, _, err = DecodeClientMessageForVersion(ProtocolVersionV1, frame)
+	if !errors.Is(err, ErrUnknownMessageTag) {
+		t.Fatalf("DecodeClientMessageForVersion(v1) err = %v, want ErrUnknownMessageTag", err)
+	}
+}
+
 func TestSubscribeDeclaredViewRoundTripName(t *testing.T) {
 	in := SubscribeDeclaredViewMsg{
 		RequestID: 31,
@@ -203,6 +234,38 @@ func TestSubscribeDeclaredViewRoundTripName(t *testing.T) {
 	got := out.(SubscribeDeclaredViewMsg)
 	if diff := cmp.Diff(in, got); diff != "" {
 		t.Errorf("SubscribeDeclaredViewMsg round-trip mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestSubscribeDeclaredViewWithParametersRoundTrip(t *testing.T) {
+	in := SubscribeDeclaredViewWithParametersMsg{
+		RequestID: 31,
+		QueryID:   41,
+		Name:      "live_messages",
+		Params:    []byte{0x08, 0x2a, 0, 0, 0, 0, 0, 0, 0},
+	}
+	frame, err := EncodeClientMessage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame[0] != TagSubscribeDeclaredViewWithParameters {
+		t.Fatalf("tag = %d, want TagSubscribeDeclaredViewWithParameters", frame[0])
+	}
+	tag, out, err := DecodeClientMessageForVersion(ProtocolVersionV2, frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag != TagSubscribeDeclaredViewWithParameters {
+		t.Fatalf("tag = %d, want TagSubscribeDeclaredViewWithParameters", tag)
+	}
+	got := out.(SubscribeDeclaredViewWithParametersMsg)
+	if diff := cmp.Diff(in, got); diff != "" {
+		t.Errorf("SubscribeDeclaredViewWithParametersMsg round-trip mismatch (-want +got):\n%s", diff)
+	}
+
+	_, _, err = DecodeClientMessageForVersion(ProtocolVersionV1, frame)
+	if !errors.Is(err, ErrUnknownMessageTag) {
+		t.Fatalf("DecodeClientMessageForVersion(v1) err = %v, want ErrUnknownMessageTag", err)
 	}
 }
 
@@ -280,8 +343,10 @@ func TestDecodeClientMessageRejectsTrailingBytes(t *testing.T) {
 		{"CallReducer", CallReducerMsg{ReducerName: "doit", Args: []byte{0x01}, RequestID: 5, Flags: CallReducerFlagsFullUpdate}},
 		{"OneOffQuery", OneOffQueryMsg{MessageID: []byte{0x06}, QueryString: "SELECT * FROM users"}},
 		{"DeclaredQuery", DeclaredQueryMsg{MessageID: []byte{0x06}, Name: "recent_messages"}},
+		{"DeclaredQueryWithParameters", DeclaredQueryWithParametersMsg{MessageID: []byte{0x06}, Name: "recent_messages", Params: []byte{0x01}}},
 		{"SubscribeMulti", SubscribeMultiMsg{RequestID: 7, QueryID: 8, QueryStrings: []string{"SELECT * FROM users", "SELECT * FROM orders"}}},
 		{"SubscribeDeclaredView", SubscribeDeclaredViewMsg{RequestID: 9, QueryID: 10, Name: "live_messages"}},
+		{"SubscribeDeclaredViewWithParameters", SubscribeDeclaredViewWithParametersMsg{RequestID: 9, QueryID: 10, Name: "live_messages", Params: []byte{0x01}}},
 		{"UnsubscribeMulti", UnsubscribeMultiMsg{RequestID: 9, QueryID: 10}},
 	}
 	for _, tc := range cases {

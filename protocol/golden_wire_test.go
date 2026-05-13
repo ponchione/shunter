@@ -28,6 +28,24 @@ func TestProtocolV1ClientGoldenWireFixtures(t *testing.T) {
 	}
 }
 
+func TestProtocolV2ClientGoldenWireFixtures(t *testing.T) {
+	for _, fixture := range protocolV2ClientGoldenWireFixtures() {
+		t.Run(fixture.name, func(t *testing.T) {
+			frame, err := EncodeClientMessage(fixture.msg)
+			if err != nil {
+				t.Fatalf("EncodeClientMessage: %v", err)
+			}
+			assertGoldenFrame(t, fixture, frame)
+
+			_, decoded, err := DecodeClientMessageForVersion(ProtocolVersionV2, frame)
+			if err != nil {
+				t.Fatalf("DecodeClientMessageForVersion(v2): %v", err)
+			}
+			assertGoldenDecoded(t, fixture.msg, decoded)
+		})
+	}
+}
+
 func TestProtocolV1ServerGoldenWireFixtures(t *testing.T) {
 	for _, fixture := range protocolV1ServerGoldenWireFixtures() {
 		t.Run(fixture.name, func(t *testing.T) {
@@ -72,6 +90,13 @@ func TestProtocolV1GoldenWireFixtureCoverage(t *testing.T) {
 		"server/one_off_query_response_error",
 		"server/subscribe_multi_applied",
 		"server/unsubscribe_multi_applied",
+	})
+}
+
+func TestProtocolV2GoldenWireFixtureCoverage(t *testing.T) {
+	assertGoldenFixtureCoverage(t, "client", protocolV2ClientGoldenWireFixtures(), []string{
+		"client/declared_query_with_parameters",
+		"client/subscribe_declared_view_with_parameters",
 	})
 }
 
@@ -149,6 +174,30 @@ func protocolV1ClientGoldenWireFixtures() []protocolGoldenFixture {
 				Name:      "live_users",
 			},
 			wantHex: "0884838281949392910a0000006c6976655f7573657273",
+		},
+	}
+}
+
+func protocolV2ClientGoldenWireFixtures() []protocolGoldenFixture {
+	return []protocolGoldenFixture{
+		{
+			name: "client/declared_query_with_parameters",
+			msg: DeclaredQueryWithParametersMsg{
+				MessageID: []byte{0x09, 0x08},
+				Name:      "recent_users",
+				Params:    []byte{0x0b, 0x05, 0x00, 0x00, 0x00, 'a', 'l', 'p', 'h', 'a'},
+			},
+			wantHex: "090200000009080c000000726563656e745f75736572730a0000000b05000000616c706861",
+		},
+		{
+			name: "client/subscribe_declared_view_with_parameters",
+			msg: SubscribeDeclaredViewWithParametersMsg{
+				RequestID: 0x81828384,
+				QueryID:   0x91929394,
+				Name:      "live_users",
+				Params:    []byte{0x08, 0x2a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+			},
+			wantHex: "0a84838281949392910a0000006c6976655f757365727309000000082a00000000000000",
 		},
 	}
 }

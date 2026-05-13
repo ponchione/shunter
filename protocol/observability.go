@@ -73,7 +73,11 @@ func protocolKindFromTag(tag uint8) string {
 		return "unsubscribe_multi"
 	case TagDeclaredQuery:
 		return "declared_query"
+	case TagDeclaredQueryWithParameters:
+		return "declared_query"
 	case TagSubscribeDeclaredView:
+		return "subscribe_declared_view"
+	case TagSubscribeDeclaredViewWithParameters:
 		return "subscribe_declared_view"
 	default:
 		return "unknown"
@@ -88,6 +92,8 @@ func protocolKindFromMessage(msg any) string {
 		return "subscribe_multi"
 	case SubscribeDeclaredViewMsg:
 		return "subscribe_declared_view"
+	case SubscribeDeclaredViewWithParametersMsg:
+		return "subscribe_declared_view"
 	case UnsubscribeSingleMsg:
 		return "unsubscribe_single"
 	case UnsubscribeMultiMsg:
@@ -97,6 +103,8 @@ func protocolKindFromMessage(msg any) string {
 	case OneOffQueryMsg:
 		return "one_off_query"
 	case DeclaredQueryMsg:
+		return "declared_query"
+	case DeclaredQueryWithParametersMsg:
 		return "declared_query"
 	default:
 		return "unknown"

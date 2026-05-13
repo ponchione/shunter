@@ -39,9 +39,9 @@ import {
 
 export const shunterProtocol = {
   minSupportedVersion: 1,
-  currentVersion: 1,
-  defaultSubprotocol: "v1.bsatn.shunter",
-  supportedSubprotocols: ["v1.bsatn.shunter"],
+  currentVersion: 2,
+  defaultSubprotocol: "v2.bsatn.shunter",
+  supportedSubprotocols: ["v2.bsatn.shunter", "v1.bsatn.shunter"],
 } as const satisfies ShunterProtocolMetadata;
 
 export type ShunterSubprotocol = (typeof shunterProtocol.supportedSubprotocols)[number];

@@ -62,7 +62,9 @@ type Server struct {
 // reads. Implementations receive the declaration name from the client message.
 type DeclaredReadHandler interface {
 	HandleDeclaredQuery(ctx context.Context, conn *Conn, msg *DeclaredQueryMsg)
+	HandleDeclaredQueryWithParameters(ctx context.Context, conn *Conn, msg *DeclaredQueryWithParametersMsg)
 	HandleSubscribeDeclaredView(ctx context.Context, conn *Conn, msg *SubscribeDeclaredViewMsg)
+	HandleSubscribeDeclaredViewWithParameters(ctx context.Context, conn *Conn, msg *SubscribeDeclaredViewWithParametersMsg)
 }
 
 // UpgradeContext is the per-connection package that the upgrade
@@ -167,7 +169,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	selected, version, ok := negotiateSubprotocol(r, SupportedSubprotocols())
 	if !ok {
 		s.writeRejected(w,
-			"Sec-WebSocket-Protocol must include "+SubprotocolV1,
+			"Sec-WebSocket-Protocol must include one of "+strings.Join(SupportedSubprotocols(), ", "),
 			http.StatusBadRequest,
 			"rejected_upgrade",
 			errors.New("missing required subprotocol"))
@@ -318,7 +320,9 @@ func (s *Server) buildMessageHandlers() *MessageHandlers {
 	}
 	if s.DeclaredReads != nil {
 		handlers.OnDeclaredQuery = s.DeclaredReads.HandleDeclaredQuery
+		handlers.OnDeclaredQueryWithParameters = s.DeclaredReads.HandleDeclaredQueryWithParameters
 		handlers.OnSubscribeDeclaredView = s.DeclaredReads.HandleSubscribeDeclaredView
+		handlers.OnSubscribeDeclaredViewWithParameters = s.DeclaredReads.HandleSubscribeDeclaredViewWithParameters
 	}
 	return handlers
 }

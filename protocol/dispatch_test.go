@@ -125,6 +125,93 @@ func TestDispatchLoop_ValidSubscribe(t *testing.T) {
 	}
 }
 
+func TestDispatchLoop_V2DeclaredQueryWithParameters(t *testing.T) {
+	conn, client := testConnPair(t, nil)
+	conn.ProtocolVersion = ProtocolVersionV2
+
+	called := make(chan DeclaredQueryWithParametersMsg, 1)
+	handlers := &MessageHandlers{
+		OnDeclaredQueryWithParameters: func(ctx context.Context, c *Conn, msg *DeclaredQueryWithParametersMsg) {
+			called <- *msg
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := runDispatchAsync(conn, ctx, handlers)
+
+	want := DeclaredQueryWithParametersMsg{
+		MessageID: []byte{0x01},
+		Name:      "messages_by_body",
+		Params:    []byte{0x0b, 0x05, 0, 0, 0, 'a', 'l', 'p', 'h', 'a'},
+	}
+	frame, err := EncodeClientMessage(want)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), time.Second)
+	defer writeCancel()
+	if err := client.Write(writeCtx, websocket.MessageBinary, frame); err != nil {
+		t.Fatalf("client write: %v", err)
+	}
+
+	select {
+	case got := <-called:
+		if got.Name != want.Name || string(got.MessageID) != string(want.MessageID) || string(got.Params) != string(want.Params) {
+			t.Fatalf("handler msg = %+v, want %+v", got, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnDeclaredQueryWithParameters was not called within timeout")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("dispatch loop did not exit after cancel")
+	}
+}
+
+func TestDispatchLoop_V1RejectsV2DeclaredReadTag(t *testing.T) {
+	conn, client := testConnPair(t, nil)
+	conn.ProtocolVersion = ProtocolVersionV1
+
+	called := make(chan struct{}, 1)
+	handlers := &MessageHandlers{
+		OnDeclaredQueryWithParameters: func(ctx context.Context, c *Conn, msg *DeclaredQueryWithParametersMsg) {
+			called <- struct{}{}
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := runDispatchAsync(conn, ctx, handlers)
+
+	frame, err := EncodeClientMessage(DeclaredQueryWithParametersMsg{
+		MessageID: []byte{0x01},
+		Name:      "messages_by_body",
+		Params:    []byte{0x01},
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), time.Second)
+	defer writeCancel()
+	if err := client.Write(writeCtx, websocket.MessageBinary, frame); err != nil {
+		t.Fatalf("client write: %v", err)
+	}
+
+	select {
+	case <-called:
+		t.Fatal("V1 dispatch called V2-only handler")
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatch loop did not exit on V2-only tag for V1 connection")
+	}
+}
+
 func TestDispatchLoop_CompressionNegotiatedAcceptsPlainClientMessage(t *testing.T) {
 	conn, client := testConnPair(t, nil)
 	conn.Compression = true
