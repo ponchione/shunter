@@ -1,0 +1,24 @@
+./scripts/shunter-canary quick
+==> revision context
+opsboard-canary: a45ec6f44931 dirty
+shunter: 947e3dd2eb4d dirty
+==> quick canary
++ go test ./... -count=1
+?   	github.com/ponchione/opsboard-canary/cmd/codegen	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/export-contract	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/migrate-data	[no test files]
+ok  	github.com/ponchione/opsboard-canary/cmd/server	0.002s
+ok  	github.com/ponchione/opsboard-canary/cmd/workflow	0.179s
+ok  	github.com/ponchione/opsboard-canary/internal/app	0.664s
+ok  	github.com/ponchione/opsboard-canary/internal/client	0.120s
+?   	github.com/ponchione/opsboard-canary/internal/model	[no test files]
+ok  	github.com/ponchione/opsboard-canary/internal/workflows	7.078s
++ make sdk-smoke
+npm install
+up to date, audited 6 packages in 399ms
+found 0 vulnerabilities
+npm run sdk-smoke
+> sdk-smoke
+> npm run sdk-typecheck && node tests/typescript/sdk-smoke.ts
+> sdk-typecheck
+> tsc -p tsconfig.sdk-smoke.json --noEmit

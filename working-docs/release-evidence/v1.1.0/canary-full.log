@@ -1,0 +1,41 @@
+./scripts/shunter-canary full
+==> revision context
+opsboard-canary: a45ec6f44931 dirty
+shunter: 947e3dd2eb4d dirty
+==> full canary
++ go test ./... -count=1
+?   	github.com/ponchione/opsboard-canary/cmd/codegen	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/export-contract	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/migrate-data	[no test files]
+ok  	github.com/ponchione/opsboard-canary/cmd/server	0.002s
+ok  	github.com/ponchione/opsboard-canary/cmd/workflow	0.213s
+ok  	github.com/ponchione/opsboard-canary/internal/app	0.583s
+ok  	github.com/ponchione/opsboard-canary/internal/client	0.109s
+?   	github.com/ponchione/opsboard-canary/internal/model	[no test files]
+ok  	github.com/ponchione/opsboard-canary/internal/workflows	6.934s
++ make sdk-smoke
+npm install
+up to date, audited 6 packages in 378ms
+found 0 vulnerabilities
+npm run sdk-smoke
+> sdk-smoke
+> npm run sdk-typecheck && node tests/typescript/sdk-smoke.ts
+> sdk-typecheck
+> tsc -p tsconfig.sdk-smoke.json --noEmit
++ go test ./internal/workflows -run TestSeededWorkflow -count=1
+ok  	github.com/ponchione/opsboard-canary/internal/workflows	0.771s
++ go test -race ./internal/workflows -count=1
+ok  	github.com/ponchione/opsboard-canary/internal/workflows	8.006s
+==> contract/codegen reproducibility
++ make contract
+go run ./cmd/export-contract > contracts/shunter.contract.json
++ make codegen
+go run ./cmd/codegen
++ diff -ru /tmp/opsboard-canary-codegen.cfNY1q/contracts contracts
++ diff -ru /tmp/opsboard-canary-codegen.cfNY1q/generated generated
+==> in-process protocol smoke
++ go run ./cmd/workflow --in-process --data-dir /home/gernsback/source/opsboard-canary/artifacts/canary/workflow-in-process-20260513T173830Z --trace-out /home/gernsback/source/opsboard-canary/artifacts/canary/workflow-in-process-trace.json
+protocol workflow smoke passed
+==> served protocol smoke on 127.0.0.1:13000
++ go run ./cmd/workflow --addr 127.0.0.1:13000 --trace-out /home/gernsback/source/opsboard-canary/artifacts/canary/server-smoke-trace-20260513T173830Z.json
+protocol workflow smoke passed

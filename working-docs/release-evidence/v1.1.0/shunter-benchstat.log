@@ -1,0 +1,226 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+                                                                             │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                                                             │                           sec/op                           │
+BackupRestoreDataDirWorkflow-24                                                                                              78.19m ± 10%
+BackupRestoreDataDirWorkflowLarge-24                                                                                         211.7m ±  9%
+DeclaredReadRuntimeSurfaces/call_query_projection_order_limit-24                                                             37.67µ ±  1%
+DeclaredReadRuntimeSurfaces/subscribe_view_projection_order_limit_initial-24                                                 38.05µ ±  1%
+DeclaredReadRuntimeSurfaces/subscribe_view_count_initial-24                                                                  13.23µ ±  2%
+geomean                                                                                                                      793.1µ
+
+                                                                             │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                                                             │                            B/op                            │
+BackupRestoreDataDirWorkflow-24                                                                                              42.04Ki ± 3%
+BackupRestoreDataDirWorkflowLarge-24                                                                                         95.90Ki ± 1%
+DeclaredReadRuntimeSurfaces/call_query_projection_order_limit-24                                                             128.7Ki ± 0%
+DeclaredReadRuntimeSurfaces/subscribe_view_projection_order_limit_initial-24                                                 138.7Ki ± 0%
+DeclaredReadRuntimeSurfaces/subscribe_view_count_initial-24                                                                  48.75Ki ± 0%
+geomean                                                                                                                      81.10Ki
+
+                                                                             │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                                                             │                         allocs/op                          │
+BackupRestoreDataDirWorkflow-24                                                                                                458.0 ± 0%
+BackupRestoreDataDirWorkflowLarge-24                                                                                           961.0 ± 0%
+DeclaredReadRuntimeSurfaces/call_query_projection_order_limit-24                                                               370.0 ± 0%
+DeclaredReadRuntimeSurfaces/subscribe_view_projection_order_limit_initial-24                                                   446.0 ± 0%
+DeclaredReadRuntimeSurfaces/subscribe_view_count_initial-24                                                                    195.0 ± 0%
+geomean                                                                                                                        426.8
+
+pkg: github.com/ponchione/shunter/commitlog
+                                               │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                               │                           sec/op                           │
+ReplayLogSegmentedLog-24                                                                        272.4m ± 1%
+OpenAndRecoverSegmentedLog-24                                                                   263.9m ± 3%
+OpenAndRecoverSnapshotOnly/small-24                                                             195.7µ ± 2%
+OpenAndRecoverSnapshotOnly/medium-24                                                            1.230m ± 3%
+OpenAndRecoverSnapshotOnly/large-24                                                             5.133m ± 1%
+OpenAndRecoverSnapshotWithTailReplay/small-24                                                   1.174m ± 2%
+OpenAndRecoverSnapshotWithTailReplay/medium-24                                                  74.39m ± 1%
+OpenAndRecoverSnapshotWithTailReplay/large-24                                                    1.315 ± 3%
+CreateSnapshotLarge-24                                                                          24.40m ± 6%
+geomean                                                                                         18.46m
+
+                                               │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                               │                            B/op                            │
+ReplayLogSegmentedLog-24                                                                       399.3Mi ± 0%
+OpenAndRecoverSegmentedLog-24                                                                  399.9Mi ± 0%
+OpenAndRecoverSnapshotOnly/small-24                                                            747.4Ki ± 0%
+OpenAndRecoverSnapshotOnly/medium-24                                                           5.532Mi ± 0%
+OpenAndRecoverSnapshotOnly/large-24                                                            22.12Mi ± 0%
+OpenAndRecoverSnapshotWithTailReplay/small-24                                                  2.510Mi ± 0%
+OpenAndRecoverSnapshotWithTailReplay/medium-24                                                 113.3Mi ± 0%
+OpenAndRecoverSnapshotWithTailReplay/large-24                                                  1.700Gi ± 0%
+CreateSnapshotLarge-24                                                                         2.867Mi ± 0%
+geomean                                                                                        30.09Mi
+
+                                               │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                               │                         allocs/op                          │
+ReplayLogSegmentedLog-24                                                                        1.663M ± 0%
+OpenAndRecoverSegmentedLog-24                                                                   1.675M ± 0%
+OpenAndRecoverSnapshotOnly/small-24                                                             2.075k ± 0%
+OpenAndRecoverSnapshotOnly/medium-24                                                            14.73k ± 0%
+OpenAndRecoverSnapshotOnly/large-24                                                             58.12k ± 0%
+OpenAndRecoverSnapshotWithTailReplay/small-24                                                   9.709k ± 0%
+OpenAndRecoverSnapshotWithTailReplay/medium-24                                                  450.4k ± 0%
+OpenAndRecoverSnapshotWithTailReplay/large-24                                                   6.936M ± 0%
+CreateSnapshotLarge-24                                                                          25.23k ± 0%
+geomean                                                                                         115.9k
+
+pkg: github.com/ponchione/shunter/executor
+                                  │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                  │                           sec/op                           │
+ExecutorReducerCommitRoundTrip-24                                                  5.062µ ± 3%
+ExecutorReducerCommitBurst64-24                                                    4.120µ ± 1%
+SchedulerScanEnqueue-24                                                            527.4n ± 1%
+geomean                                                                            2.224µ
+
+                                  │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                  │                            B/op                            │
+ExecutorReducerCommitRoundTrip-24                                                 5.901Ki ± 1%
+ExecutorReducerCommitBurst64-24                                                   5.712Ki ± 0%
+SchedulerScanEnqueue-24                                                           1.320Ki ± 0%
+geomean                                                                           3.544Ki
+
+                                  │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                  │                         allocs/op                          │
+ExecutorReducerCommitRoundTrip-24                                                   48.00 ± 0%
+ExecutorReducerCommitBurst64-24                                                     46.00 ± 0%
+SchedulerScanEnqueue-24                                                             9.000 ± 0%
+geomean                                                                             27.09
+
+pkg: github.com/ponchione/shunter/protocol
+                                                                               │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                                                               │                           sec/op                           │
+ClientSenderBackpressureFullBuffer-24                                                                                           382.8n ± 1%
+WrapCompressedGzip-24                                                                                                           8.684µ ± 5%
+UnwrapCompressedGzip-24                                                                                                         916.1n ± 1%
+WebSocketSlowReaderBackpressureUnrelatedFanout-24                                                                               6.962µ ± 2%
+SubscribeSingleWebSocketRoundTrip-24                                                                                            16.02µ ± 4%
+WebSocketFanout16ClientsLightUpdate-24                                                                                          59.54µ ± 3%
+WebSocketFanout64ClientsLightUpdate-24                                                                                          237.6µ ± 4%
+WebSocketFanout128ClientsLightUpdate-24                                                                                         468.2µ ± 4%
+ExecuteCompiledSQLQueryCommonPaths/filter_limit-24                                                                              1.874µ ± 1%
+ExecuteCompiledSQLQueryCommonPaths/projection_order_limit-24                                                                    309.7µ ± 4%
+ExecuteCompiledSQLQueryCommonPaths/count_filter-24                                                                              13.23µ ± 3%
+ExecuteCompiledSQLQueryCommonPaths/sum_filter-24                                                                                20.11µ ± 1%
+ExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24                                                  4.044m ± 1%
+ExecuteCompiledSQLQueryJoinReadShapes/multi_way_join_count-24                                                                   9.207m ± 2%
+ExecuteCompiledSQLQueryJoinReadShapes/multi_way_join_sum-24                                                                     8.765m ± 0%
+HandleSubscribeSingleAdmissionReadShapes/single_table_filter-24                                                                 1.649µ ± 5%
+HandleSubscribeSingleAdmissionReadShapes/two_table_join-24                                                                      3.086µ ± 3%
+HandleSubscribeSingleAdmissionReadShapes/multi_way_join-24                                                                      6.414µ ± 9%
+geomean                                                                                                                         34.01µ
+
+                                                                               │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                                                               │                            B/op                            │
+ClientSenderBackpressureFullBuffer-24                                                                                            376.0 ± 0%
+WrapCompressedGzip-24                                                                                                            251.0 ± 4%
+UnwrapCompressedGzip-24                                                                                                        4.616Ki ± 0%
+WebSocketSlowReaderBackpressureUnrelatedFanout-24                                                                              2.586Ki ± 0%
+SubscribeSingleWebSocketRoundTrip-24                                                                                           6.485Ki ± 0%
+WebSocketFanout16ClientsLightUpdate-24                                                                                         41.41Ki ± 0%
+WebSocketFanout64ClientsLightUpdate-24                                                                                         165.5Ki ± 0%
+WebSocketFanout128ClientsLightUpdate-24                                                                                        331.1Ki ± 0%
+ExecuteCompiledSQLQueryCommonPaths/filter_limit-24                                                                             1.961Ki ± 0%
+ExecuteCompiledSQLQueryCommonPaths/projection_order_limit-24                                                                   478.1Ki ± 0%
+ExecuteCompiledSQLQueryCommonPaths/count_filter-24                                                                               456.0 ± 0%
+ExecuteCompiledSQLQueryCommonPaths/sum_filter-24                                                                                 616.0 ± 0%
+ExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24                                                 832.9Ki ± 0%
+ExecuteCompiledSQLQueryJoinReadShapes/multi_way_join_count-24                                                                  558.7Ki ± 0%
+ExecuteCompiledSQLQueryJoinReadShapes/multi_way_join_sum-24                                                                    558.9Ki ± 0%
+HandleSubscribeSingleAdmissionReadShapes/single_table_filter-24                                                                3.250Ki ± 0%
+HandleSubscribeSingleAdmissionReadShapes/two_table_join-24                                                                     5.523Ki ± 0%
+HandleSubscribeSingleAdmissionReadShapes/multi_way_join-24                                                                     14.70Ki ± 0%
+geomean                                                                                                                        13.66Ki
+
+                                                                               │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                                                               │                         allocs/op                          │
+ClientSenderBackpressureFullBuffer-24                                                                                            10.00 ± 0%
+WrapCompressedGzip-24                                                                                                            3.000 ± 0%
+UnwrapCompressedGzip-24                                                                                                          7.000 ± 0%
+WebSocketSlowReaderBackpressureUnrelatedFanout-24                                                                                39.00 ± 0%
+SubscribeSingleWebSocketRoundTrip-24                                                                                             82.00 ± 0%
+WebSocketFanout16ClientsLightUpdate-24                                                                                           624.0 ± 0%
+WebSocketFanout64ClientsLightUpdate-24                                                                                          2.496k ± 0%
+WebSocketFanout128ClientsLightUpdate-24                                                                                         4.992k ± 0%
+ExecuteCompiledSQLQueryCommonPaths/filter_limit-24                                                                               15.00 ± 0%
+ExecuteCompiledSQLQueryCommonPaths/projection_order_limit-24                                                                    1.082k ± 0%
+ExecuteCompiledSQLQueryCommonPaths/count_filter-24                                                                               12.00 ± 0%
+ExecuteCompiledSQLQueryCommonPaths/sum_filter-24                                                                                 14.00 ± 0%
+ExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24                                                  4.729k ± 0%
+ExecuteCompiledSQLQueryJoinReadShapes/multi_way_join_count-24                                                                   15.12k ± 0%
+ExecuteCompiledSQLQueryJoinReadShapes/multi_way_join_sum-24                                                                     15.12k ± 0%
+HandleSubscribeSingleAdmissionReadShapes/single_table_filter-24                                                                  26.00 ± 0%
+HandleSubscribeSingleAdmissionReadShapes/two_table_join-24                                                                       44.00 ± 0%
+HandleSubscribeSingleAdmissionReadShapes/multi_way_join-24                                                                       92.00 ± 0%
+geomean                                                                                                                          150.8
+
+pkg: github.com/ponchione/shunter/subscription
+                                                  │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                                  │                           sec/op                           │
+EvalEqualitySubs1K-24                                                                              1.048µ ± 1%
+EvalEqualitySubs10K-24                                                                             969.7n ± 1%
+RegisterUnregister-24                                                                              1.561µ ± 2%
+RegisterSetInitialQueryAllRows-24                                                                  56.40µ ± 2%
+ProjectedRowsBeforeLargeBags-24                                                                    756.6µ ± 1%
+FanOut1KClientsSameQuery-24                                                                        155.7µ ± 2%
+FanOut1KClientsVariedQueries-24                                                                    1.746m ± 1%
+FanOut1KClientsSkewedHotKey-24                                                                     298.8µ ± 3%
+FanOut1KClientsMultiTableVariedQueries-24                                                          3.252m ± 0%
+JoinFragmentEval-24                                                                                145.9µ ± 2%
+MultiWayLiveJoinEvalSizes/rows_32/table_shape-24                                                   29.35µ ± 1%
+MultiWayLiveJoinEvalSizes/rows_32/count-24                                                         107.9µ ± 2%
+MultiWayLiveJoinEvalSizes/rows_128/table_shape-24                                                  319.4µ ± 1%
+MultiWayLiveJoinEvalSizes/rows_128/count-24                                                        1.532m ± 0%
+MultiWayLiveJoinEvalSizes/rows_512/table_shape-24                                                  4.485m ± 1%
+MultiWayLiveJoinEvalSizes/rows_512/count-24                                                        23.65m ± 0%
+DeltaIndexConstruction-24                                                                          33.96µ ± 0%
+CandidateCollection-24                                                                             1.003µ ± 1%
+geomean                                                                                            116.1µ
+
+                                                  │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                                  │                            B/op                            │
+EvalEqualitySubs1K-24                                                                               927.0 ± 0%
+EvalEqualitySubs10K-24                                                                              924.0 ± 0%
+RegisterUnregister-24                                                                             3.913Ki ± 0%
+RegisterSetInitialQueryAllRows-24                                                                 71.27Ki ± 0%
+ProjectedRowsBeforeLargeBags-24                                                                   871.8Ki ± 0%
+FanOut1KClientsSameQuery-24                                                                       321.3Ki ± 0%
+FanOut1KClientsVariedQueries-24                                                                   449.0Ki ± 0%
+FanOut1KClientsSkewedHotKey-24                                                                    355.1Ki ± 0%
+FanOut1KClientsMultiTableVariedQueries-24                                                         570.9Ki ± 0%
+JoinFragmentEval-24                                                                               81.35Ki ± 0%
+MultiWayLiveJoinEvalSizes/rows_32/table_shape-24                                                  17.97Ki ± 0%
+MultiWayLiveJoinEvalSizes/rows_32/count-24                                                        18.25Ki ± 0%
+MultiWayLiveJoinEvalSizes/rows_128/table_shape-24                                                 68.84Ki ± 0%
+MultiWayLiveJoinEvalSizes/rows_128/count-24                                                       69.05Ki ± 0%
+MultiWayLiveJoinEvalSizes/rows_512/table_shape-24                                                 282.9Ki ± 0%
+MultiWayLiveJoinEvalSizes/rows_512/count-24                                                       282.9Ki ± 0%
+DeltaIndexConstruction-24                                                                         3.965Ki ± 0%
+CandidateCollection-24                                                                              528.0 ± 0%
+geomean                                                                                           41.27Ki
+
+                                                  │ working-docs/release-evidence/v1.1.0/shunter-bench-raw.log │
+                                                  │                         allocs/op                          │
+EvalEqualitySubs1K-24                                                                               10.00 ± 0%
+EvalEqualitySubs10K-24                                                                              10.00 ± 0%
+RegisterUnregister-24                                                                               29.00 ± 0%
+RegisterSetInitialQueryAllRows-24                                                                   77.00 ± 0%
+ProjectedRowsBeforeLargeBags-24                                                                    12.32k ± 0%
+FanOut1KClientsSameQuery-24                                                                        2.029k ± 0%
+FanOut1KClientsVariedQueries-24                                                                    3.405k ± 0%
+FanOut1KClientsSkewedHotKey-24                                                                     2.381k ± 0%
+FanOut1KClientsMultiTableVariedQueries-24                                                          4.786k ± 0%
+JoinFragmentEval-24                                                                                 285.0 ± 0%
+MultiWayLiveJoinEvalSizes/rows_32/table_shape-24                                                    167.0 ± 0%
+MultiWayLiveJoinEvalSizes/rows_32/count-24                                                          170.0 ± 0%
+MultiWayLiveJoinEvalSizes/rows_128/table_shape-24                                                   371.0 ± 0%
+MultiWayLiveJoinEvalSizes/rows_128/count-24                                                         374.0 ± 0%
+MultiWayLiveJoinEvalSizes/rows_512/table_shape-24                                                  1.153k ± 0%
+MultiWayLiveJoinEvalSizes/rows_512/count-24                                                        1.155k ± 0%
+DeltaIndexConstruction-24                                                                           501.0 ± 0%
+CandidateCollection-24                                                                              3.000 ± 0%
+geomean                                                                                             303.8

@@ -1,0 +1,53 @@
+make: *** [Makefile:38: canary-full] Error 1
+./scripts/shunter-canary full
+==> revision context
+opsboard-canary: a45ec6f44931 dirty
+shunter: 947e3dd2eb4d dirty
+==> full canary
++ go test ./... -count=1
+?   	github.com/ponchione/opsboard-canary/cmd/codegen	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/export-contract	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/migrate-data	[no test files]
+ok  	github.com/ponchione/opsboard-canary/cmd/server	0.002s
+ok  	github.com/ponchione/opsboard-canary/cmd/workflow	0.220s
+ok  	github.com/ponchione/opsboard-canary/internal/app	0.631s
+ok  	github.com/ponchione/opsboard-canary/internal/client	0.111s
+?   	github.com/ponchione/opsboard-canary/internal/model	[no test files]
+ok  	github.com/ponchione/opsboard-canary/internal/workflows	6.810s
++ make sdk-smoke
+npm install
+up to date, audited 6 packages in 287ms
+found 0 vulnerabilities
+npm run sdk-smoke
+> sdk-smoke
+> npm run sdk-typecheck && node tests/typescript/sdk-smoke.ts
+> sdk-typecheck
+> tsc -p tsconfig.sdk-smoke.json --noEmit
++ go test ./internal/workflows -run TestSeededWorkflow -count=1
+ok  	github.com/ponchione/opsboard-canary/internal/workflows	0.795s
++ go test -race ./internal/workflows -count=1
+ok  	github.com/ponchione/opsboard-canary/internal/workflows	8.202s
+==> contract/codegen reproducibility
++ make contract
+go run ./cmd/export-contract > contracts/shunter.contract.json
++ make codegen
+go run ./cmd/codegen
++ git diff --exit-code contracts generated
+diff --git a/generated/typescript/index.ts b/generated/typescript/index.ts
+index 613301d..af5aede 100644
+--- a/generated/typescript/index.ts
++++ b/generated/typescript/index.ts
+@@ -6,12 +6,14 @@ import type {
+   BsatnColumn as ShunterBsatnColumn,
+   DecodedDeclaredQueryResult as ShunterDecodedDeclaredQueryResult,
+   DeclaredQueryDecodeOptions as ShunterDeclaredQueryDecodeOptions,
++  DeclaredQueryOptions as ShunterDeclaredQueryOptions,
+   DeclaredQueryRunner as ShunterDeclaredQueryRunner,
+   DeclaredViewHandleSubscriber as ShunterDeclaredViewHandleSubscriber,
+   DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,
+   DeclaredViewSubscriptionOptions as ShunterDeclaredViewSubscriptionOptions,
+   EncodedReducerCallOptions as ShunterEncodedReducerCallOptions,
+   EncodedReducerCallResultOptions as ShunterEncodedReducerCallResultOptions,
++  GeneratedContractMetadata as ShunterGeneratedContractMetadata,
+... (50 lines truncated)
+[full output: ~/.local/share/rtk/tee/1778693833_make_canary-full.log]

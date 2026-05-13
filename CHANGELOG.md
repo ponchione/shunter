@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+## v1.1.0 - 2026-05-13
+
 - Declared query and view parameters now work end to end: Go declarations
   attach typed parameter schemas through `WithQueryParameters` and
   `WithViewParameters`, SQL validation checks declared placeholders, local
@@ -13,8 +15,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   interfaces, BSATN params encoders, and parameterized declared query/view
   helpers while preserving no-parameter helper signatures and hiding encoded
   params from generated helper options.
-- The private `@shunter/client` package metadata now tracks the active
-  `v1.1.0-dev` development line as npm version `1.1.0-dev`.
+- The private `@shunter/client` package metadata now tracks the stable
+  `v1.1.0` release as npm version `1.1.0`.
 - Moved stale v1 roadmap follow-up into `working-docs/tech-debt.md` and
   restored the source version to a post-release development marker.
 - Hardened offline DataDir backup/restore file copies against replaced source
@@ -42,6 +44,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added protocol regression coverage for caller-specific declared-view
   visibility deltas, including a row moving from one caller's visible set to
   another's.
+- Release version reporting now keeps the source or linker-stamped Shunter
+  version authoritative instead of replacing it with Go VCS pseudo-version
+  metadata when they match.
 
 ## v1.0.1 - 2026-05-12
 

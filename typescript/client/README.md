@@ -30,7 +30,7 @@ Packed tarball dependency from an app:
 ```json
 {
   "dependencies": {
-    "@shunter/client": "file:./vendor/shunter-client-1.1.0-dev.tgz"
+    "@shunter/client": "file:./vendor/shunter-client-1.1.0.tgz"
   }
 }
 ```
@@ -49,7 +49,7 @@ Workspace app:
 ```json
 {
   "dependencies": {
-    "@shunter/client": "1.1.0-dev"
+    "@shunter/client": "1.1.0"
   }
 }
 ```

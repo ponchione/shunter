@@ -59,7 +59,7 @@ func CurrentBuildInfo() BuildInfo {
 		applyBuildSettings(&info, build.Settings)
 	}
 
-	if info.Version == "" || info.Version == versionFromFile {
+	if info.Version == "" {
 		if moduleVersion != "" {
 			info.Version = moduleVersion
 		}
