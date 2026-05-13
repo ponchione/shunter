@@ -291,19 +291,7 @@ func (e *Executor) rejectCommand(cmd ExecutorCommand, err error) {
 
 // Submit sends a command to the executor inbox.
 func (e *Executor) Submit(cmd ExecutorCommand) error {
-	if e.fatal.Load() {
-		e.recordExecutorCommand(cmd, "rejected")
-		return ErrExecutorFatal
-	}
-	if err := e.latchDurabilityFatal(0); err != nil {
-		e.recordExecutorCommand(cmd, "rejected")
-		return ErrExecutorFatal
-	}
-	if e.shutdown.Load() {
-		e.recordExecutorCommand(cmd, "rejected")
-		return ErrExecutorShutdown
-	}
-	if err := validateResponseChannels(cmd); err != nil {
+	if err := e.validateSubmitAdmission(cmd, false); err != nil {
 		e.recordExecutorCommand(cmd, "rejected")
 		return err
 	}
@@ -345,23 +333,7 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 		e.recordExecutorCommand(cmd, "canceled")
 		return err
 	}
-	if e.fatal.Load() {
-		e.recordExecutorCommand(cmd, "rejected")
-		return ErrExecutorFatal
-	}
-	if err := e.latchDurabilityFatal(0); err != nil {
-		e.recordExecutorCommand(cmd, "rejected")
-		return ErrExecutorFatal
-	}
-	if e.shutdown.Load() {
-		e.recordExecutorCommand(cmd, "rejected")
-		return ErrExecutorShutdown
-	}
-	if !e.externalReady.Load() {
-		e.recordExecutorCommand(cmd, "rejected")
-		return ErrExecutorNotStarted
-	}
-	if err := validateResponseChannels(cmd); err != nil {
+	if err := e.validateSubmitAdmission(cmd, true); err != nil {
 		e.recordExecutorCommand(cmd, "rejected")
 		return err
 	}
@@ -401,6 +373,22 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 		e.recordExecutorCommand(cmd, "canceled")
 		return ctx.Err()
 	}
+}
+
+func (e *Executor) validateSubmitAdmission(cmd ExecutorCommand, requireExternalReady bool) error {
+	if e.fatal.Load() {
+		return ErrExecutorFatal
+	}
+	if err := e.latchDurabilityFatal(0); err != nil {
+		return ErrExecutorFatal
+	}
+	if e.shutdown.Load() {
+		return ErrExecutorShutdown
+	}
+	if requireExternalReady && !e.externalReady.Load() {
+		return ErrExecutorNotStarted
+	}
+	return validateResponseChannels(cmd)
 }
 
 func (e *Executor) beginSubmit() bool {
