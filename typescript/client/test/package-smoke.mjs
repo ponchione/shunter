@@ -22,7 +22,7 @@ const expectedPackFiles = [
 ];
 
 const defaultRuntimePackageName = "@shunter/client";
-const defaultRuntimePackageVersion = "1.1.0";
+const defaultRuntimePackageVersion = "1.1.1-dev";
 const defaultGeneratedFixture = join(repoRoot, "codegen", "testdata", "v1_module_contract.ts");
 const appScopedRuntimePackageName = "@app/shunter-runtime";
 const appScopedGeneratedFixture = join(
