@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ponchione/shunter/internal/valueagg"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/subscription"
@@ -55,20 +56,10 @@ func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, st
 }
 
 func multiJoinResultColumns(query compiledSQLQuery, multi *compiledSQLMultiJoin) []schema.ColumnSchema {
-	if query.Aggregate != nil {
-		return []schema.ColumnSchema{query.Aggregate.ResultColumn}
-	}
-	if len(query.ProjectionColumns) != 0 {
-		columns := make([]schema.ColumnSchema, len(query.ProjectionColumns))
-		for i, col := range query.ProjectionColumns {
-			columns[i] = col.Schema
-		}
-		return columns
-	}
 	if multi == nil || multi.ProjectedRelation < 0 || multi.ProjectedRelation >= len(multi.Relations) || multi.Relations[multi.ProjectedRelation].Schema == nil {
-		return nil
+		return query.resultColumns(nil)
 	}
-	return append([]schema.ColumnSchema(nil), multi.Relations[multi.ProjectedRelation].Schema.Columns...)
+	return query.resultColumns(multi.Relations[multi.ProjectedRelation].Schema.Columns)
 }
 
 func evaluateOneOffMultiJoinOrderedRows(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, resolver schema.IndexResolver, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy) ([]orderedOneOffRow, error) {
@@ -283,15 +274,15 @@ func countOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedRead
 	}
 	argument := *aggregate.Argument
 	if aggregate.Distinct {
-		seen := newOneOffDistinctValueSet()
+		seen := valueagg.NewDistinctSet()
 		err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
 			value, ok := oneOffMultiJoinColumnValue(tuple, multi, argument)
 			if ok && !value.IsNull() {
-				seen.add(value)
+				seen.Add(value)
 			}
 			return true
 		})
-		return seen.count(), err
+		return seen.Count(), err
 	}
 	var count uint64
 	err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
@@ -307,14 +298,14 @@ func sumOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedReadVi
 	if aggregate == nil || aggregate.Argument == nil {
 		return types.Value{}, fmt.Errorf("SUM aggregate requires a column argument")
 	}
-	acc := newOneOffSumAccumulator(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
+	acc := valueagg.NewSum(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
 	argument := *aggregate.Argument
 	err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
 		value, ok := oneOffMultiJoinColumnValue(tuple, multi, argument)
 		if !ok {
 			return true
 		}
-		if err := acc.add(value); err != nil {
+		if err := acc.Add(value); err != nil {
 			return false
 		}
 		return true
@@ -322,7 +313,7 @@ func sumOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedReadVi
 	if err != nil {
 		return types.Value{}, err
 	}
-	return acc.value()
+	return acc.Value()
 }
 
 func oneOffMultiJoinColumnValue(tuple []types.ProductValue, multi *compiledSQLMultiJoin, column compiledSQLProjectionColumn) (types.Value, bool) {

@@ -170,24 +170,28 @@ func (q CompiledSQLQuery) SubscriptionAggregate() *subscription.Aggregate {
 
 // ResultColumns returns the encoded output columns for this compiled query.
 func (q CompiledSQLQuery) ResultColumns(sl SchemaLookup) []schema.ColumnSchema {
-	if q.query.Aggregate != nil {
-		return []schema.ColumnSchema{q.query.Aggregate.ResultColumn}
+	var fallback []schema.ColumnSchema
+	if sl != nil {
+		_, table, ok := sl.TableByName(q.query.TableName)
+		if ok && table != nil {
+			fallback = table.Columns
+		}
 	}
-	if len(q.query.ProjectionColumns) != 0 {
-		columns := make([]schema.ColumnSchema, len(q.query.ProjectionColumns))
-		for i, col := range q.query.ProjectionColumns {
+	return q.query.resultColumns(fallback)
+}
+
+func (query compiledSQLQuery) resultColumns(fallback []schema.ColumnSchema) []schema.ColumnSchema {
+	if query.Aggregate != nil {
+		return []schema.ColumnSchema{query.Aggregate.ResultColumn}
+	}
+	if len(query.ProjectionColumns) != 0 {
+		columns := make([]schema.ColumnSchema, len(query.ProjectionColumns))
+		for i, col := range query.ProjectionColumns {
 			columns[i] = col.Schema
 		}
 		return columns
 	}
-	if sl == nil {
-		return nil
-	}
-	_, table, ok := sl.TableByName(q.query.TableName)
-	if !ok || table == nil {
-		return nil
-	}
-	return slices.Clone(table.Columns)
+	return slices.Clone(fallback)
 }
 
 // SubscriptionOrderBy returns optional initial-snapshot ordering metadata for

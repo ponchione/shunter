@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/ponchione/shunter/internal/valueagg"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/subscription"
@@ -221,20 +222,10 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 }
 
 func oneOffResultColumns(query compiledSQLQuery, fallback *schema.TableSchema) []schema.ColumnSchema {
-	if query.Aggregate != nil {
-		return []schema.ColumnSchema{query.Aggregate.ResultColumn}
-	}
-	if len(query.ProjectionColumns) != 0 {
-		columns := make([]schema.ColumnSchema, len(query.ProjectionColumns))
-		for i, col := range query.ProjectionColumns {
-			columns[i] = col.Schema
-		}
-		return columns
-	}
 	if fallback == nil {
-		return nil
+		return query.resultColumns(nil)
 	}
-	return slices.Clone(fallback.Columns)
+	return query.resultColumns(fallback.Columns)
 }
 
 // sendOneOffError emits a failure OneOffQueryResponse matching reference
@@ -697,14 +688,14 @@ func countOneOffAggregate(ctx context.Context, view store.CommittedReadView, tab
 }
 
 func countDistinctOneOffAggregate(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, column compiledSQLProjectionColumn) (uint64, error) {
-	seen := newOneOffDistinctValueSet()
+	seen := valueagg.NewDistinctSet()
 	err := visitOneOffAggregateColumnValues(ctx, view, tableID, pred, resolver, column, func(value types.Value) bool {
 		if !value.IsNull() {
-			seen.add(value)
+			seen.Add(value)
 		}
 		return true
 	})
-	return seen.count(), err
+	return seen.Count(), err
 }
 
 func sumOneOffAggregate(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, aggregate *compiledSQLAggregate) (types.Value, error) {
@@ -715,10 +706,10 @@ func sumOneOffAggregate(ctx context.Context, view store.CommittedReadView, table
 		return types.Value{}, fmt.Errorf("SUM(DISTINCT ...) aggregate not supported")
 	}
 	argument := *aggregate.Argument
-	acc := newOneOffSumAccumulator(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
+	acc := valueagg.NewSum(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
 	var addErr error
 	err := visitOneOffAggregateColumnValues(ctx, view, tableID, pred, resolver, argument, func(value types.Value) bool {
-		if err := acc.add(value); err != nil {
+		if err := acc.Add(value); err != nil {
 			addErr = err
 			return false
 		}
@@ -730,7 +721,7 @@ func sumOneOffAggregate(ctx context.Context, view store.CommittedReadView, table
 	if addErr != nil {
 		return types.Value{}, addErr
 	}
-	return acc.value()
+	return acc.Value()
 }
 
 func visitOneOffAggregateColumnValues(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, column compiledSQLProjectionColumn, visit func(types.Value) bool) error {
@@ -762,149 +753,6 @@ func oneOffAggregateRowColumnValue(row types.ProductValue, tableID schema.TableI
 		return types.Value{}, false
 	}
 	return row[idx], true
-}
-
-type oneOffDistinctValueSet struct {
-	buckets map[uint64][]types.Value
-	n       uint64
-}
-
-func newOneOffDistinctValueSet() *oneOffDistinctValueSet {
-	return &oneOffDistinctValueSet{buckets: make(map[uint64][]types.Value)}
-}
-
-func (s *oneOffDistinctValueSet) add(value types.Value) {
-	hash := value.Hash64()
-	for _, existing := range s.buckets[hash] {
-		if value.Equal(existing) {
-			return
-		}
-	}
-	s.buckets[hash] = append(s.buckets[hash], value)
-	s.n++
-}
-
-func (s *oneOffDistinctValueSet) count() uint64 {
-	return s.n
-}
-
-type oneOffSumAccumulator struct {
-	kind     types.ValueKind
-	nullable bool
-	seen     bool
-	i64      int64
-	u64      uint64
-	f64      float64
-	err      error
-}
-
-func newOneOffSumAccumulator(kind types.ValueKind, nullable bool) *oneOffSumAccumulator {
-	return &oneOffSumAccumulator{kind: kind, nullable: nullable}
-}
-
-func (a *oneOffSumAccumulator) add(value types.Value) error {
-	if a.err != nil {
-		return a.err
-	}
-	if value.IsNull() {
-		return nil
-	}
-	a.seen = true
-	switch a.kind {
-	case types.KindInt64:
-		n, ok := oneOffValueAsInt64(value)
-		if !ok {
-			a.err = fmt.Errorf("SUM aggregate received non-signed value kind %s", value.Kind())
-			return a.err
-		}
-		sum := a.i64 + n
-		if (n > 0 && sum < a.i64) || (n < 0 && sum > a.i64) {
-			a.err = fmt.Errorf("SUM aggregate overflowed Int64")
-			return a.err
-		}
-		a.i64 = sum
-	case types.KindUint64:
-		n, ok := oneOffValueAsUint64(value)
-		if !ok {
-			a.err = fmt.Errorf("SUM aggregate received non-unsigned value kind %s", value.Kind())
-			return a.err
-		}
-		if ^uint64(0)-a.u64 < n {
-			a.err = fmt.Errorf("SUM aggregate overflowed Uint64")
-			return a.err
-		}
-		a.u64 += n
-	case types.KindFloat64:
-		n, ok := oneOffValueAsFloat64(value)
-		if !ok {
-			a.err = fmt.Errorf("SUM aggregate received non-float value kind %s", value.Kind())
-			return a.err
-		}
-		a.f64 += n
-	default:
-		a.err = fmt.Errorf("SUM aggregate result kind %s not supported", a.kind)
-	}
-	return a.err
-}
-
-func (a *oneOffSumAccumulator) value() (types.Value, error) {
-	if a.err != nil {
-		return types.Value{}, a.err
-	}
-	if a.nullable && !a.seen {
-		return types.NewNull(a.kind), nil
-	}
-	switch a.kind {
-	case types.KindInt64:
-		return types.NewInt64(a.i64), nil
-	case types.KindUint64:
-		return types.NewUint64(a.u64), nil
-	case types.KindFloat64:
-		return types.NewFloat64(a.f64)
-	default:
-		return types.Value{}, fmt.Errorf("SUM aggregate result kind %s not supported", a.kind)
-	}
-}
-
-func oneOffValueAsInt64(value types.Value) (int64, bool) {
-	switch value.Kind() {
-	case types.KindInt8:
-		return int64(value.AsInt8()), true
-	case types.KindInt16:
-		return int64(value.AsInt16()), true
-	case types.KindInt32:
-		return int64(value.AsInt32()), true
-	case types.KindInt64:
-		return value.AsInt64(), true
-	default:
-		return 0, false
-	}
-}
-
-func oneOffValueAsUint64(value types.Value) (uint64, bool) {
-	switch value.Kind() {
-	case types.KindUint8:
-		return uint64(value.AsUint8()), true
-	case types.KindUint16:
-		return uint64(value.AsUint16()), true
-	case types.KindUint32:
-		return uint64(value.AsUint32()), true
-	case types.KindUint64:
-		return value.AsUint64(), true
-	default:
-		return 0, false
-	}
-}
-
-func oneOffValueAsFloat64(value types.Value) (float64, bool) {
-	switch value.Kind() {
-	case types.KindFloat32:
-		return float64(value.AsFloat32()), true
-	case types.KindFloat64:
-		return value.AsFloat64(), true
-	default:
-		return 0, false
-	}
 }
 
 func evaluateOneOffJoin(ctx context.Context, view store.CommittedReadView, projectedTable schema.TableID, join subscription.Join, resolver schema.IndexResolver, limit int) ([]types.ProductValue, error) {

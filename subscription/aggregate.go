@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ponchione/shunter/internal/valueagg"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
@@ -682,8 +683,8 @@ func visitCrossJoinCommittedPairs(ctx context.Context, view store.CommittedReadV
 type joinAggregateAccumulator struct {
 	aggregate *Aggregate
 	count     uint64
-	distinct  *aggregateDistinctValueSet
-	sum       *liveSumAccumulator
+	distinct  *valueagg.DistinctSet
+	sum       *valueagg.Sum
 }
 
 func newJoinAggregateAccumulator(aggregate *Aggregate) (*joinAggregateAccumulator, error) {
@@ -691,10 +692,10 @@ func newJoinAggregateAccumulator(aggregate *Aggregate) (*joinAggregateAccumulato
 	switch aggregate.Func {
 	case AggregateCount:
 		if aggregate.Distinct {
-			acc.distinct = newAggregateDistinctValueSet()
+			acc.distinct = valueagg.NewDistinctSet()
 		}
 	case AggregateSum:
-		acc.sum = newLiveSumAccumulator(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
+		acc.sum = valueagg.NewSum(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
 	default:
 		return nil, fmt.Errorf("aggregate %q not supported", aggregate.Func)
 	}
@@ -721,7 +722,7 @@ func (a *joinAggregateAccumulator) addMulti(tuple []types.ProductValue, multi Mu
 			return nil
 		}
 		if a.aggregate.Distinct {
-			a.distinct.add(value)
+			a.distinct.Add(value)
 			return nil
 		}
 		a.count++
@@ -731,7 +732,7 @@ func (a *joinAggregateAccumulator) addMulti(tuple []types.ProductValue, multi Mu
 		if !ok {
 			return nil
 		}
-		return a.sum.add(value)
+		return a.sum.Add(value)
 	default:
 		return fmt.Errorf("aggregate %q not supported", a.aggregate.Func)
 	}
@@ -749,7 +750,7 @@ func (a *joinAggregateAccumulator) addPair(leftRow, rightRow types.ProductValue,
 			return nil
 		}
 		if a.aggregate.Distinct {
-			a.distinct.add(value)
+			a.distinct.Add(value)
 			return nil
 		}
 		a.count++
@@ -759,7 +760,7 @@ func (a *joinAggregateAccumulator) addPair(leftRow, rightRow types.ProductValue,
 		if !ok {
 			return nil
 		}
-		return a.sum.add(value)
+		return a.sum.Add(value)
 	default:
 		return fmt.Errorf("aggregate %q not supported", a.aggregate.Func)
 	}
@@ -769,11 +770,11 @@ func (a *joinAggregateAccumulator) value() (types.Value, error) {
 	switch a.aggregate.Func {
 	case AggregateCount:
 		if a.aggregate.Distinct {
-			return types.NewUint64(a.distinct.count()), nil
+			return types.NewUint64(a.distinct.Count()), nil
 		}
 		return types.NewUint64(a.count), nil
 	case AggregateSum:
-		return a.sum.value()
+		return a.sum.Value()
 	default:
 		return types.Value{}, fmt.Errorf("aggregate %q not supported", a.aggregate.Func)
 	}
@@ -957,32 +958,32 @@ func aggregateRowsValue(rows []types.ProductValue, table TableID, pred Predicate
 		}
 		return types.NewUint64(count), nil
 	case AggregateSum:
-		acc := newLiveSumAccumulator(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
+		acc := valueagg.NewSum(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
 		for _, row := range rows {
 			value, ok := aggregateArgumentValue(row, table, pred, aggregate)
 			if !ok {
 				continue
 			}
-			if err := acc.add(value); err != nil {
+			if err := acc.Add(value); err != nil {
 				return types.Value{}, err
 			}
 		}
-		return acc.value()
+		return acc.Value()
 	default:
 		return types.Value{}, fmt.Errorf("aggregate %q not supported", aggregate.Func)
 	}
 }
 
 func distinctCountAggregateRows(rows []types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) uint64 {
-	seen := newAggregateDistinctValueSet()
+	seen := valueagg.NewDistinctSet()
 	for _, row := range rows {
 		value, ok := aggregateArgumentValue(row, table, pred, aggregate)
 		if !ok || value.IsNull() {
 			continue
 		}
-		seen.add(value)
+		seen.Add(value)
 	}
-	return seen.count()
+	return seen.Count()
 }
 
 func aggregateArgumentValue(row types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) (types.Value, bool) {
@@ -1000,32 +1001,8 @@ func aggregateArgumentValue(row types.ProductValue, table TableID, pred Predicat
 	return row[idx], true
 }
 
-type aggregateDistinctValueSet struct {
-	buckets map[uint64][]types.Value
-	n       uint64
-}
-
-func newAggregateDistinctValueSet() *aggregateDistinctValueSet {
-	return &aggregateDistinctValueSet{buckets: make(map[uint64][]types.Value)}
-}
-
-func (s *aggregateDistinctValueSet) add(value types.Value) {
-	hash := value.Hash64()
-	for _, existing := range s.buckets[hash] {
-		if value.Equal(existing) {
-			return
-		}
-	}
-	s.buckets[hash] = append(s.buckets[hash], value)
-	s.n++
-}
-
-func (s *aggregateDistinctValueSet) count() uint64 {
-	return s.n
-}
-
 func emptySumAggregateValue(aggregate *Aggregate) (types.Value, error) {
-	return newLiveSumAccumulator(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable).value()
+	return valueagg.NewSum(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable).Value()
 }
 
 func sumAggregateResultKind(kind types.ValueKind) (types.ValueKind, bool) {
@@ -1036,125 +1013,6 @@ func sumAggregateResultKind(kind types.ValueKind) (types.ValueKind, bool) {
 		return types.KindUint64, true
 	case types.KindFloat32, types.KindFloat64:
 		return types.KindFloat64, true
-	default:
-		return 0, false
-	}
-}
-
-type liveSumAccumulator struct {
-	kind     types.ValueKind
-	nullable bool
-	seen     bool
-	i64      int64
-	u64      uint64
-	f64      float64
-	err      error
-}
-
-func newLiveSumAccumulator(kind types.ValueKind, nullable bool) *liveSumAccumulator {
-	return &liveSumAccumulator{kind: kind, nullable: nullable}
-}
-
-func (a *liveSumAccumulator) add(value types.Value) error {
-	if a.err != nil {
-		return a.err
-	}
-	if value.IsNull() {
-		return nil
-	}
-	a.seen = true
-	switch a.kind {
-	case types.KindInt64:
-		n, ok := aggregateValueAsInt64(value)
-		if !ok {
-			a.err = fmt.Errorf("SUM aggregate received non-signed value kind %s", value.Kind())
-			return a.err
-		}
-		sum := a.i64 + n
-		if (n > 0 && sum < a.i64) || (n < 0 && sum > a.i64) {
-			a.err = fmt.Errorf("SUM aggregate overflowed Int64")
-			return a.err
-		}
-		a.i64 = sum
-	case types.KindUint64:
-		n, ok := aggregateValueAsUint64(value)
-		if !ok {
-			a.err = fmt.Errorf("SUM aggregate received non-unsigned value kind %s", value.Kind())
-			return a.err
-		}
-		if ^uint64(0)-a.u64 < n {
-			a.err = fmt.Errorf("SUM aggregate overflowed Uint64")
-			return a.err
-		}
-		a.u64 += n
-	case types.KindFloat64:
-		n, ok := aggregateValueAsFloat64(value)
-		if !ok {
-			a.err = fmt.Errorf("SUM aggregate received non-float value kind %s", value.Kind())
-			return a.err
-		}
-		a.f64 += n
-	default:
-		a.err = fmt.Errorf("SUM aggregate result kind %s not supported", a.kind)
-	}
-	return a.err
-}
-
-func (a *liveSumAccumulator) value() (types.Value, error) {
-	if a.err != nil {
-		return types.Value{}, a.err
-	}
-	if a.nullable && !a.seen {
-		return types.NewNull(a.kind), nil
-	}
-	switch a.kind {
-	case types.KindInt64:
-		return types.NewInt64(a.i64), nil
-	case types.KindUint64:
-		return types.NewUint64(a.u64), nil
-	case types.KindFloat64:
-		return types.NewFloat64(a.f64)
-	default:
-		return types.Value{}, fmt.Errorf("SUM aggregate result kind %s not supported", a.kind)
-	}
-}
-
-func aggregateValueAsInt64(value types.Value) (int64, bool) {
-	switch value.Kind() {
-	case types.KindInt8:
-		return int64(value.AsInt8()), true
-	case types.KindInt16:
-		return int64(value.AsInt16()), true
-	case types.KindInt32:
-		return int64(value.AsInt32()), true
-	case types.KindInt64:
-		return value.AsInt64(), true
-	default:
-		return 0, false
-	}
-}
-
-func aggregateValueAsUint64(value types.Value) (uint64, bool) {
-	switch value.Kind() {
-	case types.KindUint8:
-		return uint64(value.AsUint8()), true
-	case types.KindUint16:
-		return uint64(value.AsUint16()), true
-	case types.KindUint32:
-		return uint64(value.AsUint32()), true
-	case types.KindUint64:
-		return value.AsUint64(), true
-	default:
-		return 0, false
-	}
-}
-
-func aggregateValueAsFloat64(value types.Value) (float64, bool) {
-	switch value.Kind() {
-	case types.KindFloat32:
-		return float64(value.AsFloat32()), true
-	case types.KindFloat64:
-		return value.AsFloat64(), true
 	default:
 		return 0, false
 	}
