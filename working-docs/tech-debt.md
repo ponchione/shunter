@@ -7,20 +7,6 @@ This file tracks work that should remain visible without making old release
 roadmaps look active. Keep entries concise and implementation-facing. Prefer
 live code, tests, focused docs, and Go doc when they disagree with this file.
 
-## Release Evidence
-
-Future release qualification should leave a durable record of the exact inputs
-used for the release decision:
-
-- Shunter commit or release tag under test
-- `opsboard-canary` commit under test
-- commands run, including `rtk make canary-quick` and `rtk make canary-full`
-- date, operator, result, and any accepted residual risks
-
-The release notes say the v1.0.0 and v1.0.1 lines passed their canary gates,
-but this repo does not currently keep a structured qualification ledger. Add
-one before the next release if the changelog needs more than a prose summary.
-
 ## Performance Gaps
 
 `docs/performance-envelopes.md` owns the current benchmark snapshot. The

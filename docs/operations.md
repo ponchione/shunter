@@ -218,30 +218,37 @@ Before cutting a Shunter release:
 2. Confirm `go.mod` names the intended supported Go version and pinned
    `toolchain` value.
 3. Update `CHANGELOG.md` for release-facing behavior.
-4. Run the release qualification commands documented by the hardening plan.
-5. Refresh [performance envelopes](performance-envelopes.md) with the current
+4. Add or update a candidate record in the
+   [release qualification ledger](../working-docs/release-qualification.md)
+   before running qualification. The record must capture the Shunter ref,
+   `opsboard-canary` ref, operator, date, command evidence, final result, and
+   accepted residual risks.
+5. Run and record the current minimum Shunter and TypeScript checks from the
+   ledger.
+6. Refresh [performance envelopes](performance-envelopes.md) with the current
    advisory benchmark snapshot, host notes, Shunter commit, and remaining
    measurement gaps.
-6. Run the external `opsboard-canary` gates from the sibling canary checkout:
+7. Run the external `opsboard-canary` gates from the sibling canary checkout:
 
 ```bash
 rtk make canary-quick
 rtk make canary-full
 ```
 
-Record the Shunter commit or release tag under test and the `opsboard-canary`
-commit used for the qualification run.
+Record the Shunter commit or release tag under test, the `opsboard-canary`
+commit, command results, evidence paths, and any accepted residual risks in the
+ledger.
 
-7. Build release binaries with linker variables for Shunter build metadata:
+8. Build release binaries with linker variables for Shunter build metadata:
 
 ```bash
 rtk go build -ldflags "-X github.com/ponchione/shunter.Version=v1.0.0 -X github.com/ponchione/shunter.Commit=<git-sha> -X github.com/ponchione/shunter.Date=<utc-rfc3339>" ./cmd/shunter
 ```
 
-8. Run the built command's `version` output and verify the stamped Shunter
+9. Run the built command's `version` output and verify the stamped Shunter
    version, commit, date, and Go version.
-9. Tag released versions with `vX.Y.Z`.
-10. Keep normal post-release development on a `-dev` version unless cutting a
+10. Tag released versions with `vX.Y.Z`.
+11. Keep normal post-release development on a `-dev` version unless cutting a
    release.
 
 ## Unsupported Operations

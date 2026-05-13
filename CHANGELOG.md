@@ -34,6 +34,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   row recovery can inspect incompatible values.
 - The preferred Go toolchain is now pinned to Go 1.26.3, which includes fixes
   for standard-library vulnerabilities reported against Go 1.26.2.
+- Added a structured release qualification ledger and wired the release
+  checklist to record Shunter/canary refs, command evidence, operator/date,
+  result, and residual risks before tagging.
 
 ## v1.0.1 - 2026-05-12
 
