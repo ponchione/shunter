@@ -2,6 +2,7 @@ package shunter
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -103,15 +104,18 @@ func TestModuleQueryAndViewDeclarationsAreCopiedAtRegistration(t *testing.T) {
 	queryTables := []string{"messages"}
 	queryTags := []string{"history"}
 	queryClassifications := []MigrationClassification{MigrationClassificationAdditive}
+	queryParameterColumns := []ProductColumn{{Name: "topic", Type: "string"}}
 	viewPermissions := []string{"messages:subscribe"}
 	viewTables := []string{"messages"}
 	viewTags := []string{"realtime"}
 	viewClassifications := []MigrationClassification{MigrationClassificationManualReviewNeeded}
+	viewParameterColumns := []ProductColumn{{Name: "topic", Type: "string"}}
 
 	mod := NewModule("chat").
 		Query(QueryDeclaration{
 			Name:        "recent_messages",
 			SQL:         "SELECT * FROM messages",
+			Parameters:  &ProductSchema{Columns: queryParameterColumns},
 			Permissions: PermissionMetadata{Required: queryPermissions},
 			ReadModel:   ReadModelMetadata{Tables: queryTables, Tags: queryTags},
 			Migration: MigrationMetadata{
@@ -121,6 +125,7 @@ func TestModuleQueryAndViewDeclarationsAreCopiedAtRegistration(t *testing.T) {
 		View(ViewDeclaration{
 			Name:        "live_messages",
 			SQL:         "SELECT * FROM messages",
+			Parameters:  &ProductSchema{Columns: viewParameterColumns},
 			Permissions: PermissionMetadata{Required: viewPermissions},
 			ReadModel:   ReadModelMetadata{Tables: viewTables, Tags: viewTags},
 			Migration: MigrationMetadata{
@@ -132,10 +137,12 @@ func TestModuleQueryAndViewDeclarationsAreCopiedAtRegistration(t *testing.T) {
 	queryTables[0] = "mutated"
 	queryTags[0] = "mutated"
 	queryClassifications[0] = MigrationClassificationDeprecated
+	queryParameterColumns[0].Name = "mutated"
 	viewPermissions[0] = "mutated"
 	viewTables[0] = "mutated"
 	viewTags[0] = "mutated"
 	viewClassifications[0] = MigrationClassificationDeprecated
+	viewParameterColumns[0].Type = "uint64"
 
 	desc := mod.Describe()
 	if got := desc.Queries[0].Permissions.Required; len(got) != 1 || got[0] != "messages:read" {
@@ -150,6 +157,7 @@ func TestModuleQueryAndViewDeclarationsAreCopiedAtRegistration(t *testing.T) {
 	if got := desc.Queries[0].Migration.Classifications; len(got) != 1 || got[0] != MigrationClassificationAdditive {
 		t.Fatalf("query migration classifications = %#v, want registration-time copy", got)
 	}
+	assertProductSchemaColumns(t, desc.Queries[0].Parameters, []ProductColumn{{Name: "topic", Type: "string"}})
 	if got := desc.Queries[0].SQL; got != "SELECT * FROM messages" {
 		t.Fatalf("query SQL = %q, want registration-time copy", got)
 	}
@@ -165,6 +173,7 @@ func TestModuleQueryAndViewDeclarationsAreCopiedAtRegistration(t *testing.T) {
 	if got := desc.Views[0].Migration.Classifications; len(got) != 1 || got[0] != MigrationClassificationManualReviewNeeded {
 		t.Fatalf("view migration classifications = %#v, want registration-time copy", got)
 	}
+	assertProductSchemaColumns(t, desc.Views[0].Parameters, []ProductColumn{{Name: "topic", Type: "string"}})
 	if got := desc.Views[0].SQL; got != "SELECT * FROM messages" {
 		t.Fatalf("view SQL = %q, want registration-time copy", got)
 	}
@@ -240,6 +249,121 @@ func TestBuildAcceptsValidDeclaredReadSQL(t *testing.T) {
 
 	if _, err := Build(mod, Config{DataDir: t.TempDir()}); err != nil {
 		t.Fatalf("Build returned error: %v", err)
+	}
+}
+
+func TestBuildAcceptsDeclaredReadSQLParameters(t *testing.T) {
+	mod := validChatModule().
+		Query(QueryDeclaration{
+			Name: "messages_by_body",
+			SQL:  "SELECT * FROM messages WHERE body = :body",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}},
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages_by_id",
+			SQL:  "SELECT * FROM messages WHERE id = :message_id",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "message_id", Type: "uint64"},
+			}},
+		})
+
+	if _, err := Build(mod, Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+}
+
+func TestBuildRejectsInvalidDeclaredReadSQLParameters(t *testing.T) {
+	tests := []struct {
+		name string
+		mod  *Module
+		want string
+	}{
+		{
+			name: "unknown query placeholder",
+			mod: validChatModule().Query(QueryDeclaration{
+				Name: "messages_by_body",
+				SQL:  "SELECT * FROM messages WHERE body = :missing",
+				Parameters: &ProductSchema{Columns: []ProductColumn{
+					{Name: "body", Type: "string"},
+				}},
+			}),
+			want: `query "messages_by_body": coerce column "body": unsupported SQL: SQL parameter :missing is not declared`,
+		},
+		{
+			name: "unused query parameter",
+			mod: validChatModule().Query(QueryDeclaration{
+				Name: "messages_by_body",
+				SQL:  "SELECT * FROM messages WHERE body = 'hello'",
+				Parameters: &ProductSchema{Columns: []ProductColumn{
+					{Name: "body", Type: "string"},
+				}},
+			}),
+			want: `query "messages_by_body": unsupported SQL: SQL parameter :body is declared but not used`,
+		},
+		{
+			name: "compatible repeated query parameter",
+			mod: validChatModule().Query(QueryDeclaration{
+				Name: "messages_by_body",
+				SQL:  "SELECT * FROM messages WHERE body = :body OR body != :body",
+				Parameters: &ProductSchema{Columns: []ProductColumn{
+					{Name: "body", Type: "string"},
+				}},
+			}),
+		},
+		{
+			name: "incompatible repeated query parameter",
+			mod: validChatModule().Query(QueryDeclaration{
+				Name: "messages_by_body",
+				SQL:  "SELECT * FROM messages WHERE body = :body OR id = :body",
+				Parameters: &ProductSchema{Columns: []ProductColumn{
+					{Name: "body", Type: "string"},
+				}},
+			}),
+			want: `SQL parameter :body type String is incompatible with column "id" type U64`,
+		},
+		{
+			name: "unsupported limit parameter position",
+			mod: validChatModule().Query(QueryDeclaration{
+				Name: "messages_by_limit",
+				SQL:  "SELECT * FROM messages WHERE body = :body LIMIT :limit",
+				Parameters: &ProductSchema{Columns: []ProductColumn{
+					{Name: "body", Type: "string"},
+					{Name: "limit", Type: "uint64"},
+				}},
+			}),
+			want: `SQL parameter :limit is not supported in LIMIT`,
+		},
+		{
+			name: "unknown view placeholder",
+			mod: validChatModule().View(ViewDeclaration{
+				Name: "live_messages_by_body",
+				SQL:  "SELECT * FROM messages WHERE body = :missing",
+				Parameters: &ProductSchema{Columns: []ProductColumn{
+					{Name: "body", Type: "string"},
+				}},
+			}),
+			want: `view "live_messages_by_body": coerce column "body": unsupported SQL: SQL parameter :missing is not declared`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Build(tt.mod, Config{DataDir: t.TempDir()})
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("Build returned error: %v", err)
+				}
+				return
+			}
+			if err == nil || !errors.Is(err, ErrInvalidDeclarationSQL) {
+				t.Fatalf("expected ErrInvalidDeclarationSQL, got %v", err)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Build error = %v, want context %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -376,8 +500,18 @@ func TestModuleDeclarationNamesShareQueryAndViewNamespace(t *testing.T) {
 
 func TestModuleDeclarationDescriptionsAreDetached(t *testing.T) {
 	mod := NewModule("chat").
-		Query(QueryDeclaration{Name: "recent_messages"}).
-		View(ViewDeclaration{Name: "live_messages"})
+		Query(QueryDeclaration{
+			Name: "recent_messages",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "string"},
+			}},
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "string"},
+			}},
+		})
 
 	desc := mod.Describe()
 	if len(desc.Queries) != 1 {
@@ -392,10 +526,14 @@ func TestModuleDeclarationDescriptionsAreDetached(t *testing.T) {
 	desc.Views[0].SQL = "SELECT * FROM mutated_view"
 	desc.Queries[0].Permissions.Required = append(desc.Queries[0].Permissions.Required, "mutated_permission")
 	desc.Views[0].ReadModel.Tables = append(desc.Views[0].ReadModel.Tables, "mutated_table")
+	desc.Queries[0].Parameters.Columns[0].Name = "mutated_query_param"
+	desc.Views[0].Parameters.Columns[0].Type = "uint64"
 
 	second := mod.Describe()
 	assertQueryDescription(t, second.Queries, "recent_messages")
 	assertViewDescription(t, second.Views, "live_messages")
+	assertProductSchemaColumns(t, second.Queries[0].Parameters, []ProductColumn{{Name: "topic", Type: "string"}})
+	assertProductSchemaColumns(t, second.Views[0].Parameters, []ProductColumn{{Name: "topic", Type: "string"}})
 	if hasQueryDescription(second.Queries, "mutated_query") {
 		t.Fatalf("queries = %#v, want detached query descriptions", second.Queries)
 	}

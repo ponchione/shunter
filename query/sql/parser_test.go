@@ -2484,31 +2484,37 @@ func TestParseWhereSenderParameterOnBytesColumn(t *testing.T) {
 	}
 }
 
-// TestParseWhereSenderParameterIsCaseSensitive pins reference `parse_expr`
-// (sql-parser/src/parser/mod.rs:223) byte-equal `":sender"` admission.
-// Any other casing falls through to `SqlUnsupported::Expr` rendered as
-// `Unsupported expression: {expr}` (parser/errors.rs:38-39).
-func TestParseWhereSenderParameterIsCaseSensitive(t *testing.T) {
-	_, err := Parse("SELECT * FROM s WHERE id = :SENDER")
-	if err == nil {
-		t.Fatal("expected error for non-byte-equal :sender placeholder")
+func TestParseWhereAppParameterPlaceholder(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM s WHERE id = :other")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
 	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
 	}
-	want := "Unsupported expression: :SENDER"
-	if err.Error() != want {
-		t.Fatalf("err = %q, want %q", err.Error(), want)
+	if cmp.Filter.Literal.Kind != LitParameter {
+		t.Fatalf("Literal.Kind = %v, want LitParameter", cmp.Filter.Literal.Kind)
+	}
+	if cmp.Filter.Literal.Param != "other" || cmp.Filter.Literal.Text != ":other" {
+		t.Fatalf("Literal = %+v, want parameter other with source text", cmp.Filter.Literal)
 	}
 }
 
-func TestParseWhereRejectsUnknownParameter(t *testing.T) {
-	_, err := Parse("SELECT * FROM s WHERE id = :other")
-	if err == nil {
-		t.Fatal("expected error for unknown SQL parameter")
+func TestParseWhereSenderParameterNameStillReservedExactly(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM s WHERE id = :sender")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
 	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	if stmt.Filters[0].Literal.Kind != LitSender {
+		t.Fatalf(":sender Literal.Kind = %v, want LitSender", stmt.Filters[0].Literal.Kind)
+	}
+	stmt, err = Parse("SELECT * FROM s WHERE id = :SENDER")
+	if err != nil {
+		t.Fatalf("Parse uppercase app placeholder error: %v", err)
+	}
+	if stmt.Filters[0].Literal.Kind != LitParameter || stmt.Filters[0].Literal.Param != "SENDER" {
+		t.Fatalf(":SENDER Literal = %+v, want app parameter", stmt.Filters[0].Literal)
 	}
 }
 

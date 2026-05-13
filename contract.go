@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/subscription"
 )
 
 const (
@@ -369,7 +369,7 @@ func withDeclaredReadResultMetadata(queries []QueryDescription, kind declaredRea
 	out := make([]QueryDescription, len(queries))
 	for i, query := range queries {
 		out[i] = copyQueryDescription(query)
-		rowSchema, resultShape := declaredReadResultMetadata(query.SQL, kind, lookup)
+		rowSchema, resultShape := declaredReadResultMetadata(query.SQL, query.Parameters, kind, lookup)
 		out[i].RowSchema = rowSchema
 		out[i].ResultShape = resultShape
 	}
@@ -384,18 +384,18 @@ func withDeclaredViewResultMetadata(views []ViewDescription, schemaExport schema
 	out := make([]ViewDescription, len(views))
 	for i, view := range views {
 		out[i] = copyViewDescription(view)
-		rowSchema, resultShape := declaredReadResultMetadata(view.SQL, declaredReadKindView, lookup)
+		rowSchema, resultShape := declaredReadResultMetadata(view.SQL, view.Parameters, declaredReadKindView, lookup)
 		out[i].RowSchema = rowSchema
 		out[i].ResultShape = resultShape
 	}
 	return out
 }
 
-func declaredReadResultMetadata(sqlText string, kind declaredReadKind, lookup contractSchemaLookup) (*ProductSchema, *ReadResultShape) {
+func declaredReadResultMetadata(sqlText string, parameters *ProductSchema, kind declaredReadKind, lookup contractSchemaLookup) (*ProductSchema, *ReadResultShape) {
 	if strings.TrimSpace(sqlText) == "" {
 		return nil, nil
 	}
-	compiled, err := compileDeclaredReadSQL(sqlText, lookup, validationOptionsForDeclaredRead(kind))
+	compiled, err := compileDeclaredReadSQLTemplate(sqlText, lookup, validationOptionsForDeclaredRead(kind), parameters)
 	if err != nil {
 		return nil, nil
 	}
@@ -419,7 +419,14 @@ func productSchemaForColumnSchemas(columns []schema.ColumnSchema) *ProductSchema
 	return product
 }
 
-func readResultShapeForCompiled(compiled protocol.CompiledSQLQuery) *ReadResultShape {
+type declaredReadResultMetadataSource interface {
+	TableName() string
+	HasAggregate() bool
+	SubscriptionProjection() []subscription.ProjectionColumn
+	UsesCallerIdentity() bool
+}
+
+func readResultShapeForCompiled(compiled declaredReadResultMetadataSource) *ReadResultShape {
 	kind := ReadResultShapeTable
 	switch {
 	case compiled.HasAggregate():
@@ -529,6 +536,7 @@ func copyQueryDescription(query QueryDescription) QueryDescription {
 	return QueryDescription{
 		Name:        query.Name,
 		SQL:         query.SQL,
+		Parameters:  copyProductSchemaPtr(query.Parameters),
 		RowSchema:   copyProductSchemaPtr(query.RowSchema),
 		ResultShape: copyReadResultShapePtr(query.ResultShape),
 		Permissions: copyPermissionMetadata(query.Permissions),
@@ -541,6 +549,7 @@ func copyViewDescription(view ViewDescription) ViewDescription {
 	return ViewDescription{
 		Name:        view.Name,
 		SQL:         view.SQL,
+		Parameters:  copyProductSchemaPtr(view.Parameters),
 		RowSchema:   copyProductSchemaPtr(view.RowSchema),
 		ResultShape: copyReadResultShapePtr(view.ResultShape),
 		Permissions: copyPermissionMetadata(view.Permissions),

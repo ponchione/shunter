@@ -35,6 +35,8 @@ const (
 	LitBytes
 	// LitSender is the :sender caller-identity placeholder.
 	LitSender
+	// LitParameter is an app-supplied declared-read placeholder.
+	LitParameter
 	// LitBigInt carries an integer literal that does not fit int64.
 	LitBigInt
 )
@@ -50,6 +52,7 @@ type Literal struct {
 	Bytes []byte
 	Big   *big.Int
 	Text  string
+	Param string
 }
 
 // Filter is a single column comparison against a literal value.
@@ -1155,6 +1158,10 @@ func (p *parser) parseUnsignedClause(keyword string) (*uint64, *Literal, bool, b
 	}
 	p.advance()
 	t := p.peek()
+	if t.kind == tokParam {
+		p.advance()
+		return nil, &Literal{Kind: LitParameter, Text: ":" + t.text, Param: t.text}, true, false, nil
+	}
 	if t.kind != tokNumber {
 		p.consumeUntilStatementEnd()
 		return nil, nil, true, true, nil
@@ -1376,17 +1383,11 @@ func (p *parser) parseLiteral() (Literal, error) {
 		}
 		return Literal{}, p.unsupported(fmt.Sprintf("expected literal, got identifier %q", t.text))
 	case tokParam:
-		// Reference `parse_expr`
-		// (sql-parser/src/parser/mod.rs:223) only accepts the exact
-		// byte-equal placeholder `:sender`; any other placeholder
-		// (different casing, unknown name) falls through to
-		// `_ => SqlUnsupported::Expr(expr)` (line 270), which renders
-		// `Unsupported expression: {expr}` via parser/errors.rs:38-39.
-		if t.text != "sender" {
-			return Literal{}, UnsupportedExprError{Expr: ":" + t.text}
-		}
 		p.advance()
-		return Literal{Kind: LitSender}, nil
+		if t.text == "sender" {
+			return Literal{Kind: LitSender}, nil
+		}
+		return Literal{Kind: LitParameter, Text: ":" + t.text, Param: t.text}, nil
 	default:
 		return Literal{}, p.unsupported(fmt.Sprintf("expected literal, got %q", t.text))
 	}

@@ -303,6 +303,55 @@ func TestV1CompatibilityModuleContractFixtureCoversStableJSONFields(t *testing.T
 	assertJSONObjectKeys(t, top["codegen"], "contract.codegen", []string{"contract_format", "contract_version", "default_snapshot_filename"})
 }
 
+func TestParameterizedDeclaredReadContractCoversParameterJSONFields(t *testing.T) {
+	mod := validChatModule().
+		Query(QueryDeclaration{
+			Name: "messages_by_topic",
+			SQL:  "SELECT id FROM messages WHERE body = :topic",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "string"},
+			}},
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages_by_topic",
+			SQL:  "SELECT id FROM messages WHERE body = :topic",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "string"},
+			}},
+		})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	data, err := rt.ExportContractJSON()
+	if err != nil {
+		t.Fatalf("ExportContractJSON returned error: %v", err)
+	}
+
+	top := assertJSONObjectKeys(t, data, "contract", []string{
+		"contract_version",
+		"module",
+		"schema",
+		"queries",
+		"views",
+		"visibility_filters",
+		"permissions",
+		"read_model",
+		"migrations",
+		"codegen",
+	})
+	queries := assertJSONArrayObjects(t, top["queries"], "contract.queries")
+	query := findJSONObjectByStringField(t, queries, "name", "messages_by_topic", "contract.queries")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, query), "contract.queries.messages_by_topic", []string{"name", "sql", "parameters", "row_schema", "result_shape"})
+	assertProductSchemaJSONKeys(t, query["parameters"], "contract.queries.messages_by_topic.parameters")
+
+	views := assertJSONArrayObjects(t, top["views"], "contract.views")
+	view := findJSONObjectByStringField(t, views, "name", "live_messages_by_topic", "contract.views")
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, view), "contract.views.live_messages_by_topic", []string{"name", "sql", "parameters", "row_schema", "result_shape"})
+	assertProductSchemaJSONKeys(t, view["parameters"], "contract.views.live_messages_by_topic.parameters")
+}
+
 func TestV1CompatibilityDeclaredReadResultShapeSQLMetadata(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "v1_module_contract.json"))
 	if err != nil {

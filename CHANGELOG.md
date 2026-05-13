@@ -4,6 +4,12 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Declared query and view contracts now carry optional typed parameter schemas
+  in deterministic JSON, validate reserved/invalid parameter metadata, and
+  classify parameter-schema drift in contract diff reports.
+- Declared query and view SQL validation now accepts declared app placeholders,
+  rejects unknown or unused parameters, and exports deterministic result
+  metadata for parameterized declared reads without enabling runtime binding.
 - Moved stale v1 roadmap follow-up into `working-docs/tech-debt.md` and
   restored the source version to a post-release development marker.
 - Hardened offline DataDir backup/restore file copies against replaced source

@@ -324,6 +324,94 @@ type SQLQueryValidationOptions struct {
 	AllowOffset     bool
 }
 
+// SQLQueryParameter declares one app placeholder accepted by declared-read SQL
+// template validation. :sender is caller identity and is not a parameter.
+type SQLQueryParameter struct {
+	Name string
+	Type types.ValueKind
+}
+
+// CompiledSQLQueryTemplate is SQL metadata validated against declared
+// parameters. It is intentionally metadata-only; runtime parameter binding is
+// handled by a later slice.
+type CompiledSQLQueryTemplate struct {
+	query compiledSQLQuery
+}
+
+func newCompiledSQLQueryTemplate(query compiledSQLQuery) CompiledSQLQueryTemplate {
+	return CompiledSQLQueryTemplate{query: copyCompiledSQLQuery(query)}
+}
+
+// TableName returns the projected table name for this SQL template.
+func (q CompiledSQLQueryTemplate) TableName() string {
+	return q.query.TableName
+}
+
+// Predicate returns the abstract predicate shape for validation metadata.
+func (q CompiledSQLQueryTemplate) Predicate() subscription.Predicate {
+	return q.query.Predicate
+}
+
+// SubscriptionProjection returns the optional live-row projection metadata.
+func (q CompiledSQLQueryTemplate) SubscriptionProjection() []subscription.ProjectionColumn {
+	return newCompiledSQLQuery(q.query).SubscriptionProjection()
+}
+
+// SubscriptionAggregate returns the optional live aggregate metadata.
+func (q CompiledSQLQueryTemplate) SubscriptionAggregate() *subscription.Aggregate {
+	return newCompiledSQLQuery(q.query).SubscriptionAggregate()
+}
+
+// ResultColumns returns the encoded output columns for this SQL template.
+func (q CompiledSQLQueryTemplate) ResultColumns(sl SchemaLookup) []schema.ColumnSchema {
+	return newCompiledSQLQuery(q.query).ResultColumns(sl)
+}
+
+// SubscriptionOrderBy returns optional initial-snapshot ordering metadata.
+func (q CompiledSQLQueryTemplate) SubscriptionOrderBy() []subscription.OrderByColumn {
+	return newCompiledSQLQuery(q.query).SubscriptionOrderBy()
+}
+
+// SubscriptionLimit returns optional initial-snapshot LIMIT metadata.
+func (q CompiledSQLQueryTemplate) SubscriptionLimit() *uint64 {
+	return newCompiledSQLQuery(q.query).SubscriptionLimit()
+}
+
+// SubscriptionOffset returns optional initial-snapshot OFFSET metadata.
+func (q CompiledSQLQueryTemplate) SubscriptionOffset() *uint64 {
+	return newCompiledSQLQuery(q.query).SubscriptionOffset()
+}
+
+// HasOrderBy reports whether the source SQL included an ORDER BY clause.
+func (q CompiledSQLQueryTemplate) HasOrderBy() bool {
+	return q.query.OrderByPresent || len(q.query.OrderBy) != 0
+}
+
+// HasLimit reports whether the source SQL included a LIMIT clause.
+func (q CompiledSQLQueryTemplate) HasLimit() bool {
+	return q.query.Limit != nil
+}
+
+// HasOffset reports whether the source SQL included an OFFSET clause.
+func (q CompiledSQLQueryTemplate) HasOffset() bool {
+	return q.query.Offset != nil
+}
+
+// HasAggregate reports whether this template returns an aggregate row shape.
+func (q CompiledSQLQueryTemplate) HasAggregate() bool {
+	return q.query.Aggregate != nil
+}
+
+// UsesCallerIdentity reports whether the template references :sender.
+func (q CompiledSQLQueryTemplate) UsesCallerIdentity() bool {
+	return q.query.UsesCallerIdentity
+}
+
+// ReferencedTables returns the table IDs referenced by the template.
+func (q CompiledSQLQueryTemplate) ReferencedTables() []schema.TableID {
+	return newCompiledSQLQuery(q.query).ReferencedTables()
+}
+
 type relationSchema struct {
 	id schema.TableID
 	ts *schema.TableSchema
@@ -403,6 +491,17 @@ func ValidateSQLQueryString(qs string, sl SchemaLookup, opts SQLQueryValidationO
 	return err
 }
 
+// ValidateSQLQueryTemplateString validates declared-read SQL against its
+// parameter schema without accepting those parameters on raw SQL surfaces.
+func ValidateSQLQueryTemplateString(qs string, sl SchemaLookup, opts SQLQueryValidationOptions, parameters []SQLQueryParameter) error {
+	if sl == nil {
+		return fmt.Errorf("schema lookup must not be nil")
+	}
+	var caller types.Identity
+	_, err := CompileSQLQueryTemplateString(qs, sl, &caller, opts, parameters)
+	return err
+}
+
 // CompileSQLQueryString compiles SQL against the supplied schema lookup and
 // caller identity. It is a narrow runtime seam for declared reads; raw external
 // SQL must still pass an auth-aware SchemaLookup when using this compiler.
@@ -410,11 +509,40 @@ func CompileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, o
 	if sl == nil {
 		return CompiledSQLQuery{}, fmt.Errorf("schema lookup must not be nil")
 	}
-	compiled, err := compileSQLQueryString(qs, sl, caller, opts.AllowLimit, opts.AllowProjection, opts.AllowOrderBy, opts.AllowOffset)
+	compiler := runtimeSQLLiteralCompiler{caller: caller}
+	compiled, err := compileSQLQueryString(qs, sl, compiler, opts.AllowLimit, opts.AllowProjection, opts.AllowOrderBy, opts.AllowOffset)
 	if err != nil {
 		return CompiledSQLQuery{}, err
 	}
 	return newCompiledSQLQuery(compiled), nil
+}
+
+// CompileSQLQueryTemplateString compiles declared-read SQL metadata against the
+// supplied parameter schema. Returned metadata must not be executed until
+// concrete parameter binding is implemented.
+func CompileSQLQueryTemplateString(qs string, sl SchemaLookup, caller *types.Identity, opts SQLQueryValidationOptions, parameters []SQLQueryParameter) (CompiledSQLQueryTemplate, error) {
+	if sl == nil {
+		return CompiledSQLQueryTemplate{}, fmt.Errorf("schema lookup must not be nil")
+	}
+	if len(parameters) == 0 {
+		compiled, err := CompileSQLQueryString(qs, sl, caller, opts)
+		if err != nil {
+			return CompiledSQLQueryTemplate{}, err
+		}
+		return newCompiledSQLQueryTemplate(compiled.query), nil
+	}
+	compiler, err := newTemplateSQLLiteralCompiler(caller, parameters)
+	if err != nil {
+		return CompiledSQLQueryTemplate{}, err
+	}
+	compiled, err := compileSQLQueryString(qs, sl, compiler, opts.AllowLimit, opts.AllowProjection, opts.AllowOrderBy, opts.AllowOffset)
+	if err != nil {
+		return CompiledSQLQueryTemplate{}, err
+	}
+	if err := compiler.validateUsed(); err != nil {
+		return CompiledSQLQueryTemplate{}, err
+	}
+	return newCompiledSQLQueryTemplate(compiled), nil
 }
 
 // CompileSQLQueryStringWithVisibility compiles SQL and expands matching
@@ -584,7 +712,7 @@ func orSubscriptionPredicates(left, right subscription.Predicate) subscription.P
 	}
 }
 
-func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, allowLimit bool, allowProjection bool, allowOrderBy bool, allowOffset bool) (compiledSQLQuery, error) {
+func compileSQLQueryString(qs string, sl SchemaLookup, literalCompiler sqlLiteralCompiler, allowLimit bool, allowProjection bool, allowOrderBy bool, allowOffset bool) (compiledSQLQuery, error) {
 	plan, err := queryplan.Build(qs, queryplan.Options{
 		AllowLimit:   allowLimit,
 		AllowOrderBy: allowOrderBy,
@@ -600,7 +728,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	normalizedPredicate := plan.NormalizedPredicate
 	usesCallerIdentity := plan.UsesCallerIdentity
 	if len(stmt.Joins) > 1 {
-		return compileMultiJoinSQLQuery(stmt, stmtOrderBy, normalizedPredicate, usesCallerIdentity, qs, sl, caller, allowProjection)
+		return compileMultiJoinSQLQuery(stmt, stmtOrderBy, normalizedPredicate, usesCallerIdentity, qs, sl, literalCompiler, allowProjection)
 	}
 	if stmt.Join != nil {
 		leftID, leftTS, ok := lookupSQLTableExact(sl, stmt.Join.LeftTable)
@@ -660,7 +788,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			stmt.Join.RightAlias: {id: rightID, ts: rightTS},
 		}
 		if stmt.Join.HasOn && stmt.Predicate != nil {
-			if _, err := compileSQLPredicateForRelations(stmt.Predicate, relations, aliasTagForJoin(stmt, leftID == rightID), caller, true); err != nil {
+			if _, err := compileSQLPredicateForRelations(stmt.Predicate, relations, aliasTagForJoin(stmt, leftID == rightID), literalCompiler, true); err != nil {
 				return compiledSQLQuery{}, err
 			}
 		}
@@ -718,7 +846,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		}
 		if !stmt.Join.HasOn {
 			if stmt.Predicate != nil {
-				join, err := compileCrossJoinWhereColumnEquality(stmt, leftID, leftTS, rightID, rightTS, caller)
+				join, err := compileCrossJoinWhereColumnEquality(stmt, leftID, leftTS, rightID, rightTS, literalCompiler)
 				if err != nil {
 					return compiledSQLQuery{}, err
 				}
@@ -742,7 +870,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		var filter subscription.Predicate
 		if stmt.Join.HasOn && normalizedPredicate != nil {
 			var err error
-			filter, err = compileSQLPredicateForRelations(normalizedPredicate, relations, aliasTag, caller, true)
+			filter, err = compileSQLPredicateForRelations(normalizedPredicate, relations, aliasTag, literalCompiler, true)
 			if err != nil {
 				return compiledSQLQuery{}, err
 			}
@@ -779,10 +907,10 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.ProjectedTable)
 	}
 	// Resolve WHERE before projection columns so predicate errors win.
-	if _, err := compileSQLPredicateForSingleRelation(stmt.Predicate, relationSchema{id: projectedID, ts: ts}, stmt.TableAlias, caller); err != nil {
+	if _, err := compileSQLPredicateForSingleRelation(stmt.Predicate, relationSchema{id: projectedID, ts: ts}, stmt.TableAlias, literalCompiler); err != nil {
 		return compiledSQLQuery{}, err
 	}
-	pred, err := compileSQLPredicateForSingleRelation(normalizedPredicate, relationSchema{id: projectedID, ts: ts}, stmt.TableAlias, caller)
+	pred, err := compileSQLPredicateForSingleRelation(normalizedPredicate, relationSchema{id: projectedID, ts: ts}, stmt.TableAlias, literalCompiler)
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
@@ -883,6 +1011,9 @@ func compileStatementLimit(stmt sql.Statement, sqlText string) (*uint64, error) 
 		return nil, sql.UnsupportedFeatureError{SQL: sqlText}
 	}
 	if stmt.InvalidLimit != nil {
+		if stmt.InvalidLimit.Kind == sql.LitParameter {
+			return nil, fmt.Errorf("%w: SQL parameter %s is not supported in LIMIT", sql.ErrUnsupportedSQL, limitLiteralText(*stmt.InvalidLimit))
+		}
 		return nil, sql.InvalidLiteralError{Literal: limitLiteralText(*stmt.InvalidLimit), Type: "U64"}
 	}
 	return stmt.Limit, nil
@@ -893,6 +1024,9 @@ func compileStatementOffset(stmt sql.Statement, sqlText string) (*uint64, error)
 		return nil, sql.UnsupportedFeatureError{SQL: sqlText}
 	}
 	if stmt.InvalidOffset != nil {
+		if stmt.InvalidOffset.Kind == sql.LitParameter {
+			return nil, fmt.Errorf("%w: SQL parameter %s is not supported in OFFSET", sql.ErrUnsupportedSQL, limitLiteralText(*stmt.InvalidOffset))
+		}
 		return nil, sql.InvalidLiteralError{Literal: limitLiteralText(*stmt.InvalidOffset), Type: "U64"}
 	}
 	return stmt.Offset, nil
@@ -1002,7 +1136,7 @@ func compileJoinAggregateProjection(agg *sql.AggregateProjection, relations map[
 	return compileAggregateProjection(agg, &argument)
 }
 
-func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.TableID, leftTS *schema.TableSchema, rightID schema.TableID, rightTS *schema.TableSchema, caller *types.Identity) (subscription.Join, error) {
+func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.TableID, leftTS *schema.TableSchema, rightID schema.TableID, rightTS *schema.TableSchema, literalCompiler sqlLiteralCompiler) (subscription.Join, error) {
 	cmp, filterPred, err := splitCrossJoinWherePredicate(stmt.Predicate)
 	if err != nil {
 		return subscription.Join{}, err
@@ -1058,7 +1192,7 @@ func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.Table
 		filter, err = compileCrossJoinWhereLiteralFilter(filterPred, map[string]relationSchema{
 			stmt.Join.LeftAlias:  {id: leftID, ts: leftTS},
 			stmt.Join.RightAlias: {id: rightID, ts: rightTS},
-		}, caller, leftID)
+		}, literalCompiler, leftID)
 		if err != nil {
 			return subscription.Join{}, err
 		}
@@ -1147,8 +1281,8 @@ func joinSQLPredicatesWithAnd(left, right sql.Predicate) sql.Predicate {
 	}
 }
 
-func compileCrossJoinWhereLiteralFilter(pred sql.Predicate, relations map[string]relationSchema, caller *types.Identity, noRowsTable schema.TableID) (subscription.Predicate, error) {
-	if _, err := compileSQLPredicateForRelations(pred, relations, func(string) uint8 { return 0 }, caller, false); err != nil {
+func compileCrossJoinWhereLiteralFilter(pred sql.Predicate, relations map[string]relationSchema, literalCompiler sqlLiteralCompiler, noRowsTable schema.TableID) (subscription.Predicate, error) {
+	if _, err := compileSQLPredicateForRelations(pred, relations, func(string) uint8 { return 0 }, literalCompiler, false); err != nil {
 		return nil, err
 	}
 	normalized := queryplan.NormalizePredicate(pred)
@@ -1160,11 +1294,11 @@ func compileCrossJoinWhereLiteralFilter(pred sql.Predicate, relations map[string
 	case sql.FalsePredicate:
 		return subscription.NoRows{Table: noRowsTable}, nil
 	default:
-		return compileSQLPredicateForRelations(p, relations, func(string) uint8 { return 0 }, caller, false)
+		return compileSQLPredicateForRelations(p, relations, func(string) uint8 { return 0 }, literalCompiler, false)
 	}
 }
 
-func compileSQLPredicateForSingleRelation(pred sql.Predicate, rel relationSchema, tableAlias string, caller *types.Identity) (subscription.Predicate, error) {
+func compileSQLPredicateForSingleRelation(pred sql.Predicate, rel relationSchema, tableAlias string, literalCompiler sqlLiteralCompiler) (subscription.Predicate, error) {
 	switch p := pred.(type) {
 	case nil:
 		return subscription.AllRows{Table: rel.id}, nil
@@ -1178,7 +1312,7 @@ func compileSQLPredicateForSingleRelation(pred sql.Predicate, rel relationSchema
 		}
 		f := p.Filter
 		f.Table = tableAlias
-		return normalizeSQLFilterForRelations(f, map[string]relationSchema{tableAlias: rel}, func(string) uint8 { return 0 }, caller)
+		return normalizeSQLFilterForRelations(f, map[string]relationSchema{tableAlias: rel}, func(string) uint8 { return 0 }, literalCompiler)
 	case sql.NullPredicate:
 		if p.Column.Alias != "" && p.Column.Alias != tableAlias {
 			return nil, sql.UnresolvedVarError{Name: p.Column.Alias}
@@ -1187,13 +1321,13 @@ func compileSQLPredicateForSingleRelation(pred sql.Predicate, rel relationSchema
 		return normalizeSQLNullPredicateForRelations(p, map[string]relationSchema{tableAlias: rel}, func(string) uint8 { return 0 })
 	case sql.AndPredicate:
 		return compileSQLBinaryPredicate(p.Left, p.Right, func(child sql.Predicate) (subscription.Predicate, error) {
-			return compileSQLPredicateForSingleRelation(child, rel, tableAlias, caller)
+			return compileSQLPredicateForSingleRelation(child, rel, tableAlias, literalCompiler)
 		}, func(left, right subscription.Predicate) subscription.Predicate {
 			return subscription.And{Left: left, Right: right}
 		})
 	case sql.OrPredicate:
 		return compileSQLBinaryPredicate(p.Left, p.Right, func(child sql.Predicate) (subscription.Predicate, error) {
-			return compileSQLPredicateForSingleRelation(child, rel, tableAlias, caller)
+			return compileSQLPredicateForSingleRelation(child, rel, tableAlias, literalCompiler)
 		}, func(left, right subscription.Predicate) subscription.Predicate {
 			return subscription.Or{Left: left, Right: right}
 		})
@@ -1418,15 +1552,81 @@ func isArrayKind(k types.ValueKind) bool {
 	return k == types.KindArrayString
 }
 
-func coerceLiteral(lit sql.Literal, kind types.ValueKind, caller *types.Identity) (types.Value, error) {
-	if caller != nil {
-		raw := (*[32]byte)(caller)
+type sqlLiteralCompiler interface {
+	compileSQLLiteral(lit sql.Literal, kind types.ValueKind, columnName string) (types.Value, error)
+}
+
+type runtimeSQLLiteralCompiler struct {
+	caller *types.Identity
+}
+
+func (c runtimeSQLLiteralCompiler) compileSQLLiteral(lit sql.Literal, kind types.ValueKind, _ string) (types.Value, error) {
+	if c.caller != nil {
+		raw := (*[32]byte)(c.caller)
 		return sql.CoerceWithCaller(lit, kind, raw)
 	}
 	return sql.Coerce(lit, kind)
 }
 
-func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]relationSchema, aliasTag func(string) uint8, caller *types.Identity, allowColumnComparisons bool) (subscription.Predicate, error) {
+type templateSQLLiteralCompiler struct {
+	runtimeSQLLiteralCompiler
+	byName map[string]SQLQueryParameter
+	order  []string
+	used   map[string]struct{}
+}
+
+func newTemplateSQLLiteralCompiler(caller *types.Identity, parameters []SQLQueryParameter) (*templateSQLLiteralCompiler, error) {
+	compiler := &templateSQLLiteralCompiler{
+		runtimeSQLLiteralCompiler: runtimeSQLLiteralCompiler{caller: caller},
+		byName:                    make(map[string]SQLQueryParameter, len(parameters)),
+		order:                     make([]string, 0, len(parameters)),
+		used:                      make(map[string]struct{}, len(parameters)),
+	}
+	for _, parameter := range parameters {
+		if strings.TrimSpace(parameter.Name) == "" {
+			return nil, fmt.Errorf("%w: SQL parameter name must not be empty", sql.ErrUnsupportedSQL)
+		}
+		if parameter.Name == "sender" {
+			return nil, fmt.Errorf("%w: SQL parameter :sender is reserved for caller identity", sql.ErrUnsupportedSQL)
+		}
+		if _, exists := compiler.byName[parameter.Name]; exists {
+			return nil, fmt.Errorf("%w: SQL parameter :%s is declared more than once", sql.ErrUnsupportedSQL, parameter.Name)
+		}
+		compiler.byName[parameter.Name] = parameter
+		compiler.order = append(compiler.order, parameter.Name)
+	}
+	return compiler, nil
+}
+
+func (c *templateSQLLiteralCompiler) compileSQLLiteral(lit sql.Literal, kind types.ValueKind, columnName string) (types.Value, error) {
+	if lit.Kind != sql.LitParameter {
+		return c.runtimeSQLLiteralCompiler.compileSQLLiteral(lit, kind, columnName)
+	}
+	name := lit.Param
+	if name == "" {
+		name = strings.TrimPrefix(lit.Text, ":")
+	}
+	parameter, ok := c.byName[name]
+	if !ok {
+		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s is not declared", sql.ErrUnsupportedSQL, name)
+	}
+	if parameter.Type != kind {
+		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s type %s is incompatible with column %q type %s", sql.ErrUnsupportedSQL, name, sql.AlgebraicName(parameter.Type), columnName, sql.AlgebraicName(kind))
+	}
+	c.used[name] = struct{}{}
+	return types.NewNull(kind), nil
+}
+
+func (c *templateSQLLiteralCompiler) validateUsed() error {
+	for _, name := range c.order {
+		if _, ok := c.used[name]; !ok {
+			return fmt.Errorf("%w: SQL parameter :%s is declared but not used", sql.ErrUnsupportedSQL, name)
+		}
+	}
+	return nil
+}
+
+func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]relationSchema, aliasTag func(string) uint8, literalCompiler sqlLiteralCompiler, allowColumnComparisons bool) (subscription.Predicate, error) {
 	switch p := pred.(type) {
 	case nil:
 		if len(relations) != 1 {
@@ -1453,7 +1653,7 @@ func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]re
 		}
 		return nil, nil
 	case sql.ComparisonPredicate:
-		return normalizeSQLFilterForRelations(p.Filter, relations, aliasTag, caller)
+		return normalizeSQLFilterForRelations(p.Filter, relations, aliasTag, literalCompiler)
 	case sql.NullPredicate:
 		return normalizeSQLNullPredicateForRelations(p, relations, aliasTag)
 	case sql.ColumnComparisonPredicate:
@@ -1463,13 +1663,13 @@ func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]re
 		return compileSQLColumnComparisonForRelations(p, relations, aliasTag)
 	case sql.AndPredicate:
 		return compileSQLBinaryPredicate(p.Left, p.Right, func(child sql.Predicate) (subscription.Predicate, error) {
-			return compileSQLPredicateForRelations(child, relations, aliasTag, caller, allowColumnComparisons)
+			return compileSQLPredicateForRelations(child, relations, aliasTag, literalCompiler, allowColumnComparisons)
 		}, func(left, right subscription.Predicate) subscription.Predicate {
 			return subscription.And{Left: left, Right: right}
 		})
 	case sql.OrPredicate:
 		return compileSQLBinaryPredicate(p.Left, p.Right, func(child sql.Predicate) (subscription.Predicate, error) {
-			return compileSQLPredicateForRelations(child, relations, aliasTag, caller, allowColumnComparisons)
+			return compileSQLPredicateForRelations(child, relations, aliasTag, literalCompiler, allowColumnComparisons)
 		}, func(left, right subscription.Predicate) subscription.Predicate {
 			return subscription.Or{Left: left, Right: right}
 		})
@@ -1556,7 +1756,7 @@ func compileSQLBinaryPredicate(
 	return combine(left, right), nil
 }
 
-func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationSchema, aliasTag func(string) uint8, caller *types.Identity) (subscription.Predicate, error) {
+func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationSchema, aliasTag func(string) uint8, literalCompiler sqlLiteralCompiler) (subscription.Predicate, error) {
 	relationKey := f.Table
 	if f.Alias != "" {
 		relationKey = f.Alias
@@ -1573,7 +1773,7 @@ func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationS
 	if !ok {
 		return nil, sql.UnresolvedVarError{Name: f.Column}
 	}
-	v, err := coerceLiteral(f.Literal, col.Type, caller)
+	v, err := literalCompiler.compileSQLLiteral(f.Literal, col.Type, f.Column)
 	if err != nil {
 		// Reference-informed error types carry the source literal verbatim; do
 		// not prefix with "coerce column" so the text matches
@@ -1585,6 +1785,10 @@ func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationS
 		}
 		var ilErr sql.InvalidLiteralError
 		if errors.As(err, &ilErr) {
+			return nil, err
+		}
+		var exprErr sql.UnsupportedExprError
+		if errors.As(err, &exprErr) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("coerce column %q: %v", f.Column, err)

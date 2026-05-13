@@ -19,6 +19,7 @@ type ModuleDescription struct {
 type QueryDescription struct {
 	Name        string             `json:"name"`
 	SQL         string             `json:"sql,omitempty"`
+	Parameters  *ProductSchema     `json:"parameters,omitempty"`
 	RowSchema   *ProductSchema     `json:"row_schema,omitempty"`
 	ResultShape *ReadResultShape   `json:"result_shape,omitempty"`
 	Permissions PermissionMetadata `json:"-"`
@@ -31,6 +32,7 @@ type QueryDescription struct {
 type ViewDescription struct {
 	Name        string             `json:"name"`
 	SQL         string             `json:"sql,omitempty"`
+	Parameters  *ProductSchema     `json:"parameters,omitempty"`
 	RowSchema   *ProductSchema     `json:"row_schema,omitempty"`
 	ResultShape *ReadResultShape   `json:"result_shape,omitempty"`
 	Permissions PermissionMetadata `json:"-"`

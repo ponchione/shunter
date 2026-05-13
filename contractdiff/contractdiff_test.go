@@ -339,6 +339,105 @@ func TestContractDiffDetectsDeclaredReadResultMetadataChanges(t *testing.T) {
 	}
 }
 
+func TestContractDiffClassifiesDeclaredReadParameterChanges(t *testing.T) {
+	t.Run("adding parameters to executable reads is breaking", func(t *testing.T) {
+		old := contractFixture()
+		old.Queries[0].SQL = "SELECT * FROM messages"
+		old.Views[0].SQL = "SELECT * FROM messages"
+		current := contractFixture()
+		current.Queries[0].SQL = old.Queries[0].SQL
+		current.Views[0].SQL = old.Views[0].SQL
+		current.Queries[0].Parameters = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "topic", Type: "string"}}}
+		current.Views[0].Parameters = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "topic", Type: "string"}}}
+
+		report := Compare(old, current)
+
+		assertChange(t, report.Changes, ChangeKindBreaking, SurfaceQuery, "history")
+		assertChange(t, report.Changes, ChangeKindBreaking, SurfaceView, "live")
+		if text := report.Text(); !strings.Contains(text, "query parameters added") ||
+			!strings.Contains(text, "view parameters added") {
+			t.Fatalf("Text() = %q, want declared-read parameter additions", text)
+		}
+	})
+
+	t.Run("adding parameters to metadata-only reads is additive", func(t *testing.T) {
+		old := contractFixture()
+		current := contractFixture()
+		current.Queries[0].Parameters = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "topic", Type: "string"}}}
+		current.Views[0].Parameters = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "topic", Type: "string"}}}
+
+		report := Compare(old, current)
+
+		assertChange(t, report.Changes, ChangeKindAdditive, SurfaceQuery, "history")
+		assertChange(t, report.Changes, ChangeKindAdditive, SurfaceView, "live")
+		if text := report.Text(); !strings.Contains(text, "query parameters added") ||
+			!strings.Contains(text, "view parameters added") {
+			t.Fatalf("Text() = %q, want metadata-only parameter additions", text)
+		}
+	})
+
+	t.Run("removing parameters is breaking", func(t *testing.T) {
+		old := contractFixture()
+		old.Queries[0].Parameters = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "topic", Type: "string"}}}
+		old.Views[0].Parameters = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "topic", Type: "string"}}}
+		current := contractFixture()
+
+		report := Compare(old, current)
+
+		assertChange(t, report.Changes, ChangeKindBreaking, SurfaceQuery, "history")
+		assertChange(t, report.Changes, ChangeKindBreaking, SurfaceView, "live")
+		if text := report.Text(); !strings.Contains(text, "query parameters removed") ||
+			!strings.Contains(text, "view parameters removed") {
+			t.Fatalf("Text() = %q, want declared-read parameter removals", text)
+		}
+	})
+
+	t.Run("changing parameters is breaking", func(t *testing.T) {
+		old := contractFixture()
+		old.Queries[0].Parameters = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "topic", Type: "string"}}}
+		old.Views[0].Parameters = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "topic", Type: "string"}}}
+		current := contractFixture()
+		current.Queries[0].Parameters = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "topic", Type: "uint64"}}}
+		current.Views[0].Parameters = &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "renamed_topic", Type: "string"}}}
+
+		report := Compare(old, current)
+
+		assertChange(t, report.Changes, ChangeKindBreaking, SurfaceQuery, "history")
+		assertChange(t, report.Changes, ChangeKindBreaking, SurfaceView, "live")
+		if text := report.Text(); !strings.Contains(text, "query parameters changed") ||
+			!strings.Contains(text, "view parameters changed") {
+			t.Fatalf("Text() = %q, want declared-read parameter changes", text)
+		}
+	})
+
+	t.Run("new reads primarily report the read as added", func(t *testing.T) {
+		old := contractFixture()
+		current := contractFixture()
+		current.Queries = append(current.Queries, shunter.QueryDescription{
+			Name: "messages_by_topic",
+			Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+				{Name: "topic", Type: "string"},
+			}},
+		})
+		current.Views = append(current.Views, shunter.ViewDescription{
+			Name: "live_messages_by_topic",
+			Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+				{Name: "topic", Type: "string"},
+			}},
+		})
+
+		report := Compare(old, current)
+
+		assertChange(t, report.Changes, ChangeKindAdditive, SurfaceQuery, "messages_by_topic")
+		assertChange(t, report.Changes, ChangeKindAdditive, SurfaceView, "live_messages_by_topic")
+		assertNoChange(t, report.Changes, SurfaceQuery, "history")
+		if text := report.Text(); strings.Contains(text, "messages_by_topic: query parameters added") ||
+			strings.Contains(text, "live_messages_by_topic: view parameters added") {
+			t.Fatalf("Text() = %q, want newly added reads reported as added reads", text)
+		}
+	})
+}
+
 func TestContractDiffIgnoresDeclaredReadPermissionOrder(t *testing.T) {
 	old := contractFixture()
 	old.Permissions.Reducers = []shunter.PermissionContractDeclaration{{

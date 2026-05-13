@@ -129,6 +129,7 @@ type QueryDeclaration struct {
 	// SQL optionally binds the declaration to an executable OneOffQuery SQL
 	// string. Empty SQL leaves the declaration metadata-only.
 	SQL         string
+	Parameters  *ProductSchema
 	Permissions PermissionMetadata
 	ReadModel   ReadModelMetadata
 	Migration   MigrationMetadata
@@ -141,6 +142,7 @@ type ViewDeclaration struct {
 	// SQL optionally binds the declaration to an executable subscription SQL
 	// string. Empty SQL leaves the declaration metadata-only.
 	SQL         string
+	Parameters  *ProductSchema
 	Permissions PermissionMetadata
 	ReadModel   ReadModelMetadata
 	Migration   MigrationMetadata
@@ -192,7 +194,11 @@ func validateModuleDeclarationSQL(m *Module, sl protocol.SchemaLookup) error {
 		if strings.TrimSpace(spec.SQL) == "" {
 			continue
 		}
-		err := protocol.ValidateSQLQueryString(spec.SQL, sl, spec.Validation)
+		parameters, parameterErr := declaredReadSQLParameters(spec.Parameters)
+		if parameterErr != nil {
+			continue
+		}
+		err := protocol.ValidateSQLQueryTemplateString(spec.SQL, sl, spec.Validation, parameters)
 		if err != nil {
 			return fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 		}
@@ -219,11 +225,13 @@ func validateModuleMetadata(m *Module, reg schema.SchemaRegistry) error {
 	}
 	for _, query := range m.queries {
 		validateAuthoredPermissionMetadata("permissions.query."+query.Name, query.Permissions, &errs)
+		validateParameterProductSchema("queries."+query.Name+".parameters", query.Parameters, &errs)
 		validateAuthoredReadModelMetadata("read_model.query."+query.Name, query.ReadModel, reg, &errs)
 		validateMigrationMetadata("migrations.query."+query.Name, query.Migration, &errs)
 	}
 	for _, view := range m.views {
 		validateAuthoredPermissionMetadata("permissions.view."+view.Name, view.Permissions, &errs)
+		validateParameterProductSchema("views."+view.Name+".parameters", view.Parameters, &errs)
 		validateAuthoredReadModelMetadata("read_model.view."+view.Name, view.ReadModel, reg, &errs)
 		validateMigrationMetadata("migrations.view."+view.Name, view.Migration, &errs)
 	}
@@ -297,6 +305,7 @@ func copyQueryDeclaration(query QueryDeclaration) QueryDeclaration {
 	return QueryDeclaration{
 		Name:        query.Name,
 		SQL:         query.SQL,
+		Parameters:  copyProductSchemaPtr(query.Parameters),
 		Permissions: copyPermissionMetadata(query.Permissions),
 		ReadModel:   copyReadModelMetadata(query.ReadModel),
 		Migration:   copyMigrationMetadata(query.Migration),
@@ -307,6 +316,7 @@ func copyViewDeclaration(view ViewDeclaration) ViewDeclaration {
 	return ViewDeclaration{
 		Name:        view.Name,
 		SQL:         view.SQL,
+		Parameters:  copyProductSchemaPtr(view.Parameters),
 		Permissions: copyPermissionMetadata(view.Permissions),
 		ReadModel:   copyReadModelMetadata(view.ReadModel),
 		Migration:   copyMigrationMetadata(view.Migration),
@@ -344,6 +354,7 @@ func describeQueryDeclarations(in []QueryDeclaration) []QueryDescription {
 		out[i] = QueryDescription{
 			Name:        query.Name,
 			SQL:         query.SQL,
+			Parameters:  copyProductSchemaPtr(query.Parameters),
 			Permissions: copyPermissionMetadata(query.Permissions),
 			ReadModel:   copyReadModelMetadata(query.ReadModel),
 			Migration:   copyMigrationMetadata(query.Migration),
@@ -361,6 +372,7 @@ func describeViewDeclarations(in []ViewDeclaration) []ViewDescription {
 		out[i] = ViewDescription{
 			Name:        view.Name,
 			SQL:         view.SQL,
+			Parameters:  copyProductSchemaPtr(view.Parameters),
 			Permissions: copyPermissionMetadata(view.Permissions),
 			ReadModel:   copyReadModelMetadata(view.ReadModel),
 			Migration:   copyMigrationMetadata(view.Migration),

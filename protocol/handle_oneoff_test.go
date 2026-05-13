@@ -9370,3 +9370,22 @@ func TestHandleOneOffQuery_ShunterSenderParameterCaseSensitiveRejectText(t *test
 		t.Fatalf("Error = %q, want %q (case-mismatched :sender placeholder must emit SqlUnsupported::Expr)", *result.Error, want)
 	}
 }
+
+func TestCompileSQLQueryString_AppParameterPlaceholderRejectedOutsideTemplate(t *testing.T) {
+	sl := newMockSchema("s", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+	_, err := CompileSQLQueryString("SELECT * FROM s WHERE id = :id", sl, nil, SQLQueryValidationOptions{
+		AllowLimit:      true,
+		AllowProjection: true,
+		AllowOrderBy:    true,
+		AllowOffset:     true,
+	})
+	if err == nil {
+		t.Fatal("CompileSQLQueryString accepted app parameter placeholder outside declared-read template validation")
+	}
+	want := "Unsupported expression: :id"
+	if err.Error() != want {
+		t.Fatalf("CompileSQLQueryString error = %q, want %q", err.Error(), want)
+	}
+}

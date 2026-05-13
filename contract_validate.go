@@ -129,6 +129,21 @@ func validateProductSchema(path string, product *ProductSchema, errs *[]error) {
 	}
 }
 
+func validateParameterProductSchema(path string, product *ProductSchema, errs *[]error) {
+	validateProductSchema(path, product, errs)
+	if product == nil {
+		return
+	}
+	for _, column := range product.Columns {
+		if column.Name == "sender" {
+			*errs = append(*errs, fmt.Errorf("%s.columns.%s name %q is reserved", path, column.Name, column.Name))
+		}
+		if column.Nullable {
+			*errs = append(*errs, fmt.Errorf("%s.columns.%s nullable parameters are not supported", path, column.Name))
+		}
+	}
+}
+
 func validateContractReadDeclarations(queries []QueryDescription, views []ViewDescription, errs *[]error) (map[string]struct{}, map[string]struct{}) {
 	queriesByName := make(map[string]struct{}, len(queries))
 	viewsByName := make(map[string]struct{}, len(views))
@@ -137,11 +152,13 @@ func validateContractReadDeclarations(queries []QueryDescription, views []ViewDe
 		if validateContractName("queries", query.Name, queriesByName, errs) {
 			validateContractName("read declarations", query.Name, readNamespace, errs)
 		}
+		validateParameterProductSchema("queries."+query.Name+".parameters", query.Parameters, errs)
 	}
 	for _, view := range views {
 		if validateContractName("views", view.Name, viewsByName, errs) {
 			validateContractName("read declarations", view.Name, readNamespace, errs)
 		}
+		validateParameterProductSchema("views."+view.Name+".parameters", view.Parameters, errs)
 	}
 	return queriesByName, viewsByName
 }
@@ -153,8 +170,7 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			validateDeclaredReadMetadataAbsent("queries."+query.Name, query.RowSchema, query.ResultShape, errs)
 			continue
 		}
-		var caller types.Identity
-		compiled, err := protocol.CompileSQLQueryString(query.SQL, lookup, &caller, declaredReadSQLValidation)
+		compiled, err := compileDeclaredReadSQLTemplate(query.SQL, lookup, declaredReadSQLValidation, query.Parameters)
 		if err != nil {
 			*errs = append(*errs, fmt.Errorf("queries.%s.sql invalid: %v", query.Name, err))
 			continue
@@ -166,8 +182,7 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			validateDeclaredReadMetadataAbsent("views."+view.Name, view.RowSchema, view.ResultShape, errs)
 			continue
 		}
-		var caller types.Identity
-		compiled, err := protocol.CompileSQLQueryString(view.SQL, lookup, &caller, declaredReadSQLValidation)
+		compiled, err := compileDeclaredReadSQLTemplate(view.SQL, lookup, declaredReadSQLValidation, view.Parameters)
 		if err != nil {
 			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
 			continue
@@ -211,7 +226,7 @@ func validateDeclaredReadMetadataAbsent(path string, rowSchema *ProductSchema, r
 	}
 }
 
-func validateDeclaredReadMetadata(path string, compiled protocol.CompiledSQLQuery, lookup contractSchemaLookup, rowSchema *ProductSchema, resultShape *ReadResultShape, errs *[]error) {
+func validateDeclaredReadMetadata(path string, compiled declaredReadValidationMetadataSource, lookup contractSchemaLookup, rowSchema *ProductSchema, resultShape *ReadResultShape, errs *[]error) {
 	if rowSchema == nil && resultShape == nil {
 		return
 	}
@@ -232,6 +247,11 @@ func validateDeclaredReadMetadata(path string, compiled protocol.CompiledSQLQuer
 	if *resultShape != *expectedShape {
 		*errs = append(*errs, fmt.Errorf("%s.result_shape = %#v, want %#v", path, *resultShape, *expectedShape))
 	}
+}
+
+type declaredReadValidationMetadataSource interface {
+	declaredReadResultMetadataSource
+	ResultColumns(protocol.SchemaLookup) []schema.ColumnSchema
 }
 
 func productSchemasEqual(a, b *ProductSchema) bool {

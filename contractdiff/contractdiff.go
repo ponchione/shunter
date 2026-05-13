@@ -274,6 +274,7 @@ func compareNamedQueries(out *Report, surface Surface, oldQueries, currentQuerie
 			continue
 		}
 		compareNamedReadSQL(out, ChangeKindAdditive, ChangeKindBreaking, surface, name, "query", old.SQL, current.SQL)
+		compareDeclaredReadParameters(out, surface, name, "query", old.SQL, old.Parameters, current.Parameters)
 		compareProductSchema(out, surface, name, "query row schema", old.RowSchema, current.RowSchema)
 		compareReadResultShape(out, surface, name, "query result shape", old.ResultShape, current.ResultShape)
 	}
@@ -294,6 +295,7 @@ func compareNamedViews(out *Report, oldViews, currentViews []shunter.ViewDescrip
 			continue
 		}
 		compareNamedReadSQL(out, ChangeKindAdditive, ChangeKindBreaking, SurfaceView, name, "view", old.SQL, current.SQL)
+		compareDeclaredReadParameters(out, SurfaceView, name, "view", old.SQL, old.Parameters, current.Parameters)
 		compareProductSchema(out, SurfaceView, name, "view row schema", old.RowSchema, current.RowSchema)
 		compareReadResultShape(out, SurfaceView, name, "view result shape", old.ResultShape, current.ResultShape)
 	}
@@ -314,6 +316,23 @@ func compareProductSchema(out *Report, surface Surface, name, label string, old,
 		out.add(ChangeKindBreaking, surface, name, label+" removed")
 	case !productSchemasEqual(old, current):
 		out.add(ChangeKindBreaking, surface, name, label+" changed")
+	}
+}
+
+func compareDeclaredReadParameters(out *Report, surface Surface, name, label, oldSQL string, old, current *shunter.ProductSchema) {
+	switch {
+	case old == nil && current == nil:
+		return
+	case old == nil:
+		kind := ChangeKindAdditive
+		if strings.TrimSpace(oldSQL) != "" {
+			kind = ChangeKindBreaking
+		}
+		out.add(kind, surface, name, label+" parameters added")
+	case current == nil:
+		out.add(ChangeKindBreaking, surface, name, label+" parameters removed")
+	case !productSchemasEqual(old, current):
+		out.add(ChangeKindBreaking, surface, name, label+" parameters changed")
 	}
 }
 

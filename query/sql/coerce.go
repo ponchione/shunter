@@ -46,6 +46,13 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		resolved := Literal{Kind: LitBytes, Bytes: caller[:], Text: hex.EncodeToString(caller[:])}
 		return coerceValue(resolved, kind, nil)
 	}
+	if lit.Kind == LitParameter {
+		name := lit.Param
+		if name == "" {
+			name = strings.TrimPrefix(lit.Text, ":")
+		}
+		return types.Value{}, UnsupportedExprError{Expr: ":" + name}
+	}
 	// Numeric columns parse string/hex source text first, then reuse the normal
 	// integer and float coercion paths.
 	if lit.Kind == LitString && isNumericKind(kind) {
@@ -522,6 +529,8 @@ func (k LitKind) String() string {
 		return "bytes"
 	case LitSender:
 		return ":sender"
+	case LitParameter:
+		return "parameter"
 	case LitBigInt:
 		return "bigint"
 	default:

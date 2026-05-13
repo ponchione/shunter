@@ -166,6 +166,185 @@ func TestRuntimeExportContractIncludesDeclaredReadResultMetadata(t *testing.T) {
 	}
 }
 
+func TestRuntimeExportContractIncludesDeclaredReadParameters(t *testing.T) {
+	mod := validChatModule().
+		Query(QueryDeclaration{
+			Name: "messages_by_topic",
+			SQL:  "SELECT id, body FROM messages WHERE body = :topic",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "string"},
+			}},
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages_by_limit",
+			SQL:  "SELECT id, body FROM messages WHERE id = :message_id",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "message_id", Type: "uint64"},
+			}},
+		})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	contract := rt.ExportContract()
+
+	query := findQueryDescription(t, contract.Queries, "messages_by_topic")
+	assertProductSchemaColumns(t, query.Parameters, []ProductColumn{{Name: "topic", Type: "string"}})
+	assertProductSchemaColumns(t, query.RowSchema, []ProductColumn{
+		{Name: "id", Type: "uint64"},
+		{Name: "body", Type: "string"},
+	})
+	if query.ResultShape == nil || query.ResultShape.Kind != ReadResultShapeProjection || query.ResultShape.Table != "messages" {
+		t.Fatalf("query result shape = %#v, want projection messages", query.ResultShape)
+	}
+	view := findViewDescription(t, contract.Views, "live_messages_by_limit")
+	assertProductSchemaColumns(t, view.Parameters, []ProductColumn{{Name: "message_id", Type: "uint64"}})
+	assertProductSchemaColumns(t, view.RowSchema, []ProductColumn{
+		{Name: "id", Type: "uint64"},
+		{Name: "body", Type: "string"},
+	})
+	if view.ResultShape == nil || view.ResultShape.Kind != ReadResultShapeProjection || view.ResultShape.Table != "messages" {
+		t.Fatalf("view result shape = %#v, want projection messages", view.ResultShape)
+	}
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected declared-read parameters: %v", err)
+	}
+}
+
+func TestRuntimeExportContractAllowsMetadataOnlyDeclaredReadParameters(t *testing.T) {
+	mod := validChatModule().
+		Query(QueryDeclaration{
+			Name: "messages_by_topic",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "string"},
+			}},
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages_by_topic",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "string"},
+			}},
+		})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	contract := rt.ExportContract()
+
+	query := findQueryDescription(t, contract.Queries, "messages_by_topic")
+	assertProductSchemaColumns(t, query.Parameters, []ProductColumn{{Name: "topic", Type: "string"}})
+	if query.RowSchema != nil || query.ResultShape != nil {
+		t.Fatalf("metadata-only query result metadata = %#v/%#v, want omitted", query.RowSchema, query.ResultShape)
+	}
+	view := findViewDescription(t, contract.Views, "live_messages_by_topic")
+	assertProductSchemaColumns(t, view.Parameters, []ProductColumn{{Name: "topic", Type: "string"}})
+	if view.RowSchema != nil || view.ResultShape != nil {
+		t.Fatalf("metadata-only view result metadata = %#v/%#v, want omitted", view.RowSchema, view.ResultShape)
+	}
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected metadata-only declared-read parameters: %v", err)
+	}
+}
+
+func TestRuntimeExportContractNormalizesEmptyDeclaredReadParameters(t *testing.T) {
+	mod := validChatModule().
+		Query(QueryDeclaration{
+			Name:       "messages_by_empty_query_params",
+			Parameters: &ProductSchema{},
+		}).
+		View(ViewDeclaration{
+			Name:       "live_messages_by_empty_view_params",
+			Parameters: &ProductSchema{},
+		})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	contract := rt.ExportContract()
+
+	query := findQueryDescription(t, contract.Queries, "messages_by_empty_query_params")
+	assertProductSchemaColumns(t, query.Parameters, []ProductColumn{})
+	if query.Parameters.Columns == nil {
+		t.Fatal("query parameter columns = nil, want normalized empty slice")
+	}
+	view := findViewDescription(t, contract.Views, "live_messages_by_empty_view_params")
+	assertProductSchemaColumns(t, view.Parameters, []ProductColumn{})
+	if view.Parameters.Columns == nil {
+		t.Fatal("view parameter columns = nil, want normalized empty slice")
+	}
+
+	data, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		t.Fatalf("Unmarshal contract JSON: %v", err)
+	}
+	queries := assertJSONArrayObjects(t, top["queries"], "contract.queries")
+	queryJSON := findJSONObjectByStringField(t, queries, "name", "messages_by_empty_query_params", "contract.queries")
+	queryParameters := assertJSONObjectKeys(t, queryJSON["parameters"], "contract.queries.messages_by_empty_query_params.parameters", []string{"columns"})
+	var queryColumns []json.RawMessage
+	if err := json.Unmarshal(queryParameters["columns"], &queryColumns); err != nil {
+		t.Fatalf("Unmarshal query parameter columns: %v", err)
+	}
+	if len(queryColumns) != 0 {
+		t.Fatalf("query parameter JSON columns = %#v, want empty", queryColumns)
+	}
+
+	views := assertJSONArrayObjects(t, top["views"], "contract.views")
+	viewJSON := findJSONObjectByStringField(t, views, "name", "live_messages_by_empty_view_params", "contract.views")
+	viewParameters := assertJSONObjectKeys(t, viewJSON["parameters"], "contract.views.live_messages_by_empty_view_params.parameters", []string{"columns"})
+	var viewColumns []json.RawMessage
+	if err := json.Unmarshal(viewParameters["columns"], &viewColumns); err != nil {
+		t.Fatalf("Unmarshal view parameter columns: %v", err)
+	}
+	if len(viewColumns) != 0 {
+		t.Fatalf("view parameter JSON columns = %#v, want empty", viewColumns)
+	}
+}
+
+func TestRuntimeExportContractOmitsNilDeclaredReadParameters(t *testing.T) {
+	data, err := buildContractRuntime(t).ExportContractJSON()
+	if err != nil {
+		t.Fatalf("ExportContractJSON returned error: %v", err)
+	}
+	if bytes.Contains(data, []byte(`"parameters"`)) {
+		t.Fatalf("no-parameter contract JSON unexpectedly included parameters:\n%s", data)
+	}
+}
+
+func TestRuntimeExportContractDeclaredReadParameterSnapshotsAreDetached(t *testing.T) {
+	mod := validChatModule().
+		Query(QueryDeclaration{
+			Name: "messages_by_topic",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "string"},
+			}},
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages_by_topic",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "string"},
+			}},
+		})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	contract := rt.ExportContract()
+	contract.Queries[0].Parameters.Columns[0].Name = "mutated_query_param"
+	contract.Views[0].Parameters.Columns[0].Type = "uint64"
+
+	again := rt.ExportContract()
+	assertProductSchemaColumns(t, findQueryDescription(t, again.Queries, "messages_by_topic").Parameters, []ProductColumn{{Name: "topic", Type: "string"}})
+	assertProductSchemaColumns(t, findViewDescription(t, again.Views, "live_messages_by_topic").Parameters, []ProductColumn{{Name: "topic", Type: "string"}})
+}
+
 func TestRuntimeExportContractIncludesTableReadPolicyMetadata(t *testing.T) {
 	mod := NewModule("chat").
 		SchemaVersion(1).
@@ -350,6 +529,96 @@ func TestModuleContractValidationRejectsInvalidReducerProductSchema(t *testing.T
 	if !strings.Contains(err.Error(), `schema.reducers.send_message.args.columns name "arg" is duplicated`) ||
 		!strings.Contains(err.Error(), `schema.reducers.send_message.result.columns.result type "notAType" is invalid`) {
 		t.Fatalf("ValidateModuleContract error = %v, want reducer product schema contexts", err)
+	}
+}
+
+func TestModuleContractValidationRejectsInvalidDeclaredReadParameters(t *testing.T) {
+	tests := []struct {
+		name    string
+		surface string
+		product ProductSchema
+		want    string
+	}{
+		{
+			name:    "duplicate query parameter names",
+			surface: "query",
+			product: ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "string"},
+				{Name: "topic", Type: "uint64"},
+			}},
+			want: `queries.recent_messages.parameters.columns name "topic" is duplicated`,
+		},
+		{
+			name:    "empty view parameter name",
+			surface: "view",
+			product: ProductSchema{Columns: []ProductColumn{
+				{Name: "", Type: "string"},
+			}},
+			want: "views.live_messages.parameters.columns name must not be empty",
+		},
+		{
+			name:    "invalid query parameter type",
+			surface: "query",
+			product: ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "notAType"},
+			}},
+			want: `queries.recent_messages.parameters.columns.topic type "notAType" is invalid`,
+		},
+		{
+			name:    "reserved view sender parameter",
+			surface: "view",
+			product: ProductSchema{Columns: []ProductColumn{
+				{Name: "sender", Type: "string"},
+			}},
+			want: `views.live_messages.parameters.columns.sender name "sender" is reserved`,
+		},
+		{
+			name:    "nullable query parameter",
+			surface: "query",
+			product: ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "string", Nullable: true},
+			}},
+			want: "queries.recent_messages.parameters.columns.topic nullable parameters are not supported",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			contract := buildContractRuntime(t).ExportContract()
+			switch tt.surface {
+			case "query":
+				contract.Queries[0].Parameters = &tt.product
+			case "view":
+				contract.Views[0].Parameters = &tt.product
+			default:
+				t.Fatalf("unknown test surface %q", tt.surface)
+			}
+
+			err := ValidateModuleContract(contract)
+			if err == nil {
+				t.Fatal("ValidateModuleContract accepted invalid declared-read parameters")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ValidateModuleContract error = %v, want context %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildRejectsInvalidAuthoredDeclaredReadParameters(t *testing.T) {
+	mod := validChatModule().Query(QueryDeclaration{
+		Name: "messages_by_sender",
+		Parameters: &ProductSchema{Columns: []ProductColumn{
+			{Name: "sender", Type: "string"},
+		}},
+	})
+
+	_, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err == nil || !errors.Is(err, ErrInvalidModuleMetadata) {
+		t.Fatalf("expected ErrInvalidModuleMetadata, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `queries.messages_by_sender.parameters.columns.sender name "sender" is reserved`) {
+		t.Fatalf("Build error = %v, want declared-read parameter context", err)
 	}
 }
 

@@ -144,7 +144,7 @@ func compiledMultiPredicateToSubscription(pred *compiledSQLMultiPredicate, noRow
 	}
 }
 
-func compileMultiJoinSQLQuery(stmt sql.Statement, orderBy []sql.OrderByColumn, normalizedPredicate sql.Predicate, usesCallerIdentity bool, sqlText string, sl SchemaLookup, caller *types.Identity, allowProjection bool) (compiledSQLQuery, error) {
+func compileMultiJoinSQLQuery(stmt sql.Statement, orderBy []sql.OrderByColumn, normalizedPredicate sql.Predicate, usesCallerIdentity bool, sqlText string, sl SchemaLookup, literalCompiler sqlLiteralCompiler, allowProjection bool) (compiledSQLQuery, error) {
 	relations, relationMap, aliasTags, err := compileMultiJoinRelations(stmt, sl)
 	if err != nil {
 		return compiledSQLQuery{}, err
@@ -154,10 +154,10 @@ func compileMultiJoinSQLQuery(stmt sql.Statement, orderBy []sql.OrderByColumn, n
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
-	if _, err := compileSQLMultiPredicateForRelations(stmt.Predicate, relationMap, relations, aliasTag, caller); err != nil {
+	if _, err := compileSQLMultiPredicateForRelations(stmt.Predicate, relationMap, relations, aliasTag, literalCompiler); err != nil {
 		return compiledSQLQuery{}, err
 	}
-	filter, err := compileSQLMultiPredicateForRelations(normalizedPredicate, relationMap, relations, aliasTag, caller)
+	filter, err := compileSQLMultiPredicateForRelations(normalizedPredicate, relationMap, relations, aliasTag, literalCompiler)
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
@@ -401,7 +401,7 @@ func compileMultiJoinOrderByTerm(orderBy sql.OrderByColumn, stmt sql.Statement, 
 	}, nil
 }
 
-func compileSQLMultiPredicateForRelations(pred sql.Predicate, relations map[string]relationSchema, multiRelations []compiledSQLMultiJoinRelation, aliasTag func(string) uint8, caller *types.Identity) (*compiledSQLMultiPredicate, error) {
+func compileSQLMultiPredicateForRelations(pred sql.Predicate, relations map[string]relationSchema, multiRelations []compiledSQLMultiJoinRelation, aliasTag func(string) uint8, literalCompiler sqlLiteralCompiler) (*compiledSQLMultiPredicate, error) {
 	switch p := pred.(type) {
 	case nil:
 		return nil, nil
@@ -415,7 +415,7 @@ func compileSQLMultiPredicateForRelations(pred sql.Predicate, relations map[stri
 		if err != nil {
 			return nil, err
 		}
-		v, err := coerceLiteral(p.Filter.Literal, column.Column.schema.Type, caller)
+		v, err := literalCompiler.compileSQLLiteral(p.Filter.Literal, column.Column.schema.Type, p.Filter.Column)
 		if err != nil {
 			var utErr sql.UnexpectedTypeError
 			if errors.As(err, &utErr) {
@@ -423,6 +423,10 @@ func compileSQLMultiPredicateForRelations(pred sql.Predicate, relations map[stri
 			}
 			var ilErr sql.InvalidLiteralError
 			if errors.As(err, &ilErr) {
+				return nil, err
+			}
+			var exprErr sql.UnsupportedExprError
+			if errors.As(err, &exprErr) {
 				return nil, err
 			}
 			return nil, fmt.Errorf("coerce column %q: %v", p.Filter.Column, err)
@@ -464,21 +468,21 @@ func compileSQLMultiPredicateForRelations(pred sql.Predicate, relations map[stri
 		}
 		return &compiledSQLMultiPredicate{Kind: compiledSQLMultiPredicateColumnComparison, LeftColumn: left, RightColumn: right}, nil
 	case sql.AndPredicate:
-		left, err := compileSQLMultiPredicateForRelations(p.Left, relations, multiRelations, aliasTag, caller)
+		left, err := compileSQLMultiPredicateForRelations(p.Left, relations, multiRelations, aliasTag, literalCompiler)
 		if err != nil {
 			return nil, err
 		}
-		right, err := compileSQLMultiPredicateForRelations(p.Right, relations, multiRelations, aliasTag, caller)
+		right, err := compileSQLMultiPredicateForRelations(p.Right, relations, multiRelations, aliasTag, literalCompiler)
 		if err != nil {
 			return nil, err
 		}
 		return &compiledSQLMultiPredicate{Kind: compiledSQLMultiPredicateAnd, Left: left, Right: right}, nil
 	case sql.OrPredicate:
-		left, err := compileSQLMultiPredicateForRelations(p.Left, relations, multiRelations, aliasTag, caller)
+		left, err := compileSQLMultiPredicateForRelations(p.Left, relations, multiRelations, aliasTag, literalCompiler)
 		if err != nil {
 			return nil, err
 		}
-		right, err := compileSQLMultiPredicateForRelations(p.Right, relations, multiRelations, aliasTag, caller)
+		right, err := compileSQLMultiPredicateForRelations(p.Right, relations, multiRelations, aliasTag, literalCompiler)
 		if err != nil {
 			return nil, err
 		}

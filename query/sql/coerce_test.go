@@ -253,6 +253,17 @@ func TestCoerceSenderWithoutCallerFails(t *testing.T) {
 	assertUnsupportedSQL(t, err)
 }
 
+func TestCoerceAppParameterWithoutTemplateFails(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitParameter, Param: "channel_id", Text: ":channel_id"}, types.KindString)
+	var exprErr UnsupportedExprError
+	if !errors.As(err, &exprErr) {
+		t.Fatalf("Coerce app parameter error = %T %v, want UnsupportedExprError", err, err)
+	}
+	if exprErr.Expr != ":channel_id" {
+		t.Fatalf("UnsupportedExprError.Expr = %q, want :channel_id", exprErr.Expr)
+	}
+}
+
 func TestCoerceSenderWithCallerToBytes(t *testing.T) {
 	caller := [32]byte{1, 2, 3}
 	v, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindBytes, &caller)
