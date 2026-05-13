@@ -59,17 +59,8 @@ func validateOrderByColumns(pred Predicate, orderBy []OrderByColumn, aggregate *
 		if col.Table != table || col.Alias != 0 {
 			return fmt.Errorf("%w: ORDER BY column %d must come from the ordered table", ErrInvalidPredicate, i)
 		}
-		if col.Schema.Index != int(col.Column) {
-			return fmt.Errorf("%w: ORDER BY column %d schema index %d does not match source column %d", ErrInvalidPredicate, i, col.Schema.Index, col.Column)
-		}
-		if !s.TableExists(col.Table) {
-			return fmt.Errorf("%w: ORDER BY column %d table %d", ErrTableNotFound, i, col.Table)
-		}
-		if !s.ColumnExists(col.Table, col.Column) {
-			return fmt.Errorf("%w: ORDER BY column %d table %d column %d", ErrColumnNotFound, i, col.Table, col.Column)
-		}
-		if want := s.ColumnType(col.Table, col.Column); col.Schema.Type != want {
-			return fmt.Errorf("%w: ORDER BY column %d kind %s does not match column kind %s", ErrInvalidPredicate, i, col.Schema.Type, want)
+		if err := validateDeclaredColumnSchema(fmt.Sprintf("ORDER BY column %d", i), col.Table, col.Column, col.Schema, s); err != nil {
+			return err
 		}
 	}
 	return nil

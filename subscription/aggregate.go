@@ -269,19 +269,7 @@ func validateMultiJoinAggregateArgument(multi MultiJoin, label string, arg *Aggr
 }
 
 func validateAggregateArgumentSchema(arg *AggregateColumn, s SchemaLookup) error {
-	if arg.Schema.Index != int(arg.Column) {
-		return fmt.Errorf("%w: aggregate argument schema index %d does not match source column %d", ErrInvalidPredicate, arg.Schema.Index, arg.Column)
-	}
-	if !s.TableExists(arg.Table) {
-		return fmt.Errorf("%w: aggregate argument table %d", ErrTableNotFound, arg.Table)
-	}
-	if !s.ColumnExists(arg.Table, arg.Column) {
-		return fmt.Errorf("%w: aggregate argument table %d column %d", ErrColumnNotFound, arg.Table, arg.Column)
-	}
-	if want := s.ColumnType(arg.Table, arg.Column); arg.Schema.Type != want {
-		return fmt.Errorf("%w: aggregate argument kind %s does not match column kind %s", ErrInvalidPredicate, arg.Schema.Type, want)
-	}
-	return nil
+	return validateDeclaredColumnSchema("aggregate argument", arg.Table, arg.Column, arg.Schema, s)
 }
 
 func aggregateArgumentMatchesJoin(join Join, arg *AggregateColumn) bool {

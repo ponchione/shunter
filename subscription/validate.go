@@ -1,6 +1,10 @@
 package subscription
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/ponchione/shunter/schema"
+)
 
 // SchemaLookup is the narrow read-only schema surface used by the
 // subscription package. During registration the executor provides this from
@@ -159,6 +163,33 @@ func validateColumn(table TableID, col ColID, s SchemaLookup) (ValueKind, error)
 		return 0, fmt.Errorf("%w: table %d column %d", ErrColumnNotFound, table, col)
 	}
 	return s.ColumnType(table, col), nil
+}
+
+func validateDeclaredColumnSchema(label string, table TableID, col ColID, declared schema.ColumnSchema, s SchemaLookup) error {
+	if err := validateDeclaredColumnIndex(label, col, declared); err != nil {
+		return err
+	}
+	return validateDeclaredColumnSource(label, table, col, declared, s)
+}
+
+func validateDeclaredColumnIndex(label string, col ColID, declared schema.ColumnSchema) error {
+	if declared.Index != int(col) {
+		return fmt.Errorf("%w: %s schema index %d does not match source column %d", ErrInvalidPredicate, label, declared.Index, col)
+	}
+	return nil
+}
+
+func validateDeclaredColumnSource(label string, table TableID, col ColID, declared schema.ColumnSchema, s SchemaLookup) error {
+	if !s.TableExists(table) {
+		return fmt.Errorf("%w: %s table %d", ErrTableNotFound, label, table)
+	}
+	if !s.ColumnExists(table, col) {
+		return fmt.Errorf("%w: %s table %d column %d", ErrColumnNotFound, label, table, col)
+	}
+	if want := s.ColumnType(table, col); declared.Type != want {
+		return fmt.Errorf("%w: %s kind %s does not match column kind %s", ErrInvalidPredicate, label, declared.Type, want)
+	}
+	return nil
 }
 
 func validateMultiJoin(p MultiJoin, s SchemaLookup, opts validateOptions) error {

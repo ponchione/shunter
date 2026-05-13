@@ -35,20 +35,15 @@ func validateProjectionColumns(pred Predicate, columns []ProjectionColumn, s Sch
 		return nil
 	}
 	for i, col := range columns {
-		if col.Schema.Index != int(col.Column) {
-			return fmt.Errorf("%w: projection column %d schema index %d does not match source column %d", ErrInvalidPredicate, i, col.Schema.Index, col.Column)
+		label := fmt.Sprintf("projection column %d", i)
+		if err := validateDeclaredColumnIndex(label, col.Column, col.Schema); err != nil {
+			return err
 		}
 		if !projectionColumnMatchesEmittedRelation(pred, col) {
 			return fmt.Errorf("%w: projection column %d must come from the emitted relation", ErrInvalidPredicate, i)
 		}
-		if !s.TableExists(col.Table) {
-			return fmt.Errorf("%w: projection column %d table %d", ErrTableNotFound, i, col.Table)
-		}
-		if !s.ColumnExists(col.Table, col.Column) {
-			return fmt.Errorf("%w: projection column %d table %d column %d", ErrColumnNotFound, i, col.Table, col.Column)
-		}
-		if want := s.ColumnType(col.Table, col.Column); col.Schema.Type != want {
-			return fmt.Errorf("%w: projection column %d kind %s does not match column kind %s", ErrInvalidPredicate, i, col.Schema.Type, want)
+		if err := validateDeclaredColumnSource(label, col.Table, col.Column, col.Schema, s); err != nil {
+			return err
 		}
 	}
 	return nil
