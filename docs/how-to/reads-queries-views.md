@@ -94,14 +94,15 @@ after product-schema columns, then pass ordered runtime values with
 mod.Query(shunter.QueryDeclaration{
 	Name: "messages_by_topic",
 	SQL:  "SELECT * FROM messages WHERE topic = :topic AND id > :after_id",
-	Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
-		{Name: "topic", Type: "string"},
-		{Name: "after_id", Type: "uint64"},
-	}},
 	Permissions: shunter.PermissionMetadata{
 		Required: []string{"messages:read"},
 	},
-})
+}, shunter.WithQueryParameters(shunter.ProductSchema{
+	Columns: []shunter.ProductColumn{
+		{Name: "topic", Type: "string"},
+		{Name: "after_id", Type: "uint64"},
+	},
+}))
 ```
 
 ```go
@@ -158,13 +159,14 @@ Declared views use the same parameter model as declared queries:
 mod.View(shunter.ViewDeclaration{
 	Name: "live_messages_by_topic",
 	SQL:  "SELECT * FROM messages WHERE topic = :topic",
-	Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
-		{Name: "topic", Type: "string"},
-	}},
 	Permissions: shunter.PermissionMetadata{
 		Required: []string{"messages:subscribe"},
 	},
-})
+}, shunter.WithViewParameters(shunter.ProductSchema{
+	Columns: []shunter.ProductColumn{
+		{Name: "topic", Type: "string"},
+	},
+}))
 ```
 
 ```go

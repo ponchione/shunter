@@ -517,7 +517,7 @@ query_id:   uint32 LE
 name:       string    — registered ViewDeclaration name
 ```
 
-**Response:** `SubscribeMultiApplied` (§8.10) or `SubscriptionError` (§8.4).
+**Response:** `SubscribeSingleApplied` (§8.2) or `SubscriptionError` (§8.4).
 
 The declaration must have executable SQL. Declaration-level permissions,
 visibility filters, caller identity handling, initial rows, transaction deltas,
@@ -538,7 +538,7 @@ name:       string
 params:     bytes     — BSATN ProductValue matching the view parameter schema
 ```
 
-**Response:** `SubscribeMultiApplied` (§8.10) or `SubscriptionError` (§8.4).
+**Response:** `SubscribeSingleApplied` (§8.2) or `SubscriptionError` (§8.4).
 
 The server decodes and validates `params` according to the declaration's
 `Parameters` product schema, binds those values into the SQL template, and then

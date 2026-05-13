@@ -52,8 +52,8 @@ Use them for stable subscriptions and generated client surfaces.
 
 Declared queries and views may use app parameters in executable SQL with
 placeholders such as `:topic`. Each app placeholder must match a column in the
-declaration's `Parameters *ProductSchema`; `sender` is reserved for caller
-identity and cannot be declared as an app parameter.
+schema attached with `WithQueryParameters` or `WithViewParameters`; `sender` is
+reserved for caller identity and cannot be declared as an app parameter.
 
 Local callers pass ordered `types.ProductValue` values with
 `WithDeclaredReadParameters`. Protocol clients send encoded parameter bytes

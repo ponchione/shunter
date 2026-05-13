@@ -5,12 +5,14 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 ## Unreleased
 
 - Declared query and view parameters now work end to end: Go declarations
-  export typed parameter schemas, SQL validation checks declared placeholders,
-  local runtime calls bind ordered `ProductValue` parameters, and protocol v2
-  carries BSATN-encoded declared-read parameter payloads.
+  attach typed parameter schemas through `WithQueryParameters` and
+  `WithViewParameters`, SQL validation checks declared placeholders, local
+  runtime calls bind ordered `ProductValue` parameters, and protocol v2 carries
+  BSATN-encoded declared-read parameter payloads.
 - Generated TypeScript bindings now emit typed declared-read params
   interfaces, BSATN params encoders, and parameterized declared query/view
-  helpers while preserving no-parameter helper signatures.
+  helpers while preserving no-parameter helper signatures and hiding encoded
+  params from generated helper options.
 - Moved stale v1 roadmap follow-up into `working-docs/tech-debt.md` and
   restored the source version to a post-release development marker.
 - Hardened offline DataDir backup/restore file copies against replaced source
