@@ -109,7 +109,7 @@ versions. Server tag `7` is reserved for the retired reducer-call result
 envelope.
 
 Row batches and subscription updates use Shunter row-list and flat update
-payloads. Reference wrapper chains, energy fields, and SpacetimeDB wire
+payloads. Reference wrapper chains, energy fields, and reference-runtime wire
 compatibility are out of scope.
 
 ## Auth Mode

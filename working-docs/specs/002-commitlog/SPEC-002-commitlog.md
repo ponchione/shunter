@@ -89,9 +89,9 @@ Invariants:
 - A record is valid only if all framing bytes, the full payload, and the trailing CRC are present.
 - Truncated tail records (partial framing, partial payload, or missing CRC at file end) are reported as `ErrTruncatedRecord` (§9), distinct from `ErrChecksumMismatch`. Recovery (§6.4) treats `ErrTruncatedRecord` on the active tail segment as the replay horizon; `ErrChecksumMismatch` in any sealed segment is fatal.
 
-**Why no epoch field:** SpacetimeDB includes an epoch for multi-master failover. Shunter is single-node; epoch is omitted.
+**Why no epoch field:** the reference runtime includes an epoch for multi-master failover. Shunter is single-node; epoch is omitted.
 
-**Why no `n` (transaction count per commit):** SpacetimeDB supports multi-TX commits to amortize per-record overhead. Shunter writes one record per transaction in v1. This simplifies the format; batching can be added in v2 if throughput profiling shows the benefit.
+**Why no `n` (transaction count per commit):** the reference runtime supports multi-TX commits to amortize per-record overhead. Shunter writes one record per transaction in v1. This simplifies the format; batching can be added in v2 if throughput profiling shows the benefit.
 
 ### 2.4 Checksum
 
@@ -107,7 +107,7 @@ Written as 4 bytes, little-endian, immediately after the payload.
 
 **Recommendation:** Use a simple length-prefixed binary encoding of `Changeset`. Not protobuf (adds a dependency), not JSON (too large). A custom encoding with explicit version byte, matching the simplicity of the log format.
 
-**BSATN naming disclaimer (canonical).** "BSATN" = "Binary SpacetimeDB Algebraic Type Notation" — the acronym is borrowed verbatim from SpacetimeDB's `bsatn` crate. It is **not** a standard encoding format (distinct from MessagePack / CBOR / Protobuf / Postcard). Shunter's BSATN is a clean-room rewrite per `CLAUDE.md`: own tag numbering (0–18 for 19 scalar kinds, see §3.3), no Sum / Array (except the single `ArrayString` convenience kind) / nested-Product types, Shunter-specific framing. The encoding is of the same family as SpacetimeDB's BSATN but is **not byte-compatible** — no wire interoperability is intended, and no Rust source was copied. All other specs MUST point to this subsection rather than re-describe the name.
+**BSATN naming disclaimer (canonical).** "BSATN" = "Binary Shunter Algebraic Type Notation" — the acronym is borrowed verbatim from the reference runtime's `bsatn` crate. It is **not** a standard encoding format (distinct from MessagePack / CBOR / Protobuf / Postcard). Shunter's BSATN is a clean-room rewrite per `CLAUDE.md`: own tag numbering (0–18 for 19 scalar kinds, see §3.3), no Sum / Array (except the single `ArrayString` convenience kind) / nested-Product types, Shunter-specific framing. The encoding is of the same family as the reference runtime's BSATN but is **not byte-compatible** — no wire interoperability is intended, and no Rust source was copied. All other specs MUST point to this subsection rather than re-describe the name.
 
 ### 3.2 Payload Structure
 
@@ -673,41 +673,41 @@ Recovery applies replayed `Changeset` values to `CommittedState`. The snapshot w
 
 ## 12. Reference-Informed Shunter Decisions
 
-SpacetimeDB is useful design evidence for durability choices, but Shunter owns its commit-log and snapshot formats. Each entry below is an explicit v1 choice for Shunter's single-node runtime. Future specs or implementations should change these only when a Shunter workload, correctness issue, or product need justifies the tradeoff. (§3.1 — BSATN naming — is documented inline at §3.1 / §3.3 as the canonical disclaimer; not repeated here.)
+The reference runtime is useful design evidence for durability choices, but Shunter owns its commit-log and snapshot formats. Each entry below is an explicit v1 choice for Shunter's single-node runtime. Future specs or implementations should change these only when a Shunter workload, correctness issue, or product need justifies the tradeoff. (§3.1 — BSATN naming — is documented inline at §3.1 / §3.3 as the canonical disclaimer; not repeated here.)
 
 ### 12.1 No offset index file; recovery performs a linear scan
 
-SpacetimeDB maintains a per-segment offset index (`tx_offset → byte_pos`) so replay can seek in O(log) instead of scanning. Shunter has no offset index. `ReplayLog` skips records by decoding framing and discarding when `tx_id ≤ fromTxID`; cost is O(total records since log origin), not O(records after snapshot).
+The reference runtime maintains a per-segment offset index (`tx_offset → byte_pos`) so replay can seek in O(log) instead of scanning. Shunter has no offset index. `ReplayLog` skips records by decoding framing and discarding when `tx_id ≤ fromTxID`; cost is O(total records since log origin), not O(records after snapshot).
 
 Rationale: the recovery-time target in §10 (`< 5 s` for snapshot + 10k log records) is achievable without an index, and v1 prioritizes a single canonical replay path over a second indexed path that would have to be kept in sync. Revisit if recovery latency shows up as a bottleneck under long-history workloads with infrequent snapshots — in that case, an offset-index sidecar file (one per segment) is the cheapest fix.
 
-### 12.2 Single TX per record vs SpacetimeDB 1–65535-TX commits
+### 12.2 Single TX per record vs the reference runtime 1–65535-TX commits
 
-Shunter writes exactly one transaction per log record. SpacetimeDB's commit-record framing supports 1–65535 transactions per record (an `n` field that Shunter omits — see §2.3 "Why no `n`").
+Shunter writes exactly one transaction per log record. The reference runtime's commit-record framing supports 1–65535 transactions per record (an `n` field that Shunter omits — see §2.3 "Why no `n`").
 
 Rationale: per-record framing overhead (18 bytes) is small relative to per-transaction payload size (typical: ≥256 B); batching only helps when payloads are tiny. v1 prioritizes format simplicity over a throughput optimization that requires a second decode path. Revisit if profiling shows fsync is amortized away and record framing is now the bottleneck.
 
 ### 12.3 Replay strictness — any `ApplyChangeset` error is fatal
 
-`ReplayLog` treats any `ApplyChangeset` error during replay as fatal. SPEC-002 §6.5 is symmetric for log-history conditions (gaps, overlaps, out-of-order). SpacetimeDB's `replay_insert` tolerates idempotent duplicates for system-meta rows.
+`ReplayLog` treats any `ApplyChangeset` error during replay as fatal. SPEC-002 §6.5 is symmetric for log-history conditions (gaps, overlaps, out-of-order). The reference runtime's `replay_insert` tolerates idempotent duplicates for system-meta rows.
 
 Rationale: fail-fast during recovery surfaces corrupt-log / schema-mismatch conditions immediately rather than masking them. Shunter's system tables are ordinary runtime tables and do not require duplicate-tolerant replay. The cost is that idempotent re-replay after a crash-during-replay will abort; paired with SPEC-001 §2.7 (`ApplyChangeset` is not idempotent) and SPEC-002's exactly-once replay guarantee, this is the intended shape.
 
 ### 12.4 First TxID is 1, not 0
 
-The first committed transaction has `tx_id = 1`. `tx_id = 0` is reserved as the pre-commit sentinel returned by `DurableTxID()` before any fsync lands and as the internal "no committed transaction" marker for failures that happen before transaction allocation. SpacetimeDB's `tx_offset` starts at 0.
+The first committed transaction has `tx_id = 1`. `tx_id = 0` is reserved as the pre-commit sentinel returned by `DurableTxID()` before any fsync lands and as the internal "no committed transaction" marker for failures that happen before transaction allocation. The reference runtime's `tx_offset` starts at 0.
 
 Rationale: keeping `0` as a "no transaction" sentinel makes uninitialized reads loud throughout the system (executor dequeue, durability handle, and fan-out metadata). Cost is one offset bit of address space, which is irrelevant at v1 scale.
 
 ### 12.5 Single auto-increment sequence per table (implicit)
 
-§5.2 sequences section stores one `(table_id, next_id)` pair per table; SPEC-001 models `Table.SequenceValue() (uint64, bool)` as a single counter. SpacetimeDB's `st_sequence` system table supports multiple sequences per table (one per auto-increment column).
+§5.2 sequences section stores one `(table_id, next_id)` pair per table; SPEC-001 models `Table.SequenceValue() (uint64, bool)` as a single counter. The reference runtime's `st_sequence` system table supports multiple sequences per table (one per auto-increment column).
 
 Rationale: SPEC-006 §9 declares at most one `AutoIncrement` column per table in v1. Multi-sequence support requires schema changes to expose multiple counters per table and snapshot-format changes to serialize them. Both deferred. When v2 adds either, `(table_id, next_id)` becomes `(table_id, sequence_id, next_id)`.
 
 ### 12.6 No segment compression / sealed-immutable marker
 
-Shunter has no segment compression and no sealed-immutable bit. Compaction (§7) is delete-only — segments fully covered by a snapshot are removed, never compressed. SpacetimeDB can mark sealed segments immutable and zstd-compress them.
+Shunter has no segment compression and no sealed-immutable bit. Compaction (§7) is delete-only — segments fully covered by a snapshot are removed, never compressed. The reference runtime can mark sealed segments immutable and zstd-compress them.
 
 Rationale: v1 deferred snapshot compression (§13 OQ#5) for the same reason — disk is cheap, and the format-stability cost of adding compression before the uncompressed format is proven outweighs the I/O savings at v1 scale. When compression lands, sealed segments and snapshots can share the same compression layer.
 

@@ -190,7 +190,7 @@ Returns:
 - `[]byte`: optional BSATN-encoded reducer return value; nil means no return payload
 - `error`: aborts the transaction if non-nil
 
-"BSATN" is the binary encoding defined in SPEC-002 §3.3; the name is non-standard and not byte-compatible with SpacetimeDB's `bsatn` crate — see the canonical disclaimer in **SPEC-002 §3.1**.
+"BSATN" is the binary encoding defined in SPEC-002 §3.3; the name is non-standard and not byte-compatible with the reference runtime's `bsatn` crate — see the canonical disclaimer in **SPEC-002 §3.1**.
 
 SPEC-006 may provide typed registration helpers that decode arguments into Go structs and re-encode return values, but the executor runtime contract is byte-oriented and fully specified here. Typed adapters are out of scope for v1 (SPEC-006 §4.3). The sentinel for typed-adapter argument-decode failures, reserved as `ErrReducerArgsDecode`, is owned by SPEC-006 rather than SPEC-003. SPEC-003 classifies any non-nil error returned by a `ReducerHandler` as `StatusFailedUser` (§11) regardless of sentinel identity; a future typed adapter does not require a dedicated executor-level catalog entry.
 
@@ -770,11 +770,11 @@ Additional catalog rules:
 
 ### 12.1 Fixed-rate repeat semantics vs explicit reducer-driven reschedule
 
-Unlike SpacetimeDB's explicit-reschedule model, Shunter's `ScheduleRepeat` is system-managed: repeating schedules advance automatically from `intended_fire_time + repeat_ns`. Reducers do not need to re-register themselves after each firing; they stop the repeat by calling `Cancel(scheduleID)` or by removing the row through normal transactional logic.
+Unlike the reference runtime's explicit-reschedule model, Shunter's `ScheduleRepeat` is system-managed: repeating schedules advance automatically from `intended_fire_time + repeat_ns`. Reducers do not need to re-register themselves after each firing; they stop the repeat by calling `Cancel(scheduleID)` or by removing the row through normal transactional logic.
 
 ### 12.2 Bounded executor inbox vs unbounded dispatch queue
 
-SpacetimeDB uses an effectively unbounded reducer-dispatch queue. Shunter bounds the executor inbox and exposes backpressure / reject-on-full policy explicitly. This prevents OOM-under-flood at the cost of caller-visible blocking or `ErrExecutorBusy` responses.
+The reference runtime uses an effectively unbounded reducer-dispatch queue. Shunter bounds the executor inbox and exposes backpressure / reject-on-full policy explicitly. This prevents OOM-under-flood at the cost of caller-visible blocking or `ErrExecutorBusy` responses.
 
 ### 12.3 Dequeue-time timestamp stamping vs enqueue-time caller stamping
 
@@ -782,7 +782,7 @@ Shunter stamps `CallerContext.Timestamp` when the command is dequeued, not when 
 
 ### 12.4 Post-commit panic fatality with localized per-query recovery
 
-v1 treats any post-commit panic or invariant-violation signal from durability, snapshot acquisition, or the subscription manager as executor-fatal. The one deliberate exception is SPEC-004's localized per-query evaluation errors: if the manager catches an individual query failure, converts it into `SubscriptionError`, and returns normally, the executor continues. This is stricter than SpacetimeDB's more selective recovery behavior.
+v1 treats any post-commit panic or invariant-violation signal from durability, snapshot acquisition, or the subscription manager as executor-fatal. The one deliberate exception is SPEC-004's localized per-query evaluation errors: if the manager catches an individual query failure, converts it into `SubscriptionError`, and returns normally, the executor continues. This is stricter than the reference runtime's more selective recovery behavior.
 
 ### 12.5 Scheduled-row mutation is atomic with reducer writes
 

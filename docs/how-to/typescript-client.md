@@ -83,8 +83,8 @@ numeric collision suffixes in contract order.
 Generated TypeScript is intended for browsers and Electron renderers with
 standard Web APIs. Non-browser hosts must provide a compatible
 `webSocketFactory`. Server-side SDK APIs, framework cache adapters, generated
-writes that bypass reducers, and SpacetimeDB client API compatibility are out
-of scope for v1.
+writes that bypass reducers, and reference-runtime client API compatibility
+are out of scope for v1.
 
 ## Connect
 

@@ -2,7 +2,7 @@ package protocol
 
 import "testing"
 
-const referenceSubprotocolToken = "v1.bsatn.spacetimedb"
+const referenceSubprotocolToken = "v1.bsatn.foreign"
 
 func TestSubprotocolReferenceTokenRejected(t *testing.T) {
 	s, _ := anonymousServer(t)

@@ -203,7 +203,7 @@ type Table struct {
 }
 ```
 
-**Storage model:** `map[RowID]ProductValue` is simple, supports O(1) insert and delete by RowID, and allows iteration. For v1, this is the recommended approach. A slice-with-bitmap (like SpacetimeDB's page layout) would reduce GC pressure on very large tables but adds complexity; defer to v2.
+**Storage model:** `map[RowID]ProductValue` is simple, supports O(1) insert and delete by RowID, and allows iteration. For v1, this is the recommended approach. A slice-with-bitmap (like the reference runtime's page layout) would reduce GC pressure on very large tables but adds complexity; defer to v2.
 
 ### 3.3 Set Semantics (Duplicate Prevention)
 
@@ -385,7 +385,7 @@ This avoids duplicating committed index structures for v1. Reads over tx-local i
 
 **Invariant:** All tx-local RowIDs allocated during a transaction are strictly greater than any committed RowID that existed when the transaction began. This holds because both classes draw from the same per-table monotonically increasing counter with no reuse. An implementer MUST NOT rely on check order alone to distinguish RowID classes — the ordering invariant is what makes the check-order approach correct.
 
-**Design decision:** SpacetimeDB maintains a full `Table` with indexes inside TxState. That makes large insert-then-query transactions faster. Shunter v1 uses linear scans of tx-local inserts instead. Rationale: most reducers insert small numbers of rows, and the extra indexing complexity is not justified before profiling.
+**Design decision:** the reference runtime maintains a full `Table` with indexes inside TxState. That makes large insert-then-query transactions faster. Shunter v1 uses linear scans of tx-local inserts instead. Rationale: most reducers insert small numbers of rows, and the extra indexing complexity is not justified before profiling.
 
 ### 5.4 StateView — Unified Read Interface
 
@@ -782,11 +782,11 @@ Recovery uses `RegisterTable` once per snapshot table, then loops `InsertRow` ov
 
 ## 12. Reference-Informed Shunter Decisions
 
-SpacetimeDB is useful design evidence for storage choices, but Shunter owns its store contract. Each entry below is an explicit v1 choice for Shunter's in-memory runtime. Future specs or implementations should change these only when a Shunter workload, correctness issue, or product need justifies the tradeoff.
+The reference runtime is useful design evidence for storage choices, but Shunter owns its store contract. Each entry below is an explicit v1 choice for Shunter's in-memory runtime. Future specs or implementations should change these only when a Shunter workload, correctness issue, or product need justifies the tradeoff.
 
 ### 12.1 NaN rejected at construction vs total-ordering via `decorum::Total`
 
-SpacetimeDB admits NaN via a total-ordering wrapper (`decorum::Total<f32>` / `decorum::Total<f64>`), assigning it a fixed ordinal position so `AlgebraicValue` derives `Eq`/`Ord`/`Hash` uniformly. Shunter v1 rejects NaN at `NewFloat32` / `NewFloat64` (§2.1), returning `ErrInvalidFloat`.
+The reference runtime admits NaN via a total-ordering wrapper (`decorum::Total<f32>` / `decorum::Total<f64>`), assigning it a fixed ordinal position so `AlgebraicValue` derives `Eq`/`Ord`/`Hash` uniformly. Shunter v1 rejects NaN at `NewFloat32` / `NewFloat64` (§2.1), returning `ErrInvalidFloat`.
 
 Rationale: v1 wants bit-by-bit determinism without importing a decorum-style wrapper. Legitimate NaN-producing payloads (sensor telemetry, ML outputs) must be sanitized at the boundary. Revisit if workloads demand stored NaN.
 
@@ -794,13 +794,13 @@ Rationale: v1 wants bit-by-bit determinism without importing a decorum-style wra
 
 Shunter v1 supports only flat scalar + String + Bytes columns (§2.1). No `Sum` (tagged unions / `Option`-like Nullability), no `Array`, no nested `Product`. Rows are stored decoded as `ProductValue` in `map[RowID]ProductValue` (§3.2); `RowID` is a per-table `uint64` that is never reused within a process lifetime (§2.3).
 
-SpacetimeDB supports `Sum`, `Array`, and `Product` nesting, stores rows as BFLATN-packed pages with a content-addressed blob store for large var-len data, and reuses row pointers across delete/insert cycles (page+offset volatility).
+The reference runtime supports `Sum`, `Array`, and `Product` nesting, stores rows as BFLATN-packed pages with a content-addressed blob store for large var-len data, and reuses row pointers across delete/insert cycles (page+offset volatility).
 
 Rationale: the subscription evaluator needs fast predicate evaluation against decoded row values, and v1 targets in-memory workloads where RAM overhead of decoded rows is acceptable. A future schema layer adding `Option<T>` must revisit `Nullable`, `ValueKind`, and `ProductValue` simultaneously.
 
-### 12.3 `rowHashIndex` scoped to "no PK" vs SpacetimeDB "no unique index"
+### 12.3 `rowHashIndex` scoped to "no PK" vs the reference runtime "no unique index"
 
-Shunter's `rowHashIndex` (§3.3) is created only when no primary key exists. A table with a unique-but-not-primary index pays for both the unique-index lookup and a row-hash lookup on every insert. SpacetimeDB maintains its equivalent (`pointer_map`) iff no unique index of any kind exists.
+Shunter's `rowHashIndex` (§3.3) is created only when no primary key exists. A table with a unique-but-not-primary index pays for both the unique-index lookup and a row-hash lookup on every insert. The reference runtime maintains its equivalent (`pointer_map`) iff no unique index of any kind exists.
 
 Rationale: the `rowHashIndex` condition in v1 is stated in terms of the primary key because the builder API (SPEC-006) makes primary-key presence the primary signal. Strictly redundant but not incorrect. A perf pass may tighten the condition to "no unique index of any kind" without a spec edit; flagged here so the tightening is deliberate.
 
@@ -810,15 +810,15 @@ Rationale: the `rowHashIndex` condition in v1 is stated in terms of the primary 
 
 Rationale: the store keeps the more general index representation because compound keys are a plausible future extension and the secondary-index path already uses `[]int`. But implementers MUST treat multi-column primary keys as out of scope for v1 unless SPEC-006 is revised first. This keeps SPEC-001 aligned with the actual schema contract instead of silently promising a capability the higher-level registration API forbids.
 
-### 12.5 Replay constraint violations are fatal vs SpacetimeDB silent skip
+### 12.5 Replay constraint violations are fatal vs the reference runtime silent skip
 
-`ApplyChangeset` treats any constraint violation during recovery as fatal (§5.8). SpacetimeDB's `replay_insert` silently ignores duplicates for system-meta rows and is generally tolerant during replay.
+`ApplyChangeset` treats any constraint violation during recovery as fatal (§5.8). The reference runtime's `replay_insert` silently ignores duplicates for system-meta rows and is generally tolerant during replay.
 
 Rationale: fail-fast during recovery surfaces corrupt-log / schema-mismatch conditions immediately rather than masking them. Paired with §2.7 (ApplyChangeset is not idempotent) and SPEC-002's exactly-once replay guarantee, this is the intended shape. The cost is that idempotent re-replay after a crash-during-replay aborts rather than resumes.
 
 ### 12.6 `Changeset` has no `truncated` / `ephemeral` / `tx_offset` flags
 
-Shunter's `Changeset` carries `{TxID, Tables}` only (§6.1). SpacetimeDB's `TxData` additionally carries `truncated: bool` (whole-table clear), `ephemeral: bool` (view-only table, skip durability), and `tx_offset: Option<u64>` (commitlog cursor).
+Shunter's `Changeset` carries `{TxID, Tables}` only (§6.1). The reference runtime's `TxData` additionally carries `truncated: bool` (whole-table clear), `ephemeral: bool` (view-only table, skip durability), and `tx_offset: Option<u64>` (commitlog cursor).
 
 Rationale: v1 has no `TRUNCATE` reducer (truncation decomposes to per-row deletes), no ephemeral tables (all tables are durable), and the commitlog owns its own cursor bookkeeping (SPEC-002 — `tx_offset` is not part of the store↔evaluator contract). Revisit if SPEC-004 grows ephemeral subscription-only tables or SPEC-002 exposes a TRUNCATE fast-path.
 

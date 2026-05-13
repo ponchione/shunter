@@ -72,7 +72,7 @@ func TestShunterTagReducerCallResultReserved(t *testing.T) {
 
 // TestShunterSubscribeSingleShape pins the SQL-string SQL-string
 // shape. Reference: SubscribeSingle { query: Box<str>, request_id,
-// query_id } at reference/SpacetimeDB/crates/client-api-messages/src/
+// query_id } at reference tree crates/client-api-messages/src/
 // websocket/v1.rs:189. The structured `Query` form was flipped to a
 // `QueryString` in SQL-string.
 func TestShunterSubscribeSingleShape(t *testing.T) {
@@ -85,7 +85,7 @@ func TestShunterSubscribeSingleShape(t *testing.T) {
 
 // TestShunterUnsubscribeSingleShape pins the reference field order.
 // Reference: Unsubscribe at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:218
+// reference tree crates/client-api-messages/src/websocket/v1.rs:218
 // (`{ request_id: u32, query_id: QueryId }`). Byte shape is pinned in
 // unsubscribe_wire_test.go. The prior extra `SendDropped` byte — a
 // Shunter-local smuggle of the v2 `UnsubscribeFlags::SendDroppedRows`
@@ -100,7 +100,7 @@ func TestShunterUnsubscribeSingleShape(t *testing.T) {
 
 // TestShunterCallReducerFlagsField pins the reference `CallReducer<Args>`
 // field order from
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:110
+// reference tree crates/client-api-messages/src/websocket/v1.rs:110
 // (`reducer, args, request_id, flags`). The wire byte shape is pinned
 // separately in call_reducer_wire_test.go.
 func TestShunterCallReducerFlagsField(t *testing.T) {
@@ -147,7 +147,7 @@ func TestShunterOneOffQueryMessageIDBytes(t *testing.T) {
 
 // TestShunterSubscribeMultiShape pins the SQL-string SQL-string
 // list. Reference: SubscribeMulti { query_strings: Box<[Box<str>]>,
-// request_id, query_id } at reference/SpacetimeDB/crates/
+// request_id, query_id } at reference tree crates/
 // client-api-messages/src/websocket/v1.rs:203. The structured Queries
 // list was flipped to QueryStrings in SQL-string.
 func TestShunterSubscribeMultiShape(t *testing.T) {
@@ -172,7 +172,7 @@ func TestShunterParameterizedDeclaredReadShapes(t *testing.T) {
 
 // TestShunterUnsubscribeMultiShape pins the new single/multi variant envelope.
 // Reference: UnsubscribeMulti { request_id, query_id } at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:229.
+// reference tree crates/client-api-messages/src/websocket/v1.rs:229.
 func TestShunterUnsubscribeMultiShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeMultiMsg{})
 	want := []string{"RequestID", "QueryID"}

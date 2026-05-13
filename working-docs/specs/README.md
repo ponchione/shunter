@@ -1,7 +1,7 @@
 # Spec Scope
 
 These docs describe the clean-room Shunter core engine/runtime that is
-architecturally inspired by SpacetimeDB.
+architecturally inspired by the reference runtime.
 
 They are intended to cover the comparable engine kernel:
 
@@ -12,14 +12,14 @@ They are intended to cover the comparable engine kernel:
 - subscription evaluation and fan-out
 - client protocol / websocket delivery
 
-They do **not** attempt full SpacetimeDB product compatibility.
+They do **not** attempt full reference-runtime product compatibility.
 
 Out of scope unless a spec says otherwise:
 
 - hosted/cloud control-plane behavior
 - standalone host/database routing concerns
 - multi-language server-module runtimes (WASM / JS bundle hosting)
-- full SpacetimeDB product/API surface beyond Shunter's v1 engine scope
+- full reference-runtime product/API surface beyond Shunter's v1 engine scope
 
 Use `README.md` as the higher-level product framing, and use the numbered
 `SPEC-*` files in this folder as the implementation-grade clean-room contracts

@@ -110,7 +110,7 @@ func (v *streamingJoinView) IndexSeek(tableID TableID, indexID IndexID, key stor
 // TestRegisterSetMultiAtomicOnInvalidPredicate — SubscribeMulti with one
 // invalid predicate fails atomically; no subs registered; QueryID free.
 // Reference: add_subscription_multi pre-validation at
-// reference/SpacetimeDB/.../module_subscription_manager.rs:1023.
+// reference tree/module_subscription_manager.rs:1023.
 func TestRegisterSetMultiAtomicOnInvalidPredicate(t *testing.T) {
 	mgr, _ := newRegisterSetTestManager(t)
 	req := SubscriptionSetRegisterRequest{
@@ -329,7 +329,7 @@ func TestRegisterSetInitialQueryStopsOnContextCancel(t *testing.T) {
 
 // TestRegisterSetRejectsDuplicateQueryID — second RegisterSet with the
 // same (ConnID, QueryID) rejected. Reference: try_insert at
-// reference/SpacetimeDB/.../module_subscription_manager.rs:1050.
+// reference tree/module_subscription_manager.rs:1050.
 func TestRegisterSetRejectsDuplicateQueryID(t *testing.T) {
 	mgr, _ := newRegisterSetTestManager(t)
 	req := SubscriptionSetRegisterRequest{
@@ -348,7 +348,7 @@ func TestRegisterSetRejectsDuplicateQueryID(t *testing.T) {
 
 // TestRegisterSetDedupsIdenticalPredicates — two identical predicates
 // within one set register once. Reference: hash_set.insert at
-// reference/SpacetimeDB/.../module_subscription_manager.rs:1065.
+// reference tree/module_subscription_manager.rs:1065.
 func TestRegisterSetDedupsIdenticalPredicates(t *testing.T) {
 	mgr, _ := newRegisterSetTestManager(t)
 	pred := AllRows{Table: 1}
@@ -725,7 +725,7 @@ func TestUnregisterSetContextStopsFinalQueryOnContextCancelAndDropsSet(t *testin
 // the unwind must drop every trace — including the PruningIndexes rows
 // that plain unregisterSingle would leave behind. Reference:
 // rollback-on-failure parallel to
-// reference/SpacetimeDB/.../module_subscription_manager.rs:1023.
+// reference tree/module_subscription_manager.rs:1023.
 func TestRegisterSetUnwindsPartialStateOnInitialQueryError(t *testing.T) {
 	s := testSchema()
 	// Table(1) has 1 row so the first predicate finishes under the

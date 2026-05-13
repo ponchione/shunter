@@ -22,7 +22,13 @@ when you are editing that document.
 - Use numbered specs for cross-subsystem contracts only when the active task
   needs them.
 - Keep docs concise and implementation-facing.
-- Keep `reference/SpacetimeDB/` read-only and research-only; never copy source from it.
+- Keep the ignored reference tree under `reference/` read-only and
+  research-only; never copy source from it.
+- Use the reference runtime only as a clean-room functionality reference. Shunter is
+  intentionally not targeting reference-runtime wire compatibility, byte-for-byte
+  format compatibility, client interoperability, or source compatibility. When
+  comparing against the reference runtime, look for product/runtime capabilities
+  Shunter may need to clone independently, not compatibility gaps.
 - Do not add speculative scaffolding or repo structure early.
 
 ## Versioning Standard

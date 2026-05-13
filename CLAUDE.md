@@ -9,11 +9,15 @@ Read `RTK.md` first for command rules.
 - `working-docs/specs/*/SPEC-*.md` = numbered subsystem contracts
 - `working-docs/shunter-design-decisions.md` = current implementation-facing
   decisions
-- `reference/SpacetimeDB/` = read-only research input only
+- the ignored reference tree under `reference/` = read-only research input only
 
 ## Rules
 
-- Keep the clean-room boundary: do not copy or port Rust code from `reference/SpacetimeDB/`.
+- Keep the clean-room boundary: do not copy or port Rust code from the ignored
+  reference tree.
+- Use the reference runtime as product/functionality evidence only. Shunter is
+  not targeting reference-runtime wire, byte-format, client, source, or
+  business-model compatibility.
 - Treat live code and tests as the first authority for current implementation
   state; use the numbered specs for contract context.
 - Keep the repo lean. Do not invent extra structure before the work actually needs it.

@@ -6,15 +6,16 @@ prefer live code, tests, and the narrow spec section for the surface being
 touched.
 
 Reference paths are grounding only. Do not copy or port source from
-`reference/SpacetimeDB/`.
+`ignored reference tree`.
 
-This document is not a promise of SpacetimeDB client, wire, or business-model
-compatibility. Shunter uses SpacetimeDB as a reference design for runtime
-semantics, then owns the final contract for Shunter APIs and Shunter clients.
+This document is not a promise of reference-runtime client, wire, or
+business-model compatibility. Shunter uses the reference runtime as a
+reference design for runtime semantics, then owns the final contract for
+Shunter APIs and Shunter clients.
 
 ## Protocol Surface Ownership
 
-Shunter's client protocol is Shunter-native. SpacetimeDB client/wire
+Shunter's client protocol is Shunter-native. The reference runtime client/wire
 compatibility is not a product goal.
 
 Current contract:
@@ -49,7 +50,7 @@ Deferred unless Shunter clients need it:
 - Brotli compression support.
 - More machine-readable reducer failure classes beyond the current
   `Committed` / `Failed` outcome model.
-- Wrapper-chain reshaping solely for SpacetimeDB wire resemblance.
+- Wrapper-chain reshaping solely for reference-runtime wire resemblance.
 
 Authoritative pins:
 
@@ -129,7 +130,7 @@ Shunter-specific decisions:
   envelope compression.
 
 Reopen only with a concrete Shunter client, migration, ergonomics, or bandwidth
-trigger. Do not reopen solely to match SpacetimeDB's client wire shape.
+trigger. Do not reopen solely to match the reference runtime's client wire shape.
 
 Authoritative pins:
 

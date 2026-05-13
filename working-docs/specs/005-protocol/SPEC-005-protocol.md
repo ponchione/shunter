@@ -23,9 +23,9 @@ This spec does not cover:
 - Reducer execution (SPEC-003)
 - Subscription evaluation algorithm (SPEC-004)
 
-Shunter's client protocol is Shunter-native. SpacetimeDB is an architectural
+Shunter's client protocol is Shunter-native. The reference runtime is an architectural
 reference, not a wire-compatibility target, and Shunter clients should be built
-against this protocol rather than assuming SpacetimeDB client interoperability.
+against this protocol rather than assuming reference-runtime client interoperability.
 Where reference behavior is cited below, treat it as design evidence unless
 the section explicitly says it is part of Shunter's own contract.
 
@@ -102,7 +102,7 @@ GET /subscribe?token=<jwt>
 
 All messages are serialized using BSATN (the binary encoding defined in SPEC-002 §3.3). Each WebSocket frame payload contains exactly one complete message, length-delimited by the WebSocket frame header. No additional length prefix on the message itself.
 
-> **Naming.** "BSATN" is a name imported from SpacetimeDB's `bsatn` crate; it is not a standard encoding format and the Shunter encoding is not byte-compatible with SpacetimeDB's. See the canonical disclaimer in **SPEC-002 §3.1**.
+> **Naming.** "BSATN" is a name imported from the reference runtime's `bsatn` crate; it is not a standard encoding format and the Shunter encoding is not byte-compatible with the reference runtime's. See the canonical disclaimer in **SPEC-002 §3.1**.
 
 ### 3.2 Message Framing
 
@@ -181,7 +181,7 @@ RowList:
   ]
 ```
 
-Each row is prefixed with its length. This is simpler than SpacetimeDB's `BsatnRowList` (which uses a `RowSizeHint` union to avoid per-row headers for fixed-size rows). The length-per-row approach adds 4 bytes overhead per row but is unambiguous to decode without schema information.
+Each row is prefixed with its length. This is simpler than the reference runtime's `BsatnRowList` (which uses a `RowSizeHint` union to avoid per-row headers for fixed-size rows). The length-per-row approach adds 4 bytes overhead per row but is unambiguous to decode without schema information.
 
 Row and update encoding is deterministic for a fixed input. Encoders treat
 caller-owned row/update slices as read-only, and decoders return detached row
@@ -742,7 +742,7 @@ query_id:                           uint32 LE
 update:                             []SubscriptionUpdate    — one entry per emitted query/table family, with query_id set and Inserts populated
 ```
 
-Reference: `SubscribeMultiApplied` at `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs`.
+Reference: `SubscribeMultiApplied` at `reference tree crates/client-api-messages/src/websocket/v1.rs`.
 
 ### 8.11 UnsubscribeMultiApplied
 
@@ -1013,15 +1013,15 @@ Subscribe and OneOffQuery handlers need to resolve table names to IDs and valida
 
 - **Protocol identifier:** Shunter-owned clients must use a supported Shunter
   token such as `v2.bsatn.shunter` or `v1.bsatn.shunter` (§2.2). Shunter does
-  not admit the SpacetimeDB reference token.
+  not admit the foreign reference token.
 - **Compression envelope tags:** Shunter uses `0x00` = none, `0x01` = brotli (reserved, unsupported — `ErrBrotliUnsupported`), `0x02` = gzip (§3.3). Negotiated `compression=gzip` applies to post-handshake server messages only; client messages remain uncompressed. Brotli should be implemented only if Shunter clients need it.
 - **Outgoing backpressure limit:** v1 bounds each connection's outbound queue at `OutgoingBufferMessages` with default `16 * 1024` (§10.1, §12). Shunter disconnects lagging clients to keep memory bounded.
 - **TransactionUpdate shape:** v1 uses a heavy/light envelope split (§8.5, §8.8). `Failed` collapses Shunter's internal `failed_user`/`failed_panic`/`not_found` distinction onto one arm with the detail carried in the error string.
 - **Subscription RPC surface:** v1 exposes `SubscribeSingle`, `SubscribeMulti`, `UnsubscribeSingle`, `UnsubscribeMulti`, `CallReducer`, `OneOffQuery`, `DeclaredQuery`, and `SubscribeDeclaredView` (§6, §7). V2 adds parameterized declared-read request messages without changing raw SQL request shapes. There is no legacy single `Subscribe` / `Unsubscribe` wire family or separate `QuerySetId` protocol family.
 - **CallReducer wire shape:** v1 `CallReducer` carries `{request_id, reducer_name, args, flags}` (§7.3). The `flags` byte matches the reference `CallReducerFlags` (FullUpdate / NoSuccessNotify); no other flag values are defined in v1.
 - **OneOffQuery language:** v1 `OneOffQuery` uses the same SQL subset as `SubscribeSingle` / `SubscribeMulti` (§7.4 / §7.1.1), giving Shunter clients one read-query surface.
-- **Close-code policy:** Shunter's documented close behavior includes `1000`, `1002`, `1008`, and `1011` with Shunter-specific reason strings for protocol/policy failures (§11.1). It does not try to mirror SpacetimeDB's full close-code/reason matrix.
-- **Energy model:** v1 has no energy subsystem. There is no `energy_quanta_used` field and no `UpdateStatus::OutOfEnergy` arm. SpacetimeDB-style hosted billing/metering is not a Shunter product goal.
+- **Close-code policy:** Shunter's documented close behavior includes `1000`, `1002`, `1008`, and `1011` with Shunter-specific reason strings for protocol/policy failures (§11.1). It does not try to mirror the reference runtime's full close-code/reason matrix.
+- **Energy model:** v1 has no energy subsystem. There is no `energy_quanta_used` field and no `UpdateStatus::OutOfEnergy` arm. reference-style hosted billing/metering is not a Shunter product goal.
 - **ConnectionID reuse semantics:** reusing `connection_id` on reconnect is only a client hint for future resume features; it has no server-side resume semantics in v1 (§2.3, §11.3).
 - **Reserved tag 7:** the former `ReducerCallResult` tag byte is held reserved rather than reused (§6, §8.7). A future contributor reintroducing a separate caller envelope MUST pick a fresh tag, not reclaim 7.
 

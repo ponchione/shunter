@@ -6,7 +6,7 @@ package commitlog
 // canonical contract. Any accidental drift in byte layout, constant
 // value, CRC algorithm, or framing invariant is intended to fail one
 // of these pins loudly. See working-docs/shunter-design-decisions.md#commitlog-record-shape
-// for the divergence audit against reference SpacetimeDB.
+// for the divergence audit against reference runtime.
 
 import (
 	"bytes"

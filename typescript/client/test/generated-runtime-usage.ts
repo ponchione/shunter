@@ -169,7 +169,7 @@ const authError = new ShunterAuthError("token rejected", { code: "auth_denied" }
 const authErrorKind: ShunterErrorKind = authError.kind;
 const mismatch = new ShunterProtocolMismatchError("unsupported protocol", {
   expected: generatedProtocolMetadata,
-  receivedSubprotocol: "v1.bsatn.spacetimedb",
+  receivedSubprotocol: "v1.bsatn.foreign",
 });
 
 const activeMessages: SubscriptionHandle<MessagesRow> = {

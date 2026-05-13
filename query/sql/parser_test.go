@@ -253,7 +253,7 @@ func TestParseWhereNegativeInt(t *testing.T) {
 }
 
 // TestParseWhereLeadingPlusInt pins the reference valid-literal shape at
-// reference/SpacetimeDB/crates/expr/src/check.rs:297-300 (`select * from t
+// reference tree crates/expr/src/check.rs:297-300 (`select * from t
 // where u32 = +1` / "Leading `+`"): a leading `+` sign on an integer literal
 // is accepted and behaves identically to the unsigned form. Mirrors the
 // existing leading `-` support exercised by TestParseWhereNegativeInt.
@@ -271,7 +271,7 @@ func TestParseWhereLeadingPlusInt(t *testing.T) {
 }
 
 // TestParseWhereScientificNotationUnsignedInteger pins the reference
-// valid-literal shape at reference/SpacetimeDB/crates/expr/src/check.rs:302-
+// valid-literal shape at reference tree crates/expr/src/check.rs:302-
 // 304 (`select * from t where u32 = 1e3` / "Scientific notation"): an
 // exponent-form numeric that evaluates to an integer value must parse as
 // LitInt so the coerce boundary can bind it to an integer column.
@@ -289,7 +289,7 @@ func TestParseWhereScientificNotationUnsignedInteger(t *testing.T) {
 }
 
 // TestParseWhereScientificNotationCaseInsensitive pins
-// reference/SpacetimeDB/crates/expr/src/check.rs:306-308 (`select * from t
+// reference tree crates/expr/src/check.rs:306-308 (`select * from t
 // where u32 = 1E3` / "Case insensitive scientific notation"): uppercase `E`
 // is accepted identically to lowercase.
 func TestParseWhereScientificNotationCaseInsensitive(t *testing.T) {
@@ -306,7 +306,7 @@ func TestParseWhereScientificNotationCaseInsensitive(t *testing.T) {
 }
 
 // TestParseWhereScientificNotationNegativeExponent pins
-// reference/SpacetimeDB/crates/expr/src/check.rs:314-316 (`select * from t
+// reference tree crates/expr/src/check.rs:314-316 (`select * from t
 // where f32 = 1e-3` / "Negative exponent"): a non-integral exponent-form
 // numeric parses as LitFloat so the coerce boundary can bind it to a
 // float column.
@@ -323,7 +323,7 @@ func TestParseWhereScientificNotationNegativeExponent(t *testing.T) {
 	}
 }
 
-// TestParseWhereLeadingDotFloat pins reference/SpacetimeDB/crates/expr/src/
+// TestParseWhereLeadingDotFloat pins reference tree crates/expr/src/
 // check.rs:322-324 (`select * from t where f32 = .1` / "Leading `.`"): a
 // leading-dot numeric with no integer part parses as LitFloat.
 func TestParseWhereLeadingDotFloat(t *testing.T) {
@@ -354,7 +354,7 @@ func TestParseWhereRoundedBoundaryFractionStaysFloat(t *testing.T) {
 }
 
 // TestParseWhereScientificNotationOverflowBigInt pins
-// reference/SpacetimeDB/crates/expr/src/check.rs:326-332 (`select * from t
+// reference tree crates/expr/src/check.rs:326-332 (`select * from t
 // where f32 = 1e40` / "Infinity" and `select * from t where u256 = 1e40` /
 // "u256"): an integer-valued exponent-form numeric whose magnitude exceeds
 // int64 must parse as LitBigInt so the coerce boundary can bind it to a
@@ -1339,7 +1339,7 @@ func TestParseMultiWayJoinForwardReferenceReachesCompileBoundary(t *testing.T) {
 // TestParseAcceptsJoinBareStarProjection pins that the SQL parser accepts
 // `SELECT *` on a join at the syntactic layer. Semantic rejection of bare
 // `*` on joins lives in protocol.compileSQLQueryString to match reference
-// `InvalidWildcard::Join` (reference/SpacetimeDB/crates/expr/src/errors.rs:41,
+// `InvalidWildcard::Join` (reference tree crates/expr/src/errors.rs:41,
 // emit site lib.rs:56) with the literal text
 // "SELECT * is not supported for joins", without the parser's
 // `unsupported SQL: ` prefix.
@@ -2548,7 +2548,7 @@ func TestParseWhereSenderParameterNameStillReservedExactly(t *testing.T) {
 // table shape of the reference :sender parameter at the parser seam. The
 // reference expression typechecker accepts alias-qualified :sender on an
 // identity/bytes column in the same way as the unaliased form (see
-// reference/SpacetimeDB/crates/expr/src/check.rs lines 435-440 for positive
+// reference tree crates/expr/src/check.rs lines 435-440 for positive
 // shapes and 487-488 for the rejection on non-identity/non-bytes columns).
 // The alias resolver must produce Filter.Table = base table and
 // Filter.Alias = the user-typed qualifier so the compile path can route
@@ -2572,7 +2572,7 @@ func TestParseWhereSenderParameterOnAliasedSingleTable(t *testing.T) {
 
 // TestParseWhereSenderParameterInJoinFilter pins the :sender parameter in a
 // join-backed WHERE leaf. Reference positive shapes live at
-// reference/SpacetimeDB/crates/expr/src/check.rs lines 435-440 (standalone
+// reference tree crates/expr/src/check.rs lines 435-440 (standalone
 // single-table) and line 462-464 (`select t.* from t join s on t.u32 = s.u32
 // where t.f32 = 0.1`) — the :sender case here is the join analogue.
 // Join WHERE leaves must stay qualified (parser.go requireQualify), and the

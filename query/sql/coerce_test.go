@@ -103,7 +103,7 @@ func TestCoerceStringDigitsWidensToInteger(t *testing.T) {
 }
 
 // TestCoerceRejectsStringLiteralOnUint32Column pins the reference type-check
-// rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines 498-501
+// rejection at reference tree crates/expr/src/check.rs lines 498-501
 // (`select * from t where u32 = 'str'` / "Field u32 is not a string"). Shunter
 // surfaces the rejection at the coerce boundary rather than a dedicated
 // type-check pass, so a LitString against a KindUint32 column must return
@@ -114,7 +114,7 @@ func TestCoerceRejectsStringLiteralOnUint32Column(t *testing.T) {
 }
 
 // TestCoerceRejectsFloatLiteralOnUint32Column pins the reference type-check
-// rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines 502-504
+// rejection at reference tree crates/expr/src/check.rs lines 502-504
 // (`select * from t where t.u32 = 1.3` / "Field u32 is not a float"). A
 // LitFloat against an integer column must return ErrUnsupportedSQL at the
 // coerce boundary so the admission surface never folds the float into the
@@ -741,7 +741,7 @@ func bigIntFromStr(t *testing.T, s string) *big.Int {
 }
 
 // TestCoerceBigIntLiteralToUint256 pins the reference `u256 = 1e40` shape at
-// reference/SpacetimeDB/crates/expr/src/check.rs:330-332. A LitBigInt with
+// reference tree crates/expr/src/check.rs:330-332. A LitBigInt with
 // value 10^40 decomposes into four uint64 words matching the 256-bit
 // little-significant-word-first layout and binds to a KindUint256 column.
 func TestCoerceBigIntLiteralToUint256(t *testing.T) {

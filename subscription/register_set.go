@@ -654,7 +654,7 @@ func emittedTableID(p Predicate) TableID {
 
 // RegisterSet atomically registers 1..N predicates under a single
 // (ConnID, QueryID) key. Reference: add_subscription_multi at
-// reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:1023.
+// reference tree crates/core/src/subscription/module_subscription_manager.rs:1023.
 func (m *Manager) RegisterSet(
 	req SubscriptionSetRegisterRequest,
 	view store.CommittedReadView,

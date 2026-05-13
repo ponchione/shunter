@@ -3261,7 +3261,7 @@ func TestHandleSubscribeSingle_ShunterSenderResolvesToHexOnStringColumn(t *testi
 
 // TestHandleSubscribeSingle_SenderParameterOnAliasedSingleTable extends the
 // reference `select * from s where id = :sender` positive shape
-// (reference/SpacetimeDB/crates/expr/src/check.rs lines 435-440) to the
+// (reference tree crates/expr/src/check.rs lines 435-440) to the
 // aliased single-table form `select * from s as r where r.bytes = :sender`.
 // The compile path resolves the alias back to the base table for the
 // relations map key, so the caller-identity threading already established
@@ -3461,7 +3461,7 @@ func TestHandleSubscribeSingle_ShunterSenderInJoinFilterResolvesOnStringColumn(t
 }
 
 // TestHandleSubscribeSingle_StringLiteralOnIntegerColumnRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 498-501 (`select * from t where u32 = 'str'` /
 // "Field u32 is not a string") onto the SubscribeSingle admission surface.
 // Shunter enforces the rejection at the coerce boundary inside
@@ -3493,7 +3493,7 @@ func TestHandleSubscribeSingle_StringLiteralOnIntegerColumnRejected(t *testing.T
 }
 
 // TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 502-504 (`select * from t where t.u32 = 1.3` /
 // "Field u32 is not a float") onto the SubscribeSingle admission surface.
 // Float literals now parse end-to-end (LitFloat) after the 2026-04-21
@@ -3733,7 +3733,7 @@ func TestHandleSubscribeSingle_ShunterHexLiteralWidensOntoStringColumn(t *testin
 }
 
 // TestHandleSubscribeSingle_ShunterUnknownTableRejected pins the reference
-// type-check rejection at reference/SpacetimeDB/crates/expr/src/check.rs
+// type-check rejection at reference tree crates/expr/src/check.rs
 // lines 483-485 (`select * from r` / "Table r does not exist") onto the
 // SubscribeSingle admission surface. Shunter enforces this incidentally via
 // SchemaLookup.TableByName returning !ok inside compileSQLQueryString
@@ -3760,7 +3760,7 @@ func TestHandleSubscribeSingle_ShunterUnknownTableRejected(t *testing.T) {
 }
 
 // TestHandleSubscribeSingle_ShunterUnknownColumnRejected pins the reference
-// type-check rejection at reference/SpacetimeDB/crates/expr/src/check.rs
+// type-check rejection at reference tree crates/expr/src/check.rs
 // lines 491-493 (`select * from t where t.a = 1` / "Field a does not exist
 // on table t") onto the SubscribeSingle admission surface. Shunter enforces
 // this incidentally via rel.ts.Column returning !ok inside
@@ -3787,7 +3787,7 @@ func TestHandleSubscribeSingle_ShunterUnknownColumnRejected(t *testing.T) {
 }
 
 // TestHandleSubscribeSingle_ShunterAliasedUnknownColumnRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 495-497 (`select * from t as r where r.a = 1` / "Field a
 // does not exist on table t") onto the SubscribeSingle admission surface.
 // The aliased single-table shape resolves `r` to base table `t` in the
@@ -3816,7 +3816,7 @@ func TestHandleSubscribeSingle_ShunterAliasedUnknownColumnRejected(t *testing.T)
 }
 
 // TestHandleSubscribeSingle_ShunterBaseTableQualifierAfterAliasRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 506-509 (`select * from t as r where t.u32 = 5` / "t is not
 // in scope after alias") onto the SubscribeSingle admission surface. Once an
 // AS alias is introduced in the FROM, the base table name is out of scope;
@@ -3845,7 +3845,7 @@ func TestHandleSubscribeSingle_ShunterBaseTableQualifierAfterAliasRejected(t *te
 }
 
 // TestHandleSubscribeSingle_ShunterBareColumnProjectionRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 510-513 (`select u32 from t` / "Subscriptions must be typed
 // to a single table") onto the SubscribeSingle admission surface. Shunter's
 // parser rejects any projection other than `*` or `table.*` at parseProjection
@@ -3892,7 +3892,7 @@ func TestHandleSubscribeSingle_UnquotedNullWhereRejectedBeforeRegistration(t *te
 }
 
 // TestHandleSubscribeSingle_ShunterJoinWithoutQualifiedProjectionRejected pins
-// the reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// the reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 515-517 (`select * from t join s` / "Subscriptions must be
 // typed to a single table") onto the SubscribeSingle admission surface.
 // Shunter's parser requires joined queries to name the projected side via a
@@ -3956,7 +3956,7 @@ func TestHandleSubscribeSingle_ShunterJoinStarProjectionRejectText(t *testing.T)
 }
 
 // TestHandleSubscribeSingle_ShunterSelfJoinWithoutAliasesRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 519-521 (`select t.* from t join t` / "Self join requires
 // aliases") onto the SubscribeSingle admission surface. Shunter's parser
 // rejects the same-alias self-join shape in parseJoinClause
@@ -4005,7 +4005,7 @@ func TestHandleSubscribeSingle_ShunterForwardAliasReferenceRejected(t *testing.T
 }
 
 // TestHandleSubscribeSingle_ShunterLimitClauseRejected pins the reference type-
-// check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
+// check rejection at reference tree crates/expr/src/check.rs lines
 // TestHandleSubscribeSingle_ShunterLimitClauseRejected pins reference
 // `SubParser::parse_query` (sql-parser/src/parser/sub.rs:94-107)
 // rejection of subscription queries carrying `limit: Some(...)` through
@@ -4185,7 +4185,7 @@ func TestHandleSubscribeSingle_ShunterLimitPrecedesSetQuantifierRejectText(t *te
 }
 
 // TestHandleSubscribeSingle_ShunterLeadingPlusIntLiteral pins the reference
-// valid-literal shape at reference/SpacetimeDB/crates/expr/src/check.rs:297-
+// valid-literal shape at reference tree crates/expr/src/check.rs:297-
 // 300 (`select * from t where u32 = +1` / "Leading `+`"): a leading `+` on
 // an integer literal is admitted end-to-end (parser accepts, coerce produces
 // the unsigned value, subscribe admission registers the set). Mirrors the
@@ -4228,7 +4228,7 @@ func TestHandleSubscribeSingle_ShunterLeadingPlusIntLiteral(t *testing.T) {
 }
 
 // TestHandleSubscribeSingle_ShunterUnqualifiedWhereInJoinRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 534-537 (`select t.* from t join s on t.u32 = s.u32 where
 // bytes = 0xABCD` / "Columns must be qualified in join expressions") onto the
 // SubscribeSingle admission surface. Shunter's parser enforces the qualify
@@ -4262,7 +4262,7 @@ func TestHandleSubscribeSingle_ShunterUnqualifiedWhereInJoinRejected(t *testing.
 }
 
 // TestHandleSubscribeSingle_ShunterScientificNotationUnsignedInteger pins the
-// reference valid-literal shape at reference/SpacetimeDB/crates/expr/src/
+// reference valid-literal shape at reference tree crates/expr/src/
 // check.rs:302-304 (`select * from t where u32 = 1e3` / "Scientific
 // notation"): an integer-valued exponent-form numeric binds to an unsigned
 // integer column end-to-end.
@@ -4304,7 +4304,7 @@ func TestHandleSubscribeSingle_ShunterScientificNotationUnsignedInteger(t *testi
 }
 
 // TestHandleSubscribeSingle_ShunterScientificNotationFloatNegativeExponent
-// pins reference/SpacetimeDB/crates/expr/src/check.rs:314-316 (`select * from
+// pins reference tree crates/expr/src/check.rs:314-316 (`select * from
 // t where f32 = 1e-3` / "Negative exponent"): a non-integral exponent-form
 // numeric binds to a float column end-to-end.
 func TestHandleSubscribeSingle_ShunterScientificNotationFloatNegativeExponent(t *testing.T) {
@@ -4345,7 +4345,7 @@ func TestHandleSubscribeSingle_ShunterScientificNotationFloatNegativeExponent(t 
 }
 
 // TestHandleSubscribeSingle_ShunterLeadingDotFloatLiteral pins reference/
-// SpacetimeDB/crates/expr/src/check.rs:322-324 (`select * from t where
+// reference tree crates/expr/src/check.rs:322-324 (`select * from t where
 // f32 = .1` / "Leading `.`"): a leading-dot numeric with no integer part
 // binds to a float column end-to-end.
 func TestHandleSubscribeSingle_ShunterLeadingDotFloatLiteral(t *testing.T) {
@@ -4386,7 +4386,7 @@ func TestHandleSubscribeSingle_ShunterLeadingDotFloatLiteral(t *testing.T) {
 }
 
 // TestHandleSubscribeSingle_ShunterScientificNotationOverflowInfinity pins
-// reference/SpacetimeDB/crates/expr/src/check.rs:326-328 (`select * from t
+// reference tree crates/expr/src/check.rs:326-328 (`select * from t
 // where f32 = 1e40` / "Infinity"): a magnitude beyond float32 range binds to
 // the f32 column as +Inf rather than being rejected.
 func TestHandleSubscribeSingle_ShunterScientificNotationOverflowInfinity(t *testing.T) {
@@ -4426,7 +4426,7 @@ func TestHandleSubscribeSingle_ShunterScientificNotationOverflowInfinity(t *test
 }
 
 // TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeIntOnUnsignedRejected
-// pins reference/SpacetimeDB/crates/expr/src/check.rs:382-385 (`select * from
+// pins reference tree crates/expr/src/check.rs:382-385 (`select * from
 // t where u8 = -1` / "Negative integer for unsigned column") onto the
 // SubscribeSingle admission surface. `-1` parses to LitInt(-1) and
 // coerceUnsigned (query/sql/coerce.go:119) rejects negative ints before they
@@ -4457,7 +4457,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeIntOnUnsignedRejecte
 }
 
 // TestHandleSubscribeSingle_ShunterInvalidLiteralScientificOverflowRejected
-// pins reference/SpacetimeDB/crates/expr/src/check.rs:386-389 (`select * from
+// pins reference tree crates/expr/src/check.rs:386-389 (`select * from
 // t where u8 = 1e3` / "Out of bounds") onto the SubscribeSingle admission
 // surface. `1e3` parses via parseNumericLiteral as an integer-valued literal
 // that collapses to LitInt(1000); coerceUnsigned (query/sql/coerce.go:123)
@@ -4488,7 +4488,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralScientificOverflowRejected(t
 }
 
 // TestHandleSubscribeSingle_ShunterInvalidLiteralFloatOnUnsignedRejected pins
-// reference/SpacetimeDB/crates/expr/src/check.rs:390-393 (`select * from t
+// reference tree crates/expr/src/check.rs:390-393 (`select * from t
 // where u8 = 0.1` / "Float as integer") onto the SubscribeSingle admission
 // surface. A non-integral decimal stays LitFloat and coerceUnsigned
 // (query/sql/coerce.go:116) rejects non-LitInt against an integer column.
@@ -4519,7 +4519,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralFloatOnUnsignedRejected(t *t
 }
 
 // TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected
-// pins reference/SpacetimeDB/crates/expr/src/check.rs:394-397 (`select * from
+// pins reference tree crates/expr/src/check.rs:394-397 (`select * from
 // t where u32 = 1e-3` / "Float as integer") onto the SubscribeSingle
 // admission surface. `1e-3` parses to 0.001, fails the integer-valued collapse
 // in parseNumericLiteral (non-integral), stays LitFloat, and coerceUnsigned
@@ -4550,7 +4550,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnUnsignedRe
 }
 
 // TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnSignedRejected
-// pins reference/SpacetimeDB/crates/expr/src/check.rs:398-401 (`select * from
+// pins reference tree crates/expr/src/check.rs:398-401 (`select * from
 // t where i32 = 1e-3` / "Float as integer") onto the SubscribeSingle
 // admission surface. Mirrors the unsigned case on a signed column:
 // parseNumericLiteral leaves 0.001 as LitFloat, and coerceSigned
@@ -4656,7 +4656,7 @@ func TestHandleSubscribeSingle_ShunterValidLiteralOnEachIntegerWidth(t *testing.
 
 // TestHandleSubscribeSingle_ShunterValidLiteralU256Scientific pins the
 // remaining reference `valid_literals` row at
-// reference/SpacetimeDB/crates/expr/src/check.rs:330-332
+// reference tree crates/expr/src/check.rs:330-332
 // (`select * from t where u256 = 1e40` / "u256"). The reference BigDecimal
 // is_integer path treats `1e40` as the exact integer 10^40, which fits u256
 // (max ~1.16e77). Shunter's parser now promotes `1e40` to LitBigInt and
@@ -4972,7 +4972,7 @@ func TestHandleSubscribeSingle_ShunterUint128NegativeRejected(t *testing.T) {
 
 // TestHandleSubscribeSingle_ShunterDMLStatementRejected pins the reference
 // subscription-parser rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
 // (`delete from t` / "DML not allowed in subscriptions") onto the
 // SubscribeSingle admission surface. Shunter's SELECT-only parser rejects any
 // leading token other than SELECT at parseStatement's expectKeyword("SELECT")
@@ -5018,7 +5018,7 @@ func TestHandleSubscribeSingle_ShunterDMLStatementRejected(t *testing.T) {
 
 // TestHandleSubscribeSingle_ShunterEmptyStatementRejected pins the reference
 // subscription-parser rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
 // (empty string / "Empty") onto the SubscribeSingle admission surface.
 // Shunter's parser rejects via expectKeyword("SELECT") returning "expected
 // SELECT, got end of input" on a token stream that tokenizes to only EOF.
@@ -5049,7 +5049,7 @@ func TestHandleSubscribeSingle_ShunterEmptyStatementRejected(t *testing.T) {
 
 // TestHandleSubscribeSingle_ShunterWhitespaceOnlyStatementRejected pins the
 // reference subscription-parser rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
 // (single space / "Empty after whitespace skip") onto the SubscribeSingle
 // admission surface. Shunter's tokenizer drops whitespace so the parser sees
 // only EOF and fails at expectKeyword("SELECT").
@@ -5080,7 +5080,7 @@ func TestHandleSubscribeSingle_ShunterWhitespaceOnlyStatementRejected(t *testing
 
 // TestHandleSubscribeSingle_ShunterDistinctProjectionRejected pins the reference
 // subscription-parser rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
 // (`select distinct a from t` / "DISTINCT not supported") onto the
 // SubscribeSingle admission surface. Shunter's parseProjection requires `*`
 // or `table.*` (query/sql/parser.go:553-572); the DISTINCT identifier is
@@ -5156,7 +5156,7 @@ func TestHandleSubscribeSingle_ShunterAllModifierRejected(t *testing.T) {
 
 // TestHandleSubscribeSingle_ShunterSubqueryInFromRejected pins the reference
 // subscription-parser rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
 // (`select * from (select * from t) join (select * from s) on a = b` /
 // "Subqueries in FROM not supported") onto the SubscribeSingle admission
 // surface. Shunter's parseStatement requires an identifier token after FROM
@@ -5189,7 +5189,7 @@ func TestHandleSubscribeSingle_ShunterSubqueryInFromRejected(t *testing.T) {
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected
 // pins the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select 1` / "FROM is required") onto the SubscribeSingle admission surface.
 // Shunter's parseProjection only accepts `*` or `table.*`
 // (query/sql/parser.go:553-572); the integer literal `1` matches neither and
@@ -5221,7 +5221,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedSelectLiteralWithoutFromReje
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedMultiPartTableNameRejected pins
 // the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a from s.t` / "Multi-part table names") onto the SubscribeSingle
 // admission surface. Shunter's parseProjection rejects the bare identifier `a`
 // (non-`*` / non-`table.*`) before FROM parsing begins, so the rejection fires
@@ -5253,7 +5253,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedMultiPartTableNameRejected(t
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedBitStringLiteralRejected pins
 // the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select * from t where a = B'1010'` / "Bit-string literals") onto the
 // SubscribeSingle admission surface. Shunter's lexer tokenizes `B` as an
 // identifier and `'1010'` as a separate string literal; parseLiteral then
@@ -5285,7 +5285,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedBitStringLiteralRejected(t *
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedWildcardWithBareColumnsRejected
 // pins the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a.*, b, c from t` / "Wildcard with non-wildcard projections") onto
 // the SubscribeSingle admission surface. Shunter's parseProjection accepts one
 // projection item; after consuming `a.*` the parser expects FROM but finds `,`
@@ -5317,7 +5317,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedWildcardWithBareColumnsRejec
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected
 // pins the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select * from t order by a limit b` / "Limit expression") onto the
 // SubscribeSingle admission surface. ORDER BY now parses for one-off reads,
 // but the subscription compile gate still rejects the statement before
@@ -5349,7 +5349,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedOrderByWithLimitExpressionRe
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedAggregateWithGroupByRejected
 // pins the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a, count(*) from t group by a` / "GROUP BY") onto the SubscribeSingle
 // admission surface. parseProjection rejects the leading bare column `a` with
 // "projection must be '*' or 'table.*'" before the aggregate or GROUP BY
@@ -5381,7 +5381,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedAggregateWithGroupByRejected
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedImplicitCommaJoinRejected pins
 // the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a.* from t as a, s as b where a.id = b.id and b.c = 1` /
 // "Implicit joins") onto the SubscribeSingle admission surface. After
 // consuming `t AS a`, parseStatement's EOF/keyword guard hits `,` and rejects
@@ -5413,7 +5413,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedImplicitCommaJoinRejected(t 
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected
 // pins the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select t.* from t join s on int = u32` / "Joins require qualified vars")
 // onto the SubscribeSingle admission surface. parseJoinClause calls
 // parseQualifiedColumnRef for the left side of ON (query/sql/parser.go:629),
@@ -5445,7 +5445,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejecte
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidEmptySelectRejected pins the
 // reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select from t` / "Empty SELECT") onto the SubscribeSingle admission
 // surface. parseProjection rejects because the next token after SELECT is the
 // identifier `from`, which is then followed by `t` (not a dot), so the
@@ -5477,7 +5477,7 @@ func TestHandleSubscribeSingle_ShunterSqlInvalidEmptySelectRejected(t *testing.T
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidEmptyFromRejected pins the
 // reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select a from where b = 1` / "Empty FROM") onto the SubscribeSingle
 // admission surface. parseProjection rejects the bare column `a` with
 // "projection must be '*' or 'table.*'" before the empty FROM is examined.
@@ -5508,7 +5508,7 @@ func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyFromRejected(t *testing.T) 
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidEmptyWhereRejected pins the
 // reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select a from t where` / "Empty WHERE") onto the SubscribeSingle admission
 // surface. parseProjection rejects the bare column `a` with "projection must
 // be '*' or 'table.*'" before the empty WHERE is examined.
@@ -5539,7 +5539,7 @@ func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyWhereRejected(t *testing.T)
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidEmptyGroupByRejected pins the
 // reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select a, count(*) from t group by` / "Empty GROUP BY") onto the
 // SubscribeSingle admission surface. parseProjection rejects the leading bare
 // column `a` with "projection must be '*' or 'table.*'" before the aggregate
@@ -5846,7 +5846,7 @@ func TestHandleSubscribeSingle_ShunterJoinColumnProjectionRejected(t *testing.T)
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidAggregateWithoutAliasRejected pins
 // the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select count(*) from t` / "Aggregate without alias") onto the
 // SubscribeSingle admission surface. parseProjection reads `count` as an
 // identifier qualifier, then finds `(` where it expects a dot, rejecting with
@@ -6002,7 +6002,7 @@ func TestHandleSubscribeSingle_ShunterJoinOnStrictEqualityRejectText(t *testing.
 
 // TestHandleSubscribeSingle_ShunterCompileErrorIncludesExecutingSqlSuffix pins
 // the reference `DBError::WithSql` shape at
-// reference/SpacetimeDB/crates/core/src/error.rs:140
+// reference tree crates/core/src/error.rs:140
 // (`"{error}, executing: `{sql}`"`): subscribe-admission compile failures
 // carry the offending SQL text in the SubscriptionError wire message so
 // clients can correlate errors with the exact query they sent. Reference
@@ -6038,7 +6038,7 @@ func TestHandleSubscribeSingle_ShunterCompileErrorIncludesExecutingSqlSuffix(t *
 
 // TestHandleSubscribeMulti_ShunterCompileErrorIncludesExecutingSqlSuffix pins
 // the reference `DBError::WithSql` shape at
-// reference/SpacetimeDB/crates/core/src/error.rs:140
+// reference tree crates/core/src/error.rs:140
 // (`"{error}, executing: `{sql}`"`) on the SubscribeMulti admission
 // surface. Reference emit site: module_subscription_actor.rs:1068
 // (SubscribeMulti `compile_query_with_hashes`), where each SQL string is
@@ -6106,9 +6106,9 @@ func TestHandleSubscribeMulti_AggregateRejectedAtomically(t *testing.T) {
 }
 
 // TestHandleSubscribeMulti_ShunterJoinStarProjectionRejectText pins
-// reference/SpacetimeDB/crates/expr/src/errors.rs:41
+// reference tree crates/expr/src/errors.rs:41
 // (`InvalidWildcard::Join` = "SELECT * is not supported for joins",
-// emit reference/SpacetimeDB/crates/expr/src/lib.rs:56) on the
+// emit reference tree crates/expr/src/lib.rs:56) on the
 // SubscribeMulti admission surface. SubscribeMulti routes each SQL
 // through `compile_query_with_hashes` at
 // module_subscription_actor.rs:1068 via `return_on_err_with_sql_bool!`,
@@ -6155,7 +6155,7 @@ func TestHandleSubscribeMulti_ShunterJoinStarProjectionRejectText(t *testing.T) 
 
 // TestHandleSubscribeSingle_ShunterUnknownTableRejectText pins the reference
 // type-check rejection literal at
-// reference/SpacetimeDB/crates/expr/src/errors.rs:14
+// reference tree crates/expr/src/errors.rs:14
 // (`Unresolved::Table` = "no such table: `{0}`. If the table exists, it may
 // be marked private."). SubscribeSingle compile-origin wraps the inner text
 // with `DBError::WithSql` (reference error.rs:140) → `"{error}, executing:
@@ -6225,7 +6225,7 @@ func TestHandleSubscribeMulti_ShunterUnknownTableRejectText(t *testing.T) {
 
 // TestHandleSubscribeSingle_ShunterUnknownFieldRejectText pins the reference
 // type-check rejection literal at
-// reference/SpacetimeDB/crates/expr/src/errors.rs:11-13
+// reference tree crates/expr/src/errors.rs:11-13
 // (`Unresolved::Var` = "`{0}` is not in scope"). Reference emit site
 // `_type_expr` lib.rs:107: a missing column inside an existing relvar
 // surfaces as `Unresolved::var(&field)`. SubscribeSingle compile-origin
@@ -6292,7 +6292,7 @@ func TestHandleSubscribeMulti_ShunterUnknownFieldRejectText(t *testing.T) {
 
 // TestHandleSubscribeSingle_ShunterAggregateReturnTypeRejectText pins the
 // reference `Unsupported::ReturnType` literal at
-// reference/SpacetimeDB/crates/expr/src/errors.rs:47 ("Column projections
+// reference tree crates/expr/src/errors.rs:47 ("Column projections
 // are not supported in subscriptions; Subscriptions must return a table
 // type"). Reference emit site expr/src/check.rs:174 via
 // `expect_table_type` on the `parse_and_type_sub` path: aggregate
@@ -6434,7 +6434,7 @@ func TestHandleSubscribeMulti_ShunterUnresolvedVarProjectionColumnRejectText(t *
 
 // TestHandleSubscribeSingle_ShunterBoolLiteralOnIntegerColumnRejectText pins
 // the reference `UnexpectedType` literal from
-// reference/SpacetimeDB/crates/expr/src/errors.rs:100 (via the emit site at
+// reference tree crates/expr/src/errors.rs:100 (via the emit site at
 // lib.rs:94 for a bool literal in a non-bool column) onto the
 // SubscribeSingle admission surface. SubscribeSingle wraps compile errors
 // with `DBError::WithSql` (module_subscription_actor.rs:643 via
@@ -6471,7 +6471,7 @@ func TestHandleSubscribeSingle_ShunterBoolLiteralOnIntegerColumnRejectText(t *te
 
 // TestHandleSubscribeSingle_ShunterIntOverflowOnUint8RejectText pins the
 // reference `InvalidLiteral` literal from
-// reference/SpacetimeDB/crates/expr/src/errors.rs:108 (emitted at lib.rs:99
+// reference tree crates/expr/src/errors.rs:108 (emitted at lib.rs:99
 // when `parse(v, ty)` fails) onto the SubscribeSingle admission surface.
 // SubscribeSingle wraps compile errors with `DBError::WithSql`
 // (module_subscription_actor.rs:643 via `return_on_err_with_sql_bool!`).

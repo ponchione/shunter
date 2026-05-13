@@ -24,7 +24,7 @@ benchmark snapshot.
 
 Shunter v1 is a Go-native hosted runtime with reducer-owned writes,
 Shunter-native protocol frames, and contract-driven clients. It is not a
-SpacetimeDB compatibility layer.
+reference-runtime compatibility layer.
 
 Stable v1 compatibility applies to the app-facing root package APIs for module
 declaration, runtime lifecycle, local reducer calls, local and declared reads,
@@ -41,7 +41,7 @@ generated clients, or documented protocol behavior.
 
 Runtime implementation packages such as `store`, `subscription`, `executor`,
 `commitlog`, `query/sql`, and `internal/*` are not app compatibility surfaces.
-`reference/SpacetimeDB/` is research-only material.
+`ignored reference tree` is research-only material.
 
 ## Current Docs
 

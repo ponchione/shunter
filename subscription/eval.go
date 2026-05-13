@@ -478,7 +478,7 @@ func projectDeltaRows(inserts, deletes []types.ProductValue, projection []Projec
 // returns row[lhsWidth:]. Short rows (malformed width) are skipped rather
 // than panicking, mirroring the defensive width checks elsewhere in the
 // evaluator. Reference: SubscriptionPlan::subscribed_table_id at
-// reference/SpacetimeDB/crates/subscription/src/lib.rs:367.
+// reference tree crates/subscription/src/lib.rs:367.
 func projectJoinedRows(rows []types.ProductValue, lhsWidth int, projectRight bool) []types.ProductValue {
 	if len(rows) == 0 {
 		return rows

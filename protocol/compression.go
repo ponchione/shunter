@@ -18,7 +18,7 @@ var gzipWriterPool = sync.Pool{
 var gzipReaderPool sync.Pool
 
 // Compression byte values (SPEC-005 §3.3, aligned with
-// reference/SpacetimeDB
+// ignored reference tree
 // crates/client-api-messages/src/websocket/common.rs
 // SERVER_MSG_COMPRESSION_TAG_*).
 const (

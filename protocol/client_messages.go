@@ -86,7 +86,7 @@ type SubscribeDeclaredViewWithParametersMsg struct {
 
 // UnsubscribeMultiMsg drops every query registered under the given
 // QueryID in one call. Reference: UnsubscribeMulti at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:229.
+// reference tree crates/client-api-messages/src/websocket/v1.rs:229.
 type UnsubscribeMultiMsg struct {
 	RequestID uint32
 	QueryID   uint32

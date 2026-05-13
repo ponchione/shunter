@@ -201,7 +201,7 @@ For each (tableID, colID) tracked in cols for this table:
 
 **Cost**: O(indexed_columns) per changed row for the map lookup (amortized O(1) per level). For the common case (one equality predicate), this is constant-time per changed row — vastly better than scanning all subscriptions.
 
-**Data-structure note**: tier-1 is pure equality lookup. There is no predicate pattern today that requires ordered iteration over value keys, so a nested map is the simplest correct structure. Empty-map cleanup on Remove gives the same "entry disappears when no hashes remain" effect a B-tree range-delete would provide. SpacetimeDB's reference implementation uses a BTreeMap here but still accesses it equality-only.
+**Data-structure note**: tier-1 is pure equality lookup. There is no predicate pattern today that requires ordered iteration over value keys, so a nested map is the simplest correct structure. Empty-map cleanup on Remove gives the same "entry disappears when no hashes remain" effect a B-tree range-delete would provide. The reference runtime's reference implementation uses a BTreeMap here but still accesses it equality-only.
 
 **Example**: 10,000 clients subscribe to `messages WHERE channel_id = ?` with different channel IDs. Inserting a message in channel 42 looks up `(messages, channel_id, 42)` and finds only the subscriptions for that channel.
 
@@ -234,7 +234,7 @@ type JoinEdgeIndex struct {
 }
 ```
 
-**Data-structure note**: candidate collection iterates the edges whose LHSTable matches the changed table. SpacetimeDB's reference implementation serves this via a BTreeMap's prefix scan; Shunter serves it via the `byTable` denormalization. Both approaches preserve the same external contract — the ordered key is an implementation detail, not a requirement of the tier-2 semantics.
+**Data-structure note**: candidate collection iterates the edges whose LHSTable matches the changed table. The reference runtime's reference implementation serves this via a BTreeMap's prefix scan; Shunter serves it via the `byTable` denormalization. Both approaches preserve the same external contract — the ordered key is an implementation detail, not a requirement of the tier-2 semantics.
 
 **Lookup on row change in LHS table:**
 
@@ -281,7 +281,7 @@ A subscription touching two tables may appear in different tiers for each table.
 
 ## 6. Delta Computation — Incremental View Maintenance
 
-> **Row-payload encoding.** `ProductValue` rows computed here are serialized to wire bytes by the protocol layer (SPEC-005) using BSATN as defined in SPEC-002 §3.3. The name "BSATN" is borrowed from SpacetimeDB and is non-standard; see the canonical disclaimer in **SPEC-002 §3.1**. SPEC-004 never touches BSATN bytes directly — it operates on decoded `ProductValue`.
+> **Row-payload encoding.** `ProductValue` rows computed here are serialized to wire bytes by the protocol layer (SPEC-005) using BSATN as defined in SPEC-002 §3.3. The name "BSATN" is borrowed from the reference runtime and is non-standard; see the canonical disclaimer in **SPEC-002 §3.1**. SPEC-004 never touches BSATN bytes directly — it operates on decoded `ProductValue`.
 
 ### 6.1 Single-Table Subscriptions
 
@@ -401,7 +401,7 @@ type DeltaIndexes struct {
 
 Delta indexes are built eagerly when the DeltaView is constructed (once per transaction evaluation, not per subscription). Only columns referenced by at least one active subscription are indexed.
 
-**Keying rationale**: `ColID` is the natural coordinate for delta-side scratch indexes because they have no identity separate from the transaction — there is no persistent `IndexID` to name them. Committed-side access on the other hand still uses the real store `IndexID` (see §10.3 `CommittedReadView.IndexSeek`). This is a deliberate divergence from SpacetimeDB's `DeltaStore` trait, which unifies delta and committed lookups under a single `IndexId`; Shunter trades that symmetry for a simpler delta view that does not depend on `SchemaRegistry` / `IndexResolver` at construction time.
+**Keying rationale**: `ColID` is the natural coordinate for delta-side scratch indexes because they have no identity separate from the transaction — there is no persistent `IndexID` to name them. Committed-side access on the other hand still uses the real store `IndexID` (see §10.3 `CommittedReadView.IndexSeek`). This is a deliberate divergence from the reference runtime's `DeltaStore` trait, which unifies delta and committed lookups under a single `IndexId`; Shunter trades that symmetry for a simpler delta view that does not depend on `SchemaRegistry` / `IndexResolver` at construction time.
 
 ---
 

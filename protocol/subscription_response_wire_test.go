@@ -237,7 +237,7 @@ func TestShunterSubscribeMultiAppliedWireShape(t *testing.T) {
 
 // TestShunterUnsubscribeMultiAppliedWireShape pins the byte-level wire
 // shape of UnsubscribeMultiApplied against the reference envelope at
-// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394`
+// `reference tree crates/client-api-messages/src/websocket/v1.rs:394`
 // (`pub struct UnsubscribeMultiApplied<F>`). Same field order as
 // SubscribeMultiApplied — duration at position 2.
 func TestShunterUnsubscribeMultiAppliedWireShape(t *testing.T) {

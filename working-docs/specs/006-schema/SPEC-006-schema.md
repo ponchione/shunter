@@ -38,13 +38,13 @@ Cross-spec engine identifier types (`RowID`, `Identity`, `ConnectionID`, `TxID`,
 
 ### 1.2 Wire encoding terminology
 
-Reducer arguments (`argBSATN []byte` in §4.3) and return values travel as BSATN bytes. BSATN is the binary encoding defined in SPEC-002 §3.3; the name is imported from SpacetimeDB and is non-standard — see the canonical disclaimer in **SPEC-002 §3.1**. SPEC-006 does not encode or decode BSATN itself; it only declares the byte-oriented handler surface.
+Reducer arguments (`argBSATN []byte` in §4.3) and return values travel as BSATN bytes. BSATN is the binary encoding defined in SPEC-002 §3.3; the name is imported from the reference runtime and is non-standard — see the canonical disclaimer in **SPEC-002 §3.1**. SPEC-006 does not encode or decode BSATN itself; it only declares the byte-oriented handler surface.
 
 ### 1.3 Reference-Informed v1 Scope Choices
 
-Shunter is intentionally schema-simpler than SpacetimeDB in v1. The differences below are deliberate product-scope choices, not missing hidden machinery:
+Shunter is intentionally schema-simpler than the reference runtime in v1. The differences below are deliberate product-scope choices, not missing hidden machinery:
 
-| Topic | SpacetimeDB | Shunter v1 |
+| Topic | Reference runtime | Shunter v1 |
 |---|---|---|
 | Schema registration | Compile-time proc-macros (`#[table]`, `#[reducer]`) validate while producing a module definition | Runtime reflection over struct tags or explicit `TableDefinition`; validation runs at `Build()` |
 | Column type system | Recursive `AlgebraicType` with sum/product/array/option shapes | Flat scalar `ValueKind` set plus `[]byte`; no recursive type graph |
@@ -555,7 +555,7 @@ A table has at most one `Primary` index, and in v1 that primary index must refer
 - Reducer names `"OnConnect"` and `"OnDisconnect"` are reserved for lifecycle hooks (`ErrReservedReducerName`)
 - At most one `OnConnect`, at most one `OnDisconnect` (`ErrDuplicateLifecycleReducer`)
 - Nil reducer or lifecycle handlers are rejected by validation (`ErrNilReducerHandler`)
-- Shunter v1 has **no `init` or `update` lifecycle reducer**. SpacetimeDB exposes `#[reducer(init)]` / `#[reducer(update)]` for module first-boot and schema-migration hooks; Shunter defers this. Applications that need one-time bootstrap MUST invoke a normal reducer from deployment tooling — there is no runtime guarantee of once-only execution. The `init` and `update` names are **not reserved** in v1 (applications may register regular reducers with those names); reintroducing them as lifecycle hooks is a v2 target. Cross-ref: SPEC-003 §10 names the v1 lifecycle set as `OnConnect`/`OnDisconnect` only.
+- Shunter v1 has **no `init` or `update` lifecycle reducer**. The reference runtime exposes `#[reducer(init)]` / `#[reducer(update)]` for module first-boot and schema-migration hooks; Shunter defers this. Applications that need one-time bootstrap MUST invoke a normal reducer from deployment tooling — there is no runtime guarantee of once-only execution. The `init` and `update` names are **not reserved** in v1 (applications may register regular reducers with those names); reintroducing them as lifecycle hooks is a v2 target. Cross-ref: SPEC-003 §10 names the v1 lifecycle set as `OnConnect`/`OnDisconnect` only.
 
 **Schema-level:**
 - Built-in system tables (`sys_clients`, `sys_scheduled`) are registered automatically; user code must not register tables with those names
@@ -594,7 +594,7 @@ type sysScheduled struct {
 
 Managed by the scheduler. Entries are inserted when `SchedulerHandle.Schedule()` is called from reducer code. One-shot entries are deleted only when the scheduled reducer transaction commits successfully. Repeating entries stay in place and update `next_run_at_ns` on successful commit. On scheduled reducer failure or crash-before-commit, the row remains as the durable source of truth.
 
-`schedule_id` intentionally uses `uint64` / `ScheduleID` in Shunter v1 for extra headroom. SpacetimeDB uses a 32-bit schedule identifier; this spec does not attempt compatibility there.
+`schedule_id` intentionally uses `uint64` / `ScheduleID` in Shunter v1 for extra headroom. The reference runtime uses a 32-bit schedule identifier; this spec does not attempt compatibility there.
 
 ---
 

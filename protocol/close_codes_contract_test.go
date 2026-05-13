@@ -8,7 +8,7 @@ import (
 )
 
 // TestShunterCloseCodeConstants pins the four close codes used by
-// the server. Reference: RFC 6455 §7.4.1 + reference/SpacetimeDB
+// the server. Reference: RFC 6455 §7.4.1 + ignored reference tree
 // standard usage.
 //
 // TestCloseConstants in close_test.go already asserts the same values;

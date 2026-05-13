@@ -4750,7 +4750,7 @@ func TestHandleOneOffQuery_SenderParameterInJoinFilter(t *testing.T) {
 }
 
 // TestHandleOneOffQuery_StringLiteralOnIntegerColumnRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 498-501 (`select * from t where u32 = 'str'` /
 // "Field u32 is not a string") onto the OneOffQuery admission surface. The
 // rejection fires while coercing the parsed SQL literal against the resolved
@@ -4773,7 +4773,7 @@ func TestHandleOneOffQuery_StringLiteralOnIntegerColumnRejected(t *testing.T) {
 }
 
 // TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 502-504 (`select * from t where t.u32 = 1.3` /
 // "Field u32 is not a float") onto the OneOffQuery admission surface. Float
 // literals parse to LitFloat end-to-end (2026-04-21 follow-through), so the
@@ -5049,7 +5049,7 @@ func TestHandleOneOffQuery_UnknownColumn(t *testing.T) {
 }
 
 // TestHandleOneOffQuery_ShunterUnknownTableRejected pins the reference type-
-// check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
+// check rejection at reference tree crates/expr/src/check.rs lines
 // 483-485 (`select * from r` / "Table r does not exist") onto the OneOff
 // admission surface. Enforced incidentally via SchemaLookup.TableByName
 // returning !ok inside compileSQLQueryString; the pin names the contract.
@@ -5070,7 +5070,7 @@ func TestHandleOneOffQuery_ShunterUnknownTableRejected(t *testing.T) {
 }
 
 // TestHandleOneOffQuery_ShunterUnknownColumnRejected pins the reference type-
-// check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
+// check rejection at reference tree crates/expr/src/check.rs lines
 // 491-493 (`select * from t where t.a = 1` / "Field a does not exist on
 // table t") onto the OneOff admission surface. Enforced incidentally via
 // rel.ts.Column returning !ok inside normalizeSQLFilterForRelations.
@@ -5091,7 +5091,7 @@ func TestHandleOneOffQuery_ShunterUnknownColumnRejected(t *testing.T) {
 }
 
 // TestHandleOneOffQuery_ShunterAliasedUnknownColumnRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 495-497 (`select * from t as r where r.a = 1` / "Field a
 // does not exist on table t") onto the OneOff admission surface. The
 // aliased single-table shape resolves `r` to base table `t` in the parser's
@@ -5115,7 +5115,7 @@ func TestHandleOneOffQuery_ShunterAliasedUnknownColumnRejected(t *testing.T) {
 }
 
 // TestHandleOneOffQuery_ShunterBaseTableQualifierAfterAliasRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 506-509 (`select * from t as r where t.u32 = 5` / "t is not
 // in scope after alias") onto the OneOff admission surface. Enforced
 // incidentally at parser level via resolveQualifier in parseComparison.
@@ -5671,7 +5671,7 @@ func TestHandleOneOffQuery_ShunterSelfJoinColumnProjectionProjectsRight(t *testi
 }
 
 // TestHandleOneOffQuery_ShunterJoinWithoutQualifiedProjectionRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 515-517 (`select * from t join s` / "Subscriptions must be
 // typed to a single table") onto the OneOff admission surface. Enforced
 // incidentally at parseStatement requiring a qualified projection for joins.
@@ -5700,9 +5700,9 @@ func TestHandleOneOffQuery_ShunterJoinWithoutQualifiedProjectionRejected(t *test
 
 // TestHandleOneOffQuery_ShunterJoinStarProjectionRejectText pins the
 // reference type-check rejection text at
-// reference/SpacetimeDB/crates/expr/src/errors.rs:41
+// reference tree crates/expr/src/errors.rs:41
 // (`InvalidWildcard::Join` = "SELECT * is not supported for joins"),
-// emit site reference/SpacetimeDB/crates/expr/src/lib.rs:56 via
+// emit site reference tree crates/expr/src/lib.rs:56 via
 // `type_proj` when `ast::Project::Star(None)` meets an input with
 // `nfields() > 1`. The OneOff admission surface (module_host.rs:2252
 // `compile_subscription`, :2316 `format!("{err}")`) emits the raw error
@@ -5742,7 +5742,7 @@ func TestHandleOneOffQuery_ShunterJoinStarProjectionRejectText(t *testing.T) {
 }
 
 // TestHandleOneOffQuery_ShunterSelfJoinWithoutAliasesRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 519-521 (`select t.* from t join t` / "Self join requires
 // aliases") onto the OneOff admission surface. Enforced incidentally at
 // parseJoinClause when both sides share the same table and alias.
@@ -5770,7 +5770,7 @@ func TestHandleOneOffQuery_ShunterSelfJoinWithoutAliasesRejected(t *testing.T) {
 }
 
 // TestHandleOneOffQuery_ShunterForwardAliasReferenceRejected pins the reference
-// type-check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
+// type-check rejection at reference tree crates/expr/src/check.rs lines
 // 526-528 (`select t.* from t join s on t.u32 = r.u32 join s as r` / "Alias
 // r is not in scope when it is referenced") onto the OneOff admission surface.
 // Enforced incidentally in parseQualifiedColumnRef when the forward alias
@@ -5896,7 +5896,7 @@ func TestHandleOneOffQuery_ShunterFractionalLimitLiteralRejected(t *testing.T) {
 }
 
 // TestHandleOneOffQuery_ShunterLeadingPlusIntLiteral pins the reference
-// valid-literal shape at reference/SpacetimeDB/crates/expr/src/check.rs:297-
+// valid-literal shape at reference tree crates/expr/src/check.rs:297-
 // 300 (`select * from t where u32 = +1` / "Leading `+`"): a leading `+` on
 // an integer literal is admitted end-to-end through the OneOff path.
 func TestHandleOneOffQuery_ShunterLeadingPlusIntLiteral(t *testing.T) {
@@ -5920,7 +5920,7 @@ func TestHandleOneOffQuery_ShunterLeadingPlusIntLiteral(t *testing.T) {
 }
 
 // TestHandleOneOffQuery_ShunterUnqualifiedWhereInJoinRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// reference type-check rejection at reference tree crates/expr/src/
 // check.rs lines 534-537 (`select t.* from t join s on t.u32 = s.u32 where
 // bytes = 0xABCD` / "Columns must be qualified in join expressions") onto the
 // OneOff admission surface. Enforced incidentally at parseComparison when the
@@ -5950,7 +5950,7 @@ func TestHandleOneOffQuery_ShunterUnqualifiedWhereInJoinRejected(t *testing.T) {
 }
 
 // TestHandleOneOffQuery_ShunterScientificNotationUnsignedInteger pins the
-// reference valid-literal shape at reference/SpacetimeDB/crates/expr/src/
+// reference valid-literal shape at reference tree crates/expr/src/
 // check.rs:302-304 (`select * from t where u32 = 1e3` / "Scientific
 // notation") on the OneOff admission path.
 func TestHandleOneOffQuery_ShunterScientificNotationUnsignedInteger(t *testing.T) {
@@ -5974,7 +5974,7 @@ func TestHandleOneOffQuery_ShunterScientificNotationUnsignedInteger(t *testing.T
 }
 
 // TestHandleOneOffQuery_ShunterScientificNotationFloatNegativeExponent pins
-// reference/SpacetimeDB/crates/expr/src/check.rs:314-316 (`select * from t
+// reference tree crates/expr/src/check.rs:314-316 (`select * from t
 // where f32 = 1e-3` / "Negative exponent") on the OneOff admission path.
 func TestHandleOneOffQuery_ShunterScientificNotationFloatNegativeExponent(t *testing.T) {
 	conn := testConnDirect(nil)
@@ -6001,7 +6001,7 @@ func TestHandleOneOffQuery_ShunterScientificNotationFloatNegativeExponent(t *tes
 }
 
 // TestHandleOneOffQuery_ShunterLeadingDotFloatLiteral pins reference/
-// SpacetimeDB/crates/expr/src/check.rs:322-324 (`select * from t where
+// reference tree crates/expr/src/check.rs:322-324 (`select * from t where
 // f32 = .1` / "Leading `.`") on the OneOff admission path.
 func TestHandleOneOffQuery_ShunterLeadingDotFloatLiteral(t *testing.T) {
 	conn := testConnDirect(nil)
@@ -6028,7 +6028,7 @@ func TestHandleOneOffQuery_ShunterLeadingDotFloatLiteral(t *testing.T) {
 }
 
 // TestHandleOneOffQuery_ShunterScientificNotationOverflowInfinity pins
-// reference/SpacetimeDB/crates/expr/src/check.rs:326-328 (`select * from t
+// reference tree crates/expr/src/check.rs:326-328 (`select * from t
 // where f32 = 1e40` / "Infinity") on the OneOff admission path. The stored
 // row is +Inf on the f32 column; the query literal `1e40` must coerce to
 // the same +Inf value and match.
@@ -6057,7 +6057,7 @@ func TestHandleOneOffQuery_ShunterScientificNotationOverflowInfinity(t *testing.
 }
 
 // TestHandleOneOffQuery_ShunterInvalidLiteralNegativeIntOnUnsignedRejected pins
-// reference/SpacetimeDB/crates/expr/src/check.rs:382-385 (`select * from t
+// reference tree crates/expr/src/check.rs:382-385 (`select * from t
 // where u8 = -1` / "Negative integer for unsigned column") onto the
 // OneOffQuery admission surface. `-1` is LitInt(-1); coerceUnsigned
 // (query/sql/coerce.go:119) rejects negative literals against unsigned
@@ -6087,7 +6087,7 @@ func TestHandleOneOffQuery_ShunterInvalidLiteralNegativeIntOnUnsignedRejected(t 
 }
 
 // TestHandleOneOffQuery_ShunterInvalidLiteralScientificOverflowRejected pins
-// reference/SpacetimeDB/crates/expr/src/check.rs:386-389 (`select * from t
+// reference tree crates/expr/src/check.rs:386-389 (`select * from t
 // where u8 = 1e3` / "Out of bounds") onto the OneOffQuery admission surface.
 // `1e3` collapses to LitInt(1000) via parseNumericLiteral; coerceUnsigned
 // (query/sql/coerce.go:123) rejects the value as out of range for u8.
@@ -6115,7 +6115,7 @@ func TestHandleOneOffQuery_ShunterInvalidLiteralScientificOverflowRejected(t *te
 }
 
 // TestHandleOneOffQuery_ShunterInvalidLiteralFloatOnUnsignedRejected pins
-// reference/SpacetimeDB/crates/expr/src/check.rs:390-393 (`select * from t
+// reference tree crates/expr/src/check.rs:390-393 (`select * from t
 // where u8 = 0.1` / "Float as integer") onto the OneOffQuery admission
 // surface. Complements the existing u32 = 1.3 pin by naming the u8 column
 // variant; coerceUnsigned rejects LitFloat against an integer column.
@@ -6143,7 +6143,7 @@ func TestHandleOneOffQuery_ShunterInvalidLiteralFloatOnUnsignedRejected(t *testi
 }
 
 // TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected
-// pins reference/SpacetimeDB/crates/expr/src/check.rs:394-397 (`select * from
+// pins reference tree crates/expr/src/check.rs:394-397 (`select * from
 // t where u32 = 1e-3` / "Float as integer") onto the OneOffQuery admission
 // surface. `1e-3` stays LitFloat (non-integral) and coerceUnsigned rejects
 // it against an unsigned column.
@@ -6171,7 +6171,7 @@ func TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnUnsignedReject
 }
 
 // TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnSignedRejected
-// pins reference/SpacetimeDB/crates/expr/src/check.rs:398-401 (`select * from
+// pins reference tree crates/expr/src/check.rs:398-401 (`select * from
 // t where i32 = 1e-3` / "Float as integer") onto the OneOffQuery admission
 // surface. Mirrors the unsigned case on a signed column: coerceSigned rejects
 // the LitFloat against KindInt32.
@@ -6199,7 +6199,7 @@ func TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnSignedRejected
 }
 
 // TestHandleOneOffQuery_ShunterValidLiteralOnEachIntegerWidth pins
-// reference/SpacetimeDB/crates/expr/src/check.rs:360-370
+// reference tree crates/expr/src/check.rs:360-370
 // (`valid_literals_for_type`) at the OneOffQuery admission surface. Each
 // subtest builds a single-column table, stores a matching row, and
 // confirms `SELECT * FROM t WHERE {colname} = 127` accepts end-to-end on
@@ -6263,7 +6263,7 @@ func TestHandleOneOffQuery_ShunterValidLiteralOnEachIntegerWidth(t *testing.T) {
 
 // TestHandleOneOffQuery_ShunterValidLiteralU256Scientific pins the remaining
 // reference `valid_literals` row at
-// reference/SpacetimeDB/crates/expr/src/check.rs:330-332
+// reference tree crates/expr/src/check.rs:330-332
 // (`select * from t where u256 = 1e40` / "u256") at the OneOffQuery
 // admission surface. Shunter's parser promotes `1e40` to LitBigInt and
 // coerce decomposes 10^40 into four uint64 words for the 256-bit Uint256
@@ -6545,7 +6545,7 @@ func TestHandleOneOffQuery_ShunterDMLStatementRejected(t *testing.T) {
 
 // TestHandleOneOffQuery_ShunterEmptyStatementRejected pins the reference
 // subscription-parser rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
 // (empty string / "Empty") onto the OneOff admission surface. Enforced
 // incidentally at expectKeyword("SELECT") on an EOF-only token stream.
 func TestHandleOneOffQuery_ShunterEmptyStatementRejected(t *testing.T) {
@@ -6573,7 +6573,7 @@ func TestHandleOneOffQuery_ShunterEmptyStatementRejected(t *testing.T) {
 
 // TestHandleOneOffQuery_ShunterWhitespaceOnlyStatementRejected pins the
 // reference subscription-parser rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
 // (single space / "Empty after whitespace skip") onto the OneOff admission
 // surface. Enforced incidentally once the tokenizer drops whitespace.
 func TestHandleOneOffQuery_ShunterWhitespaceOnlyStatementRejected(t *testing.T) {
@@ -6601,7 +6601,7 @@ func TestHandleOneOffQuery_ShunterWhitespaceOnlyStatementRejected(t *testing.T) 
 
 // TestHandleOneOffQuery_ShunterDistinctProjectionRejected pins the reference
 // SQL parser rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs:362-394 — the
+// reference tree crates/sql-parser/src/parser/sql.rs:362-394 — the
 // `parse_select` arm requires `distinct: None`; any non-None set quantifier
 // falls into `_ => SqlUnsupported::feature(select)`, which the OneOff
 // surface renders as `Unsupported: {select}`.
@@ -6664,7 +6664,7 @@ func TestHandleOneOffQuery_ShunterAllModifierRejected(t *testing.T) {
 
 // TestHandleOneOffQuery_ShunterSubqueryInFromRejected pins the reference
 // subscription-parser rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
 // (`select * from (select * from t) join (select * from s) on a = b` /
 // "Subqueries in FROM not supported") onto the OneOff admission surface.
 // Enforced incidentally at parseStatement which requires an identifier token
@@ -6694,7 +6694,7 @@ func TestHandleOneOffQuery_ShunterSubqueryInFromRejected(t *testing.T) {
 
 // TestHandleOneOffQuery_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected
 // pins the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select 1` / "FROM is required") onto the OneOff admission surface.
 // parseProjection rejects the integer literal `1` with "projection must be
 // '*' or 'table.*'".
@@ -6723,7 +6723,7 @@ func TestHandleOneOffQuery_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected
 
 // TestHandleOneOffQuery_ShunterSqlUnsupportedMultiPartTableNameRejected pins
 // the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a from s.t` / "Multi-part table names") onto the OneOff admission
 // surface. parseProjection rejects the bare identifier `a` before FROM is
 // parsed, so rejection fires with "projection must be '*' or 'table.*'".
@@ -6752,7 +6752,7 @@ func TestHandleOneOffQuery_ShunterSqlUnsupportedMultiPartTableNameRejected(t *te
 
 // TestHandleOneOffQuery_ShunterSqlUnsupportedBitStringLiteralRejected pins
 // the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select * from t where a = B'1010'` / "Bit-string literals") onto the
 // OneOff admission surface. The lexer tokenizes `B` as an identifier and
 // `'1010'` as a separate string literal; parseLiteral rejects the identifier
@@ -6782,7 +6782,7 @@ func TestHandleOneOffQuery_ShunterSqlUnsupportedBitStringLiteralRejected(t *test
 
 // TestHandleOneOffQuery_ShunterSqlUnsupportedWildcardWithBareColumnsRejected
 // pins the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a.*, b, c from t` / "Wildcard with non-wildcard projections") onto
 // the OneOff admission surface. After parseProjection consumes `t.*`,
 // parseStatement expects FROM but finds `,` and rejects with
@@ -6812,7 +6812,7 @@ func TestHandleOneOffQuery_ShunterSqlUnsupportedWildcardWithBareColumnsRejected(
 
 // TestHandleOneOffQuery_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected
 // pins the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select * from t order by a limit b` / "Limit expression") onto the OneOff
 // admission surface. ORDER BY trips parseStatement's EOF guard
 // (query/sql/parser.go:547-549) with "unexpected token \"ORDER\"" before the
@@ -6842,7 +6842,7 @@ func TestHandleOneOffQuery_ShunterSqlUnsupportedOrderByWithLimitExpressionReject
 
 // TestHandleOneOffQuery_ShunterSqlUnsupportedAggregateWithGroupByRejected pins
 // the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a, count(*) from t group by a` / "GROUP BY") onto the OneOff
 // admission surface. parseProjection rejects the leading bare column with
 // "projection must be '*' or 'table.*'" before the aggregate or GROUP BY
@@ -6872,7 +6872,7 @@ func TestHandleOneOffQuery_ShunterSqlUnsupportedAggregateWithGroupByRejected(t *
 
 // TestHandleOneOffQuery_ShunterSqlUnsupportedImplicitCommaJoinRejected pins the
 // reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a.* from t as a, s as b where a.id = b.id and b.c = 1` /
 // "Implicit joins") onto the OneOff admission surface. After consuming
 // `t AS a`, parseStatement's EOF/keyword guard hits `,` and rejects with
@@ -6902,7 +6902,7 @@ func TestHandleOneOffQuery_ShunterSqlUnsupportedImplicitCommaJoinRejected(t *tes
 
 // TestHandleOneOffQuery_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected pins
 // the reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select t.* from t join s on int = u32` / "Joins require qualified vars")
 // onto the OneOff admission surface. parseJoinClause calls
 // parseQualifiedColumnRef for the left side of ON
@@ -6933,7 +6933,7 @@ func TestHandleOneOffQuery_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected(t 
 
 // TestHandleOneOffQuery_ShunterSqlInvalidEmptySelectRejected pins the
 // reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select from t` / "Empty SELECT") onto the OneOff admission surface.
 // parseProjection rejects because the next token after SELECT is the
 // identifier `from`, which is then followed by `t` (not a dot), so the
@@ -6963,7 +6963,7 @@ func TestHandleOneOffQuery_ShunterSqlInvalidEmptySelectRejected(t *testing.T) {
 
 // TestHandleOneOffQuery_ShunterSqlInvalidEmptyFromRejected pins the reference
 // parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select a from where b = 1` / "Empty FROM") onto the OneOff admission
 // surface. parseProjection rejects the bare column `a` with "projection must
 // be '*' or 'table.*'" before the empty FROM is examined.
@@ -6992,7 +6992,7 @@ func TestHandleOneOffQuery_ShunterSqlInvalidEmptyFromRejected(t *testing.T) {
 
 // TestHandleOneOffQuery_ShunterSqlInvalidEmptyWhereRejected pins the reference
 // parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select a from t where` / "Empty WHERE") onto the OneOff admission
 // surface. parseProjection rejects the bare column `a` with "projection must
 // be '*' or 'table.*'" before the empty WHERE is examined.
@@ -7021,7 +7021,7 @@ func TestHandleOneOffQuery_ShunterSqlInvalidEmptyWhereRejected(t *testing.T) {
 
 // TestHandleOneOffQuery_ShunterSqlInvalidEmptyGroupByRejected pins the
 // reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select a, count(*) from t group by` / "Empty GROUP BY") onto the OneOff
 // admission surface. parseProjection rejects the leading bare column `a` with
 // "projection must be '*' or 'table.*'" before the aggregate or empty GROUP
@@ -7926,7 +7926,7 @@ func TestHandleOneOffQuery_ShunterCrossJoinWhereCountWithLimitReturnsFullAggrega
 
 // TestHandleOneOffQuery_ShunterSqlInvalidAggregateWithoutAliasRejected pins the
 // reference parse_sql rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select count(*) from t` / "Aggregate without alias") onto the OneOff
 // admission surface. parseProjection reads `count` as an identifier
 // qualifier, then finds `(` where it expects a dot, rejecting with
@@ -8131,7 +8131,7 @@ func TestHandleOneOffQuery_ShunterLeftJoinKeywordRejected(t *testing.T) {
 
 // TestHandleOneOffQuery_ShunterUnknownTableRejectText pins the reference
 // type-check rejection literal at
-// reference/SpacetimeDB/crates/expr/src/errors.rs:14
+// reference tree crates/expr/src/errors.rs:14
 // (`Unresolved::Table` = "no such table: `{0}`. If the table exists, it may
 // be marked private."). The OneOff admission surface
 // (module_host.rs:2252 `compile_subscription`, :2316 `format!("{err}")`)
@@ -8197,7 +8197,7 @@ func TestHandleOneOffQuery_AmbiguousCaseFoldedTableNameRejected(t *testing.T) {
 
 // TestHandleOneOffQuery_ShunterUnknownFieldRejectText pins the reference
 // type-check rejection literal at
-// reference/SpacetimeDB/crates/expr/src/errors.rs:11-13
+// reference tree crates/expr/src/errors.rs:11-13
 // (`Unresolved::Var` = "`{0}` is not in scope"). Reference emit site
 // `_type_expr` lib.rs:107: a missing column inside an existing relvar
 // surfaces as `Unresolved::var(&field)`. OneOff admission emits the raw
