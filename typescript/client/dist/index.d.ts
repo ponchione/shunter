@@ -1,15 +1,19 @@
 export declare const SHUNTER_PROTOCOL_V1: 1;
+export declare const SHUNTER_PROTOCOL_V2: 2;
 export declare const SHUNTER_MIN_SUPPORTED_PROTOCOL_VERSION: 1;
-export declare const SHUNTER_CURRENT_PROTOCOL_VERSION: 1;
+export declare const SHUNTER_CURRENT_PROTOCOL_VERSION: 2;
 export declare const SHUNTER_SUBPROTOCOL_V1: "v1.bsatn.shunter";
-export declare const SHUNTER_DEFAULT_SUBPROTOCOL: "v1.bsatn.shunter";
-export declare const SHUNTER_SUPPORTED_SUBPROTOCOLS: readonly ["v1.bsatn.shunter"];
+export declare const SHUNTER_SUBPROTOCOL_V2: "v2.bsatn.shunter";
+export declare const SHUNTER_DEFAULT_SUBPROTOCOL: "v2.bsatn.shunter";
+export declare const SHUNTER_SUPPORTED_SUBPROTOCOLS: readonly ["v2.bsatn.shunter", "v1.bsatn.shunter"];
 export declare const SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_SINGLE: 1;
 export declare const SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_SINGLE: 2;
 export declare const SHUNTER_CLIENT_MESSAGE_CALL_REDUCER: 3;
 export declare const SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_MULTI: 6;
 export declare const SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY: 7;
 export declare const SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW: 8;
+export declare const SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY_WITH_PARAMETERS: 9;
+export declare const SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW_WITH_PARAMETERS: 10;
 export declare const SHUNTER_SERVER_MESSAGE_IDENTITY_TOKEN: 1;
 export declare const SHUNTER_SERVER_MESSAGE_SUBSCRIBE_SINGLE_APPLIED: 2;
 export declare const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_SINGLE_APPLIED: 3;
@@ -25,7 +29,7 @@ export declare const SHUNTER_MODULE_CONTRACT_FORMAT: "shunter.module_contract";
 export declare const SHUNTER_MODULE_CONTRACT_VERSION_V1: 1;
 export declare const SHUNTER_MIN_SUPPORTED_MODULE_CONTRACT_VERSION: 1;
 export declare const SHUNTER_CURRENT_MODULE_CONTRACT_VERSION: 1;
-export type ShunterSubprotocol = typeof SHUNTER_SUBPROTOCOL_V1;
+export type ShunterSubprotocol = (typeof SHUNTER_SUPPORTED_SUBPROTOCOLS)[number];
 export interface ProtocolMetadata<Subprotocol extends string = string> {
     readonly minSupportedVersion: number;
     readonly currentVersion: number;
@@ -34,9 +38,9 @@ export interface ProtocolMetadata<Subprotocol extends string = string> {
 }
 export declare const shunterProtocol: {
     readonly minSupportedVersion: 1;
-    readonly currentVersion: 1;
-    readonly defaultSubprotocol: "v1.bsatn.shunter";
-    readonly supportedSubprotocols: readonly ["v1.bsatn.shunter"];
+    readonly currentVersion: 2;
+    readonly defaultSubprotocol: "v2.bsatn.shunter";
+    readonly supportedSubprotocols: readonly ["v2.bsatn.shunter", "v1.bsatn.shunter"];
 };
 export interface ProtocolCompatibilityIssue {
     readonly code: "client_too_old" | "client_too_new" | "unsupported_default_subprotocol" | "unsupported_selected_subprotocol";
@@ -420,11 +424,13 @@ export interface DeclaredQueryOptions {
     readonly requestId?: RequestID;
     readonly messageId?: Uint8Array;
     readonly signal?: AbortSignal;
+    readonly params?: Uint8Array;
 }
 export interface EncodedDeclaredQueryRequest<Name extends string = string> {
     readonly name: Name;
     readonly requestId?: RequestID;
     readonly messageId: Uint8Array;
+    readonly params?: Uint8Array;
     readonly frame: Uint8Array;
 }
 export interface DeclaredQueryResult<Name extends string = string, Rows = Uint8Array> {
@@ -492,6 +498,7 @@ export interface DeclaredViewSubscriptionOptions<Row = unknown> {
     readonly onInitialRows?: (rows: readonly Row[]) => void;
     readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
     readonly onRawUpdate?: RawSubscriptionUpdateCallback;
+    readonly params?: Uint8Array;
 }
 export interface EncodedSubscribeSingleRequest {
     readonly queryString: string;
@@ -506,6 +513,7 @@ export interface EncodedDeclaredViewSubscriptionRequest<Name extends string = st
     readonly name: Name;
     readonly requestId: RequestID;
     readonly queryId: QueryID;
+    readonly params?: Uint8Array;
     readonly frame: Uint8Array;
 }
 export interface EncodedSubscriptionUnsubscribeRequest {

@@ -70,7 +70,7 @@ const writeFixtureApp = (
   mkdirSync(join(appRoot, "src"), { recursive: true });
   writeFileSync(
     join(appRoot, "src", "index.ts"),
-    `import { SHUNTER_SUBPROTOCOL_V1, shunterProtocol as runtimeProtocol } from "${runtimePackageName}";
+    `import { SHUNTER_SUBPROTOCOL_V2, shunterProtocol as runtimeProtocol } from "${runtimePackageName}";
 import {
   reducers,
   shunterContract,
@@ -79,7 +79,7 @@ import {
 } from "../generated/v1_module_contract";
 
 const caller: ReducerCaller = async (_name, args) => args;
-const protocol: typeof SHUNTER_SUBPROTOCOL_V1 = generatedProtocol.defaultSubprotocol;
+const protocol: typeof SHUNTER_SUBPROTOCOL_V2 = generatedProtocol.defaultSubprotocol;
 const contractFormat: string = shunterContract.contractFormat;
 const moduleName: string | undefined = shunterContract.moduleName;
 
@@ -118,7 +118,7 @@ const verifyFixtureApp = (appRoot, runtimePackageName = defaultRuntimePackageNam
     [
       "--input-type=module",
       "--eval",
-      `import(${JSON.stringify(runtimePackageName)}).then((sdk) => { if (sdk.shunterProtocol.defaultSubprotocol !== 'v1.bsatn.shunter') process.exit(1); })`,
+      `import(${JSON.stringify(runtimePackageName)}).then((sdk) => { if (sdk.shunterProtocol.defaultSubprotocol !== 'v2.bsatn.shunter') process.exit(1); })`,
     ],
     appRoot,
   );
@@ -216,7 +216,7 @@ run(
   [
     "--input-type=module",
     "--eval",
-    "import('@shunter/client').then((sdk) => { if (sdk.shunterProtocol.defaultSubprotocol !== 'v1.bsatn.shunter') process.exit(1); })",
+    "import('@shunter/client').then((sdk) => { if (sdk.shunterProtocol.defaultSubprotocol !== 'v2.bsatn.shunter') process.exit(1); })",
   ],
   workspaceAppRoot,
 );

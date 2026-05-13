@@ -3,8 +3,10 @@ import {
   SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY,
   SHUNTER_CLIENT_MESSAGE_CALL_REDUCER,
   SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY,
+  SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY_WITH_PARAMETERS,
   SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_SINGLE,
   SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW,
+  SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW_WITH_PARAMETERS,
   SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_SINGLE,
   SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_MULTI,
   SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE,
@@ -19,6 +21,7 @@ import {
   SHUNTER_MODULE_CONTRACT_FORMAT,
   SHUNTER_MODULE_CONTRACT_VERSION_V1,
   SHUNTER_SUBPROTOCOL_V1,
+  SHUNTER_SUBPROTOCOL_V2,
   ShunterAuthError,
   ShunterClosedClientError,
   ShunterContractMismatchError,
@@ -62,9 +65,22 @@ import {
   shunterProtocol,
 } from "../.tmp_runtime_test/src/index.js";
 
-assert.equal(selectShunterSubprotocol(shunterProtocol), SHUNTER_SUBPROTOCOL_V1);
-assert.equal(assertProtocolCompatible(shunterProtocol), SHUNTER_SUBPROTOCOL_V1);
+assert.equal(selectShunterSubprotocol(shunterProtocol), SHUNTER_SUBPROTOCOL_V2);
+assert.equal(assertProtocolCompatible(shunterProtocol), SHUNTER_SUBPROTOCOL_V2);
 assert.deepEqual(checkProtocolCompatibility(shunterProtocol), {
+  ok: true,
+  subprotocol: SHUNTER_SUBPROTOCOL_V2,
+});
+assert.deepEqual(checkProtocolCompatibility(shunterProtocol, SHUNTER_SUBPROTOCOL_V1), {
+  ok: true,
+  subprotocol: SHUNTER_SUBPROTOCOL_V1,
+});
+assert.deepEqual(checkProtocolCompatibility({
+  minSupportedVersion: 1,
+  currentVersion: 1,
+  defaultSubprotocol: SHUNTER_SUBPROTOCOL_V1,
+  supportedSubprotocols: [SHUNTER_SUBPROTOCOL_V1],
+}), {
   ok: true,
   subprotocol: SHUNTER_SUBPROTOCOL_V1,
 });
@@ -72,10 +88,10 @@ assert.deepEqual(checkProtocolCompatibility(shunterProtocol), {
 assert.throws(
   () =>
     assertProtocolCompatible({
-      minSupportedVersion: 2,
-      currentVersion: 2,
-      defaultSubprotocol: "v2.bsatn.shunter",
-      supportedSubprotocols: ["v2.bsatn.shunter"],
+      minSupportedVersion: 3,
+      currentVersion: 3,
+      defaultSubprotocol: "v3.bsatn.shunter",
+      supportedSubprotocols: ["v3.bsatn.shunter"],
     }),
   ShunterProtocolMismatchError,
 );
@@ -492,6 +508,24 @@ assert.deepEqual(
   bytesFromHex("070200000009080c000000726563656e745f7573657273"),
 );
 
+const declaredQueryParams = new Uint8Array([0xde, 0xad, 0xbe]);
+const encodedDeclaredQueryWithParams = encodeDeclaredQueryRequest("recent_users", {
+  messageId: new Uint8Array([0x09, 0x08]),
+  params: declaredQueryParams,
+});
+declaredQueryParams[0] = 0xff;
+assert.equal(encodedDeclaredQueryWithParams.name, "recent_users");
+assert.deepEqual(encodedDeclaredQueryWithParams.params, new Uint8Array([0xde, 0xad, 0xbe]));
+assert.equal(encodedDeclaredQueryWithParams.frame[0], SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY_WITH_PARAMETERS);
+assert.deepEqual(
+  encodedDeclaredQueryWithParams.frame,
+  bytesFromHex("090200000009080c000000726563656e745f757365727303000000deadbe"),
+);
+assert.throws(
+  () => encodeDeclaredQueryRequest("recent_users", { params: [0x01] }),
+  ShunterValidationError,
+);
+
 const encodedSubscribeSingle = encodeSubscribeSingleRequest("SELECT * FROM users", {
   requestId: 0x01020304,
   queryId: 0x05060708,
@@ -518,6 +552,25 @@ assert.equal(encodedDeclaredView.frame[0], SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECL
 assert.deepEqual(
   encodedDeclaredView.frame,
   bytesFromHex("0884838281949392910a0000006c6976655f7573657273"),
+);
+
+const declaredViewParams = new Uint8Array([0x01, 0x02, 0x03, 0x04]);
+const encodedDeclaredViewWithParams = encodeDeclaredViewSubscriptionRequest("live_users", {
+  requestId: 0x81828384,
+  queryId: 0x91929394,
+  params: declaredViewParams,
+});
+declaredViewParams[0] = 0xff;
+assert.equal(encodedDeclaredViewWithParams.name, "live_users");
+assert.deepEqual(encodedDeclaredViewWithParams.params, new Uint8Array([0x01, 0x02, 0x03, 0x04]));
+assert.equal(encodedDeclaredViewWithParams.frame[0], SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW_WITH_PARAMETERS);
+assert.deepEqual(
+  encodedDeclaredViewWithParams.frame,
+  bytesFromHex("0a84838281949392910a0000006c6976655f75736572730400000001020304"),
+);
+assert.throws(
+  () => encodeDeclaredViewSubscriptionRequest("live_users", { params: null }),
+  ShunterValidationError,
 );
 
 const encodedUnsubscribeSingle = encodeUnsubscribeSingleRequest(0x21222324, {
@@ -1353,14 +1406,14 @@ const connecting = client.connect();
 await nextTurn();
 assert.equal(sockets.length, 1);
 assert.equal(sockets[0].url, "ws://127.0.0.1:3000/subscribe?existing=1&token=test-token");
-assert.deepEqual(sockets[0].protocols, [SHUNTER_SUBPROTOCOL_V1]);
+assert.deepEqual(sockets[0].protocols, [SHUNTER_SUBPROTOCOL_V2, SHUNTER_SUBPROTOCOL_V1]);
 assert.equal(sockets[0].binaryType, "arraybuffer");
 assert.deepEqual(clientStates, ["connecting"]);
 sockets[0].open();
 assert.equal(client.state.status, "connecting");
 sockets[0].message(identityTokenFrame({ token: "minted-token" }).buffer);
 const metadata = await connecting;
-assert.equal(metadata.subprotocol, SHUNTER_SUBPROTOCOL_V1);
+assert.equal(metadata.subprotocol, SHUNTER_SUBPROTOCOL_V2);
 assert.equal(metadata.identityToken, "minted-token");
 assert.deepEqual([...metadata.identity.slice(0, 3)], [1, 2, 3]);
 assert.deepEqual([...metadata.connectionId.slice(0, 3)], [0xa0, 0xa1, 0xa2]);
@@ -1607,6 +1660,124 @@ const autoQueryIdClosing = autoQueryIdClient.close();
 await assert.rejects(explicitLowDeclaredQuery, ShunterClosedClientError);
 await assert.rejects(autoAllocatedDeclaredQuery, ShunterClosedClientError);
 await autoQueryIdClosing;
+
+const parameterizedDeclaredReadSockets = [];
+const parameterizedDeclaredReadClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/declared-reads",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    parameterizedDeclaredReadSockets.push(socket);
+    return socket;
+  },
+});
+const parameterizedDeclaredReadConnecting = parameterizedDeclaredReadClient.connect();
+await nextTurn();
+parameterizedDeclaredReadSockets[0].open();
+parameterizedDeclaredReadSockets[0].message(identityTokenFrame().buffer);
+const parameterizedDeclaredReadMetadata = await parameterizedDeclaredReadConnecting;
+assert.equal(parameterizedDeclaredReadMetadata.subprotocol, SHUNTER_SUBPROTOCOL_V2);
+const parameterizedQueryParams = new Uint8Array([0xde, 0xad]);
+const parameterizedQuery = parameterizedDeclaredReadClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x01, 0x02]),
+  params: parameterizedQueryParams,
+});
+parameterizedQueryParams[0] = 0xff;
+assert.equal(parameterizedDeclaredReadSockets[0].sent.length, 1);
+assert.deepEqual(
+  parameterizedDeclaredReadSockets[0].sent[0],
+  encodeDeclaredQueryRequest("recent_users", {
+    messageId: new Uint8Array([0x01, 0x02]),
+    params: new Uint8Array([0xde, 0xad]),
+  }).frame,
+);
+parameterizedDeclaredReadSockets[0].message(oneOffSuccessFrame);
+assert.deepEqual(await parameterizedQuery, oneOffSuccessFrame);
+const parameterizedViewParams = new Uint8Array([0x01, 0x02, 0x03]);
+const parameterizedDeclaredView = parameterizedDeclaredReadClient.subscribeDeclaredView("live_users", {
+  requestId: 0x41424344,
+  queryId: 0x61626364,
+  params: parameterizedViewParams,
+});
+parameterizedViewParams[0] = 0xff;
+assert.equal(parameterizedDeclaredReadSockets[0].sent.length, 2);
+assert.deepEqual(
+  parameterizedDeclaredReadSockets[0].sent[1],
+  encodeDeclaredViewSubscriptionRequest("live_users", {
+    requestId: 0x41424344,
+    queryId: 0x61626364,
+    params: new Uint8Array([0x01, 0x02, 0x03]),
+  }).frame,
+);
+parameterizedDeclaredReadSockets[0].message(subscribeAppliedFrame);
+const unsubscribeParameterizedDeclaredView = await parameterizedDeclaredView;
+assert.equal(typeof unsubscribeParameterizedDeclaredView, "function");
+await assert.rejects(
+  parameterizedDeclaredReadClient.runDeclaredQuery("recent_users", { params: [0x01] }),
+  ShunterValidationError,
+);
+await assert.rejects(
+  parameterizedDeclaredReadClient.subscribeDeclaredView("live_users", { params: {} }),
+  ShunterValidationError,
+);
+assert.equal(parameterizedDeclaredReadSockets[0].sent.length, 2);
+await parameterizedDeclaredReadClient.close();
+
+const v1DeclaredReadSockets = [];
+const v1DeclaredReadClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/declared-reads",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    v1DeclaredReadSockets.push(socket);
+    return socket;
+  },
+});
+const v1DeclaredReadConnecting = v1DeclaredReadClient.connect();
+await nextTurn();
+v1DeclaredReadSockets[0].open(SHUNTER_SUBPROTOCOL_V1);
+v1DeclaredReadSockets[0].message(identityTokenFrame().buffer);
+const v1DeclaredReadMetadata = await v1DeclaredReadConnecting;
+assert.equal(v1DeclaredReadMetadata.subprotocol, SHUNTER_SUBPROTOCOL_V1);
+await assert.rejects(
+  v1DeclaredReadClient.runDeclaredQuery("recent_users", {
+    messageId: new Uint8Array([0x01, 0x02]),
+    params: new Uint8Array([0x01]),
+  }),
+  (error) => {
+    assert(error instanceof ShunterProtocolMismatchError);
+    assert.equal(error.kind, "protocol_mismatch");
+    assert.equal(error.code, "declared_read_parameters_unsupported_subprotocol");
+    assert.equal(error.receivedSubprotocol, SHUNTER_SUBPROTOCOL_V1);
+    return true;
+  },
+);
+await assert.rejects(
+  v1DeclaredReadClient.subscribeDeclaredView("live_users", {
+    requestId: 0x41424344,
+    queryId: 0x61626364,
+    params: new Uint8Array([0x02]),
+  }),
+  (error) => {
+    assert(error instanceof ShunterProtocolMismatchError);
+    assert.equal(error.kind, "protocol_mismatch");
+    assert.equal(error.code, "declared_read_parameters_unsupported_subprotocol");
+    assert.equal(error.receivedSubprotocol, SHUNTER_SUBPROTOCOL_V1);
+    return true;
+  },
+);
+assert.equal(v1DeclaredReadSockets[0].sent.length, 0);
+const v1DeclaredQuery = v1DeclaredReadClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x01, 0x02]),
+});
+assert.equal(v1DeclaredReadSockets[0].sent.length, 1);
+assert.deepEqual(
+  v1DeclaredReadSockets[0].sent[0],
+  encodeDeclaredQueryRequest("recent_users", { messageId: new Uint8Array([0x01, 0x02]) }).frame,
+);
+v1DeclaredReadSockets[0].message(oneOffSuccessFrame);
+assert.deepEqual(await v1DeclaredQuery, oneOffSuccessFrame);
+await v1DeclaredReadClient.close();
 
 const declaredViewRawUpdates = [];
 const declaredViewSubscription = client.subscribeDeclaredView("live_users", {

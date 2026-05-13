@@ -1,6 +1,6 @@
 # @shunter/client
 
-Status: checked-in v1 SDK runtime foundation.
+Status: checked-in SDK runtime foundation.
 
 `typescript/client` is a private package-shaped SDK for local/workspace Shunter
 apps. It is named `@shunter/client` so generated bindings have a stable runtime
@@ -125,10 +125,11 @@ explicit opt-in reconnect with bounded retry,
 token-provider refresh per attempt, and subscription replay after a fresh
 identity handshake.
 
-The lifecycle shell offers Shunter's v1 subprotocol, appends a configured token
-as the server-supported `token` query parameter, tracks `idle`/`connecting`/
-`connected`/`reconnecting`/`closing`/`closed`/`failed` states, and accepts an
-injected WebSocket factory for Node tests or host-specific transports.
+The lifecycle shell offers Shunter's v2 subprotocol first and v1 second,
+appends a configured token as the server-supported `token` query parameter,
+tracks `idle`/`connecting`/`connected`/`reconnecting`/`closing`/`closed`/
+`failed` states, and accepts an injected WebSocket factory for Node tests or
+host-specific transports.
 `connect()` resolves after the first server frame is decoded as an
 `IdentityToken`. Passing `reconnect: { enabled: true }` reconnects unexpected
 transport failures with configurable bounded backoff.
@@ -205,7 +206,9 @@ Declared query consumers that want decoded rows can call
 `decodeDeclaredQueryResult()` with table-specific decoders; generated
 declared-query helpers install contract-derived decoders by default when row
 metadata exists. Consumers that need raw RowList bytes can keep using
-`decodeRawDeclaredQueryResult()`.
+`decodeRawDeclaredQueryResult()`. Raw declared query/view runtime options can
+carry encoded `params` bytes; the runtime sends those with protocol v2
+declared-read frames and rejects them on a negotiated v1 connection.
 
 Generated module bindings import runtime types and helpers from
 `@shunter/client` by default and keep module-specific table, reducer, query,

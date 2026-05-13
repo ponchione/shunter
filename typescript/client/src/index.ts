@@ -1,15 +1,19 @@
 export const SHUNTER_PROTOCOL_V1 = 1 as const;
+export const SHUNTER_PROTOCOL_V2 = 2 as const;
 export const SHUNTER_MIN_SUPPORTED_PROTOCOL_VERSION = SHUNTER_PROTOCOL_V1;
-export const SHUNTER_CURRENT_PROTOCOL_VERSION = SHUNTER_PROTOCOL_V1;
+export const SHUNTER_CURRENT_PROTOCOL_VERSION = SHUNTER_PROTOCOL_V2;
 export const SHUNTER_SUBPROTOCOL_V1 = "v1.bsatn.shunter" as const;
-export const SHUNTER_DEFAULT_SUBPROTOCOL = SHUNTER_SUBPROTOCOL_V1;
-export const SHUNTER_SUPPORTED_SUBPROTOCOLS = [SHUNTER_SUBPROTOCOL_V1] as const;
+export const SHUNTER_SUBPROTOCOL_V2 = "v2.bsatn.shunter" as const;
+export const SHUNTER_DEFAULT_SUBPROTOCOL = SHUNTER_SUBPROTOCOL_V2;
+export const SHUNTER_SUPPORTED_SUBPROTOCOLS = [SHUNTER_SUBPROTOCOL_V2, SHUNTER_SUBPROTOCOL_V1] as const;
 export const SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_SINGLE = 1 as const;
 export const SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_SINGLE = 2 as const;
 export const SHUNTER_CLIENT_MESSAGE_CALL_REDUCER = 3 as const;
 export const SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_MULTI = 6 as const;
 export const SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY = 7 as const;
 export const SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW = 8 as const;
+export const SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY_WITH_PARAMETERS = 9 as const;
+export const SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW_WITH_PARAMETERS = 10 as const;
 export const SHUNTER_SERVER_MESSAGE_IDENTITY_TOKEN = 1 as const;
 export const SHUNTER_SERVER_MESSAGE_SUBSCRIBE_SINGLE_APPLIED = 2 as const;
 export const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_SINGLE_APPLIED = 3 as const;
@@ -26,7 +30,7 @@ export const SHUNTER_MODULE_CONTRACT_VERSION_V1 = 1 as const;
 export const SHUNTER_MIN_SUPPORTED_MODULE_CONTRACT_VERSION = SHUNTER_MODULE_CONTRACT_VERSION_V1;
 export const SHUNTER_CURRENT_MODULE_CONTRACT_VERSION = SHUNTER_MODULE_CONTRACT_VERSION_V1;
 
-export type ShunterSubprotocol = typeof SHUNTER_SUBPROTOCOL_V1;
+export type ShunterSubprotocol = (typeof SHUNTER_SUPPORTED_SUBPROTOCOLS)[number];
 
 export interface ProtocolMetadata<Subprotocol extends string = string> {
   readonly minSupportedVersion: number;
@@ -199,7 +203,10 @@ export function checkProtocolCompatibility(
   }
   if (
     selectedSubprotocol !== undefined &&
-    selectedSubprotocol !== SHUNTER_SUBPROTOCOL_V1
+    (
+      !isSupportedShunterSubprotocol(selectedSubprotocol) ||
+      !protocol.supportedSubprotocols.includes(selectedSubprotocol)
+    )
   ) {
     return {
       ok: false,
@@ -210,17 +217,22 @@ export function checkProtocolCompatibility(
       },
     };
   }
-  if (!protocol.supportedSubprotocols.includes(SHUNTER_SUBPROTOCOL_V1)) {
+  if (selectedSubprotocol !== undefined) {
+    return { ok: true, subprotocol: selectedSubprotocol };
+  }
+
+  const compatibleSubprotocols = compatibleShunterSubprotocols(protocol);
+  if (compatibleSubprotocols.length === 0) {
     return {
       ok: false,
       issue: {
         code: "unsupported_default_subprotocol",
-        message: "Generated bindings do not support this client runtime's Shunter WebSocket subprotocol.",
+        message: "Generated bindings do not support any Shunter WebSocket subprotocol supported by this client runtime.",
         receivedSubprotocol: protocol.defaultSubprotocol,
       },
     };
   }
-  return { ok: true, subprotocol: SHUNTER_SUBPROTOCOL_V1 };
+  return { ok: true, subprotocol: compatibleSubprotocols[0] };
 }
 
 export function assertProtocolCompatible(
@@ -241,6 +253,25 @@ export function assertProtocolCompatible(
 
 export function selectShunterSubprotocol(protocol: ProtocolMetadata): ShunterSubprotocol {
   return assertProtocolCompatible(protocol);
+}
+
+function selectShunterSubprotocols(protocol: ProtocolMetadata): readonly ShunterSubprotocol[] {
+  const preferred = assertProtocolCompatible(protocol);
+  return [
+    preferred,
+    ...compatibleShunterSubprotocols(protocol).filter((subprotocol) => subprotocol !== preferred),
+  ];
+}
+
+function compatibleShunterSubprotocols(protocol: ProtocolMetadata): ShunterSubprotocol[] {
+  const generatedSubprotocols = protocol.supportedSubprotocols as readonly string[];
+  return SHUNTER_SUPPORTED_SUBPROTOCOLS.filter((subprotocol) =>
+    generatedSubprotocols.includes(subprotocol)
+  );
+}
+
+function isSupportedShunterSubprotocol(subprotocol: string): subprotocol is ShunterSubprotocol {
+  return (SHUNTER_SUPPORTED_SUBPROTOCOLS as readonly string[]).includes(subprotocol);
 }
 
 function sameProtocolMetadata(left: ProtocolMetadata, right: ProtocolMetadata): boolean {
@@ -534,6 +565,7 @@ interface PendingSubscription {
   readonly requestId: RequestID;
   readonly queryId: QueryID;
   readonly tableName?: string;
+  readonly params?: Uint8Array;
   readonly onRawRows?: (message: SubscribeSingleAppliedMessage) => void;
   readonly onRawUpdate?: RawSubscriptionUpdateCallback;
   readonly onRows?: (rows: readonly unknown[]) => void;
@@ -551,6 +583,7 @@ interface ActiveSubscription {
   readonly target: string;
   readonly queryId: QueryID;
   readonly tableName?: string;
+  readonly params?: Uint8Array;
   readonly unsubscribeMode: "single" | "multi";
   readonly onRawRows?: (message: SubscribeSingleAppliedMessage) => void;
   readonly onRawUpdate?: RawSubscriptionUpdateCallback;
@@ -1333,7 +1366,18 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         : encodeDeclaredViewSubscriptionRequest(active.target, {
           requestId: allocateRequestId(),
           queryId: active.queryId,
+          params: active.params,
         });
+      const requestParams = "params" in request && request.params instanceof Uint8Array
+        ? request.params
+        : undefined;
+      if (requestParams !== undefined) {
+        try {
+          assertDeclaredReadParametersSupported(state.status === "connected" ? state.metadata.subprotocol : undefined, options.protocol);
+        } catch (error) {
+          return isShunterError(error) ? error : toShunterError(error, "protocol_mismatch", "Declared view resubscribe protocol check failed");
+        }
+      }
       if (
         pendingSubscriptionsByRequest.has(request.requestId) ||
         pendingSubscriptionsByQuery.has(request.queryId)
@@ -1353,6 +1397,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         requestId: request.requestId,
         queryId: request.queryId,
         tableName: active.tableName,
+        params: requestParams,
         onRawRows: active.onRawRows,
         onRawUpdate: active.onRawUpdate,
         onRows: active.onRows,
@@ -1406,6 +1451,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       target: pending.target,
       queryId: response.queryId,
       tableName: response.tableName,
+      params: pending.params,
       unsubscribeMode: "single",
       onRawRows: pending.onRawRows,
       onRawUpdate: pending.onRawUpdate,
@@ -1493,6 +1539,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       kind: pending.kind,
       target: pending.target,
       queryId: response.queryId,
+      params: pending.params,
       unsubscribeMode: "multi",
       onRawUpdate: pending.onRawUpdate,
       onUpdate: pending.onUpdate,
@@ -1689,14 +1736,14 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
 
       connectPromise = new Promise<ConnectionMetadata<Protocol>>(async (resolve, reject) => {
         rejectConnect = reject;
-        let offeredSubprotocol: ShunterSubprotocol;
+        let offeredSubprotocols: readonly ShunterSubprotocol[];
         let url: string;
         let tokenAwaitStarted = false;
         try {
           if (options.contract !== undefined) {
             assertGeneratedContractCompatible(options.contract, { protocol: options.protocol });
           }
-          offeredSubprotocol = selectShunterSubprotocol(options.protocol);
+          offeredSubprotocols = selectShunterSubprotocols(options.protocol);
           tokenAwaitStarted = true;
           const token = await resolveToken(options.token);
           if (connectGeneration !== generation || state.status !== "connecting") {
@@ -1722,7 +1769,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
 
         let ws: WebSocketLike;
         try {
-          ws = createWebSocket(url, [offeredSubprotocol], options.webSocketFactory);
+          ws = createWebSocket(url, offeredSubprotocols, options.webSocketFactory);
         } catch (error) {
           const shunterError = toShunterError(error, "transport", "Create WebSocket failed");
           setState({ status: "failed", error: shunterError });
@@ -1772,7 +1819,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
               const identityToken = decodeIdentityTokenFrame(event.data);
               const metadata: ConnectionMetadata<Protocol> = {
                 protocol: options.protocol,
-                subprotocol: selectedSubprotocol ?? ws.protocol ?? offeredSubprotocol,
+                subprotocol: selectedSubprotocol ?? ws.protocol ?? offeredSubprotocols[0],
                 identityToken: identityToken.token,
                 identity: identityToken.identity,
                 connectionId: identityToken.connectionId,
@@ -1985,6 +2032,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           ? options.requestId ?? allocateDeclaredQueryRequestId()
           : options.requestId,
       });
+      if (request.params !== undefined) {
+        assertDeclaredReadParametersSupported(state.metadata.subprotocol, state.metadata.protocol);
+      }
       const messageKey = bytesKey(request.messageId);
       if (pendingDeclaredQueries.has(messageKey)) {
         throw new ShunterValidationError("Declared query message ID is already in flight.", {
@@ -2039,6 +2089,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         requestId: options.requestId ?? allocateSubscriptionRequestId(),
         queryId: options.queryId ?? allocateSubscriptionQueryId(),
       });
+      if (request.params !== undefined) {
+        assertDeclaredReadParametersSupported(state.metadata.subprotocol, state.metadata.protocol);
+      }
       if (subscriptionIdInUse(request.requestId, request.queryId)) {
         throw subscriptionIdInUseError("declared_view", name, request.requestId, request.queryId);
       }
@@ -2071,6 +2124,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           target: name,
           requestId: request.requestId,
           queryId: request.queryId,
+          params: request.params,
           onInitialRows: options.onInitialRows as ((rows: readonly unknown[]) => void) | undefined,
           onUpdate: options.onUpdate as ((update: SubscriptionUpdate<unknown>) => void) | undefined,
           onRawUpdate: options.onRawUpdate,
@@ -3850,12 +3904,14 @@ export interface DeclaredQueryOptions {
   readonly requestId?: RequestID;
   readonly messageId?: Uint8Array;
   readonly signal?: AbortSignal;
+  readonly params?: Uint8Array;
 }
 
 export interface EncodedDeclaredQueryRequest<Name extends string = string> {
   readonly name: Name;
   readonly requestId?: RequestID;
   readonly messageId: Uint8Array;
+  readonly params?: Uint8Array;
   readonly frame: Uint8Array;
 }
 
@@ -3882,24 +3938,34 @@ export function encodeDeclaredQueryRequest<Name extends string>(
   const messageId = options.messageId === undefined
     ? requestIdMessageId(requestId ?? 0)
     : new Uint8Array(options.messageId);
+  const params = optionalUint8Array(options.params, "Declared query parameters");
   const queryName = utf8Bytes(name, "Declared query name");
   const frameLength =
     1 +
     4 + messageId.length +
-    4 + queryName.length;
+    4 + queryName.length +
+    (params === undefined ? 0 : 4 + params.length);
   const frame = new Uint8Array(frameLength);
   let offset = 0;
-  frame[offset] = SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY;
+  frame[offset] = params === undefined
+    ? SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY
+    : SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY_WITH_PARAMETERS;
   offset += 1;
   offset = writeUint32LE(frame, offset, messageId.length);
   frame.set(messageId, offset);
   offset += messageId.length;
   offset = writeUint32LE(frame, offset, queryName.length);
   frame.set(queryName, offset);
+  offset += queryName.length;
+  if (params !== undefined) {
+    offset = writeUint32LE(frame, offset, params.length);
+    frame.set(params, offset);
+  }
   return {
     name,
     ...(requestId === undefined ? {} : { requestId }),
     messageId,
+    ...(params === undefined ? {} : { params }),
     frame,
   };
 }
@@ -3909,6 +3975,36 @@ function requestIdMessageId(requestId: RequestID): Uint8Array {
   const messageId = new Uint8Array(4);
   writeUint32LE(messageId, 0, requestId);
   return messageId;
+}
+
+function optionalUint8Array(value: unknown, label: string): Uint8Array | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!(value instanceof Uint8Array)) {
+    throw new ShunterValidationError(`${label} must be a Uint8Array.`, {
+      code: "invalid_declared_read_parameters",
+      details: { receivedType: value === null ? "null" : typeof value },
+    });
+  }
+  return new Uint8Array(value);
+}
+
+function assertDeclaredReadParametersSupported(
+  selectedSubprotocol: string | undefined,
+  expected: ProtocolMetadata,
+): void {
+  if (selectedSubprotocol === SHUNTER_SUBPROTOCOL_V2) {
+    return;
+  }
+  throw new ShunterProtocolMismatchError(
+    "The negotiated Shunter WebSocket subprotocol does not support parameterized declared reads.",
+    {
+      code: "declared_read_parameters_unsupported_subprotocol",
+      expected,
+      receivedSubprotocol: selectedSubprotocol,
+    },
+  );
 }
 
 export interface SubscriptionClosed {
@@ -4041,6 +4137,7 @@ export interface DeclaredViewSubscriptionOptions<Row = unknown> {
 	readonly onInitialRows?: (rows: readonly Row[]) => void;
 	readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
 	readonly onRawUpdate?: RawSubscriptionUpdateCallback;
+	readonly params?: Uint8Array;
 }
 
 export interface EncodedSubscribeSingleRequest {
@@ -4058,6 +4155,7 @@ export interface EncodedDeclaredViewSubscriptionRequest<Name extends string = st
   readonly name: Name;
   readonly requestId: RequestID;
   readonly queryId: QueryID;
+  readonly params?: Uint8Array;
   readonly frame: Uint8Array;
 }
 
@@ -4133,24 +4231,34 @@ export function encodeDeclaredViewSubscriptionRequest<Name extends string>(
   const queryId = options.queryId ?? 0;
   assertUint32(requestId, "Declared view subscription request ID");
   assertUint32(queryId, "Declared view subscription query ID");
+  const params = optionalUint8Array(options.params, "Declared view parameters");
   const viewName = utf8Bytes(name, "Declared view name");
   const frameLength =
     1 +
     4 +
     4 +
-    4 + viewName.length;
+    4 + viewName.length +
+    (params === undefined ? 0 : 4 + params.length);
   const frame = new Uint8Array(frameLength);
   let offset = 0;
-  frame[offset] = SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW;
+  frame[offset] = params === undefined
+    ? SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW
+    : SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW_WITH_PARAMETERS;
   offset += 1;
   offset = writeUint32LE(frame, offset, requestId);
   offset = writeUint32LE(frame, offset, queryId);
   offset = writeUint32LE(frame, offset, viewName.length);
   frame.set(viewName, offset);
+  offset += viewName.length;
+  if (params !== undefined) {
+    offset = writeUint32LE(frame, offset, params.length);
+    frame.set(params, offset);
+  }
   return {
     name,
     requestId,
     queryId,
+    ...(params === undefined ? {} : { params }),
     frame,
   };
 }

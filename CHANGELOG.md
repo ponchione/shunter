@@ -10,6 +10,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Declared query and view SQL validation now accepts declared app placeholders,
   rejects unknown or unused parameters, and exports deterministic result
   metadata for parameterized declared reads without enabling runtime binding.
+- The TypeScript client runtime now prefers Shunter protocol v2, keeps v1
+  compatibility for no-parameter declared reads, and can send encoded declared
+  query/view parameter payloads over v2.
 - Moved stale v1 roadmap follow-up into `working-docs/tech-debt.md` and
   restored the source version to a post-release development marker.
 - Hardened offline DataDir backup/restore file copies against replaced source

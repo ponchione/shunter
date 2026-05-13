@@ -1,5 +1,5 @@
 import {
-  SHUNTER_SUBPROTOCOL_V1,
+  SHUNTER_SUBPROTOCOL_V2,
   SHUNTER_MODULE_CONTRACT_FORMAT,
   assertGeneratedContractCompatible,
   callReducerWithEncodedArgs,
@@ -135,7 +135,7 @@ const compatibleContract: GeneratedContractMetadata<typeof generatedProtocol> =
   });
 const contractCompatibilityIssue: GeneratedContractCompatibilityIssue | undefined =
   contractCompatibility.ok ? undefined : contractCompatibility.issue;
-const selectedSubprotocol: typeof SHUNTER_SUBPROTOCOL_V1 =
+const selectedSubprotocol: typeof SHUNTER_SUBPROTOCOL_V2 =
   generatedProtocol.defaultSubprotocol;
 
 const connectedState: ConnectionState<typeof generatedProtocol> = {
@@ -166,7 +166,7 @@ const client = createShunterClient({
   contract: shunterContract,
   token: async () => "token",
   webSocketFactory: () => ({
-    protocol: SHUNTER_SUBPROTOCOL_V1,
+    protocol: SHUNTER_SUBPROTOCOL_V2,
     binaryType: "arraybuffer",
     addEventListener() {},
     removeEventListener() {},
@@ -196,12 +196,29 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const encodedQueryRequest: EncodedDeclaredQueryRequest<ExecutableQueryName> =
     encodeDeclaredQueryRequest("recent_messages", { requestId: 10 });
   const encodedQueryFrame: Uint8Array = encodedQueryRequest.frame;
+  const encodedParameterizedQueryRequest: EncodedDeclaredQueryRequest<ExecutableQueryName> =
+    encodeDeclaredQueryRequest("recent_messages", {
+      requestId: 10,
+      params: new Uint8Array([1, 2, 3]),
+    });
+  const encodedParameterizedQueryParams: Uint8Array | undefined =
+    encodedParameterizedQueryRequest.params;
+  const encodedParameterizedQueryFrame: Uint8Array = encodedParameterizedQueryRequest.frame;
   const encodedViewRequest: EncodedDeclaredViewSubscriptionRequest<ExecutableViewName> =
     encodeDeclaredViewSubscriptionRequest("live_message_projection", {
       requestId: 11,
       queryId: 12,
     });
   const encodedViewFrame: Uint8Array = encodedViewRequest.frame;
+  const encodedParameterizedViewRequest: EncodedDeclaredViewSubscriptionRequest<ExecutableViewName> =
+    encodeDeclaredViewSubscriptionRequest("live_message_projection", {
+      requestId: 11,
+      queryId: 12,
+      params: new Uint8Array([4, 5, 6]),
+    });
+  const encodedParameterizedViewParams: Uint8Array | undefined =
+    encodedParameterizedViewRequest.params;
+  const encodedParameterizedViewFrame: Uint8Array = encodedParameterizedViewRequest.frame;
   const encodedSubscribeSingle: EncodedSubscribeSingleRequest =
     encodeSubscribeSingleRequest("SELECT * FROM messages", {
       requestId: 13,
@@ -512,7 +529,11 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void reducerResultDecoder;
   void encodedFrame;
   void encodedQueryFrame;
+  void encodedParameterizedQueryParams;
+  void encodedParameterizedQueryFrame;
   void encodedViewFrame;
+  void encodedParameterizedViewParams;
+  void encodedParameterizedViewFrame;
   void encodedSubscribeSingleFrame;
   void encodedTableFrame;
   void queryBytes;
