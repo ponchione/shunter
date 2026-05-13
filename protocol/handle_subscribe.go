@@ -331,15 +331,27 @@ type SQLQueryParameter struct {
 	Type types.ValueKind
 }
 
+// SQLQueryParameterValue binds one declared-read app placeholder to a concrete
+// runtime value. :sender remains caller identity and is not a parameter.
+type SQLQueryParameterValue struct {
+	Name  string
+	Value types.Value
+}
+
 // CompiledSQLQueryTemplate is SQL metadata validated against declared
-// parameters. It is intentionally metadata-only; runtime parameter binding is
-// handled by a later slice.
+// parameters. Runtime execution must bind concrete parameter values through
+// CompileSQLQueryStringWithParameters.
 type CompiledSQLQueryTemplate struct {
 	query compiledSQLQuery
 }
 
 func newCompiledSQLQueryTemplate(query compiledSQLQuery) CompiledSQLQueryTemplate {
 	return CompiledSQLQueryTemplate{query: copyCompiledSQLQuery(query)}
+}
+
+// Copy returns a detached copy of the compiled SQL template metadata.
+func (q CompiledSQLQueryTemplate) Copy() CompiledSQLQueryTemplate {
+	return newCompiledSQLQueryTemplate(q.query)
 }
 
 // TableName returns the projected table name for this SQL template.
@@ -517,9 +529,32 @@ func CompileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, o
 	return newCompiledSQLQuery(compiled), nil
 }
 
+// CompileSQLQueryStringWithParameters compiles declared-read SQL while binding
+// app placeholders to concrete values. Raw SQL protocol surfaces must not use
+// this helper.
+func CompileSQLQueryStringWithParameters(qs string, sl SchemaLookup, caller *types.Identity, opts SQLQueryValidationOptions, parameters []SQLQueryParameterValue) (CompiledSQLQuery, error) {
+	if sl == nil {
+		return CompiledSQLQuery{}, fmt.Errorf("schema lookup must not be nil")
+	}
+	if len(parameters) == 0 {
+		return CompileSQLQueryString(qs, sl, caller, opts)
+	}
+	compiler, err := newBoundSQLLiteralCompiler(caller, parameters)
+	if err != nil {
+		return CompiledSQLQuery{}, err
+	}
+	compiled, err := compileSQLQueryString(qs, sl, compiler, opts.AllowLimit, opts.AllowProjection, opts.AllowOrderBy, opts.AllowOffset)
+	if err != nil {
+		return CompiledSQLQuery{}, err
+	}
+	if err := compiler.validateUsed(); err != nil {
+		return CompiledSQLQuery{}, err
+	}
+	return newCompiledSQLQuery(compiled), nil
+}
+
 // CompileSQLQueryTemplateString compiles declared-read SQL metadata against the
-// supplied parameter schema. Returned metadata must not be executed until
-// concrete parameter binding is implemented.
+// supplied parameter schema.
 func CompileSQLQueryTemplateString(qs string, sl SchemaLookup, caller *types.Identity, opts SQLQueryValidationOptions, parameters []SQLQueryParameter) (CompiledSQLQueryTemplate, error) {
 	if sl == nil {
 		return CompiledSQLQueryTemplate{}, fmt.Errorf("schema lookup must not be nil")
@@ -1621,6 +1656,64 @@ func (c *templateSQLLiteralCompiler) validateUsed() error {
 	for _, name := range c.order {
 		if _, ok := c.used[name]; !ok {
 			return fmt.Errorf("%w: SQL parameter :%s is declared but not used", sql.ErrUnsupportedSQL, name)
+		}
+	}
+	return nil
+}
+
+type boundSQLLiteralCompiler struct {
+	runtimeSQLLiteralCompiler
+	byName map[string]types.Value
+	order  []string
+	used   map[string]struct{}
+}
+
+func newBoundSQLLiteralCompiler(caller *types.Identity, parameters []SQLQueryParameterValue) (*boundSQLLiteralCompiler, error) {
+	compiler := &boundSQLLiteralCompiler{
+		runtimeSQLLiteralCompiler: runtimeSQLLiteralCompiler{caller: caller},
+		byName:                    make(map[string]types.Value, len(parameters)),
+		order:                     make([]string, 0, len(parameters)),
+		used:                      make(map[string]struct{}, len(parameters)),
+	}
+	for _, parameter := range parameters {
+		if strings.TrimSpace(parameter.Name) == "" {
+			return nil, fmt.Errorf("%w: SQL parameter name must not be empty", sql.ErrUnsupportedSQL)
+		}
+		if parameter.Name == "sender" {
+			return nil, fmt.Errorf("%w: SQL parameter :sender is reserved for caller identity", sql.ErrUnsupportedSQL)
+		}
+		if _, exists := compiler.byName[parameter.Name]; exists {
+			return nil, fmt.Errorf("%w: SQL parameter :%s is bound more than once", sql.ErrUnsupportedSQL, parameter.Name)
+		}
+		compiler.byName[parameter.Name] = parameter.Value
+		compiler.order = append(compiler.order, parameter.Name)
+	}
+	return compiler, nil
+}
+
+func (c *boundSQLLiteralCompiler) compileSQLLiteral(lit sql.Literal, kind types.ValueKind, columnName string) (types.Value, error) {
+	if lit.Kind != sql.LitParameter {
+		return c.runtimeSQLLiteralCompiler.compileSQLLiteral(lit, kind, columnName)
+	}
+	name := lit.Param
+	if name == "" {
+		name = strings.TrimPrefix(lit.Text, ":")
+	}
+	value, ok := c.byName[name]
+	if !ok {
+		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s has no bound value", sql.ErrUnsupportedSQL, name)
+	}
+	if value.Kind() != kind {
+		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s type %s is incompatible with column %q type %s", sql.ErrUnsupportedSQL, name, sql.AlgebraicName(value.Kind()), columnName, sql.AlgebraicName(kind))
+	}
+	c.used[name] = struct{}{}
+	return value, nil
+}
+
+func (c *boundSQLLiteralCompiler) validateUsed() error {
+	for _, name := range c.order {
+		if _, ok := c.used[name]; !ok {
+			return fmt.Errorf("%w: SQL parameter :%s is bound but not used", sql.ErrUnsupportedSQL, name)
 		}
 	}
 	return nil

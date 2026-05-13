@@ -47,6 +47,7 @@ type DeclaredReadOption func(*declaredReadOptions)
 type declaredReadOptions struct {
 	caller         types.CallerContext
 	requestID      uint32
+	parameters     *types.ProductValue
 	permissionsSet bool
 }
 
@@ -100,6 +101,14 @@ func WithDeclaredReadRequestID(requestID uint32) DeclaredReadOption {
 	}
 }
 
+// WithDeclaredReadParameters supplies ordered declared-read parameter values.
+func WithDeclaredReadParameters(values types.ProductValue) DeclaredReadOption {
+	return func(opts *declaredReadOptions) {
+		copied := values.Copy()
+		opts.parameters = &copied
+	}
+}
+
 // CallQuery executes an executable QueryDeclaration by declaration name.
 func (r *Runtime) CallQuery(ctx context.Context, name string, opts ...DeclaredReadOption) (DeclaredQueryResult, error) {
 	if ctx == nil {
@@ -117,7 +126,7 @@ func (r *Runtime) CallQuery(ctx context.Context, name string, opts ...DeclaredRe
 	if err != nil {
 		return DeclaredQueryResult{}, err
 	}
-	compiled, err := r.executableDeclaredRead(entry, callOpts.caller)
+	compiled, err := r.executableDeclaredRead(entry, callOpts.caller, callOpts.parameters)
 	if err != nil {
 		return DeclaredQueryResult{}, err
 	}
@@ -155,7 +164,7 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 	if err != nil {
 		return DeclaredViewSubscription{}, err
 	}
-	compiled, err := r.executableDeclaredRead(entry, callOpts.caller)
+	compiled, err := r.executableDeclaredRead(entry, callOpts.caller, callOpts.parameters)
 	if err != nil {
 		return DeclaredViewSubscription{}, err
 	}
@@ -393,14 +402,53 @@ func (r *Runtime) authorizedDeclaredRead(name string, kind declaredReadKind, cal
 	return entry, nil
 }
 
-func (r *Runtime) executableDeclaredRead(entry declaredReadEntry, caller types.CallerContext) (protocol.CompiledSQLQuery, error) {
-	if entry.compiled == nil {
+func (r *Runtime) executableDeclaredRead(entry declaredReadEntry, caller types.CallerContext, parameters *types.ProductValue) (protocol.CompiledSQLQuery, error) {
+	if entry.compiled == nil && entry.template == nil {
 		return protocol.CompiledSQLQuery{}, fmt.Errorf("%w: %s %q", ErrDeclaredReadNotExecutable, entry.Kind, entry.Name)
+	}
+	bindings, err := declaredReadParameterBindings(entry, parameters)
+	if err != nil {
+		return protocol.CompiledSQLQuery{}, err
+	}
+	if len(bindings) != 0 {
+		return protocol.CompileSQLQueryStringWithParameters(entry.SQL, r.registry, &caller.Identity, validationOptionsForDeclaredRead(entry.Kind), bindings)
 	}
 	if entry.UsesCallerIdentity {
 		return protocol.CompileSQLQueryString(entry.SQL, r.registry, &caller.Identity, validationOptionsForDeclaredRead(entry.Kind))
 	}
 	return entry.compiled.Copy(), nil
+}
+
+func declaredReadParameterBindings(entry declaredReadEntry, supplied *types.ProductValue) ([]protocol.SQLQueryParameterValue, error) {
+	if !declaredReadHasAppParameters(entry.Parameters) {
+		if supplied != nil {
+			return nil, fmt.Errorf("shunter: declared %s %q does not accept parameters", entry.Kind, entry.Name)
+		}
+		return nil, nil
+	}
+	if supplied == nil {
+		return nil, fmt.Errorf("shunter: declared %s %q requires %d parameter(s)", entry.Kind, entry.Name, len(entry.Parameters.Columns))
+	}
+	values := *supplied
+	if len(values) != len(entry.Parameters.Columns) {
+		return nil, fmt.Errorf("shunter: declared %s %q parameter arity = %d, want %d", entry.Kind, entry.Name, len(values), len(entry.Parameters.Columns))
+	}
+	bindings := make([]protocol.SQLQueryParameterValue, len(entry.Parameters.Columns))
+	for i, parameter := range entry.Parameters.Columns {
+		kind, ok := valueKindFromExportString(parameter.Type)
+		if !ok {
+			return nil, fmt.Errorf("shunter: declared %s %q parameter %d %q has invalid type %q", entry.Kind, entry.Name, i, parameter.Name, parameter.Type)
+		}
+		value := values[i]
+		if value.Kind() != kind {
+			return nil, fmt.Errorf("shunter: declared %s %q parameter %d %q type = %s, want %s", entry.Kind, entry.Name, i, parameter.Name, value.Kind(), kind)
+		}
+		if value.IsNull() && !parameter.Nullable {
+			return nil, fmt.Errorf("shunter: declared %s %q parameter %d %q is null but not nullable", entry.Kind, entry.Name, i, parameter.Name)
+		}
+		bindings[i] = protocol.SQLQueryParameterValue{Name: parameter.Name, Value: value}
+	}
+	return bindings, nil
 }
 
 func (r *Runtime) applyDeclaredReadVisibility(compiled protocol.CompiledSQLQuery, caller types.CallerContext) (protocol.CompiledSQLQuery, error) {

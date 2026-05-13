@@ -61,6 +61,41 @@ func TestProtocolDeclaredViewSucceedsWithDeclarationPermission(t *testing.T) {
 	requireDeclaredReadAppliedRows(t, client, 31, 41, "messages", 1)
 }
 
+func TestProtocolV1ParameterizedDeclaredReadsRejectWithoutParams(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Query(QueryDeclaration{
+			Name: "messages_by_body",
+			SQL:  "SELECT * FROM messages WHERE body = :body",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages_by_body",
+			SQL:  "SELECT * FROM messages WHERE body = :body",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+
+	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "reader", "messages:read", "messages:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.DeclaredQueryMsg{
+		MessageID: []byte("parameterized-declared-query"),
+		Name:      "messages_by_body",
+	})
+	requireDeclaredReadOneOffError(t, client, `declared query "messages_by_body" requires 1 parameter(s)`)
+
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 32,
+		QueryID:   42,
+		Name:      "live_messages_by_body",
+	})
+	requireDeclaredReadSubscriptionError(t, client, 32, 42, `declared view "live_messages_by_body" requires 1 parameter(s)`)
+}
+
 func TestProtocolDeclaredViewUnindexedJoinRejected(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, NewModule("protocol_unindexed_join_reads").
 		SchemaVersion(1).

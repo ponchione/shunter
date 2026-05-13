@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
@@ -96,7 +97,7 @@ func TestDeclaredViewAdmissionPlanCarriesSubscriptionRegistrationState(t *testin
 		t.Fatal("declared view catalog entry missing")
 	}
 	caller := types.CallerContext{Identity: types.Identity{1, 2, 3}, ConnectionID: types.ConnectionID{99}}
-	compiled, err := rt.executableDeclaredRead(entry, caller)
+	compiled, err := rt.executableDeclaredRead(entry, caller, nil)
 	if err != nil {
 		t.Fatalf("executableDeclaredRead: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestDeclaredViewAdmissionPlanRecordsJoinGraph(t *testing.T) {
 	if !ok {
 		t.Fatal("declared view catalog entry missing")
 	}
-	compiled, err := rt.executableDeclaredRead(entry, types.CallerContext{Identity: types.Identity{9}})
+	compiled, err := rt.executableDeclaredRead(entry, types.CallerContext{Identity: types.Identity{9}}, nil)
 	if err != nil {
 		t.Fatalf("executableDeclaredRead: %v", err)
 	}
@@ -1920,6 +1921,368 @@ func TestDeclaredViewJoinWhereColumnComparisonAppliesVisibility(t *testing.T) {
 	}
 }
 
+func TestCallQueryWithDeclaredReadParametersFiltersRows(t *testing.T) {
+	const injected = "' OR TRUE OR body = '"
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		Query(QueryDeclaration{
+			Name: "messages_by_body",
+			SQL:  "SELECT * FROM messages WHERE body = :body ORDER BY id",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, "alpha")
+	insertMessageWithBody(t, rt, 2, "bravo")
+	insertMessageWithBody(t, rt, 3, "alpha")
+	insertMessageWithBody(t, rt, 4, injected)
+
+	result, err := rt.CallQuery(context.Background(), "messages_by_body",
+		WithDeclaredReadPermissions("messages:read"),
+		WithDeclaredReadParameters(types.ProductValue{types.NewString("alpha")}),
+	)
+	if err != nil {
+		t.Fatalf("CallQuery alpha: %v", err)
+	}
+	if got, want := rowUint64IDs(result.Rows), []uint64{1, 3}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("alpha rows = %v, want %v; rows=%#v", got, want, result.Rows)
+	}
+
+	result, err = rt.CallQuery(context.Background(), "messages_by_body",
+		WithDeclaredReadPermissions("messages:read"),
+		WithDeclaredReadParameters(types.ProductValue{types.NewString(injected)}),
+	)
+	if err != nil {
+		t.Fatalf("CallQuery injection-shaped parameter: %v", err)
+	}
+	if got, want := rowUint64IDs(result.Rows), []uint64{4}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("injection-shaped parameter rows = %v, want %v; rows=%#v", got, want, result.Rows)
+	}
+}
+
+func TestCallQueryDeclaredReadParametersComposeWithSender(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x31)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		Query(QueryDeclaration{
+			Name: "own_message_by_id",
+			SQL:  "SELECT * FROM messages WHERE body = :sender AND id = :message_id",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "message_id", Type: "uint64"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, alice.Hex())
+
+	result, err := rt.CallQuery(context.Background(), "own_message_by_id",
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:read"),
+		WithDeclaredReadParameters(types.ProductValue{types.NewUint64(2)}),
+	)
+	if err != nil {
+		t.Fatalf("CallQuery sender plus parameter: %v", err)
+	}
+	if got, want := rowUint64IDs(result.Rows), []uint64{2}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("sender plus parameter rows = %v, want %v; rows=%#v", got, want, result.Rows)
+	}
+}
+
+func TestCallQueryDeclaredReadParametersApplyVisibility(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x32)
+	bob := visibilityRuntimeIdentity(0x33)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		Query(QueryDeclaration{
+			Name: "message_by_id",
+			SQL:  "SELECT * FROM messages WHERE id = :message_id",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "message_id", Type: "uint64"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+
+	result, err := rt.CallQuery(context.Background(), "message_by_id",
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:read"),
+		WithDeclaredReadParameters(types.ProductValue{types.NewUint64(2)}),
+	)
+	if err != nil {
+		t.Fatalf("CallQuery hidden parameterized row: %v", err)
+	}
+	if len(result.Rows) != 0 {
+		t.Fatalf("hidden parameterized rows = %#v, want none after visibility", result.Rows)
+	}
+
+	result, err = rt.CallQuery(context.Background(), "message_by_id",
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:read"),
+		WithDeclaredReadParameters(types.ProductValue{types.NewUint64(1)}),
+	)
+	if err != nil {
+		t.Fatalf("CallQuery visible parameterized row: %v", err)
+	}
+	if got, want := rowUint64IDs(result.Rows), []uint64{1}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("visible parameterized rows = %v, want %v; rows=%#v", got, want, result.Rows)
+	}
+}
+
+func TestSubscribeViewWithDeclaredReadParametersFiltersInitialRowsAndDeltas(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		View(ViewDeclaration{
+			Name: "live_messages_by_body",
+			SQL:  "SELECT * FROM messages WHERE body = :body",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	capture := newDeclaredReadLocalFanOutSender(4)
+	installDeclaredReadLocalFanOutSender(t, rt, capture)
+	alphaConn := types.ConnectionID{0xA1}
+	bravoConn := types.ConnectionID{0xB2}
+	rt.fanOutWorker.SetConfirmedReads(alphaConn, false)
+	rt.fanOutWorker.SetConfirmedReads(bravoConn, false)
+
+	insertMessageWithBody(t, rt, 1, "alpha")
+	insertMessageWithBody(t, rt, 2, "bravo")
+
+	alphaSub, err := rt.SubscribeView(context.Background(), "live_messages_by_body", 10,
+		WithDeclaredReadConnectionID(alphaConn),
+		WithDeclaredReadPermissions("messages:subscribe"),
+		WithDeclaredReadParameters(types.ProductValue{types.NewString("alpha")}),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView alpha: %v", err)
+	}
+	if got, want := rowUint64IDs(alphaSub.InitialRows), []uint64{1}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("alpha initial rows = %v, want %v; rows=%#v", got, want, alphaSub.InitialRows)
+	}
+
+	bravoSub, err := rt.SubscribeView(context.Background(), "live_messages_by_body", 11,
+		WithDeclaredReadConnectionID(bravoConn),
+		WithDeclaredReadPermissions("messages:subscribe"),
+		WithDeclaredReadParameters(types.ProductValue{types.NewString("bravo")}),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView bravo: %v", err)
+	}
+	if got, want := rowUint64IDs(bravoSub.InitialRows), []uint64{2}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("bravo initial rows = %v, want %v; rows=%#v", got, want, bravoSub.InitialRows)
+	}
+
+	insertMessageWithBody(t, rt, 3, "alpha")
+	assertDeclaredReadLightFanOutInsert(t, capture.requireLight(t), alphaConn, 10, 3)
+	capture.requireNoLight(t)
+
+	insertMessageWithBody(t, rt, 4, "bravo")
+	assertDeclaredReadLightFanOutInsert(t, capture.requireLight(t), bravoConn, 11, 4)
+	capture.requireNoLight(t)
+}
+
+func TestSubscribeViewWithEqualDeclaredReadParametersCanReuseSubscriptionState(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		View(ViewDeclaration{
+			Name: "live_messages_by_body",
+			SQL:  "SELECT * FROM messages WHERE body = :body",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, "alpha")
+	insertMessageWithBody(t, rt, 2, "bravo")
+	connID := types.ConnectionID{0xC3}
+
+	first, err := rt.SubscribeView(context.Background(), "live_messages_by_body", 20,
+		WithDeclaredReadConnectionID(connID),
+		WithDeclaredReadPermissions("messages:subscribe"),
+		WithDeclaredReadParameters(types.ProductValue{types.NewString("alpha")}),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView first alpha: %v", err)
+	}
+	if got, want := rowUint64IDs(first.InitialRows), []uint64{1}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("first alpha initial rows = %v, want %v; rows=%#v", got, want, first.InitialRows)
+	}
+
+	second, err := rt.SubscribeView(context.Background(), "live_messages_by_body", 21,
+		WithDeclaredReadConnectionID(connID),
+		WithDeclaredReadPermissions("messages:subscribe"),
+		WithDeclaredReadParameters(types.ProductValue{types.NewString("alpha")}),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView second alpha: %v", err)
+	}
+	if len(second.InitialRows) != 0 {
+		t.Fatalf("second alpha initial rows = %#v, want existing same-connection dedupe to skip snapshot", second.InitialRows)
+	}
+
+	third, err := rt.SubscribeView(context.Background(), "live_messages_by_body", 22,
+		WithDeclaredReadConnectionID(connID),
+		WithDeclaredReadPermissions("messages:subscribe"),
+		WithDeclaredReadParameters(types.ProductValue{types.NewString("bravo")}),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView bravo: %v", err)
+	}
+	if got, want := rowUint64IDs(third.InitialRows), []uint64{2}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("bravo initial rows = %v, want %v; rows=%#v", got, want, third.InitialRows)
+	}
+}
+
+func TestDeclaredReadParameterValidationErrors(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Query(QueryDeclaration{
+			Name:        "all_messages",
+			SQL:         "SELECT * FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}).
+		Query(QueryDeclaration{
+			Name: "messages_by_body",
+			SQL:  "SELECT * FROM messages WHERE body = :body",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}).
+		View(ViewDeclaration{
+			Name:        "live_all_messages",
+			SQL:         "SELECT * FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages_by_body",
+			SQL:  "SELECT * FROM messages WHERE body = :body",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+
+	tests := []struct {
+		name string
+		call func() error
+		want string
+	}{
+		{
+			name: "unexpected query params",
+			call: func() error {
+				_, err := rt.CallQuery(context.Background(), "all_messages",
+					WithDeclaredReadPermissions("messages:read"),
+					WithDeclaredReadParameters(types.ProductValue{}),
+				)
+				return err
+			},
+			want: `declared query "all_messages" does not accept parameters`,
+		},
+		{
+			name: "unexpected view params",
+			call: func() error {
+				_, err := rt.SubscribeView(context.Background(), "live_all_messages", 30,
+					WithDeclaredReadPermissions("messages:subscribe"),
+					WithDeclaredReadParameters(types.ProductValue{}),
+				)
+				return err
+			},
+			want: `declared view "live_all_messages" does not accept parameters`,
+		},
+		{
+			name: "missing query params",
+			call: func() error {
+				_, err := rt.CallQuery(context.Background(), "messages_by_body", WithDeclaredReadPermissions("messages:read"))
+				return err
+			},
+			want: `declared query "messages_by_body" requires 1 parameter(s)`,
+		},
+		{
+			name: "missing view params",
+			call: func() error {
+				_, err := rt.SubscribeView(context.Background(), "live_messages_by_body", 31, WithDeclaredReadPermissions("messages:subscribe"))
+				return err
+			},
+			want: `declared view "live_messages_by_body" requires 1 parameter(s)`,
+		},
+		{
+			name: "wrong arity",
+			call: func() error {
+				_, err := rt.CallQuery(context.Background(), "messages_by_body",
+					WithDeclaredReadPermissions("messages:read"),
+					WithDeclaredReadParameters(types.ProductValue{types.NewString("alpha"), types.NewString("bravo")}),
+				)
+				return err
+			},
+			want: `declared query "messages_by_body" parameter arity = 2, want 1`,
+		},
+		{
+			name: "wrong type",
+			call: func() error {
+				_, err := rt.CallQuery(context.Background(), "messages_by_body",
+					WithDeclaredReadPermissions("messages:read"),
+					WithDeclaredReadParameters(types.ProductValue{types.NewUint64(1)}),
+				)
+				return err
+			},
+			want: `declared query "messages_by_body" parameter 0 "body" type = Uint64, want String`,
+		},
+		{
+			name: "null non-nullable",
+			call: func() error {
+				_, err := rt.CallQuery(context.Background(), "messages_by_body",
+					WithDeclaredReadPermissions("messages:read"),
+					WithDeclaredReadParameters(types.ProductValue{types.NewNull(types.KindString)}),
+				)
+				return err
+			},
+			want: `declared query "messages_by_body" parameter 0 "body" is null but not nullable`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.call()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestMetadataOnlyParameterizedDeclaredReadCannotExecute(t *testing.T) {
+	params := &ProductSchema{Columns: []ProductColumn{{Name: "body", Type: "string"}}}
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Query(QueryDeclaration{Name: "metadata_query", Parameters: params}).
+		View(ViewDeclaration{Name: "metadata_view", Parameters: params}))
+	defer rt.Close()
+
+	_, err := rt.CallQuery(context.Background(), "metadata_query",
+		WithDeclaredReadParameters(types.ProductValue{types.NewString("alpha")}),
+	)
+	if !errors.Is(err, ErrDeclaredReadNotExecutable) {
+		t.Fatalf("CallQuery metadata-only parameterized error = %v, want ErrDeclaredReadNotExecutable", err)
+	}
+	_, err = rt.SubscribeView(context.Background(), "metadata_view", 40,
+		WithDeclaredReadParameters(types.ProductValue{types.NewString("alpha")}),
+	)
+	if !errors.Is(err, ErrDeclaredReadNotExecutable) {
+		t.Fatalf("SubscribeView metadata-only parameterized error = %v, want ErrDeclaredReadNotExecutable", err)
+	}
+}
+
 func TestDeclaredReadMissingPermissionRejectsBeforeExecutionOrRegistration(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message", insertMessageReducer).
@@ -2192,6 +2555,99 @@ func TestRawSQLEquivalentDoesNotInheritDeclarationPermission(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no such table: `messages`. If the table exists, it may be marked private.") {
 		t.Fatalf("raw SQL validation error = %v, want private table rejection", err)
 	}
+}
+
+type declaredReadLocalFanOutSender struct {
+	light chan declaredReadLightFanOut
+}
+
+type declaredReadLightFanOut struct {
+	connID    types.ConnectionID
+	requestID uint32
+	updates   []subscription.SubscriptionUpdate
+}
+
+func newDeclaredReadLocalFanOutSender(buffer int) *declaredReadLocalFanOutSender {
+	return &declaredReadLocalFanOutSender{light: make(chan declaredReadLightFanOut, buffer)}
+}
+
+func (s *declaredReadLocalFanOutSender) SendTransactionUpdateHeavy(types.ConnectionID, subscription.CallerOutcome, []subscription.SubscriptionUpdate, *subscription.EncodingMemo) error {
+	return nil
+}
+
+func (s *declaredReadLocalFanOutSender) SendTransactionUpdateLight(connID types.ConnectionID, requestID uint32, updates []subscription.SubscriptionUpdate, _ *subscription.EncodingMemo) error {
+	s.light <- declaredReadLightFanOut{
+		connID:    connID,
+		requestID: requestID,
+		updates:   copyDeclaredReadSubscriptionUpdates(updates),
+	}
+	return nil
+}
+
+func (s *declaredReadLocalFanOutSender) SendSubscriptionError(types.ConnectionID, subscription.SubscriptionError) error {
+	return nil
+}
+
+func (s *declaredReadLocalFanOutSender) requireLight(t *testing.T) declaredReadLightFanOut {
+	t.Helper()
+	select {
+	case got := <-s.light:
+		return got
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for declared-read local fan-out")
+		return declaredReadLightFanOut{}
+	}
+}
+
+func (s *declaredReadLocalFanOutSender) requireNoLight(t *testing.T) {
+	t.Helper()
+	select {
+	case got := <-s.light:
+		t.Fatalf("unexpected declared-read local fan-out = %+v", got)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func installDeclaredReadLocalFanOutSender(t *testing.T, rt *Runtime, sender subscription.FanOutSender) {
+	t.Helper()
+	swappable, ok := rt.fanOutSender.(*swappableFanOutSender)
+	if !ok {
+		t.Fatalf("fanOutSender = %T, want *swappableFanOutSender", rt.fanOutSender)
+	}
+	swappable.SetTarget(sender)
+}
+
+func assertDeclaredReadLightFanOutInsert(t *testing.T, got declaredReadLightFanOut, wantConn types.ConnectionID, wantQueryID uint32, wantID uint64) {
+	t.Helper()
+	if got.connID != wantConn {
+		t.Fatalf("fan-out connID = %x, want %x", got.connID, wantConn)
+	}
+	if len(got.updates) != 1 {
+		t.Fatalf("fan-out updates = %+v, want one update", got.updates)
+	}
+	update := got.updates[0]
+	if update.QueryID != wantQueryID {
+		t.Fatalf("fan-out QueryID = %d, want %d", update.QueryID, wantQueryID)
+	}
+	if len(update.Inserts) != 1 || len(update.Deletes) != 0 {
+		t.Fatalf("fan-out inserts/deletes = %#v/%#v, want one insert", update.Inserts, update.Deletes)
+	}
+	if len(update.Inserts[0]) == 0 || update.Inserts[0][0].AsUint64() != wantID {
+		t.Fatalf("fan-out insert = %#v, want id %d", update.Inserts[0], wantID)
+	}
+}
+
+func copyDeclaredReadSubscriptionUpdates(in []subscription.SubscriptionUpdate) []subscription.SubscriptionUpdate {
+	if len(in) == 0 {
+		return nil
+	}
+	out := append([]subscription.SubscriptionUpdate(nil), in...)
+	for i := range out {
+		out[i].Columns = copyColumnSchemas(out[i].Columns)
+		out[i].Inserts = types.CopyProductValues(out[i].Inserts)
+		out[i].Deletes = types.CopyProductValues(out[i].Deletes)
+	}
+	return out
 }
 
 func buildStartedDeclaredReadRuntime(t *testing.T, mod *Module) *Runtime {

@@ -26,6 +26,7 @@ type declaredReadEntry struct {
 	Name               string
 	Kind               declaredReadKind
 	SQL                string
+	Parameters         *ProductSchema
 	Permissions        PermissionMetadata
 	ReadModel          ReadModelMetadata
 	Migration          MigrationMetadata
@@ -33,6 +34,7 @@ type declaredReadEntry struct {
 	UsesCallerIdentity bool
 
 	compiled *protocol.CompiledSQLQuery
+	template *protocol.CompiledSQLQueryTemplate
 }
 
 type declaredReadSpec struct {
@@ -99,6 +101,7 @@ func declaredReadCatalogEntry(spec declaredReadSpec, sl protocol.SchemaLookup) (
 		Name:        spec.Name,
 		Kind:        spec.Kind,
 		SQL:         spec.SQL,
+		Parameters:  copyProductSchemaPtr(spec.Parameters),
 		Permissions: copyPermissionMetadata(spec.Permissions),
 		ReadModel:   copyReadModelMetadata(spec.ReadModel),
 		Migration:   copyMigrationMetadata(spec.Migration),
@@ -118,6 +121,8 @@ func declaredReadCatalogEntry(spec declaredReadSpec, sl protocol.SchemaLookup) (
 		}
 		entry.ReferencedTables = template.ReferencedTables()
 		entry.UsesCallerIdentity = template.UsesCallerIdentity()
+		templateCopy := template.Copy()
+		entry.template = &templateCopy
 		return entry, nil
 	}
 	compiled, err := compileDeclaredReadSQL(spec.SQL, sl, spec.Validation)
@@ -242,6 +247,7 @@ func copyDeclaredReadEntry(in declaredReadEntry) declaredReadEntry {
 		Name:               in.Name,
 		Kind:               in.Kind,
 		SQL:                in.SQL,
+		Parameters:         copyProductSchemaPtr(in.Parameters),
 		Permissions:        copyPermissionMetadata(in.Permissions),
 		ReadModel:          copyReadModelMetadata(in.ReadModel),
 		Migration:          copyMigrationMetadata(in.Migration),
@@ -251,6 +257,10 @@ func copyDeclaredReadEntry(in declaredReadEntry) declaredReadEntry {
 	if in.compiled != nil {
 		compiled := in.compiled.Copy()
 		out.compiled = &compiled
+	}
+	if in.template != nil {
+		template := in.template.Copy()
+		out.template = &template
 	}
 	return out
 }
