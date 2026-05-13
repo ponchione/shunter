@@ -423,7 +423,11 @@ func (w *OffsetIndexWriter) AppendAfterCommit(txID types.TxID, byteOffset uint64
 	if w.full {
 		return nil
 	}
-	w.bytesSinceLastAppend += recordLen
+	if recordLen > ^uint64(0)-w.bytesSinceLastAppend {
+		w.bytesSinceLastAppend = ^uint64(0)
+	} else {
+		w.bytesSinceLastAppend += recordLen
+	}
 	if !w.haveCandidate {
 		w.candidateTxID = txID
 		w.candidateByteOffset = byteOffset

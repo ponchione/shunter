@@ -1319,6 +1319,36 @@ func TestOffsetIndexWriterCadenceAdvancesEarliestInWindow(t *testing.T) {
 	}
 }
 
+func TestOffsetIndexWriterCadenceCounterSaturatesOnOverflow(t *testing.T) {
+	idx, _ := mustCreate(t, 16)
+	defer idx.Close()
+
+	const interval uint64 = 100
+	w := NewOffsetIndexWriter(idx, interval)
+	w.haveCandidate = true
+	w.candidateTxID = 10
+	w.candidateByteOffset = 1000
+	w.bytesSinceLastAppend = ^uint64(0) - 5
+
+	if err := w.AppendAfterCommit(11, 1100, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := idx.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].TxID != 10 || entries[0].ByteOffset != 1000 {
+		t.Fatalf("entries after saturated counter flush: got %+v want [{10,1000}]", entries)
+	}
+	if !w.haveCandidate || w.candidateTxID != 11 || w.candidateByteOffset != 1100 {
+		t.Fatalf("candidate after saturated counter flush: tx=%d offset=%d have=%v", w.candidateTxID, w.candidateByteOffset, w.haveCandidate)
+	}
+	if w.bytesSinceLastAppend != 0 {
+		t.Fatalf("bytesSinceLastAppend after flush: got %d want 0", w.bytesSinceLastAppend)
+	}
+}
+
 type shortWriteAtSink struct{}
 
 func (shortWriteAtSink) WriteAt(p []byte, _ int64) (int, error) {
