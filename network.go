@@ -236,13 +236,19 @@ func (r *Runtime) serveStarted(ctx context.Context, ln net.Listener) error {
 		ctx = context.Background()
 	}
 	defer r.endServing()
+	return serveHTTPWithLifecycle(ctx, ln, r.HTTPHandler(), r.Start, r.Close)
+}
 
-	if err := r.Start(ctx); err != nil {
+func serveHTTPWithLifecycle(ctx context.Context, ln net.Listener, handler http.Handler, start func(context.Context) error, stop func() error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := start(ctx); err != nil {
 		_ = ln.Close()
 		return err
 	}
 
-	httpServer := newServingHTTPServer(r.HTTPHandler())
+	httpServer := newServingHTTPServer(handler)
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpServer.Serve(ln) }()
 
@@ -251,7 +257,7 @@ func (r *Runtime) serveStarted(ctx context.Context, ln net.Listener) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		shutdownErr := httpServer.Shutdown(shutdownCtx)
-		closeErr := r.Close()
+		closeErr := stop()
 		serveErr := <-errCh
 		if shutdownErr != nil && !errors.Is(shutdownErr, http.ErrServerClosed) {
 			return shutdownErr
@@ -264,7 +270,7 @@ func (r *Runtime) serveStarted(ctx context.Context, ln net.Listener) error {
 		}
 		return ctx.Err()
 	case err := <-errCh:
-		closeErr := r.Close()
+		closeErr := stop()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}

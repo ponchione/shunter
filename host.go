@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 )
 
 // ErrHostServing reports that a host serving loop is already active.
@@ -237,40 +236,7 @@ func (h *Host) endServing() {
 
 func (h *Host) serveStarted(ctx context.Context, ln net.Listener) error {
 	defer h.endServing()
-
-	if err := h.Start(ctx); err != nil {
-		_ = ln.Close()
-		return err
-	}
-
-	httpServer := newServingHTTPServer(h.HTTPHandler())
-	errCh := make(chan error, 1)
-	go func() { errCh <- httpServer.Serve(ln) }()
-
-	select {
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		shutdownErr := httpServer.Shutdown(shutdownCtx)
-		closeErr := h.Close()
-		serveErr := <-errCh
-		if shutdownErr != nil && !errors.Is(shutdownErr, http.ErrServerClosed) {
-			return shutdownErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			return serveErr
-		}
-		return ctx.Err()
-	case err := <-errCh:
-		closeErr := h.Close()
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
-		}
-		return closeErr
-	}
+	return serveHTTPWithLifecycle(ctx, ln, h.HTTPHandler(), h.Start, h.Close)
 }
 
 // Health returns detached health for every hosted runtime in registration order.

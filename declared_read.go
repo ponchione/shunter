@@ -650,6 +650,7 @@ func (r *Runtime) decodeProtocolDeclaredReadParameters(name string, kind declare
 			if _, validationErr := declaredReadParameterBindings(entry, &nullableValues); validationErr != nil {
 				return nil, validationErr
 			}
+			return nullableValues, nil
 		}
 		return nil, declaredReadParameterErrorf("shunter: declared %s %q parameter decode failed: %v", entry.Kind, entry.Name, err)
 	}

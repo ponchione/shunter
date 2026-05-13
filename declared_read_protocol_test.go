@@ -147,6 +147,52 @@ func TestProtocolV2ParameterizedDeclaredReadsExecuteWithParams(t *testing.T) {
 	}
 }
 
+func TestProtocolV2ParameterizedDeclaredReadsAcceptNullableWireEnvelope(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		Query(QueryDeclaration{
+			Name:        "messages_by_body",
+			SQL:         "SELECT * FROM messages WHERE body = :body ORDER BY id",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})).
+		View(ViewDeclaration{
+			Name:        "live_messages_by_body",
+			SQL:         "SELECT * FROM messages WHERE body = :body",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})), declaredReadProtocolConfig(t))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, "alpha")
+	insertMessageWithBody(t, rt, 2, "bravo")
+	insertMessageWithBody(t, rt, 3, "alpha")
+
+	nullableParamColumns := []schema.ColumnSchema{{Name: "body", Type: types.KindString, Nullable: true}}
+	messageColumns := []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: types.KindUint64},
+		{Index: 1, Name: "body", Type: types.KindString},
+	}
+	client := dialDeclaredReadProtocolV2(t, rt, mintDeclaredReadProtocolToken(t, "reader", "messages:read", "messages:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.DeclaredQueryWithParametersMsg{
+		MessageID: []byte("nullable-envelope-declared-query-v2"),
+		Name:      "messages_by_body",
+		Params:    encodeDeclaredReadProtocolParams(t, nullableParamColumns, types.ProductValue{types.NewString("alpha")}),
+	})
+	queryRows := requireDeclaredReadOneOffValues(t, client, "messages", messageColumns)
+	assertDeclaredReadVisibleMessageRows(t, queryRows, []uint64{1, 3}, "alpha", "v2 nullable envelope query")
+
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewWithParametersMsg{
+		RequestID: 133,
+		QueryID:   143,
+		Name:      "live_messages_by_body",
+		Params:    encodeDeclaredReadProtocolParams(t, nullableParamColumns, types.ProductValue{types.NewString("bravo")}),
+	})
+	initialRows := requireDeclaredReadAppliedValues(t, client, 133, 143, "messages", messageColumns)
+	assertDeclaredReadVisibleMessageRows(t, initialRows, []uint64{2}, "bravo", "v2 nullable envelope view initial")
+}
+
 func TestProtocolV2DeclaredReadParametersComposeWithSender(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
