@@ -6,6 +6,7 @@ import type {
   BsatnColumn as ShunterBsatnColumn,
   DecodedDeclaredQueryResult as ShunterDecodedDeclaredQueryResult,
   DeclaredQueryDecodeOptions as ShunterDeclaredQueryDecodeOptions,
+  DeclaredQueryOptions as ShunterDeclaredQueryOptions,
   DeclaredQueryRunner as ShunterDeclaredQueryRunner,
   DeclaredViewHandleSubscriber as ShunterDeclaredViewHandleSubscriber,
   DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,
@@ -60,8 +61,10 @@ export type ReducerCallResultOptions = ShunterReducerCallResultRequestOptions<Ui
 export type QueryRunner = ShunterQueryRunner<Uint8Array>;
 export type ViewSubscriber = ShunterViewSubscriber;
 export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;
+export type DeclaredQueryOptions = ShunterDeclaredQueryOptions;
 export type RawDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName> = ShunterRawDeclaredQueryResult<Name>;
 export type DeclaredQueryDecodeOptions<RowsByName extends object = TableRows> = ShunterDeclaredQueryDecodeOptions<RowsByName>;
+export type DeclaredQueryDecodedRunOptions<RowsByName extends object = TableRows> = DeclaredQueryOptions & DeclaredQueryDecodeOptions<RowsByName>;
 export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName, RowsByName extends object = TableRows> = ShunterDecodedDeclaredQueryResult<Name, RowsByName>;
 export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;
 export type DeclaredViewHandleSubscriber = ShunterDeclaredViewHandleSubscriber<ExecutableViewName>;

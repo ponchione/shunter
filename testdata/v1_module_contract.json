@@ -195,12 +195,76 @@
         "kind": "projection",
         "table": "messages"
       }
+    },
+    {
+      "name": "messages_by_topic",
+      "sql": "SELECT id, sender, body FROM messages WHERE topic = :topic AND id \u003e :after_id ORDER BY sent_at DESC LIMIT 25",
+      "parameters": {
+        "columns": [
+          {
+            "name": "topic",
+            "type": "string"
+          },
+          {
+            "name": "after_id",
+            "type": "uint64"
+          }
+        ]
+      },
+      "row_schema": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uint64"
+          },
+          {
+            "name": "sender",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "type": "string"
+          }
+        ]
+      },
+      "result_shape": {
+        "kind": "projection",
+        "table": "messages"
+      }
     }
   ],
   "views": [
     {
       "name": "live_message_projection",
       "sql": "SELECT id, body AS text FROM messages",
+      "row_schema": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uint64"
+          },
+          {
+            "name": "text",
+            "type": "string"
+          }
+        ]
+      },
+      "result_shape": {
+        "kind": "projection",
+        "table": "messages"
+      }
+    },
+    {
+      "name": "live_messages_by_topic",
+      "sql": "SELECT id, body AS text FROM messages WHERE topic = :topic",
+      "parameters": {
+        "columns": [
+          {
+            "name": "topic",
+            "type": "string"
+          }
+        ]
+      },
       "row_schema": {
         "columns": [
           {
@@ -259,11 +323,23 @@
         "required": [
           "messages:read"
         ]
+      },
+      {
+        "name": "messages_by_topic",
+        "required": [
+          "messages:read"
+        ]
       }
     ],
     "views": [
       {
         "name": "live_message_projection",
+        "required": [
+          "messages:subscribe"
+        ]
+      },
+      {
+        "name": "live_messages_by_topic",
         "required": [
           "messages:subscribe"
         ]
@@ -290,6 +366,18 @@
         ]
       },
       {
+        "surface": "query",
+        "name": "messages_by_topic",
+        "tables": [
+          "messages"
+        ],
+        "tags": [
+          "history",
+          "parameters",
+          "v1"
+        ]
+      },
+      {
         "surface": "view",
         "name": "live_message_projection",
         "tables": [
@@ -297,6 +385,18 @@
         ],
         "tags": [
           "projection",
+          "v1"
+        ]
+      },
+      {
+        "surface": "view",
+        "name": "live_messages_by_topic",
+        "tables": [
+          "messages"
+        ],
+        "tags": [
+          "projection",
+          "parameters",
           "v1"
         ]
       },
@@ -357,6 +457,21 @@
         }
       },
       {
+        "surface": "query",
+        "name": "messages_by_topic",
+        "metadata": {
+          "module_version": "",
+          "schema_version": 0,
+          "contract_version": 0,
+          "previous_version": "",
+          "compatibility": "compatible",
+          "classifications": [
+            "additive"
+          ],
+          "notes": "parameterized declared query fixture"
+        }
+      },
+      {
         "surface": "view",
         "name": "live_message_projection",
         "metadata": {
@@ -369,6 +484,21 @@
             "additive"
           ],
           "notes": "declared live view projection fixture"
+        }
+      },
+      {
+        "surface": "view",
+        "name": "live_messages_by_topic",
+        "metadata": {
+          "module_version": "",
+          "schema_version": 0,
+          "contract_version": 0,
+          "previous_version": "",
+          "compatibility": "compatible",
+          "classifications": [
+            "additive"
+          ],
+          "notes": "parameterized declared live view fixture"
         }
       },
       {

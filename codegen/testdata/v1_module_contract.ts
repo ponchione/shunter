@@ -6,6 +6,7 @@ import type {
   BsatnColumn as ShunterBsatnColumn,
   DecodedDeclaredQueryResult as ShunterDecodedDeclaredQueryResult,
   DeclaredQueryDecodeOptions as ShunterDeclaredQueryDecodeOptions,
+  DeclaredQueryOptions as ShunterDeclaredQueryOptions,
   DeclaredQueryRunner as ShunterDeclaredQueryRunner,
   DeclaredViewHandleSubscriber as ShunterDeclaredViewHandleSubscriber,
   DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,
@@ -62,8 +63,10 @@ export type ReducerCallResultOptions = ShunterReducerCallResultRequestOptions<Ui
 export type QueryRunner = ShunterQueryRunner<Uint8Array>;
 export type ViewSubscriber = ShunterViewSubscriber;
 export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;
+export type DeclaredQueryOptions = ShunterDeclaredQueryOptions;
 export type RawDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName> = ShunterRawDeclaredQueryResult<Name>;
 export type DeclaredQueryDecodeOptions<RowsByName extends object = TableRows> = ShunterDeclaredQueryDecodeOptions<RowsByName>;
+export type DeclaredQueryDecodedRunOptions<RowsByName extends object = TableRows> = DeclaredQueryOptions & DeclaredQueryDecodeOptions<RowsByName>;
 export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName, RowsByName extends object = TableRows> = ShunterDecodedDeclaredQueryResult<Name, RowsByName>;
 export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;
 export type DeclaredViewHandleSubscriber = ShunterDeclaredViewHandleSubscriber<ExecutableViewName>;
@@ -253,12 +256,14 @@ export type LifecycleReducerName = (typeof lifecycleReducers)[keyof typeof lifec
 
 export const queries = {
   recentMessages: "recent_messages",
+  messagesByTopic: "messages_by_topic",
 } as const;
 
 export type QueryName = (typeof queries)[keyof typeof queries];
 
 export const querySQL = {
   recentMessages: "SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25",
+  messagesByTopic: "SELECT id, sender, body FROM messages WHERE topic = :topic AND id > :after_id ORDER BY sent_at DESC LIMIT 25",
 } as const;
 
 export type ExecutableQueryName = (typeof queries)[keyof typeof querySQL];
@@ -304,8 +309,77 @@ export async function queryRecentMessagesDecoded(runDeclaredQuery: DeclaredQuery
   return queryRecentMessagesResult(await runDeclaredQuery("recent_messages"), options);
 }
 
+export interface MessagesByTopicParams {
+  topic: string;
+  afterId: bigint;
+}
+
+const messagesByTopicParamColumns = [
+  { name: "topic", kind: "string" },
+  { name: "after_id", kind: "uint64" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function encodeMessagesByTopicParams(value: MessagesByTopicParams): Uint8Array {
+  return shunterEncodeBsatnProduct([
+    value.topic,
+    value.afterId,
+  ], messagesByTopicParamColumns);
+}
+
+export interface MessagesByTopicQueryRow {
+  id: bigint;
+  sender: string;
+  body: string;
+}
+
+const messagesByTopicQueryColumns = [
+  { name: "id", kind: "uint64" },
+  { name: "sender", kind: "string" },
+  { name: "body", kind: "string" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decodeMessagesByTopicQueryRow(row: Uint8Array): MessagesByTopicQueryRow {
+  return shunterDecodeBsatnProduct(row, messagesByTopicQueryColumns, (values) => ({
+    id: values[0] as bigint,
+    sender: values[1] as string,
+    body: values[2] as string,
+  }));
+}
+
+export type MessagesByTopicQueryRows = {
+  "messages": MessagesByTopicQueryRow;
+};
+
+export const messagesByTopicQueryRowDecoders = {
+  "messages": decodeMessagesByTopicQueryRow,
+} as const satisfies TableRowDecoders<MessagesByTopicQueryRows>;
+
+export function queryMessagesByTopic(runDeclaredQuery: DeclaredQueryRunner, params: MessagesByTopicParams, options: DeclaredQueryOptions = {}): Promise<Uint8Array> {
+  return runDeclaredQuery("messages_by_topic", { ...options, params: encodeMessagesByTopicParams(params) });
+}
+
+export function queryMessagesByTopicResult(data: unknown, options: DeclaredQueryDecodeOptions<MessagesByTopicQueryRows> = {}): DecodedDeclaredQueryResult<typeof queries.messagesByTopic, MessagesByTopicQueryRows> {
+  const decodeOptions: DeclaredQueryDecodeOptions<MessagesByTopicQueryRows> = options.tableDecoders === undefined && options.decodeRow === undefined ? { ...options, tableDecoders: messagesByTopicQueryRowDecoders } : options;
+  return shunterDecodeDeclaredQueryResult("messages_by_topic", data, decodeOptions);
+}
+
+export async function queryMessagesByTopicDecoded(runDeclaredQuery: DeclaredQueryRunner, params: MessagesByTopicParams, options: DeclaredQueryDecodedRunOptions<MessagesByTopicQueryRows> = {}): Promise<DecodedDeclaredQueryResult<typeof queries.messagesByTopic, MessagesByTopicQueryRows>> {
+  const queryOptions: DeclaredQueryOptions = {
+    requestId: options.requestId,
+    messageId: options.messageId,
+    signal: options.signal,
+    params: encodeMessagesByTopicParams(params),
+  };
+  const decodeOptions: DeclaredQueryDecodeOptions<MessagesByTopicQueryRows> = {
+    tableDecoders: options.tableDecoders,
+    decodeRow: options.decodeRow,
+  };
+  return queryMessagesByTopicResult(await runDeclaredQuery("messages_by_topic", queryOptions), decodeOptions);
+}
+
 export const views = {
   liveMessageProjection: "live_message_projection",
+  liveMessagesByTopic: "live_messages_by_topic",
   liveMessageCount: "live_message_count",
 } as const;
 
@@ -313,6 +387,7 @@ export type ViewName = (typeof views)[keyof typeof views];
 
 export const viewSQL = {
   liveMessageProjection: "SELECT id, body AS text FROM messages",
+  liveMessagesByTopic: "SELECT id, body AS text FROM messages WHERE topic = :topic",
   liveMessageCount: "SELECT COUNT(*) AS n FROM messages",
 } as const;
 
@@ -345,6 +420,47 @@ export function subscribeLiveMessageProjectionHandle(subscribeDeclaredView: Decl
   return subscribeDeclaredView("live_message_projection", subscribeOptions);
 }
 
+export interface LiveMessagesByTopicParams {
+  topic: string;
+}
+
+const liveMessagesByTopicParamColumns = [
+  { name: "topic", kind: "string" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function encodeLiveMessagesByTopicParams(value: LiveMessagesByTopicParams): Uint8Array {
+  return shunterEncodeBsatnProduct([
+    value.topic,
+  ], liveMessagesByTopicParamColumns);
+}
+
+export interface LiveMessagesByTopicViewRow {
+  id: bigint;
+  text: string;
+}
+
+const liveMessagesByTopicViewColumns = [
+  { name: "id", kind: "uint64" },
+  { name: "text", kind: "string" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decodeLiveMessagesByTopicViewRow(row: Uint8Array): LiveMessagesByTopicViewRow {
+  return shunterDecodeBsatnProduct(row, liveMessagesByTopicViewColumns, (values) => ({
+    id: values[0] as bigint,
+    text: values[1] as string,
+  }));
+}
+
+export function subscribeLiveMessagesByTopic(subscribeDeclaredView: DeclaredViewSubscriber, params: LiveMessagesByTopicParams, options: DeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: DeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessagesByTopicViewRow } : options;
+  return subscribeDeclaredView("live_messages_by_topic", { ...subscribeOptions, params: encodeLiveMessagesByTopicParams(params) });
+}
+
+export function subscribeLiveMessagesByTopicHandle(subscribeDeclaredView: DeclaredViewHandleSubscriber, params: LiveMessagesByTopicParams, options: DeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> & SubscriptionHandleReturnOptions): Promise<SubscriptionHandle<LiveMessagesByTopicViewRow>> {
+  const subscribeOptions: DeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> & SubscriptionHandleReturnOptions = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessagesByTopicViewRow } : options;
+  return subscribeDeclaredView("live_messages_by_topic", { ...subscribeOptions, params: encodeLiveMessagesByTopicParams(params) });
+}
+
 export interface LiveMessageCountViewRow {
   n: bigint;
 }
@@ -375,9 +491,11 @@ export const permissions = {
   },
   queries: {
     recentMessages: { required: ["messages:read"] },
+    messagesByTopic: { required: ["messages:read"] },
   },
   views: {
     liveMessageProjection: { required: ["messages:subscribe"] },
+    liveMessagesByTopic: { required: ["messages:subscribe"] },
     liveMessageCount: { required: ["messages:subscribe"] },
   },
 } as const;
@@ -385,9 +503,11 @@ export const permissions = {
 export const readModels = {
   queries: {
     recentMessages: { tables: ["messages"], tags: ["history", "v1"] },
+    messagesByTopic: { tables: ["messages"], tags: ["history", "parameters", "v1"] },
   },
   views: {
     liveMessageProjection: { tables: ["messages"], tags: ["projection", "v1"] },
+    liveMessagesByTopic: { tables: ["messages"], tags: ["projection", "parameters", "v1"] },
     liveMessageCount: { tables: ["messages"], tags: ["aggregate", "v1"] },
   },
 } as const;

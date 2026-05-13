@@ -415,6 +415,21 @@ func buildV1CompatibilityRuntime(t *testing.T) *Runtime {
 				Notes:           "declared query fixture",
 			},
 		}).
+		Query(QueryDeclaration{
+			Name: "messages_by_topic",
+			SQL:  "SELECT id, sender, body FROM messages WHERE topic = :topic AND id > :after_id ORDER BY sent_at DESC LIMIT 25",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "string"},
+				{Name: "after_id", Type: "uint64"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+			ReadModel:   ReadModelMetadata{Tables: []string{"messages"}, Tags: []string{"history", "parameters", "v1"}},
+			Migration: MigrationMetadata{
+				Compatibility:   MigrationCompatibilityCompatible,
+				Classifications: []MigrationClassification{MigrationClassificationAdditive},
+				Notes:           "parameterized declared query fixture",
+			},
+		}).
 		View(ViewDeclaration{
 			Name:        "live_message_projection",
 			SQL:         "SELECT id, body AS text FROM messages",
@@ -424,6 +439,20 @@ func buildV1CompatibilityRuntime(t *testing.T) *Runtime {
 				Compatibility:   MigrationCompatibilityCompatible,
 				Classifications: []MigrationClassification{MigrationClassificationAdditive},
 				Notes:           "declared live view projection fixture",
+			},
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages_by_topic",
+			SQL:  "SELECT id, body AS text FROM messages WHERE topic = :topic",
+			Parameters: &ProductSchema{Columns: []ProductColumn{
+				{Name: "topic", Type: "string"},
+			}},
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+			ReadModel:   ReadModelMetadata{Tables: []string{"messages"}, Tags: []string{"projection", "parameters", "v1"}},
+			Migration: MigrationMetadata{
+				Compatibility:   MigrationCompatibilityCompatible,
+				Classifications: []MigrationClassification{MigrationClassificationAdditive},
+				Notes:           "parameterized declared live view fixture",
 			},
 		}).
 		View(ViewDeclaration{
@@ -504,14 +533,20 @@ func assertV1FixtureTable(t *testing.T, contract ModuleContract) {
 func assertV1FixtureDeclaredReads(t *testing.T, contract ModuleContract) {
 	t.Helper()
 	assertV1FixtureQuerySQL(t, contract.Queries, "recent_messages", "SELECT id, sender, body FROM messages ORDER BY sent_at DESC LIMIT 25")
+	assertV1FixtureQuerySQL(t, contract.Queries, "messages_by_topic", "SELECT id, sender, body FROM messages WHERE topic = :topic AND id > :after_id ORDER BY sent_at DESC LIMIT 25")
 	assertV1FixtureViewSQL(t, contract.Views, "live_message_projection", "SELECT id, body AS text FROM messages")
+	assertV1FixtureViewSQL(t, contract.Views, "live_messages_by_topic", "SELECT id, body AS text FROM messages WHERE topic = :topic")
 	assertV1FixtureViewSQL(t, contract.Views, "live_message_count", "SELECT COUNT(*) AS n FROM messages")
 	assertV1FixturePermission(t, contract.Permissions.Reducers, "create_message", "messages:write")
 	assertV1FixturePermission(t, contract.Permissions.Queries, "recent_messages", "messages:read")
+	assertV1FixturePermission(t, contract.Permissions.Queries, "messages_by_topic", "messages:read")
 	assertV1FixturePermission(t, contract.Permissions.Views, "live_message_projection", "messages:subscribe")
+	assertV1FixturePermission(t, contract.Permissions.Views, "live_messages_by_topic", "messages:subscribe")
 	assertV1FixturePermission(t, contract.Permissions.Views, "live_message_count", "messages:subscribe")
 	assertV1FixtureReadModel(t, contract.ReadModel.Declarations, ReadModelSurfaceQuery, "recent_messages", "history")
+	assertV1FixtureReadModel(t, contract.ReadModel.Declarations, ReadModelSurfaceQuery, "messages_by_topic", "parameters")
 	assertV1FixtureReadModel(t, contract.ReadModel.Declarations, ReadModelSurfaceView, "live_message_projection", "projection")
+	assertV1FixtureReadModel(t, contract.ReadModel.Declarations, ReadModelSurfaceView, "live_messages_by_topic", "parameters")
 	assertV1FixtureReadModel(t, contract.ReadModel.Declarations, ReadModelSurfaceView, "live_message_count", "aggregate")
 }
 
@@ -545,7 +580,9 @@ func assertV1FixtureMetadata(t *testing.T, contract ModuleContract) {
 	}{
 		{MigrationSurfaceTable, "messages"},
 		{MigrationSurfaceQuery, "recent_messages"},
+		{MigrationSurfaceQuery, "messages_by_topic"},
 		{MigrationSurfaceView, "live_message_projection"},
+		{MigrationSurfaceView, "live_messages_by_topic"},
 		{MigrationSurfaceView, "live_message_count"},
 	} {
 		if !v1FixtureHasMigration(contract.Migrations.Declarations, want.surface, want.name) {

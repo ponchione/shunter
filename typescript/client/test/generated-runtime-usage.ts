@@ -60,9 +60,17 @@ import {
   callCreateMessageTyped,
   decodeCreateMessageResult,
   decodeLiveMessageProjectionViewRow,
+  decodeLiveMessagesByTopicViewRow,
   decodeMessagesRow,
+  decodeMessagesByTopicQueryRow,
   decodeRecentMessagesQueryRow,
   encodeCreateMessageArgs,
+  encodeLiveMessagesByTopicParams,
+  encodeMessagesByTopicParams,
+  messagesByTopicQueryRowDecoders,
+  queryMessagesByTopic,
+  queryMessagesByTopicDecoded,
+  queryMessagesByTopicResult,
   queryRecentMessages,
   queryRecentMessagesDecoded,
   queryRecentMessagesResult,
@@ -74,12 +82,16 @@ import {
   subscribeLiveMessageCount,
   subscribeLiveMessageProjection,
   subscribeLiveMessageProjectionHandle,
+  subscribeLiveMessagesByTopic,
+  subscribeLiveMessagesByTopicHandle,
   subscribeMessages,
   tableRowDecoders as generatedTableRowDecodersValue,
 } from "../../../codegen/testdata/v1_module_contract";
 import type {
   CreateMessageArgs,
   CreateMessageResult,
+  DeclaredQueryOptions as GeneratedDeclaredQueryOptions,
+  DeclaredQueryDecodedRunOptions as GeneratedDeclaredQueryDecodedRunOptions,
   DeclaredQueryRunner,
   DeclaredQueryDecodeOptions as GeneratedDeclaredQueryDecodeOptions,
   DeclaredViewHandleSubscriber as GeneratedDeclaredViewHandleSubscriber,
@@ -90,7 +102,12 @@ import type {
   EncodedReducerCallResultOptions as GeneratedEncodedReducerCallResultOptions,
   ExecutableQueryName,
   ExecutableViewName,
+  LiveMessagesByTopicParams,
+  LiveMessagesByTopicViewRow,
   LiveMessageProjectionViewRow,
+  MessagesByTopicParams,
+  MessagesByTopicQueryRow,
+  MessagesByTopicQueryRows,
   MessagesRow,
   RecentMessagesQueryRow,
   RecentMessagesQueryRows,
@@ -361,12 +378,27 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const declaredQueryRunner: DeclaredQueryRunner = async (name) =>
     new Uint8Array([name.length]);
   const queryBytes: Uint8Array = await queryRecentMessages(declaredQueryRunner);
+  const messagesByTopicParams: MessagesByTopicParams = {
+    topic: "general",
+    afterId: 1n,
+  };
+  const encodedMessagesByTopicParams: Uint8Array =
+    encodeMessagesByTopicParams(messagesByTopicParams);
+  const generatedDeclaredQueryOptions: GeneratedDeclaredQueryOptions = {
+    requestId: 2,
+    params: encodedMessagesByTopicParams,
+  };
+  const parameterizedQueryBytes: Uint8Array = await queryMessagesByTopic(
+    declaredQueryRunner,
+    messagesByTopicParams,
+    generatedDeclaredQueryOptions,
+  );
   const rawDeclaredQueryTable: RawDeclaredQueryTable = {
     tableName: "messages",
     rows: new Uint8Array([0]),
     rowBytes: [new Uint8Array([0])],
   };
-  const rawDeclaredQueryResult: RawDeclaredQueryResult<ExecutableQueryName> = {
+  const rawDeclaredQueryResult: RawDeclaredQueryResult<typeof queries.recentMessages> = {
     name: "recent_messages",
     messageId: new Uint8Array([1]),
     tables: [rawDeclaredQueryTable],
@@ -376,7 +408,7 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const generatedRawDeclaredQueryResult: GeneratedRawDeclaredQueryResult<typeof queries.recentMessages> =
     rawDeclaredQueryResult;
   const rawDeclaredQueryDecoder: typeof decodeRawDeclaredQueryResult = decodeRawDeclaredQueryResult;
-  const decodedDeclaredQueryResult: DecodedDeclaredQueryResult<ExecutableQueryName, TableRows> = {
+  const decodedDeclaredQueryResult: DecodedDeclaredQueryResult<typeof queries.recentMessages, TableRows> = {
     name: "recent_messages",
     messageId: new Uint8Array([1]),
     tables: [{
@@ -413,6 +445,36 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const generatedProjectionQueryPromise: Promise<
     GeneratedDecodedDeclaredQueryResult<typeof queries.recentMessages, RecentMessagesQueryRows>
   > = queryRecentMessagesDecoded(declaredQueryRunner);
+  const messagesByTopicQueryRow: MessagesByTopicQueryRow = {
+    id: 1n,
+    sender: "identity",
+    body: "hello",
+  };
+  const messagesByTopicRows: MessagesByTopicQueryRows = {
+    messages: messagesByTopicQueryRow,
+  };
+  const messagesByTopicRowDecoder: TableRowDecoder<MessagesByTopicQueryRow> =
+    decodeMessagesByTopicQueryRow;
+  const generatedMessagesByTopicRowDecoders: TableRowDecoders<MessagesByTopicQueryRows> =
+    messagesByTopicQueryRowDecoders;
+  const generatedParameterizedDeclaredQueryResult: GeneratedDecodedDeclaredQueryResult<
+    typeof queries.messagesByTopic,
+    MessagesByTopicQueryRows
+  > = queryMessagesByTopicResult(rawDeclaredQueryResult, {
+    tableDecoders: messagesByTopicQueryRowDecoders,
+  });
+  const generatedDeclaredQueryDecodedRunOptions: GeneratedDeclaredQueryDecodedRunOptions<MessagesByTopicQueryRows> = {
+    requestId: 3,
+    messageId: new Uint8Array([3]),
+    tableDecoders: messagesByTopicQueryRowDecoders,
+  };
+  const generatedParameterizedQueryPromise: Promise<
+    GeneratedDecodedDeclaredQueryResult<typeof queries.messagesByTopic, MessagesByTopicQueryRows>
+  > = queryMessagesByTopicDecoded(
+    declaredQueryRunner,
+    messagesByTopicParams,
+    generatedDeclaredQueryDecodedRunOptions,
+  );
 
   const declaredViewSubscriber: DeclaredViewSubscriber = async (_name) => () => {};
   const liveProjectionRow: LiveMessageProjectionViewRow = {
@@ -427,11 +489,39 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const unsubscribeView: SubscriptionUnsubscribe =
     await subscribeLiveMessageProjection(declaredViewSubscriber, generatedDeclaredViewOptions);
   await unsubscribeView();
+  const liveMessagesByTopicParams: LiveMessagesByTopicParams = {
+    topic: "general",
+  };
+  const encodedLiveMessagesByTopicParams: Uint8Array =
+    encodeLiveMessagesByTopicParams(liveMessagesByTopicParams);
+  const liveMessagesByTopicRow: LiveMessagesByTopicViewRow = {
+    id: 1n,
+    text: "hello",
+  };
+  const liveMessagesByTopicDecoder: RowDecoder<LiveMessagesByTopicViewRow> =
+    decodeLiveMessagesByTopicViewRow;
+  const generatedParameterizedDeclaredViewOptions: GeneratedDeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> = {
+    decodeRow: liveMessagesByTopicDecoder,
+  };
+  const unsubscribeParameterizedView: SubscriptionUnsubscribe =
+    await subscribeLiveMessagesByTopic(
+      declaredViewSubscriber,
+      liveMessagesByTopicParams,
+      generatedParameterizedDeclaredViewOptions,
+    );
+  await unsubscribeParameterizedView();
   const generatedDeclaredViewHandle: SubscriptionHandle<LiveMessageProjectionViewRow> =
     await subscribeLiveMessageProjectionHandle(generatedClientGeneratedDeclaredViewHandleSubscriber, {
       returnHandle: true,
     });
   await generatedDeclaredViewHandle.unsubscribe();
+  const generatedParameterizedDeclaredViewHandle: SubscriptionHandle<LiveMessagesByTopicViewRow> =
+    await subscribeLiveMessagesByTopicHandle(
+      generatedClientGeneratedDeclaredViewHandleSubscriber,
+      liveMessagesByTopicParams,
+      { returnHandle: true },
+    );
+  await generatedParameterizedDeclaredViewHandle.unsubscribe();
 
   const runtimeBindings: RuntimeBindings<
     TableName,
@@ -537,6 +627,9 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void encodedSubscribeSingleFrame;
   void encodedTableFrame;
   void queryBytes;
+  void messagesByTopicParams;
+  void encodedMessagesByTopicParams;
+  void parameterizedQueryBytes;
   void rawDeclaredQueryResult;
   void generatedRawDeclaredQueryResult;
   void rawDeclaredQueryDecoder;
@@ -549,9 +642,20 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void generatedRecentMessagesRowDecoders;
   void generatedProjectionDeclaredQueryResult;
   void generatedProjectionQueryPromise;
+  void messagesByTopicRows;
+  void messagesByTopicRowDecoder;
+  void generatedMessagesByTopicRowDecoders;
+  void generatedParameterizedDeclaredQueryResult;
+  void generatedParameterizedQueryPromise;
   void liveProjectionRow;
+  void liveMessagesByTopicParams;
+  void encodedLiveMessagesByTopicParams;
+  void liveMessagesByTopicRow;
   void generatedDeclaredViewOptions;
+  void generatedParameterizedDeclaredViewOptions;
   void generatedDeclaredQueryDecodeOptions;
+  void generatedDeclaredQueryOptions;
+  void generatedDeclaredQueryDecodedRunOptions;
   void declaredQueryDecodeOptions;
   void tableRowDecoders;
   void generatedTableRowDecoders;

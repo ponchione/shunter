@@ -58,8 +58,10 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	b.WriteString("export type QueryRunner = ShunterQueryRunner<Uint8Array>;\n")
 	b.WriteString("export type ViewSubscriber = ShunterViewSubscriber;\n")
 	b.WriteString("export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;\n")
+	b.WriteString("export type DeclaredQueryOptions = ShunterDeclaredQueryOptions;\n")
 	b.WriteString("export type RawDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName> = ShunterRawDeclaredQueryResult<Name>;\n")
 	b.WriteString("export type DeclaredQueryDecodeOptions<RowsByName extends object = TableRows> = ShunterDeclaredQueryDecodeOptions<RowsByName>;\n")
+	b.WriteString("export type DeclaredQueryDecodedRunOptions<RowsByName extends object = TableRows> = DeclaredQueryOptions & DeclaredQueryDecodeOptions<RowsByName>;\n")
 	b.WriteString("export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName, RowsByName extends object = TableRows> = ShunterDecodedDeclaredQueryResult<Name, RowsByName>;\n")
 	b.WriteString("export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;\n")
 	b.WriteString("export type DeclaredViewHandleSubscriber = ShunterDeclaredViewHandleSubscriber<ExecutableViewName>;\n")
@@ -187,6 +189,15 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	b.WriteString("export type ExecutableQueryName = (typeof queries)[keyof typeof querySQL];\n\n")
 	for _, query := range executableQueries {
 		queryDescription := contract.Queries[queryIndexByName(contract.Queries, query.name)]
+		var queryParamsTypeName, queryParamsEncoderName string
+		if typeScriptDeclaredReadHasParameters(queryDescription.Parameters) {
+			queryParamsTypeName = uniqueTypeScriptIdentifier(upperFirst(query.identifier)+"Params", topLevelValueNames)
+			queryParamsColumnsName := uniqueTypeScriptIdentifier(query.identifier+"ParamColumns", topLevelValueNames)
+			queryParamsEncoderName = uniqueTypeScriptIdentifier("encode"+upperFirst(query.identifier)+"Params", topLevelValueNames)
+			if err := writeTypeScriptProductCodec(&b, queryParamsTypeName, queryParamsColumnsName, queryParamsEncoderName, "", *queryDescription.Parameters, true, false); err != nil {
+				return nil, err
+			}
+		}
 		var queryRowsTypeName, queryRowDecodersName string
 		if queryDescription.RowSchema != nil && queryDescription.ResultShape != nil {
 			rowTypeName := uniqueTypeScriptIdentifier(upperFirst(query.identifier)+"QueryRow", topLevelValueNames)
@@ -205,8 +216,13 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 			fmt.Fprintf(&b, "} as const satisfies TableRowDecoders<%s>;\n\n", queryRowsTypeName)
 		}
 		functionName := uniqueTypeScriptIdentifier("query"+upperFirst(query.identifier), topLevelValueNames)
-		fmt.Fprintf(&b, "export function %s(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {\n", functionName)
-		fmt.Fprintf(&b, "  return runDeclaredQuery(%s);\n", strconv.Quote(query.name))
+		if queryParamsTypeName != "" {
+			fmt.Fprintf(&b, "export function %s(runDeclaredQuery: DeclaredQueryRunner, params: %s, options: DeclaredQueryOptions = {}): Promise<Uint8Array> {\n", functionName, queryParamsTypeName)
+			fmt.Fprintf(&b, "  return runDeclaredQuery(%s, { ...options, params: %s(params) });\n", strconv.Quote(query.name), queryParamsEncoderName)
+		} else {
+			fmt.Fprintf(&b, "export function %s(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {\n", functionName)
+			fmt.Fprintf(&b, "  return runDeclaredQuery(%s);\n", strconv.Quote(query.name))
+		}
 		b.WriteString("}\n\n")
 		resultFunctionName := uniqueTypeScriptIdentifier(functionName+"Result", topLevelValueNames)
 		if queryRowsTypeName != "" {
@@ -215,8 +231,23 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 			fmt.Fprintf(&b, "  return shunterDecodeDeclaredQueryResult(%s, data, decodeOptions);\n", strconv.Quote(query.name))
 			b.WriteString("}\n\n")
 			decodedFunctionName := uniqueTypeScriptIdentifier(functionName+"Decoded", topLevelValueNames)
-			fmt.Fprintf(&b, "export async function %s(runDeclaredQuery: DeclaredQueryRunner, options: DeclaredQueryDecodeOptions<%s> = {}): Promise<DecodedDeclaredQueryResult<typeof queries.%s, %s>> {\n", decodedFunctionName, queryRowsTypeName, query.identifier, queryRowsTypeName)
-			fmt.Fprintf(&b, "  return %s(await runDeclaredQuery(%s), options);\n", resultFunctionName, strconv.Quote(query.name))
+			if queryParamsTypeName != "" {
+				fmt.Fprintf(&b, "export async function %s(runDeclaredQuery: DeclaredQueryRunner, params: %s, options: DeclaredQueryDecodedRunOptions<%s> = {}): Promise<DecodedDeclaredQueryResult<typeof queries.%s, %s>> {\n", decodedFunctionName, queryParamsTypeName, queryRowsTypeName, query.identifier, queryRowsTypeName)
+				b.WriteString("  const queryOptions: DeclaredQueryOptions = {\n")
+				b.WriteString("    requestId: options.requestId,\n")
+				b.WriteString("    messageId: options.messageId,\n")
+				b.WriteString("    signal: options.signal,\n")
+				fmt.Fprintf(&b, "    params: %s(params),\n", queryParamsEncoderName)
+				b.WriteString("  };\n")
+				fmt.Fprintf(&b, "  const decodeOptions: DeclaredQueryDecodeOptions<%s> = {\n", queryRowsTypeName)
+				b.WriteString("    tableDecoders: options.tableDecoders,\n")
+				b.WriteString("    decodeRow: options.decodeRow,\n")
+				b.WriteString("  };\n")
+				fmt.Fprintf(&b, "  return %s(await runDeclaredQuery(%s, queryOptions), decodeOptions);\n", resultFunctionName, strconv.Quote(query.name))
+			} else {
+				fmt.Fprintf(&b, "export async function %s(runDeclaredQuery: DeclaredQueryRunner, options: DeclaredQueryDecodeOptions<%s> = {}): Promise<DecodedDeclaredQueryResult<typeof queries.%s, %s>> {\n", decodedFunctionName, queryRowsTypeName, query.identifier, queryRowsTypeName)
+				fmt.Fprintf(&b, "  return %s(await runDeclaredQuery(%s), options);\n", resultFunctionName, strconv.Quote(query.name))
+			}
 			b.WriteString("}\n\n")
 		} else {
 			fmt.Fprintf(&b, "export function %s<RowsByName extends object = TableRows>(data: unknown, options: DeclaredQueryDecodeOptions<RowsByName>): DecodedDeclaredQueryResult<typeof queries.%s, RowsByName> {\n", resultFunctionName, query.identifier)
@@ -237,6 +268,15 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	b.WriteString("export type ExecutableViewName = (typeof views)[keyof typeof viewSQL];\n\n")
 	for _, view := range executableViews {
 		viewDescription := contract.Views[viewIndexByName(contract.Views, view.name)]
+		var viewParamsTypeName, viewParamsEncoderName string
+		if typeScriptDeclaredReadHasParameters(viewDescription.Parameters) {
+			viewParamsTypeName = uniqueTypeScriptIdentifier(upperFirst(view.identifier)+"Params", topLevelValueNames)
+			viewParamsColumnsName := uniqueTypeScriptIdentifier(view.identifier+"ParamColumns", topLevelValueNames)
+			viewParamsEncoderName = uniqueTypeScriptIdentifier("encode"+upperFirst(view.identifier)+"Params", topLevelValueNames)
+			if err := writeTypeScriptProductCodec(&b, viewParamsTypeName, viewParamsColumnsName, viewParamsEncoderName, "", *viewDescription.Parameters, true, false); err != nil {
+				return nil, err
+			}
+		}
 		var rowTypeName, decoderName string
 		if viewDescription.RowSchema != nil {
 			rowTypeName = uniqueTypeScriptIdentifier(upperFirst(view.identifier)+"ViewRow", topLevelValueNames)
@@ -248,18 +288,39 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 		}
 		functionName := uniqueTypeScriptIdentifier("subscribe"+upperFirst(view.identifier), topLevelValueNames)
 		if rowTypeName != "" {
-			fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, rowTypeName)
+			if viewParamsTypeName != "" {
+				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber, params: %s, options: DeclaredViewSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, viewParamsTypeName, rowTypeName)
+			} else {
+				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, rowTypeName)
+			}
 			fmt.Fprintf(&b, "  const subscribeOptions: DeclaredViewSubscriptionOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: %s } : options;\n", rowTypeName, decoderName)
-			fmt.Fprintf(&b, "  return subscribeDeclaredView(%s, subscribeOptions);\n", strconv.Quote(view.name))
+			if viewParamsTypeName != "" {
+				fmt.Fprintf(&b, "  return subscribeDeclaredView(%s, { ...subscribeOptions, params: %s(params) });\n", strconv.Quote(view.name), viewParamsEncoderName)
+			} else {
+				fmt.Fprintf(&b, "  return subscribeDeclaredView(%s, subscribeOptions);\n", strconv.Quote(view.name))
+			}
 			b.WriteString("}\n\n")
 			handleFunctionName := uniqueTypeScriptIdentifier(functionName+"Handle", topLevelValueNames)
-			fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewHandleSubscriber, options: DeclaredViewSubscriptionOptions<%s> & SubscriptionHandleReturnOptions): Promise<SubscriptionHandle<%s>> {\n", handleFunctionName, rowTypeName, rowTypeName)
+			if viewParamsTypeName != "" {
+				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewHandleSubscriber, params: %s, options: DeclaredViewSubscriptionOptions<%s> & SubscriptionHandleReturnOptions): Promise<SubscriptionHandle<%s>> {\n", handleFunctionName, viewParamsTypeName, rowTypeName, rowTypeName)
+			} else {
+				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewHandleSubscriber, options: DeclaredViewSubscriptionOptions<%s> & SubscriptionHandleReturnOptions): Promise<SubscriptionHandle<%s>> {\n", handleFunctionName, rowTypeName, rowTypeName)
+			}
 			fmt.Fprintf(&b, "  const subscribeOptions: DeclaredViewSubscriptionOptions<%s> & SubscriptionHandleReturnOptions = options.decodeRow === undefined ? { ...options, decodeRow: %s } : options;\n", rowTypeName, decoderName)
-			fmt.Fprintf(&b, "  return subscribeDeclaredView(%s, subscribeOptions);\n", strconv.Quote(view.name))
+			if viewParamsTypeName != "" {
+				fmt.Fprintf(&b, "  return subscribeDeclaredView(%s, { ...subscribeOptions, params: %s(params) });\n", strconv.Quote(view.name), viewParamsEncoderName)
+			} else {
+				fmt.Fprintf(&b, "  return subscribeDeclaredView(%s, subscribeOptions);\n", strconv.Quote(view.name))
+			}
 			b.WriteString("}\n\n")
 		} else {
-			fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {\n", functionName)
-			fmt.Fprintf(&b, "  return subscribeDeclaredView(%s);\n", strconv.Quote(view.name))
+			if viewParamsTypeName != "" {
+				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber, params: %s, options: DeclaredViewSubscriptionOptions = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, viewParamsTypeName)
+				fmt.Fprintf(&b, "  return subscribeDeclaredView(%s, { ...options, params: %s(params) });\n", strconv.Quote(view.name), viewParamsEncoderName)
+			} else {
+				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {\n", functionName)
+				fmt.Fprintf(&b, "  return subscribeDeclaredView(%s);\n", strconv.Quote(view.name))
+			}
 			b.WriteString("}\n\n")
 		}
 	}
@@ -304,6 +365,7 @@ func writeTypeScriptRuntimeImports(b *bytes.Buffer, runtimeImport string) {
 	b.WriteString("  BsatnColumn as ShunterBsatnColumn,\n")
 	b.WriteString("  DecodedDeclaredQueryResult as ShunterDecodedDeclaredQueryResult,\n")
 	b.WriteString("  DeclaredQueryDecodeOptions as ShunterDeclaredQueryDecodeOptions,\n")
+	b.WriteString("  DeclaredQueryOptions as ShunterDeclaredQueryOptions,\n")
 	b.WriteString("  DeclaredQueryRunner as ShunterDeclaredQueryRunner,\n")
 	b.WriteString("  DeclaredViewHandleSubscriber as ShunterDeclaredViewHandleSubscriber,\n")
 	b.WriteString("  DeclaredViewSubscriber as ShunterDeclaredViewSubscriber,\n")
@@ -351,6 +413,9 @@ func typeScriptRuntimeValueImportUsage(contract shunter.ModuleContract) typeScri
 			continue
 		}
 		usage.decodeDeclaredQueryResult = true
+		if typeScriptDeclaredReadHasParameters(query.Parameters) {
+			usage.encodeBsatnProduct = true
+		}
 		if query.RowSchema != nil && query.ResultShape != nil {
 			usage.decodeBsatnProduct = true
 		}
@@ -359,11 +424,18 @@ func typeScriptRuntimeValueImportUsage(contract shunter.ModuleContract) typeScri
 		if strings.TrimSpace(view.SQL) == "" {
 			continue
 		}
+		if typeScriptDeclaredReadHasParameters(view.Parameters) {
+			usage.encodeBsatnProduct = true
+		}
 		if view.RowSchema != nil && view.ResultShape != nil {
 			usage.decodeBsatnProduct = true
 		}
 	}
 	return usage
+}
+
+func typeScriptDeclaredReadHasParameters(parameters *schema.ProductSchemaExport) bool {
+	return parameters != nil && len(parameters.Columns) > 0
 }
 
 func writeTypeScriptRuntimeValueImports(b *bytes.Buffer, runtimeImport string, usage typeScriptRuntimeValueImports) {

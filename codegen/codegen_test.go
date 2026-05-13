@@ -1031,6 +1031,112 @@ func TestTypeScriptGeneratorDeclaredHelpersUseNamedCallbacksNotSQL(t *testing.T)
 	assertNotContains(t, ts, `return subscribeView("SELECT * FROM messages");`)
 }
 
+func TestTypeScriptGeneratorEmitsDeclaredQueryParameterCodec(t *testing.T) {
+	out, err := Generate(declaredReadParametersContractFixture(), Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `DeclaredQueryOptions as ShunterDeclaredQueryOptions,`)
+	assertContains(t, ts, `encodeBsatnProduct as shunterEncodeBsatnProduct,`)
+	assertContains(t, ts, `export type DeclaredQueryOptions = ShunterDeclaredQueryOptions;`)
+	assertContains(t, ts, `export type DeclaredQueryDecodedRunOptions<RowsByName extends object = TableRows> = DeclaredQueryOptions & DeclaredQueryDecodeOptions<RowsByName>;`)
+	assertContains(t, ts, `export interface MessagesByTopicParams {`)
+	assertContains(t, ts, `topic: string;`)
+	assertContains(t, ts, `afterId: bigint;`)
+	assertContains(t, ts, `const messagesByTopicParamColumns = [`)
+	assertContains(t, ts, `{ name: "topic", kind: "string" },`)
+	assertContains(t, ts, `{ name: "after_id", kind: "uint64" },`)
+	assertContains(t, ts, `export function encodeMessagesByTopicParams(value: MessagesByTopicParams): Uint8Array {`)
+	assertContains(t, ts, `return shunterEncodeBsatnProduct([`)
+	assertContains(t, ts, `value.topic,`)
+	assertContains(t, ts, `value.afterId,`)
+	assertContains(t, ts, `], messagesByTopicParamColumns);`)
+}
+
+func TestTypeScriptGeneratorEmitsDeclaredViewParameterCodec(t *testing.T) {
+	out, err := Generate(declaredReadParametersContractFixture(), Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export interface LiveMessagesByTopicParams {`)
+	assertContains(t, ts, `topic: string;`)
+	assertContains(t, ts, `const liveMessagesByTopicParamColumns = [`)
+	assertContains(t, ts, `{ name: "topic", kind: "string" },`)
+	assertContains(t, ts, `export function encodeLiveMessagesByTopicParams(value: LiveMessagesByTopicParams): Uint8Array {`)
+	assertContains(t, ts, `value.topic,`)
+	assertContains(t, ts, `], liveMessagesByTopicParamColumns);`)
+}
+
+func TestTypeScriptGeneratorDeclaredQueryHelpersAcceptTypedParams(t *testing.T) {
+	out, err := Generate(declaredReadParametersContractFixture(), Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export function queryMessagesByTopic(runDeclaredQuery: DeclaredQueryRunner, params: MessagesByTopicParams, options: DeclaredQueryOptions = {}): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("messages_by_topic", { ...options, params: encodeMessagesByTopicParams(params) });`)
+	assertContains(t, ts, `export async function queryMessagesByTopicDecoded(runDeclaredQuery: DeclaredQueryRunner, params: MessagesByTopicParams, options: DeclaredQueryDecodedRunOptions<MessagesByTopicQueryRows> = {}): Promise<DecodedDeclaredQueryResult<typeof queries.messagesByTopic, MessagesByTopicQueryRows>> {`)
+	assertContains(t, ts, `const queryOptions: DeclaredQueryOptions = {`)
+	assertContains(t, ts, `params: encodeMessagesByTopicParams(params),`)
+	assertContains(t, ts, `const decodeOptions: DeclaredQueryDecodeOptions<MessagesByTopicQueryRows> = {`)
+	assertContains(t, ts, `return queryMessagesByTopicResult(await runDeclaredQuery("messages_by_topic", queryOptions), decodeOptions);`)
+}
+
+func TestTypeScriptGeneratorDeclaredViewHelpersAcceptTypedParams(t *testing.T) {
+	out, err := Generate(declaredReadParametersContractFixture(), Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export function subscribeLiveMessagesByTopic(subscribeDeclaredView: DeclaredViewSubscriber, params: LiveMessagesByTopicParams, options: DeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> = {}): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_messages_by_topic", { ...subscribeOptions, params: encodeLiveMessagesByTopicParams(params) });`)
+	assertContains(t, ts, `export function subscribeLiveMessagesByTopicHandle(subscribeDeclaredView: DeclaredViewHandleSubscriber, params: LiveMessagesByTopicParams, options: DeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> & SubscriptionHandleReturnOptions): Promise<SubscriptionHandle<LiveMessagesByTopicViewRow>> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_messages_by_topic", { ...subscribeOptions, params: encodeLiveMessagesByTopicParams(params) });`)
+}
+
+func TestTypeScriptGeneratorDeclaredReadNoParamSignaturesRemainUnchanged(t *testing.T) {
+	contract := declaredReadParametersContractFixture()
+	contract.Queries[0].RowSchema = &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+		{Name: "id", Type: "uint64"},
+		{Name: "body", Type: "string"},
+		{Name: "sent_at", Type: "timestamp"},
+		{Name: "payload", Type: "bytes"},
+		{Name: "tags", Type: "arrayString"},
+	}}
+	contract.Queries[0].ResultShape = &shunter.ReadResultShape{Kind: shunter.ReadResultShapeTable, Table: "messages"}
+	contract.Views[0].RowSchema = &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+		{Name: "id", Type: "uint64"},
+		{Name: "body", Type: "string"},
+		{Name: "sent_at", Type: "timestamp"},
+		{Name: "payload", Type: "bytes"},
+		{Name: "tags", Type: "arrayString"},
+	}}
+	contract.Views[0].ResultShape = &shunter.ReadResultShape{Kind: shunter.ReadResultShapeTable, Table: "messages"}
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("recent_messages");`)
+	assertContains(t, ts, `export async function queryRecentMessagesDecoded(runDeclaredQuery: DeclaredQueryRunner, options: DeclaredQueryDecodeOptions<RecentMessagesQueryRows> = {}): Promise<DecodedDeclaredQueryResult<typeof queries.recentMessages, RecentMessagesQueryRows>> {`)
+	assertContains(t, ts, `export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscriptionOptions<LiveMessagesViewRow> = {}): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_messages", subscribeOptions);`)
+	assertContains(t, ts, `export function subscribeLiveMessagesHandle(subscribeDeclaredView: DeclaredViewHandleSubscriber, options: DeclaredViewSubscriptionOptions<LiveMessagesViewRow> & SubscriptionHandleReturnOptions): Promise<SubscriptionHandle<LiveMessagesViewRow>> {`)
+	assertNotContains(t, ts, `queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner, params:`)
+	assertNotContains(t, ts, `queryRecentMessagesDecoded(runDeclaredQuery: DeclaredQueryRunner, params:`)
+	assertNotContains(t, ts, `subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber, params:`)
+	assertNotContains(t, ts, `subscribeLiveMessagesHandle(subscribeDeclaredView: DeclaredViewHandleSubscriber, params:`)
+}
+
 func TestTypeScriptGeneratorDisambiguatesDeclaredReadHelperNameCollisions(t *testing.T) {
 	contract := contractFixture()
 	contract.Queries = append(contract.Queries, shunter.QueryDescription{Name: "recent-messages", SQL: "SELECT * FROM messages"})
@@ -1354,6 +1460,36 @@ func contractFixture() shunter.ModuleContract {
 			DefaultSnapshotFilename: shunter.DefaultContractSnapshotFilename,
 		},
 	}
+}
+
+func declaredReadParametersContractFixture() shunter.ModuleContract {
+	contract := contractFixture()
+	contract.Queries = append(contract.Queries, shunter.QueryDescription{
+		Name: "messages_by_topic",
+		SQL:  "SELECT id, body FROM messages WHERE body = :topic AND id > :after_id",
+		Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "topic", Type: "string"},
+			{Name: "after_id", Type: "uint64"},
+		}},
+		RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "id", Type: "uint64"},
+			{Name: "body", Type: "string"},
+		}},
+		ResultShape: &shunter.ReadResultShape{Kind: shunter.ReadResultShapeProjection, Table: "messages"},
+	})
+	contract.Views = append(contract.Views, shunter.ViewDescription{
+		Name: "live_messages_by_topic",
+		SQL:  "SELECT id, body AS text FROM messages WHERE body = :topic",
+		Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "topic", Type: "string"},
+		}},
+		RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "id", Type: "uint64"},
+			{Name: "text", Type: "string"},
+		}},
+		ResultShape: &shunter.ReadResultShape{Kind: shunter.ReadResultShapeProjection, Table: "messages"},
+	})
+	return contract
 }
 
 func assertContains(t *testing.T, haystack, needle string) {
