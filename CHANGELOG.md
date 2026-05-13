@@ -37,6 +37,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added a structured release qualification ledger and wired the release
   checklist to record Shunter/canary refs, command evidence, operator/date,
   result, and residual risks before tagging.
+- Added a protocol benchmark row for slow-reader WebSocket backpressure while
+  preserving unrelated healthy-client fanout delivery.
 
 ## v1.0.1 - 2026-05-12
 

@@ -178,7 +178,7 @@ func (l tcpBufferListener) Accept() (net.Conn, error) {
 	return conn, nil
 }
 
-func loopbackConnWithTCPBuffers(t *testing.T, opts ProtocolOptions, bufferBytes int) (*Conn, *websocket.Conn, func()) {
+func loopbackConnWithTCPBuffers(t testing.TB, opts ProtocolOptions, bufferBytes int) (*Conn, *websocket.Conn, func()) {
 	t.Helper()
 
 	serverReady := make(chan *websocket.Conn, 1)
@@ -244,7 +244,7 @@ func loopbackConnWithTCPBuffers(t *testing.T, opts ProtocolOptions, bufferBytes 
 	return conn, clientWS, cleanup
 }
 
-func superviseSyntheticConn(t *testing.T, conn *Conn, inbox ExecutorInbox, mgr *ConnManager, outboundDone <-chan struct{}) <-chan struct{} {
+func superviseSyntheticConn(t testing.TB, conn *Conn, inbox ExecutorInbox, mgr *ConnManager, outboundDone <-chan struct{}) <-chan struct{} {
 	t.Helper()
 
 	dispatchDone := make(chan struct{})

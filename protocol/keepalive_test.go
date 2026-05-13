@@ -17,7 +17,7 @@ import (
 // loopbackConn pairs a server-side *Conn with a client-side
 // *websocket.Conn via an httptest.Server. The returned cleanup closes
 // both ends.
-func loopbackConn(t *testing.T, opts ProtocolOptions) (*Conn, *websocket.Conn, func()) {
+func loopbackConn(t testing.TB, opts ProtocolOptions) (*Conn, *websocket.Conn, func()) {
 	t.Helper()
 	serverReady := make(chan *websocket.Conn, 1)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

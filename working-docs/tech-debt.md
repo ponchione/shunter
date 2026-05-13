@@ -12,7 +12,6 @@ live code, tests, focused docs, and Go doc when they disagree with this file.
 `docs/performance-envelopes.md` owns the current benchmark snapshot. The
 remaining measurement gaps are:
 
-- benchmark rows for slow-reader WebSocket writer/write-timeout backpressure
 - external canary-scale fanout and workload-derived fanout distributions
 - external canary workload timing, including canary-scale backup/restore
 - production-sized memory profiles beyond the current local fixtures

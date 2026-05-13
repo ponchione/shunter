@@ -51,6 +51,7 @@ Every row is advisory.
 | Fanout WebSocket | `WebSocketFanout16ClientsLightUpdate-24` | 16 persistent WebSocket clients; protocol light update fanout through `ConnManager`, sender enqueue, outbound writers, and client reads | 68.39us +/- 8% | 41.41Ki +/- 0% | 624 | advisory |
 | Fanout WebSocket | `WebSocketFanout64ClientsLightUpdate-24` | 64 persistent WebSocket clients; protocol light update fanout through `ConnManager`, sender enqueue, outbound writers, and client reads | 292.8us +/- 9% | 165.5Ki +/- 0% | 2.496k | advisory |
 | Fanout WebSocket | `WebSocketFanout128ClientsLightUpdate-24` | 128 persistent WebSocket clients; protocol light update fanout through `ConnManager`, sender enqueue, outbound writers, and client reads | 563.9us +/- 7% | 331.1Ki +/- 0% | 4.992k | advisory |
+| Slow-reader WebSocket | `WebSocketSlowReaderBackpressureUnrelatedFanout-24` | one WebSocket client held in an unread 8 MiB write with a one-message outbound queue and configured `WriteTimeout`; unrelated healthy client receives one light-update fanout over its WebSocket | 6.888us +/- 1% | 2.586Ki +/- 0% | 39 | advisory |
 | Backpressure sender | `ClientSenderBackpressureFullBuffer-24` | one registered connection with a one-slot outbound queue already full; `SendTransactionUpdateLight` encodes a light update and rejects the non-blocking enqueue with `ErrClientBufferFull`; no WebSocket writer or async disconnect teardown in the timed loop | 427.4ns +/- 2% | 376 B +/- 0% | 10 | advisory |
 
 ## Executor
@@ -132,10 +133,10 @@ Every row is advisory.
   DataDir fixtures and is expected to be I/O dominated; these rows do not
   replace canary-scale backup/restore timing.
 - WebSocket coverage now includes a single SubscribeSingle round trip and
-  16-, 64-, and 128-client light-update fanout fixtures. Deterministic
-  sender-level full-buffer rejection now has an advisory row. Slow-reader
-  WebSocket writer/write-timeout behavior has network-level test coverage, but
-  not an advisory benchmark row.
+  16-, 64-, and 128-client light-update fanout fixtures. Slow-reader
+  backpressure now has a network-level advisory row for unrelated healthy
+  client delivery while a second client is held in a blocked unread write.
+  Deterministic sender-level full-buffer rejection is covered separately.
 - The current rows are not release-blocking thresholds. Treat regressions here
   as investigation triggers until the release process defines hard limits.
 
@@ -282,10 +283,9 @@ Findings:
 These remain outside the current benchmark envelope:
 
 - WebSocket network-level subscription workloads beyond the current
-  single-connection subscribe and 16/64/128-client light-update fanout
-  fixtures, including benchmark rows for slow-reader writer/write-timeout
-  backpressure paths and external canary-scale fanout; deterministic
-  sender-level full-buffer rejection is covered separately
+  single-connection subscribe, 16/64/128-client light-update fanout, and
+  slow-reader backpressure fixtures, including external canary-scale fanout;
+  deterministic sender-level full-buffer rejection is covered separately
 - workload-derived or canary fanout distributions beyond the deterministic
   in-process same-query, varied single-table, skewed hot-key, and varied
   two-table predicate fixtures

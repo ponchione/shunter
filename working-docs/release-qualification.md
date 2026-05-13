@@ -74,13 +74,6 @@ Decision:
   accepted.
 ```
 
-## Historical Notes
-
-The `v1.0.0` and `v1.0.1` changelog entries say their release qualification
-passed before this ledger existed. Their exact Shunter and `opsboard-canary`
-inputs are not reconstructed here. Future release qualification records must
-capture those inputs directly in this file.
-
 ## Records
 
 No post-ledger release qualification records have been added yet.
