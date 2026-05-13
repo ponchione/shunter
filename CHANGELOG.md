@@ -14,6 +14,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - SQL decimal and exponent literals now stay floating-point unless their source
   text is exactly integral, avoiding integer coercion through `float64`
   boundary rounding.
+- SQL parsing now rejects excessively nested predicates with a normal
+  unsupported-SQL error, and the TypeScript client rejects impossible BSATN
+  string-array counts before walking the partial payload.
 
 ## v1.1.0 - 2026-05-13
 

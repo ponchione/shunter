@@ -105,6 +105,18 @@ func TestParseWhereHarmlessParenthesizationMetamorphic(t *testing.T) {
 	}
 }
 
+func TestParseWhereRejectsExcessivePredicateNesting(t *testing.T) {
+	nesting := maxPredicateNesting + 1
+	where := strings.Repeat("(", nesting) + "id = 1" + strings.Repeat(")", nesting)
+	_, err := Parse("SELECT * FROM users WHERE " + where)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("Parse err = %v, want ErrUnsupportedSQL", err)
+	}
+	if !strings.Contains(err.Error(), "predicate nesting") {
+		t.Fatalf("Parse err = %q, want predicate nesting detail", err)
+	}
+}
+
 func TestParseWhitespaceMetamorphic(t *testing.T) {
 	const seed = uint64(0x571c0de)
 	cases := []struct {

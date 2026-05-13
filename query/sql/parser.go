@@ -21,7 +21,10 @@ import (
 // Wrap with fmt.Errorf("%w: ...", ErrUnsupportedSQL, ...) for specifics.
 var ErrUnsupportedSQL = errors.New("unsupported SQL")
 
-const maxSQLLength = 50_000
+const (
+	maxSQLLength        = 50_000
+	maxPredicateNesting = 128
+)
 
 // LitKind tags a parsed literal's lexical category.
 type LitKind int
@@ -542,8 +545,9 @@ func isUnsupportedJoinStartToken(t token) bool {
 // --- parser ---
 
 type parser struct {
-	toks []token
-	pos  int
+	toks           []token
+	pos            int
+	predicateDepth int
 	// sql holds the original input string passed to Parse. Used by
 	// rejection arms whose reference text is the offending SELECT
 	// rendered verbatim (e.g. UnsupportedSelectError for the
@@ -1229,8 +1233,13 @@ func (p *parser) parseBinaryPredicate(
 
 func (p *parser) parsePredicateTerm(bindings relationBindings) (Predicate, error) {
 	if p.peek().kind == tokLParen {
+		if p.predicateDepth >= maxPredicateNesting {
+			return nil, p.unsupported(fmt.Sprintf("predicate nesting exceeds maximum depth %d", maxPredicateNesting))
+		}
 		p.advance()
+		p.predicateDepth++
 		pred, err := p.parseDisjunction(bindings)
+		p.predicateDepth--
 		if err != nil {
 			return nil, err
 		}

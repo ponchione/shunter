@@ -452,6 +452,10 @@ assert.throws(
   () => decodeBsatnProduct(bytesFromHex("0b02"), [{ name: "topic", kind: "string", nullable: true }], (values) => values),
   ShunterValidationError,
 );
+assert.throws(
+  () => decodeBsatnProduct(bytesFromHex("120200000000000000"), [{ name: "tags", kind: "arrayString" }], (values) => values),
+  /array count exceeds remaining bytes/,
+);
 
 const encodedReducer = encodeReducerCallRequest("send", new Uint8Array([0xaa, 0xbb]), {
   requestId: 0x31323334,

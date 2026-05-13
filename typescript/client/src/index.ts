@@ -3109,6 +3109,12 @@ function readBsatnStringArray(
 ): [readonly string[], number] {
   const [count, countOffset] = readUint32LE(row, offset, `BSATN ${column} array count`);
   offset = countOffset;
+  if (count > Math.floor((row.length - offset) / 4)) {
+    throw new ShunterValidationError("Malformed BSATN row: array count exceeds remaining bytes.", {
+      code: "bsatn_array_count_exceeds_remaining",
+      details: { column, count, remainingBytes: row.length - offset },
+    });
+  }
   const values: string[] = [];
   for (let i = 0; i < count; i += 1) {
     const [value, valueOffset] = readBsatnString(row, offset, `${column}[${i}]`);
