@@ -123,17 +123,41 @@ clients receive ongoing transaction updates through the protocol path.
 Shunter's SQL surface is intentionally narrow. Do not treat it as broad SQL
 database compatibility.
 
-Use [v1 compatibility](../v1-compatibility.md) as the current support matrix
-for:
+Current v1 read compatibility by surface:
 
-- one-off raw SQL
-- declared queries
-- raw subscriptions
-- declared live views
-- local runtime reads
+- Protocol `OneOffQuery` executes Shunter's read-only SQL subset against a
+  committed snapshot. Supported shapes include single-table reads, bounded
+  joins and multi-way joins, column projections and aliases, `COUNT`/`SUM`
+  aggregates including `COUNT(DISTINCT column)`, `ORDER BY`, `LIMIT`, and
+  `OFFSET`. Table read policies and visibility filters apply. There is no
+  root-level local raw SQL API in v1.
+- Declared queries use `QueryDeclaration.SQL`, `Runtime.CallQuery`, and the
+  protocol declared-query path. They use the one-off read executor with
+  declaration-level permission metadata and may expose private tables when the
+  declaration permission allows the caller. Empty SQL is metadata-only and
+  returns `ErrDeclaredReadNotExecutable` when executed.
+- Raw subscriptions use protocol `SubscribeSingle` and `SubscribeMulti` to
+  register table-shaped live reads. They support single-table and join
+  predicates, including `SELECT *` for single tables and `SELECT table.*` or
+  alias-shaped emitted relations for joins. Table read policies and visibility
+  filters apply. Raw subscriptions reject column projections, aggregates,
+  `ORDER BY`, `LIMIT`, and `OFFSET`.
+- Declared live views use `ViewDeclaration.SQL`, `Runtime.SubscribeView`, and
+  the protocol declared-view subscription path. Supported shapes include
+  table-shaped reads, table-shaped joins and multi-way joins, column
+  projections over the emitted relation, single-table `ORDER BY`, `LIMIT`, and
+  `OFFSET` initial snapshots, and `COUNT`/`SUM` aggregates including join and
+  cross-join aggregates. Aggregate aliases must use `AS`.
+- Local runtime reads use `Runtime.Read` for callback-scoped committed-state
+  access. `Runtime.CallQuery` and `Runtime.SubscribeView` are the local
+  declared-read APIs.
 
 If a read is important to the app contract, prefer a declared query or declared
 view over ad hoc raw SQL.
+
+For declared live views with `ORDER BY`, `LIMIT`, or `OFFSET`, the initial
+snapshot follows those clauses. Post-commit delivery remains row deltas over
+matching rows.
 
 ## Permissions
 

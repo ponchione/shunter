@@ -74,6 +74,18 @@ codegen.Options{
 }
 ```
 
+Generated identifier normalization is stable for v1 output. Names are emitted
+as TypeScript-safe identifiers by splitting on non-letter and non-digit
+separators, applying the category's camel-case or Pascal-case style, prefixing
+leading digits with `_`, suffixing reserved words with `_`, and appending
+numeric collision suffixes in contract order.
+
+Generated TypeScript is intended for browsers and Electron renderers with
+standard Web APIs. Non-browser hosts must provide a compatible
+`webSocketFactory`. Server-side SDK APIs, framework cache adapters, generated
+writes that bypass reducers, and SpacetimeDB client API compatibility are out
+of scope for v1.
+
 ## Connect
 
 Pass the generated protocol and contract metadata into the runtime client. When
@@ -105,8 +117,7 @@ const client = createShunterClient({
 await client.connect();
 ```
 
-The default browser path uses global `WebSocket`. Non-browser hosts must
-provide a compatible `webSocketFactory`.
+The default browser path uses global `WebSocket`.
 
 ## Call Reducers
 

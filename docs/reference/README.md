@@ -11,6 +11,3 @@ the exported app-facing surfaces.
   serving, health, and `Close`.
 - [Read surface](read-surface.md) - choosing among local reads, declared
   queries, declared views, and protocol reads.
-
-For the formal current support matrix, see
-[v1 compatibility](../v1-compatibility.md).

@@ -7,7 +7,7 @@ delivery behind a single runtime-owned API.
 
 The v1 line is focused on self-hosted Go applications that embed Shunter as a
 runtime library. Core subsystems are implemented and covered by the v1
-compatibility matrix, hardening tests, TypeScript SDK tests, and the external
+support docs, hardening tests, TypeScript SDK tests, and the external
 `opsboard-canary` release gate.
 
 ## Project Status
@@ -26,7 +26,7 @@ The supported app-facing entrypoint is the root `shunter` package:
 Shunter v1 is a self-hosted embedded runtime, not a managed database service.
 The stable v1 surfaces are the root package APIs, Shunter-native protocol,
 contract JSON, generated TypeScript, read surfaces, and documented operations
-listed in the v1 compatibility matrix.
+described under `docs/`.
 
 ## Goals
 
@@ -113,12 +113,13 @@ early or intentionally narrow:
   maintained release canary is the external `opsboard-canary` application
 - generated TypeScript and the private local package-shaped `@shunter/client`
   runtime are the v1 client path
-- SQL support is scoped to the v1 read-surface matrix; Shunter does not promise
-  broad SQL database compatibility
+- SQL support is scoped to the documented v1 read surfaces; Shunter does not
+  promise broad SQL database compatibility
 - performance rows are advisory unless a future release introduces hard
   thresholds
-- lower-level runtime packages remain implementation details unless the v1
-  compatibility matrix names a stable subset
+- lower-level runtime packages remain implementation details except for the
+  documented stable subsets used by root APIs, contracts, protocol rows, BSATN,
+  and generated clients
 
 ## Versioning
 

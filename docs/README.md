@@ -16,10 +16,32 @@ notes, and future-work trackers live under `../working-docs/`.
    surface choices that Go doc alone does not explain.
 
 Use [authentication](authentication.md) for the full current auth contract,
-[operations](operations.md) for backup/restore and release runbooks,
+[operations](operations.md) for backup/restore and release runbooks, and
 [performance envelopes](performance-envelopes.md) for the current advisory
-benchmark snapshot, and [v1 compatibility](v1-compatibility.md) for the current
-support matrix.
+benchmark snapshot.
+
+## Compatibility And Support
+
+Shunter v1 is a Go-native hosted runtime with reducer-owned writes,
+Shunter-native protocol frames, and contract-driven clients. It is not a
+SpacetimeDB compatibility layer.
+
+Stable v1 compatibility applies to the app-facing root package APIs for module
+declaration, runtime lifecycle, local reducer calls, local and declared reads,
+contract export and validation, build metadata, and health status
+classification. It also applies to v1 `ModuleContract` JSON, the v1 WebSocket
+wire contract, BSATN value/product-row encoding at runtime boundaries, and
+generated TypeScript for valid v1 contracts.
+
+Runtime diagnostics, observability hooks, offline operation helpers, migration
+hooks, multi-module hosting, contract workflow helpers, and lower-level
+protocol package helpers are advanced surfaces. They are usable, but app code
+that needs normal v1 compatibility should prefer the root APIs, contract JSON,
+generated clients, or documented protocol behavior.
+
+Runtime implementation packages such as `store`, `subscription`, `executor`,
+`commitlog`, `query/sql`, and `internal/*` are not app compatibility surfaces.
+`reference/SpacetimeDB/` is research-only material.
 
 ## Current Docs
 
@@ -38,8 +60,6 @@ support matrix.
   migrations, upgrades, and release checklist.
 - [Performance envelopes](performance-envelopes.md) - current advisory
   benchmark snapshot, workload fixtures, and known measurement gaps.
-- [v1 compatibility](v1-compatibility.md) - support matrix for root APIs,
-  protocol, contract JSON, codegen, read surfaces, and host behavior.
 
 ## Working Docs
 

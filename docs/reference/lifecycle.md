@@ -94,3 +94,7 @@ schemas, transactions, data directories, or contracts.
 
 Use host lifecycle only when the application intentionally serves multiple
 independent modules from one process.
+
+Hosts start runtimes in registration order and close them in reverse order.
+Route prefixes must be explicit and non-overlapping, module names must match
+their runtimes, and data directories must not collide.

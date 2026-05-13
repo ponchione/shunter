@@ -11,6 +11,33 @@ A contract includes app-facing schema, reducers, declared queries, declared
 views, visibility filters, permissions, read-model metadata, migration
 metadata, and codegen metadata.
 
+## Contract JSON Compatibility
+
+Stable v1 producers emit `contract_version: 1`. The stable top-level fields
+are:
+
+- `module`: app module name, version, and string metadata
+- `schema`: schema version, tables, columns, indexes, read policy, reducers,
+  and optional reducer argument/result product schemas
+- `queries` and `views`: declaration names, optional executable SQL, row
+  schema metadata, and result-shape metadata
+- `visibility_filters`: validated SQL, returned table metadata, and
+  caller-identity usage
+- `permissions`: reducer, query, and view permission metadata
+- `read_model`: query and view read-model metadata
+- `migrations`: descriptive module, table, query, and view migration metadata
+- `codegen`: contract format, contract version, and default snapshot filename
+
+`ModuleContract.MarshalCanonicalJSON` is the canonical emitted JSON format.
+`ValidateModuleContract` validates known v1 fields, reducer product schemas,
+and SQL/read metadata.
+
+V1 readers must ignore unknown JSON fields so additive metadata can be
+introduced without breaking older consumers. V1 producers must not change the
+type or meaning of an existing known field without a new contract version.
+`Module.Version(...)` populates `module.version`; it is app-owned metadata, not
+the Shunter runtime/tool version.
+
 ## Export From An App Binary
 
 The generic Shunter CLI does not dynamically load app modules. Export contracts

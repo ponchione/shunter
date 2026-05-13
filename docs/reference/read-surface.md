@@ -3,9 +3,8 @@
 Status: current v1 reference note
 Scope: choosing among Shunter's app-facing read surfaces.
 
-The authoritative support matrix is
-[v1 compatibility](../v1-compatibility.md). This page is a short decision
-guide.
+Use this page as the compact support reference for Shunter's current v1 read
+surfaces.
 
 ## Which Read Should I Use?
 
@@ -68,6 +67,22 @@ contract surfaces.
 ## SQL Compatibility
 
 Shunter's SQL support is intentionally narrow and read-oriented. Supported
-shapes differ by read surface. Check
-[v1 compatibility](../v1-compatibility.md) before relying on a SQL feature in
-an app contract.
+shapes differ by read surface:
+
+- Protocol one-off raw SQL supports committed-snapshot single-table reads,
+  bounded joins and multi-way joins, projections and aliases, `COUNT`/`SUM`
+  aggregates including `COUNT(DISTINCT column)`, `ORDER BY`, `LIMIT`, and
+  `OFFSET`.
+- Declared queries use the one-off executor through `QueryDeclaration.SQL`,
+  `Runtime.CallQuery`, and the protocol declared-query path. They may expose
+  private tables when declaration permission allows the caller. Empty SQL is
+  metadata-only.
+- Raw protocol subscriptions support table-shaped single-table and join reads.
+  Table read policies and visibility filters apply. Raw subscriptions reject
+  projections, aggregates, `ORDER BY`, `LIMIT`, and `OFFSET`.
+- Declared live views support table-shaped reads and joins, projections over
+  the emitted relation, single-table `ORDER BY`/`LIMIT`/`OFFSET` initial
+  snapshots, and `COUNT`/`SUM` aggregate views. Aggregate aliases must use
+  `AS`. Post-commit delivery remains row deltas over matching rows.
+- Local ad hoc raw SQL is out of scope for v1. Use `Runtime.Read`,
+  `Runtime.CallQuery`, or `Runtime.SubscribeView` instead.

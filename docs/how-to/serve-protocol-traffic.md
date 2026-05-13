@@ -77,6 +77,33 @@ With protocol enabled, the runtime mounts the WebSocket protocol endpoint at
 The v1 protocol is Shunter-native. Do not document it as a compatibility layer
 for another runtime's wire format.
 
+## Wire Compatibility
+
+The only v1 WebSocket subprotocol token is `v1.bsatn.shunter`.
+`ProtocolVersionV1` is the minimum, current, and only supported v1 protocol
+version. A future incompatible protocol must negotiate a new token instead of
+silently widening v1 semantics.
+
+V1 frames are Shunter-native binary frames: one tag byte followed by a BSATN
+body, inside the runtime compression envelope when compression is negotiated.
+
+Stable client-to-server message families are `SubscribeSingle`,
+`UnsubscribeSingle`, `SubscribeMulti`, `UnsubscribeMulti`, `CallReducer`,
+`OneOffQuery`, `DeclaredQuery`, and `SubscribeDeclaredView`.
+
+Stable server-to-client message families are `IdentityToken`,
+`SubscribeSingleApplied`, `UnsubscribeSingleApplied`,
+`SubscribeMultiApplied`, `UnsubscribeMultiApplied`, `SubscriptionError`,
+`TransactionUpdate`, `TransactionUpdateLight`, and `OneOffQueryResponse`.
+
+Tag `0` and tags `128` through `255` are reserved in v1. Server tag `7` is
+reserved for the retired reducer-call result envelope. Unknown, unassigned,
+reserved, malformed, or trailing-byte messages are fatal protocol errors.
+
+Row batches and subscription updates use Shunter row-list and flat update
+payloads. Reference wrapper chains, energy fields, and SpacetimeDB wire
+compatibility are out of scope for v1.
+
 ## Auth Mode
 
 Development mode is the zero-value `AuthMode` and allows missing-token protocol
@@ -133,6 +160,14 @@ return host.ListenAndServe(ctx, "127.0.0.1:3000")
 Use this only when you intentionally want multiple independent runtimes in one
 process. A host does not merge schemas, transactions, data directories, or
 contracts.
+
+Host route prefixes are explicit and must not overlap. Each registered module
+name must match the built runtime, and hosted runtimes must not share a
+`DataDir`.
+
+Cross-module transactions, cross-module SQL or subscriptions, merged schema or
+contract artifacts, global reducer/query namespaces, and dynamic module upload
+are out of scope for v1.
 
 ## Serving Checklist
 

@@ -6,6 +6,26 @@ Scope: vocabulary and mental model for app authors.
 This page explains the core nouns used by Shunter docs. It is not a subsystem
 spec and does not replace Go doc for method signatures.
 
+## Support Levels
+
+The stable v1 app surface is the root `github.com/ponchione/shunter` package
+used for module declaration, build/configuration, runtime lifecycle, reducer
+calls, local reads, declared reads, contract export/validation, build metadata,
+and health status classification.
+
+`schema`, `types`, `bsatn`, and `codegen` have stable v1 subsets where they are
+used by root APIs, contract JSON, protocol rows, BSATN encoding, or generated
+TypeScript. The `protocol` package exposes a stable wire contract, but its Go
+helper APIs are lower-level advanced surfaces.
+
+Diagnostics, observability, offline operation helpers, migration hooks,
+contract diff/workflow helpers, and multi-module hosting are advanced v1
+surfaces. Runtime implementation packages and `internal/*` are implementation
+details even when importable.
+
+Root package errors inherit the support level of the API that returns them.
+Public methods on unexported concrete types are implementation details.
+
 ## Module
 
 A module is the application definition that Shunter builds into a runtime. It
