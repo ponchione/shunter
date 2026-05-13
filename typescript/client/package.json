@@ -1,6 +1,6 @@
 {
   "name": "@shunter/client",
-  "version": "1.0.0",
+  "version": "1.1.0-dev",
   "description": "Private local Shunter v1 TypeScript client runtime.",
   "private": true,
   "type": "module",

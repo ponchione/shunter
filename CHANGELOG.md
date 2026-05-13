@@ -13,6 +13,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   interfaces, BSATN params encoders, and parameterized declared query/view
   helpers while preserving no-parameter helper signatures and hiding encoded
   params from generated helper options.
+- The private `@shunter/client` package metadata now tracks the active
+  `v1.1.0-dev` development line as npm version `1.1.0-dev`.
 - Moved stale v1 roadmap follow-up into `working-docs/tech-debt.md` and
   restored the source version to a post-release development marker.
 - Hardened offline DataDir backup/restore file copies against replaced source

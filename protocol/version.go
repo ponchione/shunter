@@ -9,7 +9,8 @@ const (
 	// ProtocolVersionUnknown is never negotiated; it is the zero value for
 	// missing or invalid version data.
 	ProtocolVersionUnknown ProtocolVersion = 0
-	// ProtocolVersionV1 is the current Shunter-native BSATN protocol.
+	// ProtocolVersionV1 is the original Shunter-native BSATN protocol and the
+	// minimum version still accepted for v1 clients.
 	ProtocolVersionV1 ProtocolVersion = 1
 	// ProtocolVersionV2 adds parameterized declared-read request messages.
 	ProtocolVersionV2 ProtocolVersion = 2

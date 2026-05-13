@@ -22,6 +22,7 @@ const expectedPackFiles = [
 ];
 
 const defaultRuntimePackageName = "@shunter/client";
+const defaultRuntimePackageVersion = "1.1.0-dev";
 const defaultGeneratedFixture = join(repoRoot, "codegen", "testdata", "v1_module_contract.ts");
 const appScopedRuntimePackageName = "@app/shunter-runtime";
 const appScopedGeneratedFixture = join(
@@ -145,7 +146,7 @@ const parsePackOutput = (output) => {
 
 const assertPackManifest = (manifest) => {
   assert.equal(manifest.name, "@shunter/client");
-  assert.equal(manifest.version, "1.0.0");
+  assert.equal(manifest.version, defaultRuntimePackageVersion);
   assert.deepEqual(
     manifest.files.map((file) => file.path),
     expectedPackFiles,
@@ -194,7 +195,7 @@ verifyFixtureApp(appScopedFileAppRoot, appScopedRuntimePackageName);
 const workspaceRoot = join(smokeRoot, "workspace");
 const workspaceAppRoot = join(workspaceRoot, "app");
 writeWorkspaceClientPackage(join(workspaceRoot, "client"));
-writeFixtureApp(workspaceAppRoot, "1.0.0");
+writeFixtureApp(workspaceAppRoot, defaultRuntimePackageVersion);
 writeFileSync(
   join(workspaceRoot, "package.json"),
   JSON.stringify(
