@@ -39,6 +39,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   result, and residual risks before tagging.
 - Added a protocol benchmark row for slow-reader WebSocket backpressure while
   preserving unrelated healthy-client fanout delivery.
+- Added protocol regression coverage for caller-specific declared-view
+  visibility deltas, including a row moving from one caller's visible set to
+  another's.
 
 ## v1.0.1 - 2026-05-12
 

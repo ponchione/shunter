@@ -42,8 +42,8 @@ coverage:
   are found
 - extend crash/fault coverage across snapshot, compaction, migration, recovery,
   and shutdown boundaries
-- expand subscription correctness scenarios for joins, deletes, updates,
-  visibility changes, caller-specific subscriptions, and concurrent writes
+- expand subscription correctness scenarios for joins, deletes, updates, and
+  concurrent writes
 - keep race-enabled package guidance current as ownership changes
 - keep soak/load tests outside the short local loop, with commands that make
   failures attributable

@@ -332,6 +332,70 @@ func TestProtocolDeclaredReadsApplyVisibilityToInitialRowsAndDeltas(t *testing.T
 	}
 }
 
+func TestProtocolDeclaredViewCallerSpecificVisibilityDeltasStayIsolated(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		Reducer("replace_message_projected_body", replaceMessageProjectedBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        "live_visible_messages",
+			SQL:         "SELECT * FROM messages ORDER BY id",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+
+	aliceClient, aliceToken := dialDeclaredReadProtocolWithIdentity(t, rt, mintDeclaredReadProtocolToken(t, "alice-visible-subscriber", "messages:subscribe"))
+	bobClient, bobToken := dialDeclaredReadProtocolWithIdentity(t, rt, mintDeclaredReadProtocolToken(t, "bob-visible-subscriber", "messages:subscribe"))
+	aliceOwner := types.Identity(aliceToken.Identity).Hex()
+	bobOwner := types.Identity(bobToken.Identity).Hex()
+	hiddenOwner := visibilityRuntimeIdentity(0x66).Hex()
+
+	insertMessageWithBody(t, rt, 1, aliceOwner)
+	insertMessageWithBody(t, rt, 2, bobOwner)
+	insertMessageWithBody(t, rt, 3, hiddenOwner)
+
+	columns := []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: types.KindUint64},
+		{Index: 1, Name: "body", Type: types.KindString},
+	}
+	writeDeclaredReadProtocolMessage(t, aliceClient, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 51,
+		QueryID:   61,
+		Name:      "live_visible_messages",
+	})
+	aliceInitial := requireDeclaredReadAppliedValues(t, aliceClient, 51, 61, "messages", columns)
+	assertDeclaredReadVisibleMessageRows(t, aliceInitial, []uint64{1}, aliceOwner, "alice visible initial")
+
+	writeDeclaredReadProtocolMessage(t, bobClient, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 52,
+		QueryID:   62,
+		Name:      "live_visible_messages",
+	})
+	bobInitial := requireDeclaredReadAppliedValues(t, bobClient, 52, 62, "messages", columns)
+	assertDeclaredReadVisibleMessageRows(t, bobInitial, []uint64{2}, bobOwner, "bob visible initial")
+
+	replaceMessageProjectedBody(t, rt, 1, 4, bobOwner)
+
+	aliceInserts, aliceDeletes := requireDeclaredReadDeltaValues(t, aliceClient, 61, "messages", columns)
+	if len(aliceInserts) != 0 {
+		t.Fatalf("alice visibility transfer inserts = %#v, want none", aliceInserts)
+	}
+	assertDeclaredReadVisibleMessageRows(t, aliceDeletes, []uint64{1}, aliceOwner, "alice visibility transfer delete")
+
+	bobInserts, bobDeletes := requireDeclaredReadDeltaValues(t, bobClient, 62, "messages", columns)
+	assertDeclaredReadVisibleMessageRows(t, bobInserts, []uint64{4}, bobOwner, "bob visibility transfer insert")
+	if len(bobDeletes) != 0 {
+		t.Fatalf("bob visibility transfer deletes = %#v, want none", bobDeletes)
+	}
+
+	insertMessageWithBody(t, rt, 5, hiddenOwner)
+	requireNoDeclaredReadProtocolMessage(t, aliceClient)
+	requireNoDeclaredReadProtocolMessage(t, bobClient)
+}
+
 func TestProtocolDeclaredViewMultiWayJoinSendsDeltas(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Reducer("insert_message", insertMessageReducer).
