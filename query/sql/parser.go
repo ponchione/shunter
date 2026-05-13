@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math"
 	"math/big"
 	"slices"
 	"strconv"
@@ -1397,20 +1396,18 @@ func (p *parser) parseLiteral() (Literal, error) {
 // Integer-valued scientific notation stays exact when possible.
 func parseNumericLiteral(text string) (Literal, error) {
 	if strings.ContainsAny(text, ".eE") {
-		r, ok := new(big.Rat).SetString(text)
-		if ok && r.IsInt() {
-			n := r.Num()
-			if n.IsInt64() {
-				return Literal{Kind: LitInt, Int: n.Int64(), Text: text}, nil
+		if r, ok := new(big.Rat).SetString(text); ok {
+			if r.IsInt() {
+				n := r.Num()
+				if n.IsInt64() {
+					return Literal{Kind: LitInt, Int: n.Int64(), Text: text}, nil
+				}
+				return Literal{Kind: LitBigInt, Big: new(big.Int).Set(n), Text: text}, nil
 			}
-			return Literal{Kind: LitBigInt, Big: new(big.Int).Set(n), Text: text}, nil
 		}
 		f, err := strconv.ParseFloat(text, 64)
 		if err != nil {
 			return Literal{}, fmt.Errorf("%w: numeric literal %q out of range", ErrUnsupportedSQL, text)
-		}
-		if !math.IsInf(f, 0) && !math.IsNaN(f) && f == math.Trunc(f) && f >= math.MinInt64 && f <= math.MaxInt64 {
-			return Literal{Kind: LitInt, Int: int64(f), Text: text}, nil
 		}
 		return Literal{Kind: LitFloat, Float: f, Text: text}, nil
 	}

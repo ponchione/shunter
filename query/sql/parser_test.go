@@ -327,6 +327,20 @@ func TestParseWhereLeadingDotFloat(t *testing.T) {
 	}
 }
 
+func TestParseWhereRoundedBoundaryFractionStaysFloat(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM t WHERE n = 9223372036854775807.5")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	lit := stmt.Filters[0].Literal
+	if lit.Kind != LitFloat {
+		t.Fatalf("Literal.Kind = %v, want LitFloat", lit.Kind)
+	}
+	if lit.Text != "9223372036854775807.5" {
+		t.Fatalf("Literal.Text = %q, want original boundary fraction", lit.Text)
+	}
+}
+
 // TestParseWhereScientificNotationOverflowBigInt pins
 // reference/SpacetimeDB/crates/expr/src/check.rs:326-332 (`select * from t
 // where f32 = 1e40` / "Infinity" and `select * from t where u256 = 1e40` /

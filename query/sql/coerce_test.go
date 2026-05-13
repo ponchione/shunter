@@ -1122,6 +1122,7 @@ func TestCoerceParserPreservedSourceTextOnInvalidLiteral(t *testing.T) {
 		{"u8_scientific_overflows", "SELECT * FROM t WHERE u8 = 1e3", types.KindUint8, "1e3", "U8"},
 		{"u8_leading_plus_overflow", "SELECT * FROM t WHERE u8 = +1000", types.KindUint8, "+1000", "U8"},
 		{"u8_round_trip_lossy_float", "SELECT * FROM t WHERE u8 = 1.10", types.KindUint8, "1.10", "U8"},
+		{"i64_rounded_fractional_boundary", "SELECT * FROM t WHERE i64 = 9223372036854775807.5", types.KindInt64, "9223372036854775807.5", "I64"},
 		{"u32_quoted_scientific", "SELECT * FROM t WHERE u32 = '1e40'", types.KindUint32, "1e40", "U32"},
 		{"u32_hex_token", "SELECT * FROM t WHERE u32 = 0x01", types.KindUint32, "0x01", "U32"},
 		{"bool_hex_token", "SELECT * FROM t WHERE b = 0x01", types.KindBool, "0x01", "Bool"},
