@@ -5,7 +5,7 @@ import "github.com/ponchione/shunter/types"
 // ValueIndex maps (table, column, value) to candidate query hashes.
 // cols records active columns so candidate collection can avoid full scans.
 type ValueIndex struct {
-	cols map[TableID]map[ColID]int
+	cols columnRefCounts
 	// args: table → column → encoded(value) → set of query hashes.
 	args map[TableID]map[ColID]map[valueKey]map[QueryHash]struct{}
 }
@@ -13,7 +13,7 @@ type ValueIndex struct {
 // NewValueIndex constructs an empty ValueIndex.
 func NewValueIndex() *ValueIndex {
 	return &ValueIndex{
-		cols: make(map[TableID]map[ColID]int),
+		cols: newColumnRefCounts(),
 		args: make(map[TableID]map[ColID]map[valueKey]map[QueryHash]struct{}),
 	}
 }
@@ -45,14 +45,7 @@ func (v *ValueIndex) Add(table TableID, col ColID, value Value, hash QueryHash) 
 		return
 	}
 	set[hash] = struct{}{}
-
-	// Bump the cols refcount.
-	byCol, ok := v.cols[table]
-	if !ok {
-		byCol = make(map[ColID]int)
-		v.cols[table] = byCol
-	}
-	byCol[col]++
+	v.cols.add(table, col)
 }
 
 // Remove removes a (table, column, value) → hash mapping. Empty keys are
@@ -85,16 +78,7 @@ func (v *ValueIndex) Remove(table TableID, col ColID, value Value, hash QueryHas
 		delete(v.args, table)
 	}
 
-	// Drop the cols refcount.
-	if colsRC, ok := v.cols[table]; ok {
-		colsRC[col]--
-		if colsRC[col] <= 0 {
-			delete(colsRC, col)
-		}
-		if len(colsRC) == 0 {
-			delete(v.cols, table)
-		}
-	}
+	v.cols.remove(table, col)
 }
 
 // Lookup returns all query hashes registered for the given (table, col, value).
@@ -138,22 +122,12 @@ func (v *ValueIndex) ForEachHash(table TableID, col ColID, value Value, fn func(
 // TrackedColumns returns the columns that have at least one subscription
 // registered for the given table. Used during candidate collection.
 func (v *ValueIndex) TrackedColumns(table TableID) []ColID {
-	byCol, ok := v.cols[table]
-	if !ok {
-		return []ColID{}
-	}
-	return mapKeys(byCol)
+	return v.cols.trackedColumns(table)
 }
 
 // ForEachTrackedColumn calls fn for every tracked column on table.
 func (v *ValueIndex) ForEachTrackedColumn(table TableID, fn func(ColID)) {
-	byCol, ok := v.cols[table]
-	if !ok {
-		return
-	}
-	for col := range byCol {
-		fn(col)
-	}
+	v.cols.forEachTrackedColumn(table, fn)
 }
 
 type valueKey struct {

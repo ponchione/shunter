@@ -4,7 +4,7 @@ package subscription
 // Candidate collection probes changed row values against registered ranges,
 // then full predicate evaluation rechecks the row before fan-out.
 type RangeIndex struct {
-	cols   map[TableID]map[ColID]int
+	cols   columnRefCounts
 	ranges map[TableID]map[ColID]map[rangeKey]*rangeBucket
 }
 
@@ -26,7 +26,7 @@ type rangeKey struct {
 // NewRangeIndex constructs an empty RangeIndex.
 func NewRangeIndex() *RangeIndex {
 	return &RangeIndex{
-		cols:   make(map[TableID]map[ColID]int),
+		cols:   newColumnRefCounts(),
 		ranges: make(map[TableID]map[ColID]map[rangeKey]*rangeBucket),
 	}
 }
@@ -62,13 +62,7 @@ func (r *RangeIndex) Add(table TableID, col ColID, lower, upper Bound, hash Quer
 		return
 	}
 	bucket.hashes[hash] = struct{}{}
-
-	byCol, ok := r.cols[table]
-	if !ok {
-		byCol = make(map[ColID]int)
-		r.cols[table] = byCol
-	}
-	byCol[col]++
+	r.cols.add(table, col)
 }
 
 // Remove removes a (table, column, range) -> hash mapping.
@@ -100,15 +94,7 @@ func (r *RangeIndex) Remove(table TableID, col ColID, lower, upper Bound, hash Q
 		delete(r.ranges, table)
 	}
 
-	if colsRC, ok := r.cols[table]; ok {
-		colsRC[col]--
-		if colsRC[col] <= 0 {
-			delete(colsRC, col)
-		}
-		if len(colsRC) == 0 {
-			delete(r.cols, table)
-		}
-	}
+	r.cols.remove(table, col)
 }
 
 // Lookup returns query hashes whose registered range contains value.
@@ -151,22 +137,12 @@ func (r *RangeIndex) ForEachHash(table TableID, col ColID, value Value, fn func(
 
 // TrackedColumns returns columns with at least one registered range.
 func (r *RangeIndex) TrackedColumns(table TableID) []ColID {
-	byCol, ok := r.cols[table]
-	if !ok {
-		return []ColID{}
-	}
-	return mapKeys(byCol)
+	return r.cols.trackedColumns(table)
 }
 
 // ForEachTrackedColumn calls fn for every range-tracked column on table.
 func (r *RangeIndex) ForEachTrackedColumn(table TableID, fn func(ColID)) {
-	byCol, ok := r.cols[table]
-	if !ok {
-		return
-	}
-	for col := range byCol {
-		fn(col)
-	}
+	r.cols.forEachTrackedColumn(table, fn)
 }
 
 func makeRangeKey(lower, upper Bound) rangeKey {
