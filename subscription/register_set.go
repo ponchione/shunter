@@ -68,6 +68,19 @@ func (c *initialRowCollector) addReturned(n int) error {
 	return nil
 }
 
+func copyRegisterSetOption[S, D any](label string, in []S, want int, out []D, copyValue func(S) D) error {
+	if in == nil {
+		return nil
+	}
+	if len(in) != want {
+		return fmt.Errorf("%s set count = %d, want %d", label, len(in), want)
+	}
+	for i := range in {
+		out[i] = copyValue(in[i])
+	}
+	return nil
+}
+
 func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, orderBy []OrderByColumn, limit *uint64, offset *uint64, view store.CommittedReadView, subID types.SubscriptionID, queryID uint32) ([]SubscriptionUpdate, error) {
 	if aggregate != nil {
 		return m.initialAggregateUpdates(ctx, pred, aggregate, view, subID, queryID)
@@ -659,45 +672,21 @@ func (m *Manager) RegisterSet(
 	orderBys := make([][]OrderByColumn, len(req.Predicates))
 	limits := make([]*uint64, len(req.Predicates))
 	offsets := make([]*uint64, len(req.Predicates))
-	if req.ProjectionColumns != nil {
-		if len(req.ProjectionColumns) != len(req.Predicates) {
-			return SubscriptionSetRegisterResult{}, fmt.Errorf("projection column set count = %d, want %d", len(req.ProjectionColumns), len(req.Predicates))
-		}
-		for i := range req.ProjectionColumns {
-			projections[i] = copyProjectionColumns(req.ProjectionColumns[i])
-		}
+	predicateCount := len(req.Predicates)
+	if err := copyRegisterSetOption("projection column", req.ProjectionColumns, predicateCount, projections, copyProjectionColumns); err != nil {
+		return SubscriptionSetRegisterResult{}, err
 	}
-	if req.Aggregates != nil {
-		if len(req.Aggregates) != len(req.Predicates) {
-			return SubscriptionSetRegisterResult{}, fmt.Errorf("aggregate set count = %d, want %d", len(req.Aggregates), len(req.Predicates))
-		}
-		for i := range req.Aggregates {
-			aggregates[i] = copyAggregate(req.Aggregates[i])
-		}
+	if err := copyRegisterSetOption("aggregate", req.Aggregates, predicateCount, aggregates, copyAggregate); err != nil {
+		return SubscriptionSetRegisterResult{}, err
 	}
-	if req.OrderByColumns != nil {
-		if len(req.OrderByColumns) != len(req.Predicates) {
-			return SubscriptionSetRegisterResult{}, fmt.Errorf("order-by column set count = %d, want %d", len(req.OrderByColumns), len(req.Predicates))
-		}
-		for i := range req.OrderByColumns {
-			orderBys[i] = copyOrderByColumns(req.OrderByColumns[i])
-		}
+	if err := copyRegisterSetOption("order-by column", req.OrderByColumns, predicateCount, orderBys, copyOrderByColumns); err != nil {
+		return SubscriptionSetRegisterResult{}, err
 	}
-	if req.Limits != nil {
-		if len(req.Limits) != len(req.Predicates) {
-			return SubscriptionSetRegisterResult{}, fmt.Errorf("limit set count = %d, want %d", len(req.Limits), len(req.Predicates))
-		}
-		for i := range req.Limits {
-			limits[i] = copyRowLimit(req.Limits[i])
-		}
+	if err := copyRegisterSetOption("limit", req.Limits, predicateCount, limits, copyRowLimit); err != nil {
+		return SubscriptionSetRegisterResult{}, err
 	}
-	if req.Offsets != nil {
-		if len(req.Offsets) != len(req.Predicates) {
-			return SubscriptionSetRegisterResult{}, fmt.Errorf("offset set count = %d, want %d", len(req.Offsets), len(req.Predicates))
-		}
-		for i := range req.Offsets {
-			offsets[i] = copyRowOffset(req.Offsets[i])
-		}
+	if err := copyRegisterSetOption("offset", req.Offsets, predicateCount, offsets, copyRowOffset); err != nil {
+		return SubscriptionSetRegisterResult{}, err
 	}
 	// Pre-validate every predicate before touching registry state.
 	for i, p := range req.Predicates {

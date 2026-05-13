@@ -135,45 +135,30 @@ func validateMultiJoinAggregate(multi MultiJoin, aggregate *Aggregate, s SchemaL
 }
 
 func validateJoinCountAggregate(join Join, aggregate *Aggregate, s SchemaLookup) error {
-	if err := validateCountResult(aggregate); err != nil {
-		return err
-	}
-	if aggregate.Argument == nil {
-		if aggregate.Distinct {
-			return fmt.Errorf("%w: COUNT(DISTINCT ...) aggregate requires a column argument", ErrInvalidPredicate)
-		}
-		return nil
-	}
-	return validateJoinAggregateArgument(join, "COUNT(column)", aggregate.Argument, s)
+	return validateCountAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
+		return validateJoinAggregateArgument(join, "COUNT(column)", arg, s)
+	})
 }
 
 func validateCrossJoinCountAggregate(cross CrossJoin, aggregate *Aggregate, s SchemaLookup) error {
-	if err := validateCountResult(aggregate); err != nil {
-		return err
-	}
-	if aggregate.Argument == nil {
-		if aggregate.Distinct {
-			return fmt.Errorf("%w: COUNT(DISTINCT ...) aggregate requires a column argument", ErrInvalidPredicate)
-		}
-		return nil
-	}
-	return validateCrossJoinAggregateArgument(cross, "COUNT(column)", aggregate.Argument, s)
+	return validateCountAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
+		return validateCrossJoinAggregateArgument(cross, "COUNT(column)", arg, s)
+	})
 }
 
 func validateMultiJoinCountAggregate(multi MultiJoin, aggregate *Aggregate, s SchemaLookup) error {
-	if err := validateCountResult(aggregate); err != nil {
-		return err
-	}
-	if aggregate.Argument == nil {
-		if aggregate.Distinct {
-			return fmt.Errorf("%w: COUNT(DISTINCT ...) aggregate requires a column argument", ErrInvalidPredicate)
-		}
-		return nil
-	}
-	return validateMultiJoinAggregateArgument(multi, "COUNT(column)", aggregate.Argument, s)
+	return validateCountAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
+		return validateMultiJoinAggregateArgument(multi, "COUNT(column)", arg, s)
+	})
 }
 
 func validateCountAggregate(table TableID, aggregate *Aggregate, s SchemaLookup) error {
+	return validateCountAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
+		return validateAggregateArgument(table, "COUNT(column)", arg, s)
+	})
+}
+
+func validateCountAggregateWithArgument(aggregate *Aggregate, validateArg func(*AggregateColumn) error) error {
 	if err := validateCountResult(aggregate); err != nil {
 		return err
 	}
@@ -183,10 +168,7 @@ func validateCountAggregate(table TableID, aggregate *Aggregate, s SchemaLookup)
 		}
 		return nil
 	}
-	if err := validateAggregateArgument(table, "COUNT(column)", aggregate.Argument, s); err != nil {
-		return err
-	}
-	return nil
+	return validateArg(aggregate.Argument)
 }
 
 func validateCountResult(aggregate *Aggregate) error {
@@ -200,82 +182,37 @@ func validateCountResult(aggregate *Aggregate) error {
 }
 
 func validateSumAggregate(table TableID, aggregate *Aggregate, s SchemaLookup) error {
-	if aggregate.Distinct {
-		return fmt.Errorf("%w: live aggregate views do not support SUM(DISTINCT ...)", ErrInvalidPredicate)
-	}
-	if aggregate.Argument == nil {
-		return fmt.Errorf("%w: SUM aggregate requires a column argument", ErrInvalidPredicate)
-	}
-	if err := validateAggregateArgument(table, "SUM(column)", aggregate.Argument, s); err != nil {
-		return err
-	}
-	wantKind, ok := sumAggregateResultKind(aggregate.Argument.Schema.Type)
-	if !ok {
-		return fmt.Errorf("%w: SUM aggregate only supports integer and float columns", ErrInvalidPredicate)
-	}
-	if aggregate.ResultColumn.Type != wantKind {
-		return fmt.Errorf("%w: SUM aggregate result kind must be %s", ErrInvalidPredicate, wantKind)
-	}
-	if aggregate.ResultColumn.Nullable != aggregate.Argument.Schema.Nullable {
-		return fmt.Errorf("%w: SUM aggregate result nullability must match source column", ErrInvalidPredicate)
-	}
-	return nil
+	return validateSumAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
+		return validateAggregateArgument(table, "SUM(column)", arg, s)
+	})
 }
 
 func validateJoinSumAggregate(join Join, aggregate *Aggregate, s SchemaLookup) error {
-	if aggregate.Distinct {
-		return fmt.Errorf("%w: live aggregate views do not support SUM(DISTINCT ...)", ErrInvalidPredicate)
-	}
-	if aggregate.Argument == nil {
-		return fmt.Errorf("%w: SUM aggregate requires a column argument", ErrInvalidPredicate)
-	}
-	if err := validateJoinAggregateArgument(join, "SUM(column)", aggregate.Argument, s); err != nil {
-		return err
-	}
-	wantKind, ok := sumAggregateResultKind(aggregate.Argument.Schema.Type)
-	if !ok {
-		return fmt.Errorf("%w: SUM aggregate only supports integer and float columns", ErrInvalidPredicate)
-	}
-	if aggregate.ResultColumn.Type != wantKind {
-		return fmt.Errorf("%w: SUM aggregate result kind must be %s", ErrInvalidPredicate, wantKind)
-	}
-	if aggregate.ResultColumn.Nullable != aggregate.Argument.Schema.Nullable {
-		return fmt.Errorf("%w: SUM aggregate result nullability must match source column", ErrInvalidPredicate)
-	}
-	return nil
+	return validateSumAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
+		return validateJoinAggregateArgument(join, "SUM(column)", arg, s)
+	})
 }
 
 func validateCrossJoinSumAggregate(cross CrossJoin, aggregate *Aggregate, s SchemaLookup) error {
-	if aggregate.Distinct {
-		return fmt.Errorf("%w: live aggregate views do not support SUM(DISTINCT ...)", ErrInvalidPredicate)
-	}
-	if aggregate.Argument == nil {
-		return fmt.Errorf("%w: SUM aggregate requires a column argument", ErrInvalidPredicate)
-	}
-	if err := validateCrossJoinAggregateArgument(cross, "SUM(column)", aggregate.Argument, s); err != nil {
-		return err
-	}
-	wantKind, ok := sumAggregateResultKind(aggregate.Argument.Schema.Type)
-	if !ok {
-		return fmt.Errorf("%w: SUM aggregate only supports integer and float columns", ErrInvalidPredicate)
-	}
-	if aggregate.ResultColumn.Type != wantKind {
-		return fmt.Errorf("%w: SUM aggregate result kind must be %s", ErrInvalidPredicate, wantKind)
-	}
-	if aggregate.ResultColumn.Nullable != aggregate.Argument.Schema.Nullable {
-		return fmt.Errorf("%w: SUM aggregate result nullability must match source column", ErrInvalidPredicate)
-	}
-	return nil
+	return validateSumAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
+		return validateCrossJoinAggregateArgument(cross, "SUM(column)", arg, s)
+	})
 }
 
 func validateMultiJoinSumAggregate(multi MultiJoin, aggregate *Aggregate, s SchemaLookup) error {
+	return validateSumAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
+		return validateMultiJoinAggregateArgument(multi, "SUM(column)", arg, s)
+	})
+}
+
+func validateSumAggregateWithArgument(aggregate *Aggregate, validateArg func(*AggregateColumn) error) error {
 	if aggregate.Distinct {
 		return fmt.Errorf("%w: live aggregate views do not support SUM(DISTINCT ...)", ErrInvalidPredicate)
 	}
 	if aggregate.Argument == nil {
 		return fmt.Errorf("%w: SUM aggregate requires a column argument", ErrInvalidPredicate)
 	}
-	if err := validateMultiJoinAggregateArgument(multi, "SUM(column)", aggregate.Argument, s); err != nil {
+	if err := validateArg(aggregate.Argument); err != nil {
 		return err
 	}
 	wantKind, ok := sumAggregateResultKind(aggregate.Argument.Schema.Type)
@@ -298,19 +235,7 @@ func validateAggregateArgument(table TableID, label string, arg *AggregateColumn
 	if arg.Table != table || arg.Alias != 0 {
 		return fmt.Errorf("%w: %s argument must come from the aggregate table", ErrInvalidPredicate, label)
 	}
-	if arg.Schema.Index != int(arg.Column) {
-		return fmt.Errorf("%w: aggregate argument schema index %d does not match source column %d", ErrInvalidPredicate, arg.Schema.Index, arg.Column)
-	}
-	if !s.TableExists(arg.Table) {
-		return fmt.Errorf("%w: aggregate argument table %d", ErrTableNotFound, arg.Table)
-	}
-	if !s.ColumnExists(arg.Table, arg.Column) {
-		return fmt.Errorf("%w: aggregate argument table %d column %d", ErrColumnNotFound, arg.Table, arg.Column)
-	}
-	if want := s.ColumnType(arg.Table, arg.Column); arg.Schema.Type != want {
-		return fmt.Errorf("%w: aggregate argument kind %s does not match column kind %s", ErrInvalidPredicate, arg.Schema.Type, want)
-	}
-	return nil
+	return validateAggregateArgumentSchema(arg, s)
 }
 
 func validateJoinAggregateArgument(join Join, label string, arg *AggregateColumn, s SchemaLookup) error {
@@ -320,19 +245,7 @@ func validateJoinAggregateArgument(join Join, label string, arg *AggregateColumn
 	if !aggregateArgumentMatchesJoin(join, arg) {
 		return fmt.Errorf("%w: %s argument must come from a joined relation", ErrInvalidPredicate, label)
 	}
-	if arg.Schema.Index != int(arg.Column) {
-		return fmt.Errorf("%w: aggregate argument schema index %d does not match source column %d", ErrInvalidPredicate, arg.Schema.Index, arg.Column)
-	}
-	if !s.TableExists(arg.Table) {
-		return fmt.Errorf("%w: aggregate argument table %d", ErrTableNotFound, arg.Table)
-	}
-	if !s.ColumnExists(arg.Table, arg.Column) {
-		return fmt.Errorf("%w: aggregate argument table %d column %d", ErrColumnNotFound, arg.Table, arg.Column)
-	}
-	if want := s.ColumnType(arg.Table, arg.Column); arg.Schema.Type != want {
-		return fmt.Errorf("%w: aggregate argument kind %s does not match column kind %s", ErrInvalidPredicate, arg.Schema.Type, want)
-	}
-	return nil
+	return validateAggregateArgumentSchema(arg, s)
 }
 
 func validateCrossJoinAggregateArgument(cross CrossJoin, label string, arg *AggregateColumn, s SchemaLookup) error {
@@ -342,19 +255,7 @@ func validateCrossJoinAggregateArgument(cross CrossJoin, label string, arg *Aggr
 	if !aggregateArgumentMatchesCrossJoin(cross, arg) {
 		return fmt.Errorf("%w: %s argument must come from a joined relation", ErrInvalidPredicate, label)
 	}
-	if arg.Schema.Index != int(arg.Column) {
-		return fmt.Errorf("%w: aggregate argument schema index %d does not match source column %d", ErrInvalidPredicate, arg.Schema.Index, arg.Column)
-	}
-	if !s.TableExists(arg.Table) {
-		return fmt.Errorf("%w: aggregate argument table %d", ErrTableNotFound, arg.Table)
-	}
-	if !s.ColumnExists(arg.Table, arg.Column) {
-		return fmt.Errorf("%w: aggregate argument table %d column %d", ErrColumnNotFound, arg.Table, arg.Column)
-	}
-	if want := s.ColumnType(arg.Table, arg.Column); arg.Schema.Type != want {
-		return fmt.Errorf("%w: aggregate argument kind %s does not match column kind %s", ErrInvalidPredicate, arg.Schema.Type, want)
-	}
-	return nil
+	return validateAggregateArgumentSchema(arg, s)
 }
 
 func validateMultiJoinAggregateArgument(multi MultiJoin, label string, arg *AggregateColumn, s SchemaLookup) error {
@@ -364,6 +265,10 @@ func validateMultiJoinAggregateArgument(multi MultiJoin, label string, arg *Aggr
 	if !aggregateArgumentMatchesMultiJoin(multi, arg) {
 		return fmt.Errorf("%w: %s argument must come from a joined relation", ErrInvalidPredicate, label)
 	}
+	return validateAggregateArgumentSchema(arg, s)
+}
+
+func validateAggregateArgumentSchema(arg *AggregateColumn, s SchemaLookup) error {
 	if arg.Schema.Index != int(arg.Column) {
 		return fmt.Errorf("%w: aggregate argument schema index %d does not match source column %d", ErrInvalidPredicate, arg.Schema.Index, arg.Column)
 	}

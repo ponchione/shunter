@@ -415,72 +415,53 @@ func (m *Manager) evalQuery(ctx context.Context, qs *queryState, dv *DeltaView) 
 		projectJoinFragments(frags.Deletes[:], lhsWidth, p.ProjectRight)
 		ins, del := ReconcileJoinDelta(frags.Inserts[:], frags.Deletes[:])
 		ins, del = projectDeltaRows(ins, del, qs.projection, len(qs.projection) > 0)
-		if len(ins) == 0 && len(del) == 0 {
-			return nil, nil
-		}
-		projected := p.ProjectedTable()
-		columns := projectionUpdateColumns(m.columnsForUpdate(projected), qs.projection)
-		return []SubscriptionUpdate{{
-			TableID:   projected,
-			TableName: m.schema.TableName(projected),
-			Columns:   columns,
-			Inserts:   ins,
-			Deletes:   del,
-		}}, nil
+		return m.deltaUpdate(p.ProjectedTable(), qs.projection, ins, del), nil
 	case CrossJoin:
 		ins, del, err := evalCrossJoinDelta(ctx, dv, p)
 		if err != nil {
 			return nil, err
 		}
 		ins, del = projectDeltaRows(ins, del, qs.projection, len(qs.projection) > 0)
-		if len(ins) == 0 && len(del) == 0 {
-			return nil, nil
-		}
-		projected := p.ProjectedTable()
-		columns := projectionUpdateColumns(m.columnsForUpdate(projected), qs.projection)
-		return []SubscriptionUpdate{{
-			TableID:   projected,
-			TableName: m.schema.TableName(projected),
-			Columns:   columns,
-			Inserts:   ins,
-			Deletes:   del,
-		}}, nil
+		return m.deltaUpdate(p.ProjectedTable(), qs.projection, ins, del), nil
 	case MultiJoin:
 		ins, del, err := evalMultiJoinDelta(ctx, dv, p)
 		if err != nil {
 			return nil, err
 		}
 		ins, del = projectDeltaRows(ins, del, qs.projection, len(qs.projection) > 0)
-		if len(ins) == 0 && len(del) == 0 {
-			return nil, nil
-		}
-		projected := p.ProjectedTable()
-		columns := projectionUpdateColumns(m.columnsForUpdate(projected), qs.projection)
-		return []SubscriptionUpdate{{
-			TableID:   projected,
-			TableName: m.schema.TableName(projected),
-			Columns:   columns,
-			Inserts:   ins,
-			Deletes:   del,
-		}}, nil
+		return m.deltaUpdate(p.ProjectedTable(), qs.projection, ins, del), nil
 	default:
 		var updates []SubscriptionUpdate
 		for _, t := range qs.predicate.Tables() {
 			ins, del := EvalSingleTableDelta(dv, qs.predicate, t)
 			ins, del = projectDeltaRows(ins, del, qs.projection, true)
-			if len(ins) == 0 && len(del) == 0 {
-				continue
+			if update, ok := m.makeDeltaUpdate(t, qs.projection, ins, del); ok {
+				updates = append(updates, update)
 			}
-			updates = append(updates, SubscriptionUpdate{
-				TableID:   t,
-				TableName: m.schema.TableName(t),
-				Columns:   projectionUpdateColumns(m.columnsForUpdate(t), qs.projection),
-				Inserts:   ins,
-				Deletes:   del,
-			})
 		}
 		return updates, nil
 	}
+}
+
+func (m *Manager) deltaUpdate(table TableID, projection []ProjectionColumn, inserts, deletes []types.ProductValue) []SubscriptionUpdate {
+	update, ok := m.makeDeltaUpdate(table, projection, inserts, deletes)
+	if !ok {
+		return nil
+	}
+	return []SubscriptionUpdate{update}
+}
+
+func (m *Manager) makeDeltaUpdate(table TableID, projection []ProjectionColumn, inserts, deletes []types.ProductValue) (SubscriptionUpdate, bool) {
+	if len(inserts) == 0 && len(deletes) == 0 {
+		return SubscriptionUpdate{}, false
+	}
+	return SubscriptionUpdate{
+		TableID:   table,
+		TableName: m.schema.TableName(table),
+		Columns:   projectionUpdateColumns(m.columnsForUpdate(table), projection),
+		Inserts:   inserts,
+		Deletes:   deletes,
+	}, true
 }
 
 func projectDeltaRows(inserts, deletes []types.ProductValue, projection []ProjectionColumn, reconcile bool) ([]types.ProductValue, []types.ProductValue) {
