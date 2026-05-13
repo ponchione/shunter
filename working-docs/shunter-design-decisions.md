@@ -19,10 +19,12 @@ compatibility is not a product goal.
 
 Current contract:
 
-- `v1.bsatn.shunter` is the only supported WebSocket subprotocol token.
+- `v2.bsatn.shunter` is the current/default WebSocket subprotocol token, and
+  `v1.bsatn.shunter` remains supported for existing v1 clients.
 - Protocol version policy is explicit in `protocol/version.go`: v1 is the
-  minimum, current, and only supported version. A future v2 must add a new
-  subprotocol token and negotiation pins rather than widening v1 semantics.
+  minimum supported version and v2 is the current version. New incompatible
+  protocol behavior must add a new subprotocol token and negotiation pins
+  rather than widening older negotiated semantics.
 - Generated TypeScript clients expose protocol metadata from the same runtime
   constants: minimum version, current version, default subprotocol, and
   supported subprotocols.

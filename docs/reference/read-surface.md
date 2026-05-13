@@ -35,7 +35,8 @@ The view is valid only during the callback.
 ## Declared Query
 
 Declared queries are named request/response reads. They can carry SQL,
-permission metadata, read-model metadata, and migration metadata.
+optional parameter schemas, permission metadata, read-model metadata, and
+migration metadata.
 
 Use them when a read is stable enough to expose to clients or review in a
 contract.
@@ -43,9 +44,24 @@ contract.
 ## Declared View
 
 Declared views are named live reads. They can carry SQL, permission metadata,
-read-model metadata, and migration metadata.
+optional parameter schemas, read-model metadata, and migration metadata.
 
 Use them for stable subscriptions and generated client surfaces.
+
+## Declared-Read Parameters
+
+Declared queries and views may use app parameters in executable SQL with
+placeholders such as `:topic`. Each app placeholder must match a column in the
+declaration's `Parameters *ProductSchema`; `sender` is reserved for caller
+identity and cannot be declared as an app parameter.
+
+Local callers pass ordered `types.ProductValue` values with
+`WithDeclaredReadParameters`. Protocol clients send encoded parameter bytes
+only through protocol v2 declared-read request messages. Generated TypeScript
+helpers expose typed params objects and hide the BSATN product encoding.
+
+No-parameter declared reads keep their existing local, protocol v1, and
+generated-helper call shapes.
 
 ## Metadata-Only Declarations
 
@@ -76,13 +92,15 @@ shapes differ by read surface:
 - Declared queries use the one-off executor through `QueryDeclaration.SQL`,
   `Runtime.CallQuery`, and the protocol declared-query path. They may expose
   private tables when declaration permission allows the caller. Empty SQL is
-  metadata-only.
+  metadata-only. Declared app placeholders are allowed only when backed by the
+  declaration parameter schema.
 - Raw protocol subscriptions support table-shaped single-table and join reads.
   Table read policies and visibility filters apply. Raw subscriptions reject
   projections, aggregates, `ORDER BY`, `LIMIT`, and `OFFSET`.
 - Declared live views support table-shaped reads and joins, projections over
   the emitted relation, single-table `ORDER BY`/`LIMIT`/`OFFSET` initial
   snapshots, and `COUNT`/`SUM` aggregate views. Aggregate aliases must use
-  `AS`. Post-commit delivery remains row deltas over matching rows.
+  `AS`. Declared app placeholders follow the same parameter rules as declared
+  queries. Post-commit delivery remains row deltas over matching rows.
 - Local ad hoc raw SQL is out of scope for v1. Use `Runtime.Read`,
   `Runtime.CallQuery`, or `Runtime.SubscribeView` instead.

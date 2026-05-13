@@ -79,30 +79,38 @@ for another runtime's wire format.
 
 ## Wire Compatibility
 
-The only v1 WebSocket subprotocol token is `v1.bsatn.shunter`.
-`ProtocolVersionV1` is the minimum, current, and only supported v1 protocol
-version. A future incompatible protocol must negotiate a new token instead of
-silently widening v1 semantics.
+Supported WebSocket subprotocol tokens are:
 
-V1 frames are Shunter-native binary frames: one tag byte followed by a BSATN
-body, inside the runtime compression envelope when compression is negotiated.
+- `v2.bsatn.shunter`: current/default protocol. V2 adds parameterized
+  declared-query and declared-view request messages.
+- `v1.bsatn.shunter`: minimum supported protocol for existing v1 clients and
+  no-parameter declared reads.
+
+Frames are Shunter-native binary frames: one tag byte followed by a BSATN body,
+inside the runtime compression envelope when compression is negotiated.
+Unknown, unassigned, reserved, malformed, or trailing-byte messages are fatal
+protocol errors within the negotiated version. V1 connections reject v2-only
+tags instead of widening v1 semantics.
 
 Stable client-to-server message families are `SubscribeSingle`,
 `UnsubscribeSingle`, `SubscribeMulti`, `UnsubscribeMulti`, `CallReducer`,
-`OneOffQuery`, `DeclaredQuery`, and `SubscribeDeclaredView`.
+`OneOffQuery`, `DeclaredQuery`, and `SubscribeDeclaredView`. V2 also supports
+`DeclaredQueryWithParameters` and `SubscribeDeclaredViewWithParameters`; their
+`params` field is a BSATN product row encoded according to the declaration's
+parameter schema.
 
 Stable server-to-client message families are `IdentityToken`,
 `SubscribeSingleApplied`, `UnsubscribeSingleApplied`,
 `SubscribeMultiApplied`, `UnsubscribeMultiApplied`, `SubscriptionError`,
 `TransactionUpdate`, `TransactionUpdateLight`, and `OneOffQueryResponse`.
 
-Tag `0` and tags `128` through `255` are reserved in v1. Server tag `7` is
-reserved for the retired reducer-call result envelope. Unknown, unassigned,
-reserved, malformed, or trailing-byte messages are fatal protocol errors.
+Tag `0` and tags `128` through `255` are reserved in supported protocol
+versions. Server tag `7` is reserved for the retired reducer-call result
+envelope.
 
 Row batches and subscription updates use Shunter row-list and flat update
 payloads. Reference wrapper chains, energy fields, and SpacetimeDB wire
-compatibility are out of scope for v1.
+compatibility are out of scope.
 
 ## Auth Mode
 

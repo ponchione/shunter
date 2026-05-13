@@ -4,15 +4,13 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
-- Declared query and view contracts now carry optional typed parameter schemas
-  in deterministic JSON, validate reserved/invalid parameter metadata, and
-  classify parameter-schema drift in contract diff reports.
-- Declared query and view SQL validation now accepts declared app placeholders,
-  rejects unknown or unused parameters, and exports deterministic result
-  metadata for parameterized declared reads without enabling runtime binding.
-- The TypeScript client runtime now prefers Shunter protocol v2, keeps v1
-  compatibility for no-parameter declared reads, and can send encoded declared
-  query/view parameter payloads over v2.
+- Declared query and view parameters now work end to end: Go declarations
+  export typed parameter schemas, SQL validation checks declared placeholders,
+  local runtime calls bind ordered `ProductValue` parameters, and protocol v2
+  carries BSATN-encoded declared-read parameter payloads.
+- Generated TypeScript bindings now emit typed declared-read params
+  interfaces, BSATN params encoders, and parameterized declared query/view
+  helpers while preserving no-parameter helper signatures.
 - Moved stale v1 roadmap follow-up into `working-docs/tech-debt.md` and
   restored the source version to a post-release development marker.
 - Hardened offline DataDir backup/restore file copies against replaced source

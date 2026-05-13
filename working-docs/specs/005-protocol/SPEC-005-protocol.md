@@ -51,22 +51,28 @@ Shunter uses WebSocket (RFC 6455) over HTTP/1.1 or HTTP/2. All application messa
 Shunter negotiates protocol versions through the WebSocket subprotocol token.
 The server-owned preference order is defined in `protocol/version.go`.
 
-Shunter v1 accepts exactly one subprotocol token:
+Shunter accepts these subprotocol tokens:
 
-- `v1.bsatn.shunter` — Shunter-native token; this is the product protocol identifier Shunter clients must use.
+- `v2.bsatn.shunter` — current/default Shunter-native token. V2 adds
+  parameterized declared-read request messages.
+- `v1.bsatn.shunter` — minimum supported Shunter-native token for existing v1
+  clients and no-parameter declared reads.
 
-The client includes this token in the `Sec-WebSocket-Protocol` request header. The server echoes the selected token in the response header. If the client does not offer this token, the server rejects the upgrade with status 400.
+The client includes supported tokens in the `Sec-WebSocket-Protocol` request
+header. The server echoes the selected token in the response header. If the
+client does not offer a supported token, the server rejects the upgrade with
+status 400.
 
 ```
-Client: Sec-WebSocket-Protocol: v1.bsatn.shunter
-Server: Sec-WebSocket-Protocol: v1.bsatn.shunter
+Client: Sec-WebSocket-Protocol: v2.bsatn.shunter, v1.bsatn.shunter
+Server: Sec-WebSocket-Protocol: v2.bsatn.shunter
 ```
 
 The token fixes both the major protocol version and the BSATN message encoding.
 Additive message families, tag reuse, incompatible field shapes, or any change
-that requires v1 clients to skip unknown frames MUST be introduced under a new
-subprotocol token and pinned by negotiation and wire tests. Unknown tags remain
-fatal within a negotiated version.
+that requires older clients to skip unknown frames MUST be introduced under a
+new subprotocol token and pinned by negotiation and wire tests. Unknown tags
+remain fatal within a negotiated version.
 
 Generated Shunter client artifacts MUST expose protocol metadata sourced from
 the runtime constants in `protocol/version.go`: minimum supported version,
@@ -106,7 +112,9 @@ Each message begins with a 1-byte **message type tag**, followed by the BSATN-en
 [tag: uint8] [body: BSATN-encoded fields]
 ```
 
-Tags are stable and version-specific.
+Tags are stable and version-specific. A low tag may be valid in one negotiated
+version and invalid in another; for example, the parameterized declared-read
+tags are v2-only.
 
 Behavior on unknown tags:
 - **Client → server:** the server MUST close the connection with a protocol error (`1002`) and log the offending tag. Silently ignoring an unknown request would leave the client hanging without a response.
@@ -114,8 +122,8 @@ Behavior on unknown tags:
 
 Tag `0` is reserved and never identifies a message. Tags `128`–`255` are
 reserved for future negotiated protocol versions; in v1 they are handled the
-same way as any other unknown tag. Server tag `7` is separately reserved in v1
-for the retired `ReducerCallResult` envelope (§6).
+same way as any other unknown tag. Server tag `7` is separately reserved for
+the retired `ReducerCallResult` envelope (§6).
 
 ### 3.3 Compression
 
@@ -273,8 +281,13 @@ The server sends a WebSocket Ping frame every `PingInterval` (default: 15 second
 | 6 | UnsubscribeMulti |
 | 7 | DeclaredQuery |
 | 8 | SubscribeDeclaredView |
+| 9 | DeclaredQueryWithParameters (v2 only) |
+| 10 | SubscribeDeclaredViewWithParameters (v2 only) |
 
 The `SubscribeSingle` / `UnsubscribeSingle` tags are the current v1 names for the former `Subscribe` / `Unsubscribe` byte values (1 and 2), which remain stable. `SubscribeMulti` / `UnsubscribeMulti` carry a query-set under one `query_id`. Canonical source is `protocol/tags.go`.
+V1 connections reject tags 9 and 10 as unsupported for the negotiated
+protocol. V2 connections may use tags 7 and 8 for no-parameter declared reads
+and tags 9 and 10 when sending encoded declared-read parameters.
 
 ### Server→Client tags
 
@@ -292,9 +305,9 @@ The `SubscribeSingle` / `UnsubscribeSingle` tags are the current v1 names for th
 | 10 | UnsubscribeMultiApplied |
 
 Protocol-wide tag `0` and tags `128`–`255` are reserved and MUST remain fatal
-in v1. Unassigned low tags are also fatal in v1. New message families require a
-new negotiated subprotocol token unless the current protocol version explicitly
-documents the new tag before release.
+in supported protocol versions. Unassigned low tags are also fatal. New message
+families require a new negotiated subprotocol token unless the current protocol
+version explicitly documents the new tag before release.
 
 Server tag 7 is reserved and MUST NOT be reallocated. The current v1 outcome model removed the standalone `ReducerCallResult` envelope, merging the caller outcome into the heavy `TransactionUpdate` (tag 5) and adding `TransactionUpdateLight` (tag 8) for non-callers. Holding tag 7 reserved prevents silent re-allocation if a future contributor reintroduces a separate caller envelope. Canonical source is `protocol/tags.go`.
 
@@ -453,6 +466,86 @@ Single-table `ORDER BY <column> ASC` may use a matching single-column index for
 the ordered scan before applying projection, `OFFSET`, or `LIMIT`; the executor
 still rechecks the full predicate and visibility filters before a row is
 counted toward the ordered output.
+
+### 7.5 DeclaredQuery
+
+Execute a module-owned declared query by declaration name. The wire carries the
+declaration name, not SQL text; the server uses the declaration as the
+execution authority.
+
+```
+tag: 7
+message_id: bytes     — opaque client-chosen correlator
+name:       string    — registered QueryDeclaration name
+```
+
+**Response:** `OneOffQueryResponse` (§8.6) carrying the same `message_id`.
+
+The declaration must have executable SQL. Declaration-level permissions,
+visibility filters, and caller identity handling apply before rows are
+returned. Parameterized declarations cannot be executed with tag 7; the caller
+must use the v2-only parameterized message.
+
+#### 7.5b DeclaredQueryWithParameters
+
+V2-only variant of `DeclaredQuery` that supplies BSATN-encoded declared-read
+parameters.
+
+```
+tag: 9
+message_id: bytes
+name:       string
+params:     bytes     — BSATN ProductValue matching the query parameter schema
+```
+
+**Response:** `OneOffQueryResponse` (§8.6) carrying the same `message_id`.
+
+The server decodes `params` according to the declaration's `Parameters` product
+schema, validates arity and value kinds, binds those values into the SQL
+template, and then executes the declared query. Supplying params to a
+no-parameter declaration or omitting params for a parameterized declaration is a
+declared-read error. V1 connections MUST reject tag 9 before dispatch.
+
+### 7.6 SubscribeDeclaredView
+
+Subscribe to a module-owned declared live view by declaration name.
+
+```
+tag: 8
+request_id: uint32 LE
+query_id:   uint32 LE
+name:       string    — registered ViewDeclaration name
+```
+
+**Response:** `SubscribeMultiApplied` (§8.10) or `SubscriptionError` (§8.4).
+
+The declaration must have executable SQL. Declaration-level permissions,
+visibility filters, caller identity handling, initial rows, transaction deltas,
+and unsubscribe behavior follow the existing declared-view path.
+Parameterized declarations cannot be subscribed with tag 8; the caller must use
+the v2-only parameterized message.
+
+#### 7.6b SubscribeDeclaredViewWithParameters
+
+V2-only variant of `SubscribeDeclaredView` that supplies BSATN-encoded
+declared-read parameters.
+
+```
+tag: 10
+request_id: uint32 LE
+query_id:   uint32 LE
+name:       string
+params:     bytes     — BSATN ProductValue matching the view parameter schema
+```
+
+**Response:** `SubscribeMultiApplied` (§8.10) or `SubscriptionError` (§8.4).
+
+The server decodes and validates `params` according to the declaration's
+`Parameters` product schema, binds those values into the SQL template, and then
+registers the declared view. Distinct bound parameter values produce distinct
+effective subscription queries. Supplying params to a no-parameter declaration
+or omitting params for a parameterized declaration is a declared-read error. V1
+connections MUST reject tag 10 before dispatch.
 
 ---
 
@@ -906,7 +999,7 @@ Subscribe and OneOffQuery handlers need to resolve table names to IDs and valida
 
 1. **Query language evolution.** *Closed for v1.* v1 carries SQL query strings on `SubscribeSingle` / `SubscribeMulti` / `OneOffQuery` (§7.1.1). The supported subscription SQL subset is single-table equality/range predicates with `AND` / `OR`, plus bounded two-relation joins. Aggregates, column-list subscription projections, ordering, limits, and broader relational SQL remain rejected. Further language widening should be driven by Shunter client needs.
 
-2. **Gap-fill / resume protocol.** v1 has no commit-id wire field on post-commit envelopes and no way to request missed deltas. Clients must re-subscribe and accept a full `SubscribeSingleApplied` / `SubscribeMultiApplied`. Should the server support `resume_from_tx_id` for short disconnections? This requires the server to retain a short delta buffer and expose a commit-id. Deferred to v2.
+2. **Gap-fill / resume protocol.** v1 has no commit-id wire field on post-commit envelopes and no way to request missed deltas. Clients must re-subscribe and accept a full `SubscribeSingleApplied` / `SubscribeMultiApplied`. Should the server support `resume_from_tx_id` for short disconnections? This requires the server to retain a short delta buffer and expose a commit-id. Deferred to a future protocol version.
 
 3. **Subscription for all rows (no predicate) vs table watch.** A subscription with no `WHERE` clause returns all table rows. For large tables this may be expensive. Should there be an explicit `WatchTable` message, or is the no-predicate SQL subscription sufficient? No distinction needed in v1 — document the performance implication clearly.
 
@@ -918,11 +1011,13 @@ Subscribe and OneOffQuery handlers need to resolve table names to IDs and valida
 
 ## 16. Reference-Informed Shunter Decisions
 
-- **Protocol identifier:** Shunter-owned clients must use `v1.bsatn.shunter` (§2.2). Shunter does not admit the SpacetimeDB reference token.
+- **Protocol identifier:** Shunter-owned clients must use a supported Shunter
+  token such as `v2.bsatn.shunter` or `v1.bsatn.shunter` (§2.2). Shunter does
+  not admit the SpacetimeDB reference token.
 - **Compression envelope tags:** Shunter uses `0x00` = none, `0x01` = brotli (reserved, unsupported — `ErrBrotliUnsupported`), `0x02` = gzip (§3.3). Negotiated `compression=gzip` applies to post-handshake server messages only; client messages remain uncompressed. Brotli should be implemented only if Shunter clients need it.
 - **Outgoing backpressure limit:** v1 bounds each connection's outbound queue at `OutgoingBufferMessages` with default `16 * 1024` (§10.1, §12). Shunter disconnects lagging clients to keep memory bounded.
 - **TransactionUpdate shape:** v1 uses a heavy/light envelope split (§8.5, §8.8). `Failed` collapses Shunter's internal `failed_user`/`failed_panic`/`not_found` distinction onto one arm with the detail carried in the error string.
-- **Subscription RPC surface:** v1 exposes `SubscribeSingle`, `SubscribeMulti`, `UnsubscribeSingle`, `UnsubscribeMulti`, `CallReducer`, and `OneOffQuery` (§6, §7). There is no legacy single `Subscribe` / `Unsubscribe` wire family or separate `QuerySetId` protocol family.
+- **Subscription RPC surface:** v1 exposes `SubscribeSingle`, `SubscribeMulti`, `UnsubscribeSingle`, `UnsubscribeMulti`, `CallReducer`, `OneOffQuery`, `DeclaredQuery`, and `SubscribeDeclaredView` (§6, §7). V2 adds parameterized declared-read request messages without changing raw SQL request shapes. There is no legacy single `Subscribe` / `Unsubscribe` wire family or separate `QuerySetId` protocol family.
 - **CallReducer wire shape:** v1 `CallReducer` carries `{request_id, reducer_name, args, flags}` (§7.3). The `flags` byte matches the reference `CallReducerFlags` (FullUpdate / NoSuccessNotify); no other flag values are defined in v1.
 - **OneOffQuery language:** v1 `OneOffQuery` uses the same SQL subset as `SubscribeSingle` / `SubscribeMulti` (§7.4 / §7.1.1), giving Shunter clients one read-query surface.
 - **Close-code policy:** Shunter's documented close behavior includes `1000`, `1002`, `1008`, and `1011` with Shunter-specific reason strings for protocol/policy failures (§11.1). It does not try to mirror SpacetimeDB's full close-code/reason matrix.

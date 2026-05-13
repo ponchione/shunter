@@ -19,8 +19,8 @@ are:
 - `module`: app module name, version, and string metadata
 - `schema`: schema version, tables, columns, indexes, read policy, reducers,
   and optional reducer argument/result product schemas
-- `queries` and `views`: declaration names, optional executable SQL, row
-  schema metadata, and result-shape metadata
+- `queries` and `views`: declaration names, optional executable SQL, optional
+  parameter schemas, row schema metadata, and result-shape metadata
 - `visibility_filters`: validated SQL, returned table metadata, and
   caller-identity usage
 - `permissions`: reducer, query, and view permission metadata
@@ -30,7 +30,7 @@ are:
 
 `ModuleContract.MarshalCanonicalJSON` is the canonical emitted JSON format.
 `ValidateModuleContract` validates known v1 fields, reducer product schemas,
-and SQL/read metadata.
+declared-read parameter schemas, and SQL/read metadata.
 
 V1 readers must ignore unknown JSON fields so additive metadata can be
 introduced without breaking older consumers. V1 producers must not change the
@@ -116,9 +116,10 @@ Generated TypeScript currently includes protocol and contract metadata, table
 row interfaces, `TableRows` and `tableRowDecoders`, table subscription helpers,
 read-policy and visibility metadata, reducer constants and helpers, schema-aware
 reducer argument encoders and result decoders when product schemas are exported,
-declared-query/view constants and helper functions, decoded declared-query/view
-row helpers when read metadata is exported, permissions, and read-model
-metadata.
+declared-query/view constants and helper functions, typed declared-read
+parameter interfaces and encoders when parameter schemas are exported, decoded
+declared-query/view row helpers when read metadata is exported, permissions,
+and read-model metadata.
 
 Generated helpers are contract-driven client bindings. Raw `Uint8Array`
 helpers remain available for every reducer. When reducer product schemas are not

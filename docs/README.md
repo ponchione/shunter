@@ -71,8 +71,8 @@ answer a dependency question.
   contracts.
 - `../working-docs/specs/README.md` - scope note for the numbered subsystem
   contracts.
-- `../working-docs/v1.1-declared-read-parameters.md` - active implementation
-  plan for typed declared-read parameters.
+- `../working-docs/v1.1-declared-read-parameters.md` - implementation note for
+  typed declared-read parameters.
 - `../working-docs/tech-debt.md` - non-blocking future work retired from stale
   release roadmaps.
 - `../working-docs/shunter-design-decisions.md` - consolidated implementation

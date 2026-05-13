@@ -86,6 +86,40 @@ for _, row := range result.Rows {
 Use declared queries when the read is part of the app contract, should appear
 in generated clients, or needs declaration-level permissions.
 
+Declared queries can carry typed app parameters. Use SQL placeholders named
+after product-schema columns, then pass ordered runtime values with
+`WithDeclaredReadParameters`.
+
+```go
+mod.Query(shunter.QueryDeclaration{
+	Name: "messages_by_topic",
+	SQL:  "SELECT * FROM messages WHERE topic = :topic AND id > :after_id",
+	Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+		{Name: "topic", Type: "string"},
+		{Name: "after_id", Type: "uint64"},
+	}},
+	Permissions: shunter.PermissionMetadata{
+		Required: []string{"messages:read"},
+	},
+})
+```
+
+```go
+result, err := rt.CallQuery(
+	ctx,
+	"messages_by_topic",
+	shunter.WithDeclaredReadPermissions("messages:read"),
+	shunter.WithDeclaredReadParameters(types.ProductValue{
+		types.NewString("general"),
+		types.NewUint64(100),
+	}),
+)
+```
+
+Parameter values are bound as typed values, not interpolated into SQL text.
+The product-value order must match the `Parameters.Columns` order. `:sender`
+remains caller identity and `sender` is reserved as a parameter name.
+
 ## Declared Views
 
 Declare live read surfaces on the module.
@@ -118,12 +152,39 @@ _ = sub.InitialRows
 `SubscribeView` admits the subscription and returns initial rows. Protocol
 clients receive ongoing transaction updates through the protocol path.
 
+Declared views use the same parameter model as declared queries:
+
+```go
+mod.View(shunter.ViewDeclaration{
+	Name: "live_messages_by_topic",
+	SQL:  "SELECT * FROM messages WHERE topic = :topic",
+	Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+		{Name: "topic", Type: "string"},
+	}},
+	Permissions: shunter.PermissionMetadata{
+		Required: []string{"messages:subscribe"},
+	},
+})
+```
+
+```go
+sub, err := rt.SubscribeView(
+	ctx,
+	"live_messages_by_topic",
+	8,
+	shunter.WithDeclaredReadPermissions("messages:subscribe"),
+	shunter.WithDeclaredReadParameters(types.ProductValue{
+		types.NewString("general"),
+	}),
+)
+```
+
 ## SQL Surface
 
 Shunter's SQL surface is intentionally narrow. Do not treat it as broad SQL
 database compatibility.
 
-Current v1 read compatibility by surface:
+Current read compatibility by surface:
 
 - Protocol `OneOffQuery` executes Shunter's read-only SQL subset against a
   committed snapshot. Supported shapes include single-table reads, bounded
@@ -135,7 +196,9 @@ Current v1 read compatibility by surface:
   protocol declared-query path. They use the one-off read executor with
   declaration-level permission metadata and may expose private tables when the
   declaration permission allows the caller. Empty SQL is metadata-only and
-  returns `ErrDeclaredReadNotExecutable` when executed.
+  returns `ErrDeclaredReadNotExecutable` when executed. Executable declared
+  queries may use declared app placeholders such as `:topic`; callers must
+  supply matching typed declared-read parameters.
 - Raw subscriptions use protocol `SubscribeSingle` and `SubscribeMulti` to
   register table-shaped live reads. They support single-table and join
   predicates, including `SELECT *` for single tables and `SELECT table.*` or
@@ -147,10 +210,16 @@ Current v1 read compatibility by surface:
   table-shaped reads, table-shaped joins and multi-way joins, column
   projections over the emitted relation, single-table `ORDER BY`, `LIMIT`, and
   `OFFSET` initial snapshots, and `COUNT`/`SUM` aggregates including join and
-  cross-join aggregates. Aggregate aliases must use `AS`.
+  cross-join aggregates. Aggregate aliases must use `AS`. Declared live views
+  may use the same declared app placeholders and parameter binding as declared
+  queries.
 - Local runtime reads use `Runtime.Read` for callback-scoped committed-state
   access. `Runtime.CallQuery` and `Runtime.SubscribeView` are the local
   declared-read APIs.
+
+Declared-read parameters are only for declared queries and declared views. Raw
+protocol `OneOffQuery`, `SubscribeSingle`, and `SubscribeMulti` do not accept
+client-side parameter payloads.
 
 If a read is important to the app contract, prefer a declared query or declared
 view over ad hoc raw SQL.

@@ -119,6 +119,11 @@ await client.connect();
 
 The default browser path uses global `WebSocket`.
 
+Generated protocol metadata defaults to `v2.bsatn.shunter` while still listing
+`v1.bsatn.shunter` as supported. Parameterized declared reads require a
+negotiated v2 connection; no-parameter declared reads remain compatible with
+v1.
+
 ## Call Reducers
 
 Generated bindings always keep raw `Uint8Array` reducer helpers. When a
@@ -153,10 +158,13 @@ raw helper.
 
 Executable declared queries get raw helpers. When exported declared-read row
 metadata is available, generated bindings also expose decoded result helpers
-that use generated row decoders by default.
+that use generated row decoders by default. Parameterized declared queries get
+typed params interfaces and helpers that encode those params before calling the
+runtime.
 
 ```ts
 import {
+  queryMessagesByTopicDecoded,
   queryRecentMessages,
   queryRecentMessagesDecoded,
 } from "./shunter.gen";
@@ -168,10 +176,22 @@ const decoded = await queryRecentMessagesDecoded(client.runDeclaredQuery);
 for (const row of decoded.tables[0]?.rows ?? []) {
   console.log(row.body);
 }
+
+const byTopic = await queryMessagesByTopicDecoded(
+  client.runDeclaredQuery,
+  { topic: "general", afterId: 1n },
+);
+for (const row of byTopic.tables[0]?.rows ?? []) {
+  console.log(row.body);
+}
 ```
 
 Use raw helpers when the app wants bytes or custom decoding. Use decoded helpers
-when the generated contract row schema is the client-facing shape.
+when the generated contract row schema is the client-facing shape. Generated
+parameterized helpers hide BSATN encoding; the lower-level runtime
+`DeclaredQueryOptions.params` field is an already encoded `Uint8Array`.
+Supplying `params` on a v1 connection raises a protocol mismatch before sending.
+No-parameter helper signatures are unchanged.
 
 ## Subscribe To Tables And Views
 
@@ -181,6 +201,7 @@ receive cloned row bytes.
 
 ```ts
 import {
+  subscribeLiveMessagesByTopic,
   subscribeLiveMessages,
   subscribeLiveMessagesHandle,
   subscribeMessages,
@@ -198,7 +219,18 @@ const liveHandle = await subscribeLiveMessagesHandle(
   { returnHandle: true },
 );
 
+const unsubscribeByTopic = await subscribeLiveMessagesByTopic(
+  client.subscribeDeclaredView,
+  { topic: "general" },
+  {
+    onUpdate: (update) => {
+      console.log(update.inserts.length);
+    },
+  },
+);
+
 await unsubscribeMessages();
+await unsubscribeByTopic();
 await liveHandle.unsubscribe();
 ```
 
