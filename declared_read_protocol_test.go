@@ -64,21 +64,19 @@ func TestProtocolDeclaredViewSucceedsWithDeclarationPermission(t *testing.T) {
 func TestProtocolV1ParameterizedDeclaredReadsRejectWithoutParams(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Query(QueryDeclaration{
-			Name: "messages_by_body",
-			SQL:  "SELECT * FROM messages WHERE body = :body",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "body", Type: "string"},
-			}},
+			Name:        "messages_by_body",
+			SQL:         "SELECT * FROM messages WHERE body = :body",
 			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
-		}).
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})).
 		View(ViewDeclaration{
-			Name: "live_messages_by_body",
-			SQL:  "SELECT * FROM messages WHERE body = :body",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "body", Type: "string"},
-			}},
+			Name:        "live_messages_by_body",
+			SQL:         "SELECT * FROM messages WHERE body = :body",
 			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}), declaredReadProtocolConfig(t))
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})), declaredReadProtocolConfig(t))
 	defer rt.Close()
 
 	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "reader", "messages:read", "messages:subscribe"))
@@ -100,21 +98,19 @@ func TestProtocolV2ParameterizedDeclaredReadsExecuteWithParams(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
 		Query(QueryDeclaration{
-			Name: "messages_by_body",
-			SQL:  "SELECT * FROM messages WHERE body = :body ORDER BY id",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "body", Type: "string"},
-			}},
+			Name:        "messages_by_body",
+			SQL:         "SELECT * FROM messages WHERE body = :body ORDER BY id",
 			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
-		}).
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})).
 		View(ViewDeclaration{
-			Name: "live_messages_by_body",
-			SQL:  "SELECT * FROM messages WHERE body = :body",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "body", Type: "string"},
-			}},
+			Name:        "live_messages_by_body",
+			SQL:         "SELECT * FROM messages WHERE body = :body",
 			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}), declaredReadProtocolConfig(t))
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})), declaredReadProtocolConfig(t))
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, "alpha")
 	insertMessageWithBody(t, rt, 2, "bravo")
@@ -155,13 +151,12 @@ func TestProtocolV2DeclaredReadParametersComposeWithSender(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
 		Query(QueryDeclaration{
-			Name: "own_message_by_id",
-			SQL:  "SELECT * FROM messages WHERE body = :sender AND id = :message_id",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "message_id", Type: "uint64"},
-			}},
+			Name:        "own_message_by_id",
+			SQL:         "SELECT * FROM messages WHERE body = :sender AND id = :message_id",
 			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
-		}), declaredReadProtocolConfig(t))
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "message_id", Type: "uint64"},
+		}})), declaredReadProtocolConfig(t))
 	defer rt.Close()
 
 	client, identityToken := dialDeclaredReadProtocolV2WithIdentity(t, rt, mintDeclaredReadProtocolToken(t, "sender-reader", "messages:read"))
@@ -192,21 +187,19 @@ func TestProtocolV2ParameterizedDeclaredReadValidationErrors(t *testing.T) {
 			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
 		}).
 		Query(QueryDeclaration{
-			Name: "messages_by_body",
-			SQL:  "SELECT * FROM messages WHERE body = :body",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "body", Type: "string"},
-			}},
+			Name:        "messages_by_body",
+			SQL:         "SELECT * FROM messages WHERE body = :body",
 			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
-		}).
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})).
 		View(ViewDeclaration{
-			Name: "live_messages_by_body",
-			SQL:  "SELECT * FROM messages WHERE body = :body",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "body", Type: "string"},
-			}},
+			Name:        "live_messages_by_body",
+			SQL:         "SELECT * FROM messages WHERE body = :body",
 			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}), declaredReadProtocolConfig(t))
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})), declaredReadProtocolConfig(t))
 	defer rt.Close()
 
 	stringParamColumns := []schema.ColumnSchema{{Name: "body", Type: types.KindString}}

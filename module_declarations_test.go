@@ -29,6 +29,32 @@ func TestModuleViewDeclarationMetadataIsDescribed(t *testing.T) {
 	}
 }
 
+func TestNoParameterDeclaredReadsKeepUnkeyedLiteralShape(t *testing.T) {
+	query := QueryDeclaration{
+		"recent_messages",
+		"SELECT * FROM messages",
+		PermissionMetadata{},
+		ReadModelMetadata{},
+		MigrationMetadata{},
+	}
+	view := ViewDeclaration{
+		"live_messages",
+		"SELECT * FROM messages",
+		PermissionMetadata{},
+		ReadModelMetadata{},
+		MigrationMetadata{},
+	}
+
+	mod := NewModule("chat").Query(query).View(view)
+	desc := mod.Describe()
+	if len(desc.Queries) != 1 || desc.Queries[0].Name != "recent_messages" {
+		t.Fatalf("query description = %#v, want unkeyed declaration registered", desc.Queries)
+	}
+	if len(desc.Views) != 1 || desc.Views[0].Name != "live_messages" {
+		t.Fatalf("view description = %#v, want unkeyed declaration registered", desc.Views)
+	}
+}
+
 func TestModuleVisibilityFilterDeclarationMetadataIsDescribed(t *testing.T) {
 	mod := NewModule("chat").VisibilityFilter(VisibilityFilterDeclaration{
 		Name: "own_messages",
@@ -115,23 +141,21 @@ func TestModuleQueryAndViewDeclarationsAreCopiedAtRegistration(t *testing.T) {
 		Query(QueryDeclaration{
 			Name:        "recent_messages",
 			SQL:         "SELECT * FROM messages",
-			Parameters:  &ProductSchema{Columns: queryParameterColumns},
 			Permissions: PermissionMetadata{Required: queryPermissions},
 			ReadModel:   ReadModelMetadata{Tables: queryTables, Tags: queryTags},
 			Migration: MigrationMetadata{
 				Classifications: queryClassifications,
 			},
-		}).
+		}, WithQueryParameters(ProductSchema{Columns: queryParameterColumns})).
 		View(ViewDeclaration{
 			Name:        "live_messages",
 			SQL:         "SELECT * FROM messages",
-			Parameters:  &ProductSchema{Columns: viewParameterColumns},
 			Permissions: PermissionMetadata{Required: viewPermissions},
 			ReadModel:   ReadModelMetadata{Tables: viewTables, Tags: viewTags},
 			Migration: MigrationMetadata{
 				Classifications: viewClassifications,
 			},
-		})
+		}, WithViewParameters(ProductSchema{Columns: viewParameterColumns}))
 
 	queryPermissions[0] = "mutated"
 	queryTables[0] = "mutated"
@@ -257,17 +281,15 @@ func TestBuildAcceptsDeclaredReadSQLParameters(t *testing.T) {
 		Query(QueryDeclaration{
 			Name: "messages_by_body",
 			SQL:  "SELECT * FROM messages WHERE body = :body",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "body", Type: "string"},
-			}},
-		}).
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})).
 		View(ViewDeclaration{
 			Name: "live_messages_by_id",
 			SQL:  "SELECT * FROM messages WHERE id = :message_id",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "message_id", Type: "uint64"},
-			}},
-		})
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "message_id", Type: "uint64"},
+		}}))
 
 	if _, err := Build(mod, Config{DataDir: t.TempDir()}); err != nil {
 		t.Fatalf("Build returned error: %v", err)
@@ -285,10 +307,9 @@ func TestBuildRejectsInvalidDeclaredReadSQLParameters(t *testing.T) {
 			mod: validChatModule().Query(QueryDeclaration{
 				Name: "messages_by_body",
 				SQL:  "SELECT * FROM messages WHERE body = :missing",
-				Parameters: &ProductSchema{Columns: []ProductColumn{
-					{Name: "body", Type: "string"},
-				}},
-			}),
+			}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}})),
 			want: `query "messages_by_body": coerce column "body": unsupported SQL: SQL parameter :missing is not declared`,
 		},
 		{
@@ -296,10 +317,9 @@ func TestBuildRejectsInvalidDeclaredReadSQLParameters(t *testing.T) {
 			mod: validChatModule().Query(QueryDeclaration{
 				Name: "messages_by_body",
 				SQL:  "SELECT * FROM messages WHERE body = 'hello'",
-				Parameters: &ProductSchema{Columns: []ProductColumn{
-					{Name: "body", Type: "string"},
-				}},
-			}),
+			}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}})),
 			want: `query "messages_by_body": unsupported SQL: SQL parameter :body is declared but not used`,
 		},
 		{
@@ -307,20 +327,18 @@ func TestBuildRejectsInvalidDeclaredReadSQLParameters(t *testing.T) {
 			mod: validChatModule().Query(QueryDeclaration{
 				Name: "messages_by_body",
 				SQL:  "SELECT * FROM messages WHERE body = :body OR body != :body",
-				Parameters: &ProductSchema{Columns: []ProductColumn{
-					{Name: "body", Type: "string"},
-				}},
-			}),
+			}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}})),
 		},
 		{
 			name: "incompatible repeated query parameter",
 			mod: validChatModule().Query(QueryDeclaration{
 				Name: "messages_by_body",
 				SQL:  "SELECT * FROM messages WHERE body = :body OR id = :body",
-				Parameters: &ProductSchema{Columns: []ProductColumn{
-					{Name: "body", Type: "string"},
-				}},
-			}),
+			}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}})),
 			want: `SQL parameter :body type String is incompatible with column "id" type U64`,
 		},
 		{
@@ -328,11 +346,10 @@ func TestBuildRejectsInvalidDeclaredReadSQLParameters(t *testing.T) {
 			mod: validChatModule().Query(QueryDeclaration{
 				Name: "messages_by_limit",
 				SQL:  "SELECT * FROM messages WHERE body = :body LIMIT :limit",
-				Parameters: &ProductSchema{Columns: []ProductColumn{
-					{Name: "body", Type: "string"},
-					{Name: "limit", Type: "uint64"},
-				}},
-			}),
+			}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+				{Name: "limit", Type: "uint64"},
+			}})),
 			want: `SQL parameter :limit is not supported in LIMIT`,
 		},
 		{
@@ -340,10 +357,9 @@ func TestBuildRejectsInvalidDeclaredReadSQLParameters(t *testing.T) {
 			mod: validChatModule().View(ViewDeclaration{
 				Name: "live_messages_by_body",
 				SQL:  "SELECT * FROM messages WHERE body = :missing",
-				Parameters: &ProductSchema{Columns: []ProductColumn{
-					{Name: "body", Type: "string"},
-				}},
-			}),
+			}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+				{Name: "body", Type: "string"},
+			}})),
 			want: `view "live_messages_by_body": coerce column "body": unsupported SQL: SQL parameter :missing is not declared`,
 		},
 	}
@@ -502,16 +518,14 @@ func TestModuleDeclarationDescriptionsAreDetached(t *testing.T) {
 	mod := NewModule("chat").
 		Query(QueryDeclaration{
 			Name: "recent_messages",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "topic", Type: "string"},
-			}},
-		}).
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "topic", Type: "string"},
+		}})).
 		View(ViewDeclaration{
 			Name: "live_messages",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "topic", Type: "string"},
-			}},
-		})
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "topic", Type: "string"},
+		}}))
 
 	desc := mod.Describe()
 	if len(desc.Queries) != 1 {

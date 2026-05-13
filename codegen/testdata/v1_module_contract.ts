@@ -64,13 +64,14 @@ export type QueryRunner = ShunterQueryRunner<Uint8Array>;
 export type ViewSubscriber = ShunterViewSubscriber;
 export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;
 export type DeclaredQueryOptions = ShunterDeclaredQueryOptions;
+export type DeclaredQueryRunOptions = Omit<DeclaredQueryOptions, "params">;
 export type RawDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName> = ShunterRawDeclaredQueryResult<Name>;
 export type DeclaredQueryDecodeOptions<RowsByName extends object = TableRows> = ShunterDeclaredQueryDecodeOptions<RowsByName>;
-export type DeclaredQueryDecodedRunOptions<RowsByName extends object = TableRows> = DeclaredQueryOptions & DeclaredQueryDecodeOptions<RowsByName>;
+export type DeclaredQueryDecodedRunOptions<RowsByName extends object = TableRows> = DeclaredQueryRunOptions & DeclaredQueryDecodeOptions<RowsByName>;
 export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName, RowsByName extends object = TableRows> = ShunterDecodedDeclaredQueryResult<Name, RowsByName>;
 export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;
 export type DeclaredViewHandleSubscriber = ShunterDeclaredViewHandleSubscriber<ExecutableViewName>;
-export type DeclaredViewSubscriptionOptions<Row = unknown> = ShunterDeclaredViewSubscriptionOptions<Row>;
+export type DeclaredViewSubscriptionOptions<Row = unknown> = Omit<ShunterDeclaredViewSubscriptionOptions<Row>, "params">;
 export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;
 export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;
 export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;
@@ -354,7 +355,7 @@ export const messagesByTopicQueryRowDecoders = {
   "messages": decodeMessagesByTopicQueryRow,
 } as const satisfies TableRowDecoders<MessagesByTopicQueryRows>;
 
-export function queryMessagesByTopic(runDeclaredQuery: DeclaredQueryRunner, params: MessagesByTopicParams, options: DeclaredQueryOptions = {}): Promise<Uint8Array> {
+export function queryMessagesByTopic(runDeclaredQuery: DeclaredQueryRunner, params: MessagesByTopicParams, options: DeclaredQueryRunOptions = {}): Promise<Uint8Array> {
   return runDeclaredQuery("messages_by_topic", { ...options, params: encodeMessagesByTopicParams(params) });
 }
 

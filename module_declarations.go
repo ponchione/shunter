@@ -129,7 +129,6 @@ type QueryDeclaration struct {
 	// SQL optionally binds the declaration to an executable OneOffQuery SQL
 	// string. Empty SQL leaves the declaration metadata-only.
 	SQL         string
-	Parameters  *ProductSchema
 	Permissions PermissionMetadata
 	ReadModel   ReadModelMetadata
 	Migration   MigrationMetadata
@@ -142,23 +141,72 @@ type ViewDeclaration struct {
 	// SQL optionally binds the declaration to an executable subscription SQL
 	// string. Empty SQL leaves the declaration metadata-only.
 	SQL         string
+	Permissions PermissionMetadata
+	ReadModel   ReadModelMetadata
+	Migration   MigrationMetadata
+}
+
+type queryDeclaration struct {
+	Name        string
+	SQL         string
 	Parameters  *ProductSchema
 	Permissions PermissionMetadata
 	ReadModel   ReadModelMetadata
 	Migration   MigrationMetadata
 }
 
+type viewDeclaration struct {
+	Name        string
+	SQL         string
+	Parameters  *ProductSchema
+	Permissions PermissionMetadata
+	ReadModel   ReadModelMetadata
+	Migration   MigrationMetadata
+}
+
+type queryDeclarationOptions struct {
+	parameters *ProductSchema
+}
+
+// QueryDeclarationOption configures query declaration metadata without changing
+// the source-compatible QueryDeclaration literal shape.
+type QueryDeclarationOption func(*queryDeclarationOptions)
+
+// WithQueryParameters attaches the declared-read parameter product schema used
+// by SQL placeholders such as :topic.
+func WithQueryParameters(product ProductSchema) QueryDeclarationOption {
+	return func(o *queryDeclarationOptions) {
+		o.parameters = copyProductSchemaPtr(&product)
+	}
+}
+
+type viewDeclarationOptions struct {
+	parameters *ProductSchema
+}
+
+// ViewDeclarationOption configures view declaration metadata without changing
+// the source-compatible ViewDeclaration literal shape.
+type ViewDeclarationOption func(*viewDeclarationOptions)
+
+// WithViewParameters attaches the declared-read parameter product schema used
+// by SQL placeholders such as :topic.
+func WithViewParameters(product ProductSchema) ViewDeclarationOption {
+	return func(o *viewDeclarationOptions) {
+		o.parameters = copyProductSchemaPtr(&product)
+	}
+}
+
 // Query registers a named read query declaration and returns the receiver for
 // fluent module declarations.
-func (m *Module) Query(decl QueryDeclaration) *Module {
-	m.queries = append(m.queries, copyQueryDeclaration(decl))
+func (m *Module) Query(decl QueryDeclaration, opts ...QueryDeclarationOption) *Module {
+	m.queries = append(m.queries, newQueryDeclaration(decl, opts...))
 	return m
 }
 
 // View registers a named live view/subscription declaration and returns the
 // receiver for fluent module declarations.
-func (m *Module) View(decl ViewDeclaration) *Module {
-	m.views = append(m.views, copyViewDeclaration(decl))
+func (m *Module) View(decl ViewDeclaration, opts ...ViewDeclarationOption) *Module {
+	m.views = append(m.views, newViewDeclaration(decl, opts...))
 	return m
 }
 
@@ -301,8 +349,42 @@ func validateModuleTableMigrations(m *Module, reg schema.SchemaRegistry) error {
 	return nil
 }
 
-func copyQueryDeclaration(query QueryDeclaration) QueryDeclaration {
-	return QueryDeclaration{
+func newQueryDeclaration(decl QueryDeclaration, opts ...QueryDeclarationOption) queryDeclaration {
+	var options queryDeclarationOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+	return queryDeclaration{
+		Name:        decl.Name,
+		SQL:         decl.SQL,
+		Parameters:  copyProductSchemaPtr(options.parameters),
+		Permissions: copyPermissionMetadata(decl.Permissions),
+		ReadModel:   copyReadModelMetadata(decl.ReadModel),
+		Migration:   copyMigrationMetadata(decl.Migration),
+	}
+}
+
+func newViewDeclaration(decl ViewDeclaration, opts ...ViewDeclarationOption) viewDeclaration {
+	var options viewDeclarationOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+	return viewDeclaration{
+		Name:        decl.Name,
+		SQL:         decl.SQL,
+		Parameters:  copyProductSchemaPtr(options.parameters),
+		Permissions: copyPermissionMetadata(decl.Permissions),
+		ReadModel:   copyReadModelMetadata(decl.ReadModel),
+		Migration:   copyMigrationMetadata(decl.Migration),
+	}
+}
+
+func copyQueryDeclaration(query queryDeclaration) queryDeclaration {
+	return queryDeclaration{
 		Name:        query.Name,
 		SQL:         query.SQL,
 		Parameters:  copyProductSchemaPtr(query.Parameters),
@@ -312,8 +394,8 @@ func copyQueryDeclaration(query QueryDeclaration) QueryDeclaration {
 	}
 }
 
-func copyViewDeclaration(view ViewDeclaration) ViewDeclaration {
-	return ViewDeclaration{
+func copyViewDeclaration(view viewDeclaration) viewDeclaration {
+	return viewDeclaration{
 		Name:        view.Name,
 		SQL:         view.SQL,
 		Parameters:  copyProductSchemaPtr(view.Parameters),
@@ -323,29 +405,29 @@ func copyViewDeclaration(view ViewDeclaration) ViewDeclaration {
 	}
 }
 
-func copyQueryDeclarations(in []QueryDeclaration) []QueryDeclaration {
+func copyQueryDeclarations(in []queryDeclaration) []queryDeclaration {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]QueryDeclaration, len(in))
+	out := make([]queryDeclaration, len(in))
 	for i, query := range in {
 		out[i] = copyQueryDeclaration(query)
 	}
 	return out
 }
 
-func copyViewDeclarations(in []ViewDeclaration) []ViewDeclaration {
+func copyViewDeclarations(in []viewDeclaration) []viewDeclaration {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]ViewDeclaration, len(in))
+	out := make([]viewDeclaration, len(in))
 	for i, view := range in {
 		out[i] = copyViewDeclaration(view)
 	}
 	return out
 }
 
-func describeQueryDeclarations(in []QueryDeclaration) []QueryDescription {
+func describeQueryDeclarations(in []queryDeclaration) []QueryDescription {
 	if len(in) == 0 {
 		return nil
 	}
@@ -363,7 +445,7 @@ func describeQueryDeclarations(in []QueryDeclaration) []QueryDescription {
 	return out
 }
 
-func describeViewDeclarations(in []ViewDeclaration) []ViewDescription {
+func describeViewDeclarations(in []viewDeclaration) []ViewDescription {
 	if len(in) == 0 {
 		return nil
 	}

@@ -5,8 +5,8 @@ type moduleSnapshot struct {
 	version           string
 	metadata          map[string]string
 	reducers          []ReducerDeclaration
-	queries           []QueryDeclaration
-	views             []ViewDeclaration
+	queries           []queryDeclaration
+	views             []viewDeclaration
 	visibilityFilters []VisibilityFilterDescription
 	migration         MigrationMetadata
 	tableMigrations   map[string]MigrationMetadata

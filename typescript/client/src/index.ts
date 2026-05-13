@@ -4321,6 +4321,17 @@ export interface TableSubscriptionOptions<Row = unknown> {
   readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
 }
 
+export interface ViewSubscriptionOptions<Row = unknown> {
+  readonly requestId?: RequestID;
+  readonly queryId?: QueryID;
+  readonly signal?: AbortSignal;
+  readonly returnHandle?: boolean;
+  readonly decodeRow?: RowDecoder<Row>;
+  readonly onInitialRows?: (rows: readonly Row[]) => void;
+  readonly onRawUpdate?: RawSubscriptionUpdateCallback;
+  readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
+}
+
 export type TableSubscriber<
   Name extends string = string,
   RowsByName extends Record<Name, unknown> = Record<Name, unknown>,
@@ -4357,7 +4368,7 @@ export type RawTableHandleSubscriber = <Table extends string>(
 
 export type ViewSubscriber = (
   sql: string,
-  options?: DeclaredViewSubscriptionOptions,
+  options?: ViewSubscriptionOptions,
 ) => Promise<SubscriptionUnsubscribe>;
 
 export interface RuntimeBindings<

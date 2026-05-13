@@ -59,13 +59,14 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	b.WriteString("export type ViewSubscriber = ShunterViewSubscriber;\n")
 	b.WriteString("export type DeclaredQueryRunner = ShunterDeclaredQueryRunner<ExecutableQueryName, Uint8Array>;\n")
 	b.WriteString("export type DeclaredQueryOptions = ShunterDeclaredQueryOptions;\n")
+	b.WriteString("export type DeclaredQueryRunOptions = Omit<DeclaredQueryOptions, \"params\">;\n")
 	b.WriteString("export type RawDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName> = ShunterRawDeclaredQueryResult<Name>;\n")
 	b.WriteString("export type DeclaredQueryDecodeOptions<RowsByName extends object = TableRows> = ShunterDeclaredQueryDecodeOptions<RowsByName>;\n")
-	b.WriteString("export type DeclaredQueryDecodedRunOptions<RowsByName extends object = TableRows> = DeclaredQueryOptions & DeclaredQueryDecodeOptions<RowsByName>;\n")
+	b.WriteString("export type DeclaredQueryDecodedRunOptions<RowsByName extends object = TableRows> = DeclaredQueryRunOptions & DeclaredQueryDecodeOptions<RowsByName>;\n")
 	b.WriteString("export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = ExecutableQueryName, RowsByName extends object = TableRows> = ShunterDecodedDeclaredQueryResult<Name, RowsByName>;\n")
 	b.WriteString("export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;\n")
 	b.WriteString("export type DeclaredViewHandleSubscriber = ShunterDeclaredViewHandleSubscriber<ExecutableViewName>;\n")
-	b.WriteString("export type DeclaredViewSubscriptionOptions<Row = unknown> = ShunterDeclaredViewSubscriptionOptions<Row>;\n")
+	b.WriteString("export type DeclaredViewSubscriptionOptions<Row = unknown> = Omit<ShunterDeclaredViewSubscriptionOptions<Row>, \"params\">;\n")
 	b.WriteString("export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;\n")
 	b.WriteString("export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;\n")
 	b.WriteString("export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;\n")
@@ -217,7 +218,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 		}
 		functionName := uniqueTypeScriptIdentifier("query"+upperFirst(query.identifier), topLevelValueNames)
 		if queryParamsTypeName != "" {
-			fmt.Fprintf(&b, "export function %s(runDeclaredQuery: DeclaredQueryRunner, params: %s, options: DeclaredQueryOptions = {}): Promise<Uint8Array> {\n", functionName, queryParamsTypeName)
+			fmt.Fprintf(&b, "export function %s(runDeclaredQuery: DeclaredQueryRunner, params: %s, options: DeclaredQueryRunOptions = {}): Promise<Uint8Array> {\n", functionName, queryParamsTypeName)
 			fmt.Fprintf(&b, "  return runDeclaredQuery(%s, { ...options, params: %s(params) });\n", strconv.Quote(query.name), queryParamsEncoderName)
 		} else {
 			fmt.Fprintf(&b, "export function %s(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {\n", functionName)

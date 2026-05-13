@@ -550,6 +550,16 @@ export interface TableSubscriptionOptions<Row = unknown> {
     readonly onRawUpdate?: RawSubscriptionUpdateCallback;
     readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
 }
+export interface ViewSubscriptionOptions<Row = unknown> {
+    readonly requestId?: RequestID;
+    readonly queryId?: QueryID;
+    readonly signal?: AbortSignal;
+    readonly returnHandle?: boolean;
+    readonly decodeRow?: RowDecoder<Row>;
+    readonly onInitialRows?: (rows: readonly Row[]) => void;
+    readonly onRawUpdate?: RawSubscriptionUpdateCallback;
+    readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
+}
 export type TableSubscriber<Name extends string = string, RowsByName extends Record<Name, unknown> = Record<Name, unknown>, Row = never> = <Table extends Name>(table: Table, onRows?: (rows: ([Row] extends [never] ? RowsByName[Table] : Row)[]) => void, options?: TableSubscriptionOptions<[Row] extends [never] ? RowsByName[Table] : Row>) => Promise<SubscriptionUnsubscribe>;
 export type TableHandleSubscriber<Name extends string = string> = <Table extends Name>(table: Table, onRows: ((rows: Uint8Array[]) => void) | undefined, options: TableSubscriptionOptions<Uint8Array> & SubscriptionHandleReturnOptions) => Promise<SubscriptionHandle<Uint8Array>>;
 export type DecodedTableHandleSubscriber = <Table extends string, Row>(table: Table, onRows: ((rows: Row[]) => void) | undefined, options: TableSubscriptionOptions<Row> & SubscriptionHandleReturnOptions & {
@@ -557,7 +567,7 @@ export type DecodedTableHandleSubscriber = <Table extends string, Row>(table: Ta
 }) => Promise<SubscriptionHandle<Row>>;
 export type RawTableSubscriber = <Table extends string, Row = unknown>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe>;
 export type RawTableHandleSubscriber = <Table extends string>(table: Table, onRows: ((rows: Uint8Array[]) => void) | undefined, options: TableSubscriptionOptions<Uint8Array> & SubscriptionHandleReturnOptions) => Promise<SubscriptionHandle<Uint8Array>>;
-export type ViewSubscriber = (sql: string, options?: DeclaredViewSubscriptionOptions) => Promise<SubscriptionUnsubscribe>;
+export type ViewSubscriber = (sql: string, options?: ViewSubscriptionOptions) => Promise<SubscriptionUnsubscribe>;
 export interface RuntimeBindings<TableName extends string = string, RowsByName extends Record<TableName, unknown> = Record<TableName, unknown>, ReducerName extends string = string, ExecutableQueryName extends string = string, ExecutableViewName extends string = string> {
     readonly callReducer: ReducerCaller<ReducerName, Uint8Array, Uint8Array>;
     readonly runDeclaredQuery: DeclaredQueryRunner<ExecutableQueryName, Uint8Array>;

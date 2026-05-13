@@ -171,17 +171,15 @@ func TestRuntimeExportContractIncludesDeclaredReadParameters(t *testing.T) {
 		Query(QueryDeclaration{
 			Name: "messages_by_topic",
 			SQL:  "SELECT id, body FROM messages WHERE body = :topic",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "topic", Type: "string"},
-			}},
-		}).
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "topic", Type: "string"},
+		}})).
 		View(ViewDeclaration{
 			Name: "live_messages_by_limit",
 			SQL:  "SELECT id, body FROM messages WHERE id = :message_id",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "message_id", Type: "uint64"},
-			}},
-		})
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "message_id", Type: "uint64"},
+		}}))
 
 	rt, err := Build(mod, Config{DataDir: t.TempDir()})
 	if err != nil {
@@ -216,16 +214,14 @@ func TestRuntimeExportContractAllowsMetadataOnlyDeclaredReadParameters(t *testin
 	mod := validChatModule().
 		Query(QueryDeclaration{
 			Name: "messages_by_topic",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "topic", Type: "string"},
-			}},
-		}).
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "topic", Type: "string"},
+		}})).
 		View(ViewDeclaration{
 			Name: "live_messages_by_topic",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "topic", Type: "string"},
-			}},
-		})
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "topic", Type: "string"},
+		}}))
 
 	rt, err := Build(mod, Config{DataDir: t.TempDir()})
 	if err != nil {
@@ -251,13 +247,11 @@ func TestRuntimeExportContractAllowsMetadataOnlyDeclaredReadParameters(t *testin
 func TestRuntimeExportContractNormalizesEmptyDeclaredReadParameters(t *testing.T) {
 	mod := validChatModule().
 		Query(QueryDeclaration{
-			Name:       "messages_by_empty_query_params",
-			Parameters: &ProductSchema{},
-		}).
+			Name: "messages_by_empty_query_params",
+		}, WithQueryParameters(ProductSchema{})).
 		View(ViewDeclaration{
-			Name:       "live_messages_by_empty_view_params",
-			Parameters: &ProductSchema{},
-		})
+			Name: "live_messages_by_empty_view_params",
+		}, WithViewParameters(ProductSchema{}))
 
 	rt, err := Build(mod, Config{DataDir: t.TempDir()})
 	if err != nil {
@@ -321,16 +315,14 @@ func TestRuntimeExportContractDeclaredReadParameterSnapshotsAreDetached(t *testi
 	mod := validChatModule().
 		Query(QueryDeclaration{
 			Name: "messages_by_topic",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "topic", Type: "string"},
-			}},
-		}).
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "topic", Type: "string"},
+		}})).
 		View(ViewDeclaration{
 			Name: "live_messages_by_topic",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "topic", Type: "string"},
-			}},
-		})
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "topic", Type: "string"},
+		}}))
 
 	rt, err := Build(mod, Config{DataDir: t.TempDir()})
 	if err != nil {
@@ -608,10 +600,9 @@ func TestModuleContractValidationRejectsInvalidDeclaredReadParameters(t *testing
 func TestBuildRejectsInvalidAuthoredDeclaredReadParameters(t *testing.T) {
 	mod := validChatModule().Query(QueryDeclaration{
 		Name: "messages_by_sender",
-		Parameters: &ProductSchema{Columns: []ProductColumn{
-			{Name: "sender", Type: "string"},
-		}},
-	})
+	}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+		{Name: "sender", Type: "string"},
+	}}))
 
 	_, err := Build(mod, Config{DataDir: t.TempDir()})
 	if err == nil || !errors.Is(err, ErrInvalidModuleMetadata) {

@@ -308,17 +308,15 @@ func TestParameterizedDeclaredReadContractCoversParameterJSONFields(t *testing.T
 		Query(QueryDeclaration{
 			Name: "messages_by_topic",
 			SQL:  "SELECT id FROM messages WHERE body = :topic",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "topic", Type: "string"},
-			}},
-		}).
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "topic", Type: "string"},
+		}})).
 		View(ViewDeclaration{
 			Name: "live_messages_by_topic",
 			SQL:  "SELECT id FROM messages WHERE body = :topic",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "topic", Type: "string"},
-			}},
-		})
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "topic", Type: "string"},
+		}}))
 
 	rt, err := Build(mod, Config{DataDir: t.TempDir()})
 	if err != nil {
@@ -416,12 +414,8 @@ func buildV1CompatibilityRuntime(t *testing.T) *Runtime {
 			},
 		}).
 		Query(QueryDeclaration{
-			Name: "messages_by_topic",
-			SQL:  "SELECT id, sender, body FROM messages WHERE topic = :topic AND id > :after_id ORDER BY sent_at DESC LIMIT 25",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "topic", Type: "string"},
-				{Name: "after_id", Type: "uint64"},
-			}},
+			Name:        "messages_by_topic",
+			SQL:         "SELECT id, sender, body FROM messages WHERE topic = :topic AND id > :after_id ORDER BY sent_at DESC LIMIT 25",
 			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
 			ReadModel:   ReadModelMetadata{Tables: []string{"messages"}, Tags: []string{"history", "parameters", "v1"}},
 			Migration: MigrationMetadata{
@@ -429,7 +423,10 @@ func buildV1CompatibilityRuntime(t *testing.T) *Runtime {
 				Classifications: []MigrationClassification{MigrationClassificationAdditive},
 				Notes:           "parameterized declared query fixture",
 			},
-		}).
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "topic", Type: "string"},
+			{Name: "after_id", Type: "uint64"},
+		}})).
 		View(ViewDeclaration{
 			Name:        "live_message_projection",
 			SQL:         "SELECT id, body AS text FROM messages",
@@ -442,11 +439,8 @@ func buildV1CompatibilityRuntime(t *testing.T) *Runtime {
 			},
 		}).
 		View(ViewDeclaration{
-			Name: "live_messages_by_topic",
-			SQL:  "SELECT id, body AS text FROM messages WHERE topic = :topic",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "topic", Type: "string"},
-			}},
+			Name:        "live_messages_by_topic",
+			SQL:         "SELECT id, body AS text FROM messages WHERE topic = :topic",
 			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
 			ReadModel:   ReadModelMetadata{Tables: []string{"messages"}, Tags: []string{"projection", "parameters", "v1"}},
 			Migration: MigrationMetadata{
@@ -454,7 +448,9 @@ func buildV1CompatibilityRuntime(t *testing.T) *Runtime {
 				Classifications: []MigrationClassification{MigrationClassificationAdditive},
 				Notes:           "parameterized declared live view fixture",
 			},
-		}).
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "topic", Type: "string"},
+		}})).
 		View(ViewDeclaration{
 			Name:        "live_message_count",
 			SQL:         "SELECT COUNT(*) AS n FROM messages",

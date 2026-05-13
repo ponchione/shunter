@@ -53,6 +53,7 @@ import type {
   TableHandleSubscriber,
   TableRowDecoder,
   TableRowDecoders,
+  ViewSubscriber,
 } from "../src/index";
 import {
   callCreateMessage,
@@ -92,6 +93,7 @@ import type {
   CreateMessageResult,
   DeclaredQueryOptions as GeneratedDeclaredQueryOptions,
   DeclaredQueryDecodedRunOptions as GeneratedDeclaredQueryDecodedRunOptions,
+  DeclaredQueryRunOptions as GeneratedDeclaredQueryRunOptions,
   DeclaredQueryRunner,
   DeclaredQueryDecodeOptions as GeneratedDeclaredQueryDecodeOptions,
   DeclaredViewHandleSubscriber as GeneratedDeclaredViewHandleSubscriber,
@@ -388,10 +390,15 @@ async function exerciseGeneratedBindings(): Promise<void> {
     requestId: 2,
     params: encodedMessagesByTopicParams,
   };
+  const generatedDeclaredQueryRunOptions: GeneratedDeclaredQueryRunOptions = {
+    requestId: 2,
+  };
+  // @ts-expect-error generated query helper options hide encoded params.
+  const generatedDeclaredQueryRunOptionsWithParams: GeneratedDeclaredQueryRunOptions = { params: encodedMessagesByTopicParams };
   const parameterizedQueryBytes: Uint8Array = await queryMessagesByTopic(
     declaredQueryRunner,
     messagesByTopicParams,
-    generatedDeclaredQueryOptions,
+    generatedDeclaredQueryRunOptions,
   );
   const rawDeclaredQueryTable: RawDeclaredQueryTable = {
     tableName: "messages",
@@ -503,6 +510,8 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const generatedParameterizedDeclaredViewOptions: GeneratedDeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> = {
     decodeRow: liveMessagesByTopicDecoder,
   };
+  // @ts-expect-error generated declared-view helper options hide encoded params.
+  const generatedParameterizedDeclaredViewOptionsWithParams: GeneratedDeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> = { params: encodedLiveMessagesByTopicParams };
   const unsubscribeParameterizedView: SubscriptionUnsubscribe =
     await subscribeLiveMessagesByTopic(
       declaredViewSubscriber,
@@ -510,6 +519,9 @@ async function exerciseGeneratedBindings(): Promise<void> {
       generatedParameterizedDeclaredViewOptions,
     );
   await unsubscribeParameterizedView();
+  const rawViewSubscriber: ViewSubscriber = async (_sql) => () => {};
+  // @ts-expect-error raw SQL view subscriptions do not accept declared-read params.
+  const rawViewSubscriptionWithParams = rawViewSubscriber("SELECT * FROM messages", { params: new Uint8Array([1]) });
   const generatedDeclaredViewHandle: SubscriptionHandle<LiveMessageProjectionViewRow> =
     await subscribeLiveMessageProjectionHandle(generatedClientGeneratedDeclaredViewHandleSubscriber, {
       returnHandle: true,
@@ -653,8 +665,12 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void liveMessagesByTopicRow;
   void generatedDeclaredViewOptions;
   void generatedParameterizedDeclaredViewOptions;
+  void generatedParameterizedDeclaredViewOptionsWithParams;
+  void rawViewSubscriptionWithParams;
   void generatedDeclaredQueryDecodeOptions;
   void generatedDeclaredQueryOptions;
+  void generatedDeclaredQueryRunOptions;
+  void generatedDeclaredQueryRunOptionsWithParams;
   void generatedDeclaredQueryDecodedRunOptions;
   void declaredQueryDecodeOptions;
   void tableRowDecoders;

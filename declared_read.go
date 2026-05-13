@@ -21,7 +21,25 @@ var (
 	// ErrDeclaredReadNotExecutable reports a metadata-only query/view
 	// declaration used through an execution API.
 	ErrDeclaredReadNotExecutable = errors.New("shunter: declared read is metadata-only")
+
+	errDeclaredReadParameter = errors.New("shunter: declared read parameter validation")
 )
+
+type declaredReadParameterError struct {
+	message string
+}
+
+func (e declaredReadParameterError) Error() string {
+	return e.message
+}
+
+func (e declaredReadParameterError) Is(target error) bool {
+	return target == errDeclaredReadParameter
+}
+
+func declaredReadParameterErrorf(format string, args ...any) error {
+	return declaredReadParameterError{message: fmt.Sprintf(format, args...)}
+}
 
 // DeclaredQueryResult is the detached row result returned by CallQuery.
 type DeclaredQueryResult struct {
@@ -423,16 +441,16 @@ func (r *Runtime) executableDeclaredRead(entry declaredReadEntry, caller types.C
 func declaredReadParameterBindings(entry declaredReadEntry, supplied *types.ProductValue) ([]protocol.SQLQueryParameterValue, error) {
 	if !declaredReadHasAppParameters(entry.Parameters) {
 		if supplied != nil {
-			return nil, fmt.Errorf("shunter: declared %s %q does not accept parameters", entry.Kind, entry.Name)
+			return nil, declaredReadParameterErrorf("shunter: declared %s %q does not accept parameters", entry.Kind, entry.Name)
 		}
 		return nil, nil
 	}
 	if supplied == nil {
-		return nil, fmt.Errorf("shunter: declared %s %q requires %d parameter(s)", entry.Kind, entry.Name, len(entry.Parameters.Columns))
+		return nil, declaredReadParameterErrorf("shunter: declared %s %q requires %d parameter(s)", entry.Kind, entry.Name, len(entry.Parameters.Columns))
 	}
 	values := *supplied
 	if len(values) != len(entry.Parameters.Columns) {
-		return nil, fmt.Errorf("shunter: declared %s %q parameter arity = %d, want %d", entry.Kind, entry.Name, len(values), len(entry.Parameters.Columns))
+		return nil, declaredReadParameterErrorf("shunter: declared %s %q parameter arity = %d, want %d", entry.Kind, entry.Name, len(values), len(entry.Parameters.Columns))
 	}
 	bindings := make([]protocol.SQLQueryParameterValue, len(entry.Parameters.Columns))
 	for i, parameter := range entry.Parameters.Columns {
@@ -442,10 +460,10 @@ func declaredReadParameterBindings(entry declaredReadEntry, supplied *types.Prod
 		}
 		value := values[i]
 		if value.Kind() != kind {
-			return nil, fmt.Errorf("shunter: declared %s %q parameter %d %q type = %s, want %s", entry.Kind, entry.Name, i, parameter.Name, value.Kind(), kind)
+			return nil, declaredReadParameterErrorf("shunter: declared %s %q parameter %d %q type = %s, want %s", entry.Kind, entry.Name, i, parameter.Name, value.Kind(), kind)
 		}
 		if value.IsNull() && !parameter.Nullable {
-			return nil, fmt.Errorf("shunter: declared %s %q parameter %d %q is null but not nullable", entry.Kind, entry.Name, i, parameter.Name)
+			return nil, declaredReadParameterErrorf("shunter: declared %s %q parameter %d %q is null but not nullable", entry.Kind, entry.Name, i, parameter.Name)
 		}
 		bindings[i] = protocol.SQLQueryParameterValue{Name: parameter.Name, Value: value}
 	}
@@ -620,7 +638,7 @@ func (r *Runtime) decodeProtocolDeclaredReadParameters(name string, kind declare
 		return nil, err
 	}
 	if !declaredReadHasAppParameters(entry.Parameters) {
-		return nil, fmt.Errorf("shunter: declared %s %q does not accept parameters", entry.Kind, entry.Name)
+		return nil, declaredReadParameterErrorf("shunter: declared %s %q does not accept parameters", entry.Kind, entry.Name)
 	}
 	columns, err := declaredReadParameterColumnSchemas(entry.Parameters)
 	if err != nil {
@@ -633,7 +651,7 @@ func (r *Runtime) decodeProtocolDeclaredReadParameters(name string, kind declare
 				return nil, validationErr
 			}
 		}
-		return nil, fmt.Errorf("shunter: declared %s %q parameter decode failed: %v", entry.Kind, entry.Name, err)
+		return nil, declaredReadParameterErrorf("shunter: declared %s %q parameter decode failed: %v", entry.Kind, entry.Name, err)
 	}
 	if _, err := declaredReadParameterBindings(entry, &values); err != nil {
 		return nil, err
@@ -784,6 +802,9 @@ func protocolDeclaredReadMetricResult(err error) string {
 		return "permission_denied"
 	}
 	if errors.Is(err, ErrUnknownDeclaredRead) || errors.Is(err, ErrDeclaredReadNotExecutable) {
+		return "validation_error"
+	}
+	if errors.Is(err, errDeclaredReadParameter) {
 		return "validation_error"
 	}
 	return "internal_error"

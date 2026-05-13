@@ -12,8 +12,8 @@ type Module struct {
 	metadata          map[string]string
 	builder           *schema.Builder
 	reducers          []ReducerDeclaration
-	queries           []QueryDeclaration
-	views             []ViewDeclaration
+	queries           []queryDeclaration
+	views             []viewDeclaration
 	visibilityFilters []VisibilityFilterDeclaration
 	migration         MigrationMetadata
 	tableMigrations   map[string]MigrationMetadata

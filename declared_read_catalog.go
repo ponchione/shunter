@@ -55,7 +55,7 @@ var declaredReadSQLValidation = protocol.SQLQueryValidationOptions{
 	AllowOffset:     true,
 }
 
-func newDeclaredReadCatalog(queries []QueryDeclaration, views []ViewDeclaration, sl protocol.SchemaLookup) (*declaredReadCatalog, error) {
+func newDeclaredReadCatalog(queries []queryDeclaration, views []viewDeclaration, sl protocol.SchemaLookup) (*declaredReadCatalog, error) {
 	catalog := &declaredReadCatalog{entries: make(map[string]declaredReadEntry, len(queries)+len(views))}
 	for _, spec := range declaredReadSpecs(queries, views) {
 		entry, err := declaredReadCatalogEntry(spec, sl)
@@ -67,7 +67,7 @@ func newDeclaredReadCatalog(queries []QueryDeclaration, views []ViewDeclaration,
 	return catalog, nil
 }
 
-func declaredReadSpecs(queries []QueryDeclaration, views []ViewDeclaration) []declaredReadSpec {
+func declaredReadSpecs(queries []queryDeclaration, views []viewDeclaration) []declaredReadSpec {
 	specs := make([]declaredReadSpec, 0, len(queries)+len(views))
 	for _, query := range queries {
 		specs = append(specs, declaredReadSpec{

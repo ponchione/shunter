@@ -236,7 +236,7 @@ func TestV1CompatibilityTypeScriptDeclaredReadResultShapeSurface(t *testing.T) {
 		`export async function queryRecentMessagesDecoded(runDeclaredQuery: DeclaredQueryRunner, options: DeclaredQueryDecodeOptions<RecentMessagesQueryRows> = {}): Promise<DecodedDeclaredQueryResult<typeof queries.recentMessages, RecentMessagesQueryRows>> {`,
 		`export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;`,
 		`export type DeclaredViewHandleSubscriber = ShunterDeclaredViewHandleSubscriber<ExecutableViewName>;`,
-		`export type DeclaredViewSubscriptionOptions<Row = unknown> = ShunterDeclaredViewSubscriptionOptions<Row>;`,
+		`export type DeclaredViewSubscriptionOptions<Row = unknown> = Omit<ShunterDeclaredViewSubscriptionOptions<Row>, "params">;`,
 		`export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;`,
 		`export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;`,
 		`export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;`,

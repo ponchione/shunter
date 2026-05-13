@@ -1926,13 +1926,12 @@ func TestCallQueryWithDeclaredReadParametersFiltersRows(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
 		Query(QueryDeclaration{
-			Name: "messages_by_body",
-			SQL:  "SELECT * FROM messages WHERE body = :body ORDER BY id",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "body", Type: "string"},
-			}},
+			Name:        "messages_by_body",
+			SQL:         "SELECT * FROM messages WHERE body = :body ORDER BY id",
 			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
-		}))
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})))
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, "alpha")
 	insertMessageWithBody(t, rt, 2, "bravo")
@@ -1967,13 +1966,12 @@ func TestCallQueryDeclaredReadParametersComposeWithSender(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
 		Query(QueryDeclaration{
-			Name: "own_message_by_id",
-			SQL:  "SELECT * FROM messages WHERE body = :sender AND id = :message_id",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "message_id", Type: "uint64"},
-			}},
+			Name:        "own_message_by_id",
+			SQL:         "SELECT * FROM messages WHERE body = :sender AND id = :message_id",
 			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
-		}))
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "message_id", Type: "uint64"},
+		}})))
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 2, alice.Hex())
@@ -2001,13 +1999,12 @@ func TestCallQueryDeclaredReadParametersApplyVisibility(t *testing.T) {
 			SQL:  "SELECT * FROM messages WHERE body = :sender",
 		}).
 		Query(QueryDeclaration{
-			Name: "message_by_id",
-			SQL:  "SELECT * FROM messages WHERE id = :message_id",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "message_id", Type: "uint64"},
-			}},
+			Name:        "message_by_id",
+			SQL:         "SELECT * FROM messages WHERE id = :message_id",
 			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
-		}))
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "message_id", Type: "uint64"},
+		}})))
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
@@ -2041,13 +2038,12 @@ func TestSubscribeViewWithDeclaredReadParametersFiltersInitialRowsAndDeltas(t *t
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
 		View(ViewDeclaration{
-			Name: "live_messages_by_body",
-			SQL:  "SELECT * FROM messages WHERE body = :body",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "body", Type: "string"},
-			}},
+			Name:        "live_messages_by_body",
+			SQL:         "SELECT * FROM messages WHERE body = :body",
 			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})))
 	defer rt.Close()
 	capture := newDeclaredReadLocalFanOutSender(4)
 	installDeclaredReadLocalFanOutSender(t, rt, capture)
@@ -2096,13 +2092,12 @@ func TestSubscribeViewWithEqualDeclaredReadParametersCanReuseSubscriptionState(t
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
 		View(ViewDeclaration{
-			Name: "live_messages_by_body",
-			SQL:  "SELECT * FROM messages WHERE body = :body",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "body", Type: "string"},
-			}},
+			Name:        "live_messages_by_body",
+			SQL:         "SELECT * FROM messages WHERE body = :body",
 			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})))
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, "alpha")
 	insertMessageWithBody(t, rt, 2, "bravo")
@@ -2153,26 +2148,24 @@ func TestDeclaredReadParameterValidationErrors(t *testing.T) {
 			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
 		}).
 		Query(QueryDeclaration{
-			Name: "messages_by_body",
-			SQL:  "SELECT * FROM messages WHERE body = :body",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "body", Type: "string"},
-			}},
+			Name:        "messages_by_body",
+			SQL:         "SELECT * FROM messages WHERE body = :body",
 			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
-		}).
+		}, WithQueryParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})).
 		View(ViewDeclaration{
 			Name:        "live_all_messages",
 			SQL:         "SELECT * FROM messages",
 			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
 		}).
 		View(ViewDeclaration{
-			Name: "live_messages_by_body",
-			SQL:  "SELECT * FROM messages WHERE body = :body",
-			Parameters: &ProductSchema{Columns: []ProductColumn{
-				{Name: "body", Type: "string"},
-			}},
+			Name:        "live_messages_by_body",
+			SQL:         "SELECT * FROM messages WHERE body = :body",
 			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+		}, WithViewParameters(ProductSchema{Columns: []ProductColumn{
+			{Name: "body", Type: "string"},
+		}})))
 	defer rt.Close()
 
 	tests := []struct {
@@ -2262,11 +2255,18 @@ func TestDeclaredReadParameterValidationErrors(t *testing.T) {
 	}
 }
 
+func TestProtocolDeclaredReadMetricResultClassifiesParameterErrorsAsValidation(t *testing.T) {
+	err := declaredReadParameterErrorf("shunter: declared query %q requires 1 parameter(s)", "messages_by_body")
+	if got := protocolDeclaredReadMetricResult(err); got != "validation_error" {
+		t.Fatalf("protocolDeclaredReadMetricResult(parameter error) = %q, want validation_error", got)
+	}
+}
+
 func TestMetadataOnlyParameterizedDeclaredReadCannotExecute(t *testing.T) {
 	params := &ProductSchema{Columns: []ProductColumn{{Name: "body", Type: "string"}}}
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Query(QueryDeclaration{Name: "metadata_query", Parameters: params}).
-		View(ViewDeclaration{Name: "metadata_view", Parameters: params}))
+		Query(QueryDeclaration{Name: "metadata_query"}, WithQueryParameters(*params)).
+		View(ViewDeclaration{Name: "metadata_view"}, WithViewParameters(*params)))
 	defer rt.Close()
 
 	_, err := rt.CallQuery(context.Background(), "metadata_query",
