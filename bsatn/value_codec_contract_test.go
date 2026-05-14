@@ -97,7 +97,18 @@ func TestValueEncodingTagsAndLittleEndianPayloads(t *testing.T) {
 }
 
 func TestDecodeValueErrorsAndEmptyBytes(t *testing.T) {
-	_, err := DecodeValue(bytes.NewReader([]byte{99}))
+	requireErrorText := func(label string, err error, want string) {
+		if err == nil || err.Error() != want {
+			t.Fatalf("%s err = %v, want %q", label, err, want)
+		}
+	}
+	requireErrorText("EncodeValue nil writer", EncodeValue(nil, types.NewBool(true)), "bsatn: writer is required")
+	requireErrorText("EncodeProductValue nil writer", EncodeProductValue(nil, types.ProductValue{types.NewBool(true)}), "bsatn: writer is required")
+	_, err := DecodeValue(nil)
+	requireErrorText("DecodeValue nil reader", err, "bsatn: reader is required")
+	_, err = DecodeValueExpecting(nil, types.KindString, "name")
+	requireErrorText("DecodeValueExpecting nil reader", err, "bsatn: reader is required")
+	_, err = DecodeValue(bytes.NewReader([]byte{99}))
 	var unknown *UnknownValueTagError
 	if !errors.As(err, &unknown) {
 		t.Fatalf("expected UnknownValueTagError, got %v", err)

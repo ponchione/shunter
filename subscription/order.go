@@ -35,26 +35,10 @@ func validateOrderByColumns(pred Predicate, orderBy []OrderByColumn, aggregate *
 	if len(orderBy) == 0 {
 		return nil
 	}
-	if s == nil {
-		return fmt.Errorf("%w: order-by schema lookup is nil", ErrInvalidPredicate)
+	table, err := validateWindowSingleTable("ORDER BY", "order-by", pred, aggregate, s)
+	if err != nil {
+		return err
 	}
-	if aggregate != nil {
-		return fmt.Errorf("%w: live ORDER BY views do not support aggregate views", ErrInvalidPredicate)
-	}
-	if _, ok := pred.(Join); ok {
-		return fmt.Errorf("%w: live ORDER BY views require a single table", ErrInvalidPredicate)
-	}
-	if _, ok := pred.(CrossJoin); ok {
-		return fmt.Errorf("%w: live ORDER BY views require a single table", ErrInvalidPredicate)
-	}
-	if _, ok := pred.(MultiJoin); ok {
-		return fmt.Errorf("%w: live ORDER BY views require a single table", ErrInvalidPredicate)
-	}
-	tables := pred.Tables()
-	if len(tables) != 1 {
-		return fmt.Errorf("%w: live ORDER BY views require one referenced table", ErrInvalidPredicate)
-	}
-	table := tables[0]
 	for i, col := range orderBy {
 		if col.Table != table || col.Alias != 0 {
 			return fmt.Errorf("%w: ORDER BY column %d must come from the ordered table", ErrInvalidPredicate, i)

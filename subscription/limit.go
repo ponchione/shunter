@@ -1,8 +1,6 @@
 package subscription
 
 import (
-	"fmt"
-
 	"github.com/ponchione/shunter/types"
 )
 
@@ -23,29 +21,8 @@ func validateRowLimit(pred Predicate, limit *uint64, aggregate *Aggregate, s Sch
 	if limit == nil {
 		return nil
 	}
-	if s == nil {
-		return fmt.Errorf("%w: limit schema lookup is nil", ErrInvalidPredicate)
-	}
-	if aggregate != nil {
-		return fmt.Errorf("%w: live LIMIT views do not support aggregate views", ErrInvalidPredicate)
-	}
-	if _, ok := pred.(Join); ok {
-		return fmt.Errorf("%w: live LIMIT views require a single table", ErrInvalidPredicate)
-	}
-	if _, ok := pred.(CrossJoin); ok {
-		return fmt.Errorf("%w: live LIMIT views require a single table", ErrInvalidPredicate)
-	}
-	if _, ok := pred.(MultiJoin); ok {
-		return fmt.Errorf("%w: live LIMIT views require a single table", ErrInvalidPredicate)
-	}
-	tables := pred.Tables()
-	if len(tables) != 1 {
-		return fmt.Errorf("%w: live LIMIT views require one referenced table", ErrInvalidPredicate)
-	}
-	if !s.TableExists(tables[0]) {
-		return fmt.Errorf("%w: LIMIT table %d", ErrTableNotFound, tables[0])
-	}
-	return nil
+	_, err := validateWindowSingleTable("LIMIT", "limit", pred, aggregate, s)
+	return err
 }
 
 func limitInitialRows(rows []types.ProductValue, limit *uint64) []types.ProductValue {

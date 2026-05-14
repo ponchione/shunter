@@ -15,23 +15,34 @@ import (
 
 // DecodeValue reads a BSATN-encoded Value.
 func DecodeValue(r io.Reader) (types.Value, error) {
-	var tag [1]byte
-	if _, err := io.ReadFull(r, tag[:]); err != nil {
+	tag, err := readValueTag(r)
+	if err != nil {
 		return types.Value{}, err
 	}
-	return decodePayload(r, tag[0])
+	return decodePayload(r, tag)
 }
 
 // DecodeValueExpecting reads a Value and validates the tag matches expected.
 func DecodeValueExpecting(r io.Reader, expected types.ValueKind, colName string) (types.Value, error) {
-	var tag [1]byte
-	if _, err := io.ReadFull(r, tag[:]); err != nil {
+	tag, err := readValueTag(r)
+	if err != nil {
 		return types.Value{}, err
 	}
-	if tag[0] != byte(expected) {
-		return types.Value{}, &TypeTagMismatchError{Column: colName, Expected: expected, Got: tag[0]}
+	if tag != byte(expected) {
+		return types.Value{}, &TypeTagMismatchError{Column: colName, Expected: expected, Got: tag}
 	}
-	return decodePayload(r, tag[0])
+	return decodePayload(r, tag)
+}
+
+func readValueTag(r io.Reader) (byte, error) {
+	if r == nil {
+		return 0, errors.New("bsatn: reader is required")
+	}
+	var tag [1]byte
+	if _, err := io.ReadFull(r, tag[:]); err != nil {
+		return 0, err
+	}
+	return tag[0], nil
 }
 
 func decodeColumnValue(r io.Reader, col schema.ColumnSchema) (types.Value, error) {

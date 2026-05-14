@@ -191,6 +191,9 @@ func EncodeValue(w io.Writer, v types.Value) error {
 }
 
 func writeAll(w io.Writer, p []byte) error {
+	if w == nil {
+		return errors.New("bsatn: writer is required")
+	}
 	if len(p) == 0 {
 		return nil
 	}
