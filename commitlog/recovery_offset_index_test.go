@@ -137,6 +137,47 @@ func TestOpenAndRecoverFallsBackToLinearScanForUnsafeOffsetIndexes(t *testing.T)
 	}
 }
 
+func TestOpenAndRecoverIgnoresOffsetIndexWithoutSnapshot(t *testing.T) {
+	root := t.TempDir()
+	const finalTxID = 12
+	_, reg := testSchema()
+
+	records := recoveryOffsetIndexReplayRecords(1, finalTxID)
+	rapidWriteReplaySegmentWithOffsets(t, root, 1, records)
+	if err := os.WriteFile(filepath.Join(root, OffsetIndexFileName(1)), []byte{1, 2, 3}, 0o600); err != nil {
+		t.Fatalf("write corrupt index: %v", err)
+	}
+
+	scannedTxIDs := captureSegmentScanTxIDs(t)
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatalf("OpenAndRecoverWithReport: %v", err)
+	}
+	if maxTxID != finalTxID {
+		t.Fatalf("max txID = %d, want %d (report=%+v)", maxTxID, finalTxID, report)
+	}
+	if report.HasSelectedSnapshot {
+		t.Fatalf("selected snapshot = (%v, %d), want none", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: finalTxID}) {
+		t.Fatalf("replayed range = %+v, want 1..%d", report.ReplayedTxRange, finalTxID)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != finalTxID+1 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx %d", plan, finalTxID+1)
+	}
+	assertRecoveryOffsetIndexRows(t, recovered, finalTxID)
+
+	scanned := scannedTxIDs()
+	if len(scanned) < finalTxID {
+		t.Fatalf("startup scan decoded %d records, want at least one full linear scan of %d records: %v", len(scanned), finalTxID, scanned)
+	}
+	for i := uint64(0); i < finalTxID; i++ {
+		if scanned[i] != i+1 {
+			t.Fatalf("startup scan txIDs first pass = %v, want prefix 1..%d", scanned, finalTxID)
+		}
+	}
+}
+
 func recoveryOffsetIndexReplayRecords(startTxID, endTxID uint64) []replayRecord {
 	records := make([]replayRecord, 0, endTxID-startTxID+1)
 	for txID := startTxID; txID <= endTxID; txID++ {

@@ -303,7 +303,9 @@ and genesis recovery; refactored segment listing/continuity helpers in
 `commitlog/segment_scan.go`; wired recovery report construction through the new
 selection path in `commitlog/recovery.go`; added regressions in
 `commitlog/recovery_offset_index_test.go` for valid indexed snapshot-covered
-prefix skips and missing/corrupt/non-monotonic/stale sidecar fallback.
+prefix skips and missing/corrupt/non-monotonic/stale sidecar fallback. Audit
+follow-up: added a no-snapshot corrupt-sidecar regression proving genesis
+recovery still scans linearly and ignores `*.idx`.
 Validation passed: `rtk go test ./commitlog`; `rtk go vet ./commitlog`;
 `rtk go test ./...`.
 
