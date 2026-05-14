@@ -427,7 +427,14 @@ Validation:
 - `rtk go test ./protocol`
 - `rtk go vet ./protocol`
 
-10. [ ] Reconcile declared live-view documentation with current v1 behavior.
+10. [x] Reconcile declared live-view documentation with current v1 behavior.
+
+Done: Updated `docs/reference/read-surface.md` and
+`docs/how-to/reads-queries-views.md` to document declared live-view joins,
+multi-way joins, `COUNT`/`SUM` aggregate views including multi-way aggregates,
+and initial-snapshot-only `ORDER BY`/`LIMIT`/`OFFSET` behavior with no
+maintained top-N/windowed live views. Validation passed:
+`rtk git diff --check -- docs`.
 
 Owner: docs under `docs/reference` and `docs/how-to`
 

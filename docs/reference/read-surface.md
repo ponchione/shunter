@@ -97,10 +97,15 @@ shapes differ by read surface:
 - Raw protocol subscriptions support table-shaped single-table and join reads.
   Table read policies and visibility filters apply. Raw subscriptions reject
   projections, aggregates, `ORDER BY`, `LIMIT`, and `OFFSET`.
-- Declared live views support table-shaped reads and joins, projections over
-  the emitted relation, single-table `ORDER BY`/`LIMIT`/`OFFSET` initial
-  snapshots, and `COUNT`/`SUM` aggregate views. Aggregate aliases must use
-  `AS`. Declared app placeholders follow the same parameter rules as declared
-  queries. Post-commit delivery remains row deltas over matching rows.
+- Declared live views support table-shaped reads, joins, self joins, cross
+  joins, multi-way joins, projections over the emitted relation, and
+  `COUNT`/`SUM` aggregate views, including join and multi-way aggregate views.
+  `COUNT(DISTINCT column)` is supported. Aggregate aliases must use `AS`.
+  `ORDER BY`, `LIMIT`, and `OFFSET` shape the initial snapshot only; Shunter
+  does not maintain top-N/windowed live view membership after commits.
+  Non-aggregate post-commit delivery remains row deltas over matching rows, and
+  aggregate views emit replacement aggregate rows when the aggregate changes.
+  Declared app placeholders follow the same parameter rules as declared
+  queries.
 - Local ad hoc raw SQL is out of scope for v1. Use `Runtime.Read`,
   `Runtime.CallQuery`, or `Runtime.SubscribeView` instead.

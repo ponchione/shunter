@@ -209,12 +209,12 @@ Current read compatibility by surface:
   `ORDER BY`, `LIMIT`, and `OFFSET`.
 - Declared live views use `ViewDeclaration.SQL`, `Runtime.SubscribeView`, and
   the protocol declared-view subscription path. Supported shapes include
-  table-shaped reads, table-shaped joins and multi-way joins, column
-  projections over the emitted relation, single-table `ORDER BY`, `LIMIT`, and
-  `OFFSET` initial snapshots, and `COUNT`/`SUM` aggregates including join and
-  cross-join aggregates. Aggregate aliases must use `AS`. Declared live views
-  may use the same declared app placeholders and parameter binding as declared
-  queries.
+  table-shaped reads, joins, self joins, cross joins, multi-way joins, column
+  projections over the emitted relation, and `COUNT`/`SUM` aggregates including
+  join, cross-join, and multi-way aggregate views. `COUNT(DISTINCT column)` is
+  supported. Aggregate aliases must use `AS`. `ORDER BY`, `LIMIT`, and
+  `OFFSET` shape the initial snapshot only. Declared live views may use the
+  same declared app placeholders and parameter binding as declared queries.
 - Local runtime reads use `Runtime.Read` for callback-scoped committed-state
   access. `Runtime.CallQuery` and `Runtime.SubscribeView` are the local
   declared-read APIs.
@@ -226,9 +226,11 @@ client-side parameter payloads.
 If a read is important to the app contract, prefer a declared query or declared
 view over ad hoc raw SQL.
 
-For declared live views with `ORDER BY`, `LIMIT`, or `OFFSET`, the initial
-snapshot follows those clauses. Post-commit delivery remains row deltas over
-matching rows.
+For declared live views with `ORDER BY`, `LIMIT`, or `OFFSET`, only the
+initial snapshot follows those clauses. Post-commit delivery is not maintained
+as a top-N/windowed view: non-aggregate views emit ordinary row deltas over
+matching rows, and aggregate views emit replacement aggregate rows when the
+aggregate changes.
 
 ## Permissions
 
