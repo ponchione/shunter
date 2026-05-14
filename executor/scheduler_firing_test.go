@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -129,6 +130,23 @@ func TestFiringRepeatAdvancesNextRun(t *testing.T) {
 		if got != want {
 			t.Errorf("next_run_at_ns = %d, want %d (intended+repeat)", got, want)
 		}
+	}
+}
+
+func TestFiringRepeatDeletesRowWhenNextRunWouldOverflow(t *testing.T) {
+	ff := newFiringFixture(t, nil)
+	intendedNs := int64(math.MaxInt64 - 1)
+	repeatNs := int64(2)
+	seedSchedule(t, ff.cs, ff.schedTable, 12, "fire", nil, intendedNs, repeatNs)
+
+	resp := fireCallCmd(ff, 12, intendedNs)
+	if resp.Status != StatusCommitted {
+		t.Fatalf("status=%d err=%v", resp.Status, resp.Error)
+	}
+
+	tbl, _ := ff.cs.Table(ff.schedTable)
+	if tbl.RowCount() != 0 {
+		t.Fatalf("overflowing repeating schedule should be deleted; count=%d", tbl.RowCount())
 	}
 }
 

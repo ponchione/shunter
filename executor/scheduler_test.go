@@ -2,6 +2,7 @@ package executor
 
 import (
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -99,6 +100,24 @@ func TestSchedulerHandleScheduleInsertsRow(t *testing.T) {
 	}
 }
 
+func TestSchedulerHandleScheduleRejectsOutOfRangeTimeWithoutConsumingID(t *testing.T) {
+	tx, h, _ := setupScheduler(t)
+
+	id, err := h.Schedule("greet", nil, time.Unix(0, math.MaxInt64).Add(time.Nanosecond))
+	if !errors.Is(err, ErrInvalidScheduleTime) {
+		t.Fatalf("Schedule out-of-range error = %v, want %v", err, ErrInvalidScheduleTime)
+	}
+	if id != 0 {
+		t.Fatalf("Schedule out-of-range id = %d, want 0", id)
+	}
+	if got := len(tx.TxState().Inserts(h.tableID)); got != 0 {
+		t.Fatalf("out-of-range Schedule inserted %d rows, want 0", got)
+	}
+	if got := h.seq.Peek(); got != 1 {
+		t.Fatalf("sequence after out-of-range Schedule = %d, want 1", got)
+	}
+}
+
 func TestSchedulerHandleScheduleRepeatSetsRepeatNs(t *testing.T) {
 	tx, h, _ := setupScheduler(t)
 
@@ -126,6 +145,24 @@ func TestSchedulerHandleScheduleRepeatSetsRepeatNs(t *testing.T) {
 	}
 	if got := found[SysScheduledColNextRunAtNs].AsInt64(); got <= time.Now().Add(-1*time.Second).UnixNano() {
 		t.Errorf("next_run_at_ns should be near now, got %d", got)
+	}
+}
+
+func TestSchedulerHandleScheduleRepeatRejectsOutOfRangeFirstRunWithoutConsumingID(t *testing.T) {
+	tx, h, _ := setupScheduler(t)
+
+	id, err := h.ScheduleRepeat("tick", nil, time.Duration(math.MaxInt64))
+	if !errors.Is(err, ErrInvalidScheduleTime) {
+		t.Fatalf("ScheduleRepeat huge interval error = %v, want %v", err, ErrInvalidScheduleTime)
+	}
+	if id != 0 {
+		t.Fatalf("ScheduleRepeat huge interval id = %d, want 0", id)
+	}
+	if got := len(tx.TxState().Inserts(h.tableID)); got != 0 {
+		t.Fatalf("out-of-range ScheduleRepeat inserted %d rows, want 0", got)
+	}
+	if got := h.seq.Peek(); got != 1 {
+		t.Fatalf("sequence after out-of-range ScheduleRepeat = %d, want 1", got)
 	}
 }
 

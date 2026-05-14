@@ -26,6 +26,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   after the terminal tx_id is durably written.
 - Commit-log recovery and append-resume scans now reject segment history that
   wraps from the maximum tx_id back to tx_id 0.
+- Scheduled repeat timestamps now reject or terminate at the int64 nanosecond
+  boundary instead of wrapping the next run into the past.
 
 ## v1.1.0 - 2026-05-13
 

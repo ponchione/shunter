@@ -16,5 +16,6 @@ var (
 	ErrTxIDExhausted                     = errors.New("executor: tx id exhausted")
 	ErrReducerIDExhausted                = errors.New("executor: reducer id exhausted")
 	ErrInvalidScheduleInterval           = errors.New("executor: schedule repeat interval must be positive")
+	ErrInvalidScheduleTime               = errors.New("executor: schedule time outside representable unix nanosecond range")
 	ErrScheduleIDExhausted               = errors.New("executor: schedule id exhausted")
 )

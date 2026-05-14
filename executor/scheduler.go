@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -39,8 +40,12 @@ func (e *Executor) advanceOrDeleteSchedule(tx *store.Transaction, id ScheduleID,
 		if repeatNs == 0 {
 			return tx.Delete(e.schedTableID, rowID)
 		}
+		nextRunAtNs, ok := nextScheduleRepeatRunAt(intendedNs, repeatNs)
+		if !ok {
+			return tx.Delete(e.schedTableID, rowID)
+		}
 		newRow := row.Copy()
-		newRow[SysScheduledColNextRunAtNs] = types.NewInt64(intendedNs + repeatNs)
+		newRow[SysScheduledColNextRunAtNs] = types.NewInt64(nextRunAtNs)
 		_, err := tx.Update(e.schedTableID, rowID, newRow)
 		return err
 	}
@@ -97,36 +102,37 @@ func (h *schedulerHandle) checkOpenLocked() error {
 
 // Schedule inserts a one-shot scheduled-reducer row into sys_scheduled.
 func (h *schedulerHandle) Schedule(reducerName string, args []byte, at time.Time) (ScheduleID, error) {
-	return h.insertSchedule(reducerName, args, at.UnixNano(), 0)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err := h.checkOpenLocked(); err != nil {
+		return 0, err
+	}
+	nextRunAtNs, ok := unixNanoWithinScheduleRange(at)
+	if !ok {
+		return 0, ErrInvalidScheduleTime
+	}
+	return h.insertScheduleLocked(reducerName, args, nextRunAtNs, 0)
 }
 
 // ScheduleRepeat inserts a repeating scheduled-reducer row. The first
 // fire is one interval from now; subsequent fires advance by
 // interval.Nanoseconds() using fixed-rate semantics (Story 6.4, §9.5).
 func (h *schedulerHandle) ScheduleRepeat(reducerName string, args []byte, interval time.Duration) (ScheduleID, error) {
-	first := time.Now().Add(interval).UnixNano()
-	return h.insertRepeatSchedule(reducerName, args, first, interval.Nanoseconds())
-}
-
-func (h *schedulerHandle) insertSchedule(reducerName string, args []byte, nextRunAtNs, repeatNs int64) (ScheduleID, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if err := h.checkOpenLocked(); err != nil {
 		return 0, err
 	}
-	return h.insertScheduleLocked(reducerName, args, nextRunAtNs, repeatNs)
-}
-
-func (h *schedulerHandle) insertRepeatSchedule(reducerName string, args []byte, nextRunAtNs, repeatNs int64) (ScheduleID, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if err := h.checkOpenLocked(); err != nil {
-		return 0, err
-	}
+	repeatNs := interval.Nanoseconds()
 	if repeatNs <= 0 {
 		return 0, ErrInvalidScheduleInterval
 	}
-	return h.insertScheduleLocked(reducerName, args, nextRunAtNs, repeatNs)
+	nowNs := time.Now().UnixNano()
+	first, ok := nextScheduleRepeatRunAt(nowNs, repeatNs)
+	if !ok {
+		return 0, ErrInvalidScheduleTime
+	}
+	return h.insertScheduleLocked(reducerName, args, first, repeatNs)
 }
 
 func (h *schedulerHandle) insertScheduleLocked(reducerName string, args []byte, nextRunAtNs, repeatNs int64) (ScheduleID, error) {
@@ -162,6 +168,20 @@ func validateScheduledReducerTarget(reg *ReducerRegistry, reducerName string) er
 		return fmt.Errorf("%w: %s", ErrLifecycleReducer, reducerName)
 	}
 	return nil
+}
+
+func nextScheduleRepeatRunAt(intendedNs, repeatNs int64) (int64, bool) {
+	if repeatNs <= 0 || intendedNs > math.MaxInt64-repeatNs {
+		return 0, false
+	}
+	return intendedNs + repeatNs, true
+}
+
+func unixNanoWithinScheduleRange(t time.Time) (int64, bool) {
+	if t.Before(time.Unix(0, math.MinInt64)) || t.After(time.Unix(0, math.MaxInt64)) {
+		return 0, false
+	}
+	return t.UnixNano(), true
 }
 
 func (e *Executor) sweepInvalidSchedules(ctx context.Context) error {
