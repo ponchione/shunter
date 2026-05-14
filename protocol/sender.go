@@ -79,14 +79,23 @@ func (s *connManagerSender) Send(connID types.ConnectionID, msg any) error {
 }
 
 func (s *connManagerSender) SendTransactionUpdate(connID types.ConnectionID, update *TransactionUpdate) error {
+	if update == nil {
+		return nil
+	}
 	return enqueueTransactionEnvelope(s, connID, update)
 }
 
 func (s *connManagerSender) SendTransactionUpdateLight(connID types.ConnectionID, update *TransactionUpdateLight) error {
+	if update == nil {
+		return nil
+	}
 	return enqueueTransactionEnvelope(s, connID, update)
 }
 
 func enqueueTransactionEnvelope[T TransactionUpdate | TransactionUpdateLight](s *connManagerSender, connID types.ConnectionID, update *T) error {
+	if s == nil || s.mgr == nil {
+		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
+	}
 	conn := s.mgr.Get(connID)
 	if conn == nil {
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
@@ -97,6 +106,9 @@ func enqueueTransactionEnvelope[T TransactionUpdate | TransactionUpdateLight](s 
 // enqueue encodes msg, wraps it in the connection's compression
 // envelope, and does a non-blocking send to OutboundCh.
 func (s *connManagerSender) enqueue(connID types.ConnectionID, msg any) error {
+	if s == nil || s.mgr == nil {
+		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
+	}
 	conn := s.mgr.Get(connID)
 	if conn == nil {
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])

@@ -121,6 +121,18 @@ func TestProductValueRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDecodeProductValueRejectsNilInputs(t *testing.T) {
+	if _, err := DecodeProductValue(nil, &schema.TableSchema{}); err == nil {
+		t.Fatal("DecodeProductValue nil reader error = nil, want error")
+	}
+	if _, err := DecodeProductValue(bytes.NewReader(nil), nil); err == nil {
+		t.Fatal("DecodeProductValue nil schema error = nil, want error")
+	}
+	if _, err := DecodeProductValueFromBytes(nil, nil); err == nil {
+		t.Fatal("DecodeProductValueFromBytes nil schema error = nil, want error")
+	}
+}
+
 func TestNullableProductValueRoundTripAndEncoding(t *testing.T) {
 	ts := &schema.TableSchema{
 		Name: "players",

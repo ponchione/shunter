@@ -264,6 +264,12 @@ func initialArrayStringCap(count uint32) int {
 
 // DecodeProductValue reads a schema-validated row.
 func DecodeProductValue(r io.Reader, ts *schema.TableSchema) (types.ProductValue, error) {
+	if r == nil {
+		return nil, errors.New("bsatn: reader is required")
+	}
+	if ts == nil {
+		return nil, errors.New("bsatn: table schema is required")
+	}
 	br, ok := r.(*bufio.Reader)
 	if !ok {
 		br = bufio.NewReader(r)

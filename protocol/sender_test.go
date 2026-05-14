@@ -73,6 +73,15 @@ func TestSendConnNotFound(t *testing.T) {
 	}
 }
 
+func TestSendNilConnManagerReturnsConnNotFound(t *testing.T) {
+	s := NewClientSender(nil, &fakeInbox{})
+	id := types.ConnectionID{99}
+	err := s.Send(id, SubscribeSingleApplied{})
+	if !errors.Is(err, ErrConnNotFound) {
+		t.Fatalf("Send error = %v, want ErrConnNotFound", err)
+	}
+}
+
 func TestSendClosedOutboundChannelReturnsConnNotFound(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
@@ -166,5 +175,17 @@ func TestSendTransactionUpdateTypedLight(t *testing.T) {
 	}
 	if tu.RequestID != 42 {
 		t.Fatalf("RequestID = %d, want 42", tu.RequestID)
+	}
+}
+
+func TestSendTransactionUpdateNilIsNoop(t *testing.T) {
+	mgr := NewConnManager()
+	s := NewClientSender(mgr, &fakeInbox{})
+	id := types.ConnectionID{99}
+	if err := s.SendTransactionUpdate(id, nil); err != nil {
+		t.Fatalf("SendTransactionUpdate nil error = %v, want nil", err)
+	}
+	if err := s.SendTransactionUpdateLight(id, nil); err != nil {
+		t.Fatalf("SendTransactionUpdateLight nil error = %v, want nil", err)
 	}
 }

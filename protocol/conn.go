@@ -288,6 +288,9 @@ func (m *ConnManager) RecordRejected() {
 // Each teardown gets a bounded context so one hung inbox call cannot stall
 // server shutdown indefinitely.
 func (m *ConnManager) CloseAll(ctx context.Context, inbox ExecutorInbox) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	m.mu.RLock()
 	conns := make([]*Conn, 0, len(m.conns))
 	for _, c := range m.conns {
@@ -300,7 +303,7 @@ func (m *ConnManager) CloseAll(ctx context.Context, inbox ExecutorInbox) {
 		wg.Add(1)
 		go func(c *Conn) {
 			defer wg.Done()
-			disconnectCtx, cancel := context.WithTimeout(ctx, c.opts.DisconnectTimeout)
+			disconnectCtx, cancel := context.WithTimeout(ctx, c.disconnectTimeout())
 			defer cancel()
 			c.Disconnect(disconnectCtx, CloseNormal, CloseReasonServerShutdown, inbox, m)
 		}(c)

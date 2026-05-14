@@ -100,3 +100,30 @@ func TestCloseAllDeliversOnInboxOK(t *testing.T) {
 		t.Fatal("conn not removed from manager after happy-path CloseAll")
 	}
 }
+
+func TestCloseAllNilContextAndNilConnOptionsUseDefaults(t *testing.T) {
+	mgr := NewConnManager()
+	conn := &Conn{
+		ID:         GenerateConnectionID(),
+		Identity:   [32]byte{1},
+		OutboundCh: make(chan []byte, 1),
+		closed:     make(chan struct{}),
+	}
+	mgr.Add(conn)
+
+	done := make(chan struct{})
+	go func() {
+		//lint:ignore SA1012 regression test intentionally exercises nil context handling.
+		mgr.CloseAll(nil, &fakeInbox{})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("CloseAll with nil context and nil conn options did not return")
+	}
+	if mgr.Get(conn.ID) != nil {
+		t.Fatal("conn not removed from manager")
+	}
+}
