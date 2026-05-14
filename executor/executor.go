@@ -622,11 +622,11 @@ func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSet
 }
 
 func elapsedHostExecutionMicros(start time.Time) uint64 {
-	durationMicros := uint64(time.Since(start).Microseconds())
-	if durationMicros == 0 {
+	durationMicros := time.Since(start).Microseconds()
+	if durationMicros <= 0 {
 		return 1
 	}
-	return durationMicros
+	return uint64(durationMicros)
 }
 
 func (e *Executor) handleDisconnectClientSubscriptions(cmd DisconnectClientSubscriptionsCmd) string {

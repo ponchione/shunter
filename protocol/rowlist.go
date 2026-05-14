@@ -56,41 +56,7 @@ func EncodeRowListChecked(rows [][]byte) ([]byte, error) {
 // payload carried by protocol messages. Row payloads are treated as read-only:
 // bsatn.EncodeProductValue must not mutate shared ProductValue backing arrays.
 func EncodeProductRows(rows []types.ProductValue) ([]byte, error) {
-	count, err := checkedProtocolLen("product row count", len(rows))
-	if err != nil {
-		return nil, err
-	}
-	size := uint64(4)
-	rowSizes := make([]uint32, len(rows))
-	for i, row := range rows {
-		n := bsatn.EncodedProductValueSize(row)
-		rowLen, err := checkedProtocolLen("product row", n)
-		if err != nil {
-			return nil, err
-		}
-		rowSizes[i] = rowLen
-		size += 4 + uint64(n)
-		if size > maxProtocolAlloc() {
-			return nil, fmt.Errorf("%w: encoded product rows size %d exceeds max allocation", ErrMessageTooLarge, size)
-		}
-	}
-	out := make([]byte, 4, int(size))
-	binary.LittleEndian.PutUint32(out[0:4], count)
-	var scratch [4]byte
-	for i, row := range rows {
-		binary.LittleEndian.PutUint32(scratch[:], rowSizes[i])
-		out = append(out, scratch[:]...)
-		before := len(out)
-		var err error
-		out, err = bsatn.AppendProductValue(out, row)
-		if err != nil {
-			return nil, err
-		}
-		if got := len(out) - before; got != int(rowSizes[i]) {
-			return nil, fmt.Errorf("protocol: encoded row size changed from %d to %d", rowSizes[i], got)
-		}
-	}
-	return out, nil
+	return encodeProductRowsWith(rows, encodedProductValueSize, bsatn.AppendProductValue)
 }
 
 // EncodeProductRowsForSchema encodes ProductValue rows using nullable metadata from ts.
@@ -103,6 +69,26 @@ func EncodeProductRowsForSchema(rows []types.ProductValue, ts *schema.TableSchem
 
 // EncodeProductRowsForColumns encodes ProductValue rows using nullable metadata from columns.
 func EncodeProductRowsForColumns(rows []types.ProductValue, columns []schema.ColumnSchema) ([]byte, error) {
+	return encodeProductRowsWith(
+		rows,
+		func(row types.ProductValue) (int, error) {
+			return bsatn.EncodedProductValueSizeForColumns(row, columns)
+		},
+		func(out []byte, row types.ProductValue) ([]byte, error) {
+			return bsatn.AppendProductValueForColumns(out, row, columns)
+		},
+	)
+}
+
+type productRowSizer func(types.ProductValue) (int, error)
+
+type productRowAppender func([]byte, types.ProductValue) ([]byte, error)
+
+func encodedProductValueSize(row types.ProductValue) (int, error) {
+	return bsatn.EncodedProductValueSize(row), nil
+}
+
+func encodeProductRowsWith(rows []types.ProductValue, rowSize productRowSizer, appendRow productRowAppender) ([]byte, error) {
 	count, err := checkedProtocolLen("product row count", len(rows))
 	if err != nil {
 		return nil, err
@@ -110,7 +96,7 @@ func EncodeProductRowsForColumns(rows []types.ProductValue, columns []schema.Col
 	size := uint64(4)
 	rowSizes := make([]uint32, len(rows))
 	for i, row := range rows {
-		n, err := bsatn.EncodedProductValueSizeForColumns(row, columns)
+		n, err := rowSize(row)
 		if err != nil {
 			return nil, err
 		}
@@ -132,7 +118,7 @@ func EncodeProductRowsForColumns(rows []types.ProductValue, columns []schema.Col
 		out = append(out, scratch[:]...)
 		before := len(out)
 		var err error
-		out, err = bsatn.AppendProductValueForColumns(out, row, columns)
+		out, err = appendRow(out, row)
 		if err != nil {
 			return nil, err
 		}

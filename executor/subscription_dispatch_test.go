@@ -95,6 +95,13 @@ func TestDisconnectSubscriptionDispatchNilResponseChannelDoesNotBlock(t *testing
 	}
 }
 
+func TestElapsedHostExecutionMicrosClampsFutureReceipt(t *testing.T) {
+	got := elapsedHostExecutionMicros(time.Now().Add(time.Hour))
+	if got != 1 {
+		t.Fatalf("elapsedHostExecutionMicros(future) = %d, want 1", got)
+	}
+}
+
 func TestDispatchRegisterSubscriptionSet(t *testing.T) {
 	exec, _ := setupExecutor()
 	fakeSubs := &registerDispatchSubs{
