@@ -769,6 +769,7 @@ func (m *Manager) RegisterSet(
 		return SubscriptionSetRegisterResult{}, fmt.Errorf("%w: next=%d requested=%d", ErrSubscriptionIDOverflow, m.nextSubID, len(deduped))
 	}
 	// Allocate internal IDs + run initial snapshot per predicate.
+	startNextSubID := m.nextSubID
 	allocated := make([]types.SubscriptionID, 0, len(deduped))
 	updates := make([]SubscriptionUpdate, 0, len(deduped))
 	for i, p := range deduped {
@@ -794,6 +795,7 @@ func (m *Manager) RegisterSet(
 				for _, sid := range allocated {
 					m.dropSub(req.ConnID, sid)
 				}
+				m.nextSubID = startNextSubID
 				return SubscriptionSetRegisterResult{}, fmt.Errorf("%w: %w", ErrInitialQuery, err)
 			}
 		}

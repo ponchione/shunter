@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -113,7 +114,7 @@ func TestBuildAuthConfigDevMintedTokenValidatesWithConfiguredIssuers(t *testing.
 	if err != nil {
 		t.Fatalf("buildAuthConfig returned error: %v", err)
 	}
-	if !stringSliceContains(jwtCfg.Issuers, mintCfg.Issuer) {
+	if !slices.Contains(jwtCfg.Issuers, mintCfg.Issuer) {
 		t.Fatalf("JWT issuers = %#v, want anonymous token issuer %q accepted", jwtCfg.Issuers, mintCfg.Issuer)
 	}
 
@@ -135,7 +136,7 @@ func TestBuildAuthConfigDevExplicitAnonymousAudienceIsAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAuthConfig returned error: %v", err)
 	}
-	if !stringSliceContains(jwtCfg.Audiences, "anonymous-app") {
+	if !slices.Contains(jwtCfg.Audiences, "anonymous-app") {
 		t.Fatalf("JWT audiences = %#v, want explicit anonymous audience accepted", jwtCfg.Audiences)
 	}
 

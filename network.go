@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -105,7 +106,7 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 		if issuer == "" {
 			issuer = "shunter-dev"
 		}
-		if len(issuers) > 0 && !stringSliceContains(issuers, issuer) {
+		if len(issuers) > 0 && !slices.Contains(issuers, issuer) {
 			issuers = append(issuers, issuer)
 		}
 		audience := cfg.AnonymousTokenAudience
@@ -115,7 +116,7 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 			} else {
 				audience = "shunter-dev"
 			}
-		} else if len(audiences) > 0 && !stringSliceContains(audiences, audience) {
+		} else if len(audiences) > 0 && !slices.Contains(audiences, audience) {
 			audiences = append(audiences, audience)
 		}
 		jwtCfg := &auth.JWTConfig{SigningKey: append([]byte(nil), signingKey...), Issuers: issuers, Audiences: audiences, AuthMode: auth.AuthModeAnonymous}
@@ -129,15 +130,6 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 	default:
 		return nil, nil, fmt.Errorf("auth mode is invalid")
 	}
-}
-
-func stringSliceContains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 // HTTPHandler returns a composable HTTP handler for the runtime network surface.

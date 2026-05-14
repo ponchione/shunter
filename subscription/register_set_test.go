@@ -307,6 +307,7 @@ func TestUnregisterSetTwoTablePredicateFinalDeltaCoversEachTable(t *testing.T) {
 
 func TestRegisterSetInitialQueryStopsOnContextCancel(t *testing.T) {
 	mgr, base := newRegisterSetTestManagerWithRows(t)
+	mgr.nextSubID = 41
 	ctx, cancel := context.WithCancel(context.Background())
 	view := &cancelOnTableScanView{mockCommitted: base, cancel: cancel}
 	req := SubscriptionSetRegisterRequest{
@@ -324,6 +325,9 @@ func TestRegisterSetInitialQueryStopsOnContextCancel(t *testing.T) {
 	}
 	if mgr.registry.hasActive() {
 		t.Fatal("registry should be clear after canceled initial query")
+	}
+	if mgr.nextSubID != 41 {
+		t.Fatalf("nextSubID after canceled initial query = %d, want 41", mgr.nextSubID)
 	}
 }
 
@@ -743,6 +747,7 @@ func TestRegisterSetUnwindsPartialStateOnInitialQueryError(t *testing.T) {
 	})
 	mgr := NewManager(s, s)
 	mgr.InitialRowLimit = 1
+	mgr.nextSubID = 9
 	req := SubscriptionSetRegisterRequest{
 		ConnID:  types.ConnectionID{1},
 		QueryID: 1,
@@ -767,6 +772,9 @@ func TestRegisterSetUnwindsPartialStateOnInitialQueryError(t *testing.T) {
 	if !pruningIndexesEmpty(mgr.indexes) {
 		t.Fatalf("pruning indexes not cleared on unwind: value=%+v range=%+v joinedge=%+v joinrangeedge=%+v table=%+v",
 			mgr.indexes.Value, mgr.indexes.Range, mgr.indexes.JoinEdge, mgr.indexes.JoinRangeEdge, mgr.indexes.Table)
+	}
+	if mgr.nextSubID != 9 {
+		t.Fatalf("nextSubID after initial query unwind = %d, want 9", mgr.nextSubID)
 	}
 }
 
