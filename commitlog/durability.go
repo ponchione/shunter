@@ -545,12 +545,11 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 		}
 	}
 
-	// Check rotation.
-	if dw.seg.Size() >= dw.opts.MaxSegmentSize {
-		nextTx := batch[len(batch)-1].txID + 1
+	if dw.seg.Size() >= dw.opts.MaxSegmentSize && lastDurable != ^uint64(0) {
+		nextTx := lastDurable + 1
 		if err := dw.seg.Close(); err != nil {
-			recordDurabilityFailed(dw.observer, err, "segment_rotate_failed", batch[len(batch)-1].txID)
-			traceDurabilityBatch(dw.observer, batch[len(batch)-1].txID, "error", err)
+			recordDurabilityFailed(dw.observer, err, "segment_rotate_failed", lastDurable)
+			traceDurabilityBatch(dw.observer, lastDurable, "error", err)
 			return err
 		}
 		if dw.idx != nil {

@@ -349,6 +349,33 @@ func TestDurabilityWorkerRotatesIndexOnSegmentRotation(t *testing.T) {
 	}
 }
 
+func TestDurabilityWorkerDoesNotRotateAfterTerminalTxID(t *testing.T) {
+	const terminalTxID = ^uint64(0)
+	dir := t.TempDir()
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 1
+	opts.DrainBatchSize = 1
+	opts.MaxSegmentSize = SegmentHeaderSize + 1
+	opts.OffsetIndexIntervalBytes = 0
+	opts.OffsetIndexCap = 0
+
+	dw, err := NewDurabilityWorker(dir, terminalTxID, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(terminalTxID, makeDurabilityTestChangeset(terminalTxID))
+	finalTx, fatal := dw.Close()
+	if fatal != nil {
+		t.Fatalf("Close fatal: %v", fatal)
+	}
+	if finalTx != terminalTxID {
+		t.Fatalf("final durable tx = %d, want %d", finalTx, terminalTxID)
+	}
+	if _, err := os.Stat(filepath.Join(dir, SegmentFileName(0))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("wrapped segment stat error = %v, want not exist", err)
+	}
+}
+
 func TestDurabilityWorkerRolloverRecoveryMetamorphicEquivalence(t *testing.T) {
 	const n = uint64(6)
 	_, reg := testSchema()

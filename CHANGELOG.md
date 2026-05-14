@@ -22,6 +22,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Dev anonymous auth now rejects negative token TTLs instead of silently
   minting non-expiring tokens, and JSON values reject non-UTF-8 byte payloads
   before canonicalization.
+- Commit-log rotation now avoids wrapping the next segment start to tx_id 0
+  after the terminal tx_id is durably written.
 
 ## v1.1.0 - 2026-05-13
 
