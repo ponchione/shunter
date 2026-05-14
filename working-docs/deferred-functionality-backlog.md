@@ -205,17 +205,16 @@ Review later:
 
 ## Deferred Auth Expansion
 
-12. [ ] Production auth verification beyond current HS256 support.
+12. [ ] Remote auth key discovery and automatic rotation caches.
 
 Owner: `auth`, `protocol`, root runtime config
 
 Deferred decision:
-- Complete JWT size bounds in the active list, but defer OIDC/JWKS/asymmetric
-  verification and rotation caches.
+- Local strict-mode JWT verification now supports configured HS256, RS256, and
+  ES256 verification keys with optional `kid` matching.
+- Defer OIDC/JWKS discovery and automatic remote rotation caches.
 
 Review later:
-- Asymmetric local key validation.
-- Multiple active verification keys.
 - JWKS/OIDC discovery.
 - Cache lifetimes.
 - Rotation behavior.

@@ -111,8 +111,21 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 func copyConfig(cfg Config) Config {
 	out := cfg
 	out.AuthSigningKey = append([]byte(nil), cfg.AuthSigningKey...)
+	out.AuthVerificationKeys = copyAuthVerificationKeys(cfg.AuthVerificationKeys)
 	out.AuthIssuers = append([]string(nil), cfg.AuthIssuers...)
 	out.AuthAudiences = append([]string(nil), cfg.AuthAudiences...)
+	return out
+}
+
+func copyAuthVerificationKeys(in []AuthVerificationKey) []AuthVerificationKey {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]AuthVerificationKey, len(in))
+	for i, key := range in {
+		out[i] = key
+		out[i].Key = append([]byte(nil), key.Key...)
+	}
 	return out
 }
 

@@ -24,7 +24,8 @@ runtime.
 
 | Field | Purpose |
 | --- | --- |
-| `AuthSigningKey` | HS256 token signing/verification key. Required for strict protocol serving. |
+| `AuthSigningKey` | Legacy HS256 token signing/verification key. Required for strict protocol serving unless `AuthVerificationKeys` is configured. |
+| `AuthVerificationKeys` | Local JWT verification keys for HS256, RS256, or ES256, with optional `KeyID`/`kid` matching for rotation. |
 | `AuthIssuers` | Accepted JWT issuer values when non-empty. |
 | `AuthAudiences` | Accepted JWT audience values when non-empty. |
 | `AnonymousTokenIssuer` | Development anonymous-token issuer override. |
@@ -81,7 +82,7 @@ cfg := shunter.Config{
 }
 ```
 
-Strict protocol runtime:
+Strict protocol runtime with HS256:
 
 ```go
 cfg := shunter.Config{
@@ -92,5 +93,25 @@ cfg := shunter.Config{
 	AuthSigningKey: signingKey,
 	AuthIssuers:    []string{"https://issuer.example"},
 	AuthAudiences:  []string{"chat"},
+}
+```
+
+Strict protocol runtime with RS256:
+
+```go
+cfg := shunter.Config{
+	DataDir:        "./data/chat",
+	EnableProtocol: true,
+	ListenAddr:     "127.0.0.1:3000",
+	AuthMode:       shunter.AuthModeStrict,
+	AuthVerificationKeys: []shunter.AuthVerificationKey{
+		{
+			Algorithm: shunter.AuthAlgorithmRS256,
+			KeyID:     "issuer-key-2026-05",
+			Key:       issuerPublicKeyPEM,
+		},
+	},
+	AuthIssuers:   []string{"https://issuer.example"},
+	AuthAudiences: []string{"chat"},
 }
 ```

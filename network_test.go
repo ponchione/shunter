@@ -156,7 +156,7 @@ func TestBuildAuthConfigDevRejectsNegativeAnonymousTokenTTL(t *testing.T) {
 	}
 }
 
-func TestBuildAuthConfigStrictRequiresSigningKey(t *testing.T) {
+func TestBuildAuthConfigStrictRequiresVerificationMaterial(t *testing.T) {
 	_, _, err := buildAuthConfig(Config{AuthMode: AuthModeStrict})
 	if !errors.Is(err, ErrAuthSigningKeyRequired) {
 		t.Fatalf("error = %v, want ErrAuthSigningKeyRequired", err)
@@ -189,16 +189,62 @@ func TestBuildAuthConfigStrictMapsIssuersAudiencesAndCopiesKey(t *testing.T) {
 	}
 }
 
+func TestBuildAuthConfigStrictAcceptsVerificationKeysWithoutSigningKey(t *testing.T) {
+	key := []byte("rotation-secret")
+	cfg := Config{
+		AuthMode: AuthModeStrict,
+		AuthVerificationKeys: []AuthVerificationKey{
+			{Algorithm: AuthAlgorithmHS256, KeyID: "active", Key: key},
+		},
+		AuthIssuers:   []string{"issuer"},
+		AuthAudiences: []string{"app"},
+	}
+	jwtCfg, mintCfg, err := buildAuthConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildAuthConfig returned error: %v", err)
+	}
+	if jwtCfg.AuthMode != auth.AuthModeStrict || mintCfg != nil {
+		t.Fatalf("unexpected strict config: jwt=%+v mint=%+v", jwtCfg, mintCfg)
+	}
+	if len(jwtCfg.SigningKey) != 0 {
+		t.Fatalf("SigningKey = %q, want empty when only verification keys configured", string(jwtCfg.SigningKey))
+	}
+	if len(jwtCfg.VerificationKeys) != 1 || jwtCfg.VerificationKeys[0].KeyID != "active" {
+		t.Fatalf("VerificationKeys = %#v, want active key", jwtCfg.VerificationKeys)
+	}
+
+	key[0] = 'X'
+	if string(jwtCfg.VerificationKeys[0].Key) == string(key) {
+		t.Fatal("verification key material was not defensively copied")
+	}
+}
+
+func TestBuildAuthConfigStrictRejectsInvalidVerificationKey(t *testing.T) {
+	_, _, err := buildAuthConfig(Config{
+		AuthMode: AuthModeStrict,
+		AuthVerificationKeys: []AuthVerificationKey{
+			{Algorithm: AuthAlgorithmRS256, KeyID: "bad", Key: []byte("not pem")},
+		},
+	})
+	if !errors.Is(err, auth.ErrJWTInvalid) {
+		t.Fatalf("error = %v, want auth.ErrJWTInvalid", err)
+	}
+}
+
 func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	key := []byte("strict-runtime-secret")
+	verificationKey := []byte("runtime-verification-secret")
 	issuers := []string{"issuer"}
 	audiences := []string{"app"}
 	cfg := Config{
 		DataDir:        t.TempDir(),
 		AuthMode:       AuthModeStrict,
 		AuthSigningKey: key,
-		AuthIssuers:    issuers,
-		AuthAudiences:  audiences,
+		AuthVerificationKeys: []AuthVerificationKey{
+			{Algorithm: AuthAlgorithmHS256, KeyID: "runtime", Key: verificationKey},
+		},
+		AuthIssuers:   issuers,
+		AuthAudiences: audiences,
 	}
 
 	rt, err := Build(validChatModule(), cfg)
@@ -207,6 +253,7 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	}
 
 	key[0] = 'X'
+	verificationKey[0] = 'X'
 	issuers[0] = "mutated"
 	audiences[0] = "mutated"
 
@@ -220,8 +267,13 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	if len(got.AuthIssuers) != 1 || got.AuthIssuers[0] != "issuer" {
 		t.Fatalf("Config AuthIssuers = %#v, want original issuer", got.AuthIssuers)
 	}
+	if len(got.AuthVerificationKeys) != 1 || string(got.AuthVerificationKeys[0].Key) != "runtime-verification-secret" {
+		t.Fatalf("Config AuthVerificationKeys = %#v, want detached original verification key", got.AuthVerificationKeys)
+	}
 
 	got.AuthSigningKey[0] = 'Y'
+	got.AuthVerificationKeys[0].Key[0] = 'Y'
+	got.AuthVerificationKeys[0].KeyID = "changed"
 	got.AuthIssuers[0] = "changed"
 	got.AuthAudiences[0] = "changed"
 
@@ -234,6 +286,11 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	}
 	if len(again.AuthIssuers) != 1 || again.AuthIssuers[0] != "issuer" {
 		t.Fatalf("second Config AuthIssuers = %#v, want detached original issuer", again.AuthIssuers)
+	}
+	if len(again.AuthVerificationKeys) != 1 ||
+		again.AuthVerificationKeys[0].KeyID != "runtime" ||
+		string(again.AuthVerificationKeys[0].Key) != "runtime-verification-secret" {
+		t.Fatalf("second Config AuthVerificationKeys = %#v, want detached original verification key", again.AuthVerificationKeys)
 	}
 }
 

@@ -50,8 +50,31 @@ cfg := shunter.Config{
 }
 ```
 
-Current strict mode expects HS256 JWTs. Tokens must include `iss` and `sub`.
-When configured, issuer and audience are checked.
+The `AuthSigningKey` path validates HS256 JWTs. Tokens must include `iss` and
+`sub`. When configured, issuer and audience are checked.
+
+For RS256 or ES256 tokens, configure local verification keys instead of an HMAC
+signing key:
+
+```go
+cfg := shunter.Config{
+	DataDir:        "./data/chat",
+	EnableProtocol: true,
+	AuthMode:       shunter.AuthModeStrict,
+	AuthVerificationKeys: []shunter.AuthVerificationKey{
+		{
+			Algorithm: shunter.AuthAlgorithmRS256,
+			KeyID:     "issuer-key-2026-05",
+			Key:       issuerPublicKeyPEM,
+		},
+	},
+	AuthIssuers:   []string{"https://issuer.example"},
+	AuthAudiences: []string{"chat"},
+}
+```
+
+`KeyID` matches the token header `kid` during local key rotation. Shunter does
+not fetch JWKS/OIDC keys; load the accepted public keys from app configuration.
 
 ## Permissions
 
@@ -137,11 +160,12 @@ The current stable parameter is `:sender`, derived from caller identity.
 ## Production Checklist
 
 - Set `AuthModeStrict` for public protocol serving.
-- Provide a strong `AuthSigningKey` from secret configuration.
+- Provide a strong `AuthSigningKey` for HS256 or configure
+  `AuthVerificationKeys` for HS256, RS256, or ES256.
 - Configure accepted issuers.
 - Configure audiences when tokens are app-scoped.
 - Include required permissions in issued tokens.
 - Test allowed and denied reducer calls.
 - Test allowed and denied declared reads.
 - Test visibility-filtered reads.
-- Document key replacement as a restart/deployment event.
+- Document local key replacement as a restart/deployment event.

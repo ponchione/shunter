@@ -27,8 +27,8 @@ const (
 )
 
 var (
-	// ErrAuthSigningKeyRequired reports that strict protocol auth lacks signing material.
-	ErrAuthSigningKeyRequired = errors.New("shunter: auth signing key required")
+	// ErrAuthSigningKeyRequired reports that strict protocol auth lacks local verification material.
+	ErrAuthSigningKeyRequired = errors.New("shunter: auth signing or verification key required")
 	// ErrAnonymousTokenTTLInvalid reports invalid anonymous token TTL configuration.
 	ErrAnonymousTokenTTLInvalid = errors.New("shunter: anonymous token TTL must not be negative")
 	// ErrRuntimeNotReady reports that protocol traffic reached a non-ready runtime.
@@ -93,6 +93,7 @@ func buildProtocolOptions(cfg ProtocolConfig) (protocol.ProtocolOptions, error) 
 
 func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 	signingKey := append([]byte(nil), cfg.AuthSigningKey...)
+	verificationKeys := copyAuthVerificationKeys(cfg.AuthVerificationKeys)
 	issuers := append([]string(nil), cfg.AuthIssuers...)
 	audiences := append([]string(nil), cfg.AuthAudiences...)
 
@@ -124,14 +125,33 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 		} else if len(audiences) > 0 && !slices.Contains(audiences, audience) {
 			audiences = append(audiences, audience)
 		}
-		jwtCfg := &auth.JWTConfig{SigningKey: append([]byte(nil), signingKey...), Issuers: issuers, Audiences: audiences, AuthMode: auth.AuthModeAnonymous}
+		jwtCfg := &auth.JWTConfig{
+			SigningKey:       append([]byte(nil), signingKey...),
+			VerificationKeys: verificationKeys,
+			Issuers:          issuers,
+			Audiences:        audiences,
+			AuthMode:         auth.AuthModeAnonymous,
+		}
+		if err := auth.ValidateJWTConfig(jwtCfg); err != nil {
+			return nil, nil, err
+		}
 		mintCfg := &auth.MintConfig{Issuer: issuer, Audience: audience, SigningKey: append([]byte(nil), signingKey...), Expiry: cfg.AnonymousTokenTTL}
 		return jwtCfg, mintCfg, nil
 	case AuthModeStrict:
-		if len(signingKey) == 0 {
+		if len(signingKey) == 0 && len(verificationKeys) == 0 {
 			return nil, nil, ErrAuthSigningKeyRequired
 		}
-		return &auth.JWTConfig{SigningKey: signingKey, Issuers: issuers, Audiences: audiences, AuthMode: auth.AuthModeStrict}, nil, nil
+		jwtCfg := &auth.JWTConfig{
+			SigningKey:       signingKey,
+			VerificationKeys: verificationKeys,
+			Issuers:          issuers,
+			Audiences:        audiences,
+			AuthMode:         auth.AuthModeStrict,
+		}
+		if err := auth.ValidateJWTConfig(jwtCfg); err != nil {
+			return nil, nil, err
+		}
+		return jwtCfg, nil, nil
 	default:
 		return nil, nil, fmt.Errorf("auth mode is invalid")
 	}

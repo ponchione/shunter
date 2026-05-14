@@ -21,6 +21,8 @@ Behavior:
 - The server mints an anonymous HS256 JWT for missing-token protocol clients.
 - If `AuthSigningKey` is empty, Shunter generates an ephemeral in-process
   signing key for that runtime.
+- Presented tokens are validated against `AuthSigningKey` and any configured
+  `AuthVerificationKeys`.
 - `AnonymousTokenIssuer` defaults to `shunter-dev`.
 - `AnonymousTokenAudience` defaults to the first configured `AuthAudiences`
   value, or `shunter-dev` when no audience is configured.
@@ -38,8 +40,14 @@ root runtime.
 Behavior:
 
 - Protocol connections must present a bearer token.
-- `AuthSigningKey` is required when protocol serving is enabled.
-- Tokens are validated as HS256 JWTs.
+- Either `AuthSigningKey` or at least one `AuthVerificationKeys` entry is
+  required when protocol serving is enabled.
+- `AuthSigningKey` validates legacy HS256 JWTs.
+- `AuthVerificationKeys` validates local HS256, RS256, or ES256 keys. RS256 and
+  ES256 keys are PEM-encoded public keys or certificates.
+- A verification key's `KeyID` matches the token header `kid` for overlapping
+  rotation. If a token supplies `kid`, keyed matches are preferred; unkeyed
+  keys remain a fallback for legacy HS256 configurations.
 - `sub` and `iss` claims are required.
 - `iss` is checked when `AuthIssuers` is non-empty.
 - `aud` is checked only when `AuthAudiences` is non-empty.
@@ -51,9 +59,8 @@ Behavior:
 - Local reducer and declared-read calls do not receive the dev-mode allow-all
   permission bypass by default.
 
-Current strict mode does not include asymmetric keys, JWKS/OIDC discovery,
-multi-key rotation caches, or app-provided claim mappers. Those remain
-post-v1 directions unless a new roadmap decision expands the v1 auth surface.
+Current strict mode does not include JWKS/OIDC discovery, automatic remote key
+refresh, or app-provided claim mappers.
 
 ## Principal And Identity
 
@@ -103,14 +110,13 @@ mod.VisibilityFilter(shunter.VisibilityFilterDeclaration{
 
 ## Key Replacement
 
-Current strict mode has one configured HS256 signing key. Replacing the key
-requires updating app configuration and restarting the runtime. Tokens signed by
-the old key fail after replacement.
+`AuthVerificationKeys` supports overlapping local key rotation. Configure both
+old and new public keys or HMAC secrets during the overlap window, give keyed
+tokens a stable `kid`, then remove retired keys in a later deployment.
 
-For production deployments that need overlapping key rotation, use a deployment
-procedure that temporarily accepts both old and new tokens outside Shunter or
-wait for a future Shunter multi-key/JWKS design. Do not imply multi-key
-rotation in app docs until the runtime supports it.
+Shunter does not fetch keys from an identity provider. Apps that use JWKS/OIDC
+must load the desired verification keys into config before runtime startup and
+restart or rebuild their serving process when that local key set changes.
 
 ## Failure Behavior
 
@@ -128,7 +134,8 @@ rotation in app docs until the runtime supports it.
 Before deploying strict auth:
 
 1. Set `AuthMode: shunter.AuthModeStrict`.
-2. Provide a strong `AuthSigningKey` from secret configuration.
+2. Provide a strong `AuthSigningKey` for HS256 tokens or configure
+   `AuthVerificationKeys` for local HS256, RS256, or ES256 verification.
 3. Configure `AuthIssuers` to the accepted token issuer values.
 4. Configure `AuthAudiences` when tokens should be scoped to this app.
 5. Ensure issued tokens contain `iss`, `sub`, and any required `permissions`.
@@ -139,10 +146,8 @@ Before deploying strict auth:
 
 ## Unsupported In Current Strict Mode
 
-- asymmetric signing keys
 - JWKS or OIDC discovery
-- multiple active verification keys
-- automatic key rotation or cache refresh
+- automatic remote key rotation or cache refresh
 - app-provided claim-to-permission mappers
 - anonymous-token minting in strict mode
 - arbitrary token claims in visibility-filter SQL

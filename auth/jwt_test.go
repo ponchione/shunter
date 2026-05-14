@@ -1,6 +1,12 @@
 package auth
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"reflect"
@@ -254,6 +260,127 @@ func TestValidateJWTRejectsNonHS256HMAC(t *testing.T) {
 	_, err = ValidateJWT(s, cfg)
 	if !errors.Is(err, ErrJWTInvalid) {
 		t.Fatalf("got %v, want ErrJWTInvalid for HS384 token", err)
+	}
+}
+
+func TestValidateJWTLegacySigningKeyAcceptsHS256TokenWithKeyID(t *testing.T) {
+	cfg := &JWTConfig{SigningKey: testKey}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": "a", "iss": "b"})
+	tok.Header["kid"] = "ignored-for-legacy-unkeyed-hmac"
+	s, err := tok.SignedString(testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claims, err := ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.Subject != "a" || claims.Issuer != "b" {
+		t.Fatalf("claims = %+v, want sub/iss", claims)
+	}
+}
+
+func TestValidateJWTMultipleHS256VerificationKeysUsesKeyID(t *testing.T) {
+	oldKey := []byte("old-rotation-key")
+	newKey := []byte("new-rotation-key")
+	cfg := &JWTConfig{
+		VerificationKeys: []JWTVerificationKey{
+			{Algorithm: JWTAlgorithmHS256, KeyID: "old", Key: oldKey},
+			{Algorithm: JWTAlgorithmHS256, KeyID: "new", Key: newKey},
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": "alice", "iss": "issuer"})
+	tok.Header["kid"] = "new"
+	s, err := tok.SignedString(newKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claims, err := ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.Subject != "alice" || claims.Issuer != "issuer" {
+		t.Fatalf("claims = %+v, want alice/issuer", claims)
+	}
+}
+
+func TestValidateJWTKeyIDWithoutMatchingVerifierRejected(t *testing.T) {
+	cfg := &JWTConfig{
+		VerificationKeys: []JWTVerificationKey{
+			{Algorithm: JWTAlgorithmHS256, KeyID: "old", Key: []byte("old-rotation-key")},
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": "alice", "iss": "issuer"})
+	tok.Header["kid"] = "new"
+	s, err := tok.SignedString([]byte("new-rotation-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claims, err := ValidateJWT(s, cfg)
+	if !errors.Is(err, ErrJWTUnsupportedAlg) {
+		t.Fatalf("ValidateJWT error = %v, want ErrJWTUnsupportedAlg for unmatched kid", err)
+	}
+	if claims != nil {
+		t.Fatalf("claims = %+v, want nil", claims)
+	}
+}
+
+func TestValidateJWTRS256VerificationKeyAccepted(t *testing.T) {
+	privateKey, publicPEM := generateRS256TestKey(t)
+	cfg := &JWTConfig{
+		VerificationKeys: []JWTVerificationKey{
+			{Algorithm: JWTAlgorithmRS256, KeyID: "rsa-1", Key: publicPEM},
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"sub": "alice",
+		"iss": "https://issuer.example",
+		"aud": "shunter-api",
+	})
+	tok.Header["kid"] = "rsa-1"
+	s, err := tok.SignedString(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claims, err := ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.Subject != "alice" || claims.Issuer != "https://issuer.example" {
+		t.Fatalf("claims = %+v, want alice/issuer", claims)
+	}
+	if got := claims.Audience; len(got) != 1 || got[0] != "shunter-api" {
+		t.Fatalf("Audience = %#v, want shunter-api", got)
+	}
+}
+
+func TestValidateJWTES256VerificationKeyAccepted(t *testing.T) {
+	privateKey, publicPEM := generateES256TestKey(t)
+	cfg := &JWTConfig{
+		VerificationKeys: []JWTVerificationKey{
+			{Algorithm: JWTAlgorithmES256, KeyID: "ecdsa-1", Key: publicPEM},
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+		"sub": "alice",
+		"iss": "https://issuer.example",
+	})
+	tok.Header["kid"] = "ecdsa-1"
+	s, err := tok.SignedString(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claims, err := ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.Subject != "alice" || claims.Issuer != "https://issuer.example" {
+		t.Fatalf("claims = %+v, want alice/issuer", claims)
 	}
 }
 
@@ -543,4 +670,31 @@ func TestClaimsPrincipalCopiesExternalClaims(t *testing.T) {
 	if got := nilClaims.Principal(); got.Issuer != "" || got.Subject != "" || got.Audience != nil || got.Permissions != nil {
 		t.Fatalf("nil Claims Principal = %+v, want zero", got)
 	}
+}
+
+func generateRS256TestKey(t *testing.T) (*rsa.PrivateKey, []byte) {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return privateKey, marshalPublicKeyPEM(t, &privateKey.PublicKey)
+}
+
+func generateES256TestKey(t *testing.T) (*ecdsa.PrivateKey, []byte) {
+	t.Helper()
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return privateKey, marshalPublicKeyPEM(t, &privateKey.PublicKey)
+}
+
+func marshalPublicKeyPEM(t *testing.T, key any) []byte {
+	t.Helper()
+	der, err := x509.MarshalPKIXPublicKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
 }

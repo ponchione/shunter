@@ -2,6 +2,10 @@ package protocol
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -173,6 +177,49 @@ func TestUpgradeValidTokenHeaderSucceeds(t *testing.T) {
 	}
 	if uc.ProtocolVersion != ProtocolVersionV1 {
 		t.Errorf("ProtocolVersion = %s, want v1", uc.ProtocolVersion)
+	}
+}
+
+func TestUpgradeValidRS256TokenHeaderSucceeds(t *testing.T) {
+	privateKey, publicPEM := generateUpgradeRS256Key(t)
+	rec := &upgradeRecorder{}
+	s := &Server{
+		JWT: &auth.JWTConfig{
+			VerificationKeys: []auth.JWTVerificationKey{
+				{Algorithm: auth.JWTAlgorithmRS256, KeyID: "rsa-1", Key: publicPEM},
+			},
+			AuthMode: auth.AuthModeStrict,
+		},
+		Options:  DefaultProtocolOptions(),
+		Upgraded: rec.record,
+	}
+	srv := newTestServer(t, s)
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"sub": "alice",
+		"iss": "test-issuer",
+		"iat": time.Now().Unix(),
+	})
+	tok.Header["kid"] = "rsa-1"
+	token, err := tok.SignedString(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, resp, err := dialWS(t, srv, wsDialOpts{
+		authHeader:   "Bearer " + token,
+		subprotocols: []string{"v1.bsatn.shunter"},
+	})
+	if err != nil {
+		t.Fatalf("dial failed: %v (resp=%v)", err, resp)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Errorf("status = %d, want 101", resp.StatusCode)
+	}
+	uc := rec.waitLast(t)
+	if uc.Identity != auth.DeriveIdentity("test-issuer", "alice") {
+		t.Errorf("Identity mismatch: got %x", uc.Identity)
 	}
 }
 
@@ -697,4 +744,17 @@ func responseBodyString(t *testing.T, resp *http.Response) string {
 		t.Fatalf("read response body: %v", err)
 	}
 	return string(body)
+}
+
+func generateUpgradeRS256Key(t *testing.T) (*rsa.PrivateKey, []byte) {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return privateKey, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
 }
