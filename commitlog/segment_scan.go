@@ -35,20 +35,32 @@ type SegmentInfo struct {
 	AppendMode AppendMode
 }
 
+type segmentPath struct {
+	path    string
+	startTx uint64
+}
+
+// segmentScanRecordHook is a test-only instrumentation point fired once per
+// record decoded by recovery segment scanning. Always nil in production.
+var segmentScanRecordHook func(*Record)
+
 // ScanSegments lists, validates, and orders all segment files in dir.
 // It returns the validated segment list, plus the highest contiguous valid TxID.
 func ScanSegments(dir string) ([]SegmentInfo, types.TxID, error) {
+	paths, err := listSegmentPaths(dir)
+	if err != nil {
+		return nil, 0, err
+	}
+	return scanSegmentPaths(paths)
+}
+
+func listSegmentPaths(dir string) ([]segmentPath, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, 0, nil
+			return nil, nil
 		}
-		return nil, 0, err
-	}
-
-	type segmentPath struct {
-		path    string
-		startTx uint64
+		return nil, err
 	}
 
 	paths := make([]segmentPath, 0, len(entries))
@@ -58,14 +70,14 @@ func ScanSegments(dir string) ([]SegmentInfo, types.TxID, error) {
 		}
 		startTx, err := parseSegmentFileStartTx(entry.Name())
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		if err := rejectBootstrapSegmentStart(startTx, filepath.Join(dir, entry.Name())); err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		if entry.IsDir() {
 			if startTx == 1 {
-				return nil, 0, fmt.Errorf("%w: segment file %s is not a regular file", ErrOpen, filepath.Join(dir, entry.Name()))
+				return nil, fmt.Errorf("%w: segment file %s is not a regular file", ErrOpen, filepath.Join(dir, entry.Name()))
 			}
 			continue
 		}
@@ -75,7 +87,10 @@ func ScanSegments(dir string) ([]SegmentInfo, types.TxID, error) {
 		})
 	}
 	sort.Slice(paths, func(i, j int) bool { return paths[i].startTx < paths[j].startTx })
+	return paths, nil
+}
 
+func scanSegmentPaths(paths []segmentPath) ([]SegmentInfo, types.TxID, error) {
 	if len(paths) == 0 {
 		return nil, 0, nil
 	}
@@ -89,20 +104,27 @@ func ScanSegments(dir string) ([]SegmentInfo, types.TxID, error) {
 		segments = append(segments, info)
 	}
 
+	if err := validateSegmentContinuity(segments); err != nil {
+		return nil, 0, err
+	}
+
+	return segments, segments[len(segments)-1].LastTx, nil
+}
+
+func validateSegmentContinuity(segments []SegmentInfo) error {
 	for i := 1; i < len(segments); i++ {
 		prev := segments[i-1]
 		cur := segments[i]
 		expected := uint64(prev.LastTx) + 1
 		if uint64(cur.StartTx) != expected {
-			return nil, 0, &HistoryGapError{
+			return &HistoryGapError{
 				Expected: expected,
 				Got:      uint64(cur.StartTx),
 				Segment:  cur.Path,
 			}
 		}
 	}
-
-	return segments, segments[len(segments)-1].LastTx, nil
+	return nil
 }
 
 func parseSegmentFileStartTx(name string) (uint64, error) {
@@ -294,6 +316,9 @@ func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {
 			}
 		}
 
+		if segmentScanRecordHook != nil {
+			segmentScanRecordHook(rec)
+		}
 		lastTx = rec.TxID
 		recordCount++
 	}

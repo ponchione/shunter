@@ -79,26 +79,30 @@ func OpenAndRecoverDetailed(dir string, reg schema.SchemaRegistry) (*store.Commi
 // OpenAndRecoverWithReport reconstructs committed state and returns a
 // structured recovery report for diagnostics.
 func OpenAndRecoverWithReport(dir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, RecoveryResumePlan, RecoveryReport, error) {
-	segments, durableHorizon, err := ScanSegments(dir)
+	segments, durableHorizon, snapshot, skippedSnapshots, err := scanRecoverySegmentsAndSelectSnapshot(dir, reg)
 	if err != nil {
-		return nil, 0, RecoveryResumePlan{}, RecoveryReport{}, err
+		report := RecoveryReport{
+			HasDurableLog:       len(segments) > 0,
+			DamagedTailSegments: damagedTailSegments(segments),
+			SegmentCoverage:     SegmentCoverage(segments),
+			SkippedSnapshots:    skippedSnapshots,
+		}
+		if report.HasDurableLog {
+			report.DurableLogHorizon = durableHorizon
+		}
+		return nil, 0, RecoveryResumePlan{}, report, err
 	}
 	report := RecoveryReport{
 		HasDurableLog:       len(segments) > 0,
 		DamagedTailSegments: damagedTailSegments(segments),
 		SegmentCoverage:     SegmentCoverage(segments),
+		SkippedSnapshots:    skippedSnapshots,
 	}
 	if report.HasDurableLog {
 		report.DurableLogHorizon = durableHorizon
 	}
 	if len(segments) == 0 {
 		durableHorizon = types.TxID(^uint64(0))
-	}
-
-	snapshot, skippedSnapshots, err := selectSnapshotWithReport(dir, durableHorizon, reg)
-	report.SkippedSnapshots = skippedSnapshots
-	if err != nil {
-		return nil, 0, RecoveryResumePlan{}, report, err
 	}
 	if snapshot == nil && len(segments) > 0 && isEmptyDamagedTail(segments[0]) {
 		return nil, 0, RecoveryResumePlan{}, report, ErrTruncatedRecord

@@ -293,7 +293,17 @@ Validation:
 - `rtk go test . ./schema` if schema export or root contract export changes
 - `rtk go vet ./contractdiff ./schema .` when exported contract structs change
 
-6. [ ] Use offset indexes for safe snapshot-covered startup recovery.
+6. [x] Use offset indexes for safe snapshot-covered startup recovery.
+
+Done: Added recovery-only indexed snapshot-boundary scanning in
+`commitlog/recovery_index_scan.go`, leaving `ScanSegments` linear for fallback
+and genesis recovery; refactored segment listing/continuity helpers in
+`commitlog/segment_scan.go`; wired recovery report construction through the new
+selection path in `commitlog/recovery.go`; added regressions in
+`commitlog/recovery_offset_index_test.go` for valid indexed snapshot-covered
+prefix skips and missing/corrupt/non-monotonic/stale sidecar fallback.
+Validation passed: `rtk go test ./commitlog`; `rtk go vet ./commitlog`;
+`rtk go test ./...`.
 
 Owner: `commitlog`
 
