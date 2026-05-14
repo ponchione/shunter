@@ -83,6 +83,9 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 		dst = append(dst, buf[:8]...)
 	case types.KindString:
 		s := v.AsString()
+		if err := types.ValidateUTF8String(s); err != nil {
+			return dst[:start], fmt.Errorf("string: %w", err)
+		}
 		n, err := checkedUint32Len("string", len(s))
 		if err != nil {
 			return dst[:start], err
@@ -135,6 +138,9 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 		dst = append(dst, buf[:8]...)
 	case types.KindArrayString:
 		xs := v.ArrayStringView()
+		if err := types.ValidateUTF8StringArray(xs); err != nil {
+			return dst[:start], fmt.Errorf("array string: %w", err)
+		}
 		count, err := checkedUint32Len("array string count", len(xs))
 		if err != nil {
 			return dst[:start], err

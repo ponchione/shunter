@@ -24,6 +24,19 @@ func ValidateRow(ts *schema.TableSchema, row types.ProductValue) error {
 		if value.IsNull() && !col.Nullable {
 			return fmt.Errorf("%w: column %q", ErrNullNotAllowed, col.Name)
 		}
+		if value.IsNull() {
+			continue
+		}
+		switch col.Type {
+		case types.KindString:
+			if err := types.ValidateUTF8String(value.AsString()); err != nil {
+				return fmt.Errorf("column %q: %w", col.Name, err)
+			}
+		case types.KindArrayString:
+			if err := types.ValidateUTF8StringArray(value.ArrayStringView()); err != nil {
+				return fmt.Errorf("column %q: %w", col.Name, err)
+			}
+		}
 	}
 	return nil
 }

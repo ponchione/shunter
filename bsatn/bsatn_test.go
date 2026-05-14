@@ -180,6 +180,39 @@ func TestAppendProductValueMatchesWriterEncoding(t *testing.T) {
 	}
 }
 
+func TestAppendValueRejectsInvalidUTF8AndRollsBack(t *testing.T) {
+	prefix := []byte{0xaa, 0xbb}
+	invalid := string([]byte{0xff})
+
+	got, err := AppendValue(append([]byte(nil), prefix...), types.NewString(invalid))
+	if !errors.Is(err, types.ErrInvalidUTF8) {
+		t.Fatalf("AppendValue invalid string err = %v, want ErrInvalidUTF8", err)
+	}
+	if !bytes.Equal(got, prefix) {
+		t.Fatalf("AppendValue invalid string buffer = %x, want prefix %x", got, prefix)
+	}
+
+	got, err = AppendValue(append([]byte(nil), prefix...), types.NewArrayString([]string{"ok", invalid}))
+	if !errors.Is(err, types.ErrInvalidUTF8) {
+		t.Fatalf("AppendValue invalid array string err = %v, want ErrInvalidUTF8", err)
+	}
+	if !bytes.Equal(got, prefix) {
+		t.Fatalf("AppendValue invalid array string buffer = %x, want prefix %x", got, prefix)
+	}
+}
+
+func TestEncodeValueRejectsInvalidUTF8BeforeWriting(t *testing.T) {
+	var buf bytes.Buffer
+	invalid := string([]byte{0xff})
+	err := EncodeValue(&buf, types.NewString(invalid))
+	if !errors.Is(err, types.ErrInvalidUTF8) {
+		t.Fatalf("EncodeValue invalid string err = %v, want ErrInvalidUTF8", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("EncodeValue invalid string wrote %d bytes, want 0", buf.Len())
+	}
+}
+
 func TestEncodeValueDetectsShortWrites(t *testing.T) {
 	cases := []types.Value{
 		types.NewUint64(42),

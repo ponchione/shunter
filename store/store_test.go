@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -480,6 +481,34 @@ func TestValidateRowTypeMismatch(t *testing.T) {
 	var tmErr *TypeMismatchError
 	if !errors.As(err, &tmErr) {
 		t.Fatalf("expected TypeMismatchError, got %T", err)
+	}
+}
+
+func TestValidateRowRejectsInvalidUTF8String(t *testing.T) {
+	ts := pkSchema()
+	err := ValidateRow(ts, types.ProductValue{
+		types.NewUint64(1),
+		types.NewString(string([]byte{0xff})),
+	})
+	if !errors.Is(err, types.ErrInvalidUTF8) {
+		t.Fatalf("ValidateRow invalid string err = %v, want ErrInvalidUTF8", err)
+	}
+	if !strings.Contains(err.Error(), "name") {
+		t.Fatalf("ValidateRow invalid string err = %v, want column name", err)
+	}
+}
+
+func TestValidateRowRejectsInvalidUTF8ArrayStringElement(t *testing.T) {
+	ts := arrayStringUniqueSchema()
+	err := ValidateRow(ts, types.ProductValue{
+		types.NewUint64(1),
+		types.NewArrayString([]string{"ok", string([]byte{0xff})}),
+	})
+	if !errors.Is(err, types.ErrInvalidUTF8) {
+		t.Fatalf("ValidateRow invalid array string err = %v, want ErrInvalidUTF8", err)
+	}
+	if !strings.Contains(err.Error(), "tags") {
+		t.Fatalf("ValidateRow invalid array string err = %v, want column name", err)
 	}
 }
 

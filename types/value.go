@@ -11,9 +11,12 @@ import (
 	"math"
 	"slices"
 	"time"
+	"unicode/utf8"
 )
 
 var ErrInvalidFloat = errors.New("invalid float value")
+
+var ErrInvalidUTF8 = errors.New("invalid UTF-8")
 
 // ErrInvalidUUID identifies UUID text that is not canonical lowercase
 // RFC 4122 hyphenated form.
@@ -162,6 +165,22 @@ func NewFloat64(x float64) (Value, error) {
 
 func NewString(x string) Value {
 	return Value{kind: KindString, str: x}
+}
+
+func ValidateUTF8String(s string) error {
+	if !utf8.ValidString(s) {
+		return ErrInvalidUTF8
+	}
+	return nil
+}
+
+func ValidateUTF8StringArray(xs []string) error {
+	for i, s := range xs {
+		if err := ValidateUTF8String(s); err != nil {
+			return fmt.Errorf("%w: array string element %d", err, i)
+		}
+	}
+	return nil
 }
 
 func NewBytes(x []byte) Value {

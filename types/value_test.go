@@ -197,6 +197,16 @@ func TestRoundTripString(t *testing.T) {
 	}
 }
 
+func TestValidateUTF8StringRejectsInvalidStandaloneString(t *testing.T) {
+	invalid := string([]byte{0xff})
+	if err := ValidateUTF8String(invalid); !errors.Is(err, ErrInvalidUTF8) {
+		t.Fatalf("ValidateUTF8String invalid err = %v, want ErrInvalidUTF8", err)
+	}
+	if err := ValidateUTF8String("hello 日本語"); err != nil {
+		t.Fatalf("ValidateUTF8String valid err = %v, want nil", err)
+	}
+}
+
 func TestRoundTripBytes(t *testing.T) {
 	for _, x := range [][]byte{{}, {0x00}, {0xDE, 0xAD, 0xBE, 0xEF}} {
 		v := NewBytes(x)
@@ -552,6 +562,20 @@ func TestRoundTripArrayString(t *testing.T) {
 				t.Fatalf("AsArrayString[%d] = %q, want %q", i, got[i], xs[i])
 			}
 		}
+	}
+}
+
+func TestValidateUTF8StringArrayRejectsInvalidElement(t *testing.T) {
+	invalid := string([]byte{0xff})
+	err := ValidateUTF8StringArray([]string{"ok", invalid})
+	if !errors.Is(err, ErrInvalidUTF8) {
+		t.Fatalf("ValidateUTF8StringArray invalid err = %v, want ErrInvalidUTF8", err)
+	}
+	if err == nil || err.Error() == ErrInvalidUTF8.Error() {
+		t.Fatalf("ValidateUTF8StringArray err = %v, want element context", err)
+	}
+	if err := ValidateUTF8StringArray([]string{"alpha", "βeta"}); err != nil {
+		t.Fatalf("ValidateUTF8StringArray valid err = %v, want nil", err)
 	}
 }
 

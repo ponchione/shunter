@@ -120,7 +120,15 @@ Validation:
 - `rtk go test ./schema`
 - `rtk go vet ./schema`
 
-3. [ ] Reject invalid UTF-8 string values before persistence.
+3. [x] Reject invalid UTF-8 string values before persistence.
+
+Done: Added `types.ErrInvalidUTF8` and UTF-8 validation helpers in
+`types/value.go`; made `store/validate.go` reject invalid `String` and
+`ArrayString` values by column; made `bsatn/encode.go` reject invalid direct
+string encoding with rollback; added regressions in `types/value_test.go`,
+`store/store_test.go`, and `bsatn/bsatn_test.go`. Validation passed:
+`rtk go test ./types ./store ./bsatn`; `rtk go vet ./types ./store ./bsatn`;
+`rtk go test ./...`.
 
 Owner: `types`, `store`, `bsatn`
 
