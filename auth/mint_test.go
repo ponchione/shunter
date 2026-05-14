@@ -48,6 +48,9 @@ func TestMintAnonymousTokenInvalidConfigFailsBeforeRandomRead(t *testing.T) {
 	cfg = testMintConfig()
 	cfg.Issuer = ""
 	check("empty issuer", cfg, "issuer is required")
+	cfg = testMintConfig()
+	cfg.Expiry = -time.Second
+	check("negative expiry", cfg, "expiry must not be negative")
 }
 
 func TestMintAnonymousTokenValidatesRoundTrip(t *testing.T) {

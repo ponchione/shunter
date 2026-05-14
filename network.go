@@ -29,6 +29,8 @@ const (
 var (
 	// ErrAuthSigningKeyRequired reports that strict protocol auth lacks signing material.
 	ErrAuthSigningKeyRequired = errors.New("shunter: auth signing key required")
+	// ErrAnonymousTokenTTLInvalid reports invalid anonymous token TTL configuration.
+	ErrAnonymousTokenTTLInvalid = errors.New("shunter: anonymous token TTL must not be negative")
 	// ErrRuntimeNotReady reports that protocol traffic reached a non-ready runtime.
 	ErrRuntimeNotReady = errors.New("shunter: runtime is not ready")
 	// ErrRuntimeServing reports that a serving loop is already active.
@@ -96,6 +98,9 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 
 	switch cfg.AuthMode {
 	case AuthModeDev:
+		if cfg.AnonymousTokenTTL < 0 {
+			return nil, nil, ErrAnonymousTokenTTLInvalid
+		}
 		if len(signingKey) == 0 {
 			signingKey = make([]byte, 32)
 			if _, err := rand.Read(signingKey); err != nil {

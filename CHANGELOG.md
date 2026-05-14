@@ -19,6 +19,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - SQL parsing now rejects excessively nested predicates with a normal
   unsupported-SQL error, and the TypeScript client rejects impossible BSATN
   string-array counts before walking the partial payload.
+- Dev anonymous auth now rejects negative token TTLs instead of silently
+  minting non-expiring tokens, and JSON values reject non-UTF-8 byte payloads
+  before canonicalization.
 
 ## v1.1.0 - 2026-05-13
 

@@ -149,6 +149,13 @@ func TestBuildAuthConfigDevExplicitAnonymousAudienceIsAccepted(t *testing.T) {
 	}
 }
 
+func TestBuildAuthConfigDevRejectsNegativeAnonymousTokenTTL(t *testing.T) {
+	_, _, err := buildAuthConfig(Config{AuthMode: AuthModeDev, AnonymousTokenTTL: -time.Second})
+	if !errors.Is(err, ErrAnonymousTokenTTLInvalid) {
+		t.Fatalf("error = %v, want ErrAnonymousTokenTTLInvalid", err)
+	}
+}
+
 func TestBuildAuthConfigStrictRequiresSigningKey(t *testing.T) {
 	_, _, err := buildAuthConfig(Config{AuthMode: AuthModeStrict})
 	if !errors.Is(err, ErrAuthSigningKeyRequired) {

@@ -667,6 +667,16 @@ func TestJSONRejectsInvalidAndDuplicateKeys(t *testing.T) {
 	}
 }
 
+func TestJSONRejectsInvalidUTF8Bytes(t *testing.T) {
+	_, err := NewJSON([]byte{'"', 0xff, '"'})
+	if !errors.Is(err, ErrInvalidJSON) {
+		t.Fatalf("NewJSON invalid UTF-8 err = %v, want ErrInvalidJSON", err)
+	}
+	if !errors.Is(err, ErrInvalidUTF8) {
+		t.Fatalf("NewJSON invalid UTF-8 err = %v, want ErrInvalidUTF8", err)
+	}
+}
+
 func TestJSONAccessorsDoNotExposeMutableAliases(t *testing.T) {
 	src := []byte(`{"b":2,"a":1}`)
 	v, err := NewJSON(src)

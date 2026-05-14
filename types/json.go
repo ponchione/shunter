@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"unicode/utf8"
 )
 
 // ErrInvalidJSON identifies payloads that are not valid Shunter canonical JSON.
@@ -24,6 +25,9 @@ func NewJSON(x []byte) (Value, error) {
 }
 
 func canonicalizeJSON(x []byte) ([]byte, error) {
+	if !utf8.Valid(x) {
+		return nil, fmt.Errorf("shunter: %w: %w", ErrInvalidJSON, ErrInvalidUTF8)
+	}
 	dec := json.NewDecoder(bytes.NewReader(x))
 	dec.UseNumber()
 	var out bytes.Buffer
