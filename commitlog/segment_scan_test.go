@@ -3,6 +3,7 @@ package commitlog
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -105,6 +106,16 @@ func TestScanSegmentsOutOfOrderTxID(t *testing.T) {
 
 	_, _, err := ScanSegments(dir)
 	assertHistoryGap(t, err, 2, 3)
+}
+
+func TestScanSegmentsRejectsTxIDWrapWithinSegment(t *testing.T) {
+	dir := t.TempDir()
+	maxTxID := ^uint64(0)
+
+	path := makeManualScanTestSegment(t, dir, maxTxID, maxTxID, 0)
+
+	_, _, err := ScanSegments(dir)
+	assertMaximumTxIDWrap(t, err, path, 0)
 }
 
 func TestScanSegmentsTruncatedTail(t *testing.T) {
@@ -714,6 +725,26 @@ func assertHistoryGap(t *testing.T, err error, expected, got uint64) {
 	}
 	if gapErr.Expected != expected || gapErr.Got != got {
 		t.Fatalf("HistoryGapError = {Expected:%d Got:%d}, want {Expected:%d Got:%d}", gapErr.Expected, gapErr.Got, expected, got)
+	}
+}
+
+func assertMaximumTxIDWrap(t *testing.T, err error, segment string, got uint64) {
+	t.Helper()
+
+	if err == nil {
+		t.Fatal("expected maximum tx_id wrap error")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("error = %v, want ErrOpen category", err)
+	}
+	for _, want := range []string{
+		"after maximum tx_id",
+		segment,
+		fmt.Sprintf("tx_id %d", got),
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %v, want detail %q", err, want)
+		}
 	}
 }
 

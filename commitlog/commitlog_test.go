@@ -370,6 +370,26 @@ func TestOpenSegmentForAppendInteriorHistoryGapFailsClosed(t *testing.T) {
 	}
 }
 
+func TestOpenSegmentForAppendRejectsTxIDWrapWithinSegment(t *testing.T) {
+	dir := t.TempDir()
+	maxTxID := ^uint64(0)
+	path := makeManualScanTestSegment(t, dir, maxTxID, maxTxID, 0)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = OpenSegmentForAppend(dir, maxTxID)
+	assertMaximumTxIDWrap(t, err, path, 0)
+	after, statErr := os.Stat(path)
+	if statErr != nil {
+		t.Fatal(statErr)
+	}
+	if after.Size() != before.Size() {
+		t.Fatalf("segment size changed after failed reopen: before=%d after=%d", before.Size(), after.Size())
+	}
+}
+
 func TestOpenSegmentForAppendStructuredRecordFaultAfterValidPrefixFailsClosed(t *testing.T) {
 	cases := []struct {
 		name      string

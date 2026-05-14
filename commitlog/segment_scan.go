@@ -115,7 +115,10 @@ func validateSegmentContinuity(segments []SegmentInfo) error {
 	for i := 1; i < len(segments); i++ {
 		prev := segments[i-1]
 		cur := segments[i]
-		expected := uint64(prev.LastTx) + 1
+		expected, err := nextContiguousRecordTxID(uint64(prev.LastTx), uint64(cur.StartTx), cur.Path)
+		if err != nil {
+			return err
+		}
 		if uint64(cur.StartTx) != expected {
 			return &HistoryGapError{
 				Expected: expected,
@@ -136,6 +139,13 @@ func parseSegmentFileStartTx(name string) (uint64, error) {
 		return 0, fmt.Errorf("commitlog: non-canonical segment filename %q", name)
 	}
 	return startTx, nil
+}
+
+func nextContiguousRecordTxID(lastTx, gotTx uint64, path string) (uint64, error) {
+	if lastTx == ^uint64(0) {
+		return 0, fmt.Errorf("%w: tx_id %d after maximum tx_id %d in segment %s", ErrOpen, gotTx, lastTx, path)
+	}
+	return lastTx + 1, nil
 }
 
 func scanNextRecord(sr *SegmentReader) (*Record, error) {
@@ -308,11 +318,17 @@ func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {
 					Segment:  path,
 				}
 			}
-		} else if rec.TxID != lastTx+1 {
-			return SegmentInfo{}, &HistoryGapError{
-				Expected: lastTx + 1,
-				Got:      rec.TxID,
-				Segment:  path,
+		} else {
+			expected, err := nextContiguousRecordTxID(lastTx, rec.TxID, path)
+			if err != nil {
+				return SegmentInfo{}, err
+			}
+			if rec.TxID != expected {
+				return SegmentInfo{}, &HistoryGapError{
+					Expected: expected,
+					Got:      rec.TxID,
+					Segment:  path,
+				}
 			}
 		}
 

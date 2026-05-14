@@ -24,6 +24,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   before canonicalization.
 - Commit-log rotation now avoids wrapping the next segment start to tx_id 0
   after the terminal tx_id is durably written.
+- Commit-log recovery and append-resume scans now reject segment history that
+  wraps from the maximum tx_id back to tx_id 0.
 
 ## v1.1.0 - 2026-05-13
 

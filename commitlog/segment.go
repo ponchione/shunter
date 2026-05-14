@@ -342,12 +342,19 @@ func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) 
 					Segment:  path,
 				}
 			}
-		} else if rec.TxID != lastTx+1 {
-			f.Close()
-			return nil, &HistoryGapError{
-				Expected: lastTx + 1,
-				Got:      rec.TxID,
-				Segment:  path,
+		} else {
+			expected, err := nextContiguousRecordTxID(lastTx, rec.TxID, path)
+			if err != nil {
+				f.Close()
+				return nil, err
+			}
+			if rec.TxID != expected {
+				f.Close()
+				return nil, &HistoryGapError{
+					Expected: expected,
+					Got:      rec.TxID,
+					Segment:  path,
+				}
 			}
 		}
 		size += int64(RecordOverhead + len(rec.Payload))

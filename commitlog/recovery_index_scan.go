@@ -194,9 +194,13 @@ func scanOneSegmentFromOffsetIndex(path string, isLast bool, target types.TxID) 
 			}
 			return SegmentInfo{}, true, err
 		}
-		if rec.TxID != lastTx+1 {
+		expected, gapErr := nextContiguousRecordTxID(lastTx, rec.TxID, path)
+		if gapErr != nil {
+			return SegmentInfo{}, true, gapErr
+		}
+		if rec.TxID != expected {
 			return SegmentInfo{}, true, &HistoryGapError{
-				Expected: lastTx + 1,
+				Expected: expected,
 				Got:      rec.TxID,
 				Segment:  path,
 			}
