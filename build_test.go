@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/ponchione/shunter/commitlog"
@@ -202,6 +203,27 @@ func TestBuildWithBlankDataDirNormalizesToRuntimeDefault(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Fatalf("default data dir path is not a directory")
+	}
+}
+
+func TestBuildCreatesMissingDataDirWithPrivatePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits are POSIX-specific")
+	}
+
+	dir := filepath.Join(t.TempDir(), "state")
+	rt, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat data dir: %v", err)
+	}
+	if got := info.Mode().Perm(); got != dataDirMode {
+		t.Fatalf("data dir mode = %#o, want %#o", got, dataDirMode)
 	}
 }
 

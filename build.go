@@ -15,6 +15,7 @@ import (
 
 const (
 	defaultDataDir                 = "./shunter-data"
+	dataDirMode                    = 0o700
 	defaultExecutorQueueCapacity   = 256
 	defaultDurabilityQueueCapacity = 256
 )
@@ -148,7 +149,7 @@ func CheckDataDirCompatibility(mod *Module, cfg Config) error {
 }
 
 func openOrBootstrapState(dataDir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, commitlog.RecoveryResumePlan, commitlog.RecoveryReport, error) {
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, dataDirMode); err != nil {
 		return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, fmt.Errorf("mkdir data dir: %w", err)
 	}
 
