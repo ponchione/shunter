@@ -405,7 +405,12 @@ Do not:
 Validation:
 - `rtk git diff --check -- working-docs/specs`
 
-9. [ ] Update the stale visibility-filter implementation comment.
+9. [x] Update the stale visibility-filter implementation comment.
+
+Done: Updated the `VisibilityFilterDeclaration` comment in
+`visibility_filters.go` to state that validated visibility metadata already
+applies to raw one-off reads, raw subscriptions, declared queries, and declared
+views. Validation passed: `rtk go test ./protocol`; `rtk go vet ./protocol`.
 
 Owner: `protocol`
 

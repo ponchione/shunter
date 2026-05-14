@@ -11,7 +11,8 @@ import (
 )
 
 // VisibilityFilterDeclaration declares a row-level visibility filter for one
-// returned table. Task 08 applies stored filter metadata to read execution.
+// returned table. Validated filter metadata is applied to raw one-off reads,
+// raw subscriptions, declared queries, and declared views.
 type VisibilityFilterDeclaration struct {
 	Name string
 	SQL  string
