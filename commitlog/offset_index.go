@@ -79,7 +79,7 @@ func OpenOffsetIndexMut(path string, cap uint64) (*OffsetIndexMut, error) {
 	if err := requireRegularOffsetIndexPath(path); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_RDWR, 0o644)
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return nil, err
 	}
