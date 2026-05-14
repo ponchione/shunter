@@ -515,6 +515,76 @@ func TestModuleContractValidationRejectsUnknownColumnType(t *testing.T) {
 	}
 }
 
+func TestModuleContractValidationRejectsInvalidAutoIncrementMetadata(t *testing.T) {
+	tests := []struct {
+		name        string
+		mutate      func(*ModuleContract)
+		wantErr     error
+		wantContext string
+	}{
+		{
+			name: "non integer",
+			mutate: func(contract *ModuleContract) {
+				contract.Schema.Tables[0].Columns[1].AutoIncrement = true
+			},
+			wantErr:     schema.ErrAutoIncrementType,
+			wantContext: "schema.tables.messages.columns.body",
+		},
+		{
+			name: "nullable",
+			mutate: func(contract *ModuleContract) {
+				contract.Schema.Tables[0].Columns[0].Nullable = true
+			},
+			wantErr:     schema.ErrNullableAutoIncrement,
+			wantContext: "schema.tables.messages.columns.id",
+		},
+		{
+			name: "multiple",
+			mutate: func(contract *ModuleContract) {
+				contract.Schema.Tables[0].Columns[1].Type = "uint64"
+				contract.Schema.Tables[0].Columns[1].AutoIncrement = true
+				contract.Schema.Tables[0].Indexes = append(contract.Schema.Tables[0].Indexes, schema.IndexExport{
+					ID:             1,
+					Name:           "body_unique",
+					Columns:        []string{"body"},
+					ColumnOrdinals: []int{1},
+					Unique:         true,
+				})
+			},
+			wantErr:     schema.ErrMultipleAutoIncrement,
+			wantContext: "schema.tables.messages",
+		},
+		{
+			name: "unkeyed",
+			mutate: func(contract *ModuleContract) {
+				contract.Schema.Tables[0].Columns[0].AutoIncrement = false
+				contract.Schema.Tables[0].Columns = append(contract.Schema.Tables[0].Columns, schema.ColumnExport{
+					Index:         len(contract.Schema.Tables[0].Columns),
+					Name:          "sequence",
+					Type:          "uint64",
+					AutoIncrement: true,
+				})
+			},
+			wantErr:     schema.ErrAutoIncrementRequiresKey,
+			wantContext: "schema.tables.messages.columns.sequence",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			contract := buildContractRuntime(t).ExportContract()
+			tt.mutate(&contract)
+
+			err := ValidateModuleContract(contract)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("ValidateModuleContract error = %v, want %v", err, tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantContext) {
+				t.Fatalf("ValidateModuleContract error = %v, want context %q", err, tt.wantContext)
+			}
+		})
+	}
+}
+
 func TestModuleContractValidationRejectsInvalidReducerProductSchema(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Schema.Reducers[0].Args = &ProductSchema{Columns: []ProductColumn{

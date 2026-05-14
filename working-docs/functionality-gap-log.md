@@ -237,6 +237,8 @@ and root contract copy/validation helpers; split product-schema columns from
 table columns; made `contractdiff` treat table/column/index order, IDs, column
 indexes, and `AutoIncrement` changes as breaking; updated metamorphic coverage,
 contract/codegen JSON fixtures, and root/schema/contractdiff regressions.
+Audit follow-up: strengthened `contract_validate.go` to reject invalid
+contract `AutoIncrement` metadata and added regressions in `contract_test.go`.
 Validation passed: `rtk go test ./contractdiff`;
 `rtk go test ./contractworkflow ./cmd/shunter`; `rtk go test . ./schema`;
 `rtk go vet ./contractdiff ./schema .`; `rtk go test ./...`.

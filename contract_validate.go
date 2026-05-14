@@ -78,6 +78,7 @@ func validateContractTables(tables []schema.TableExport, errs *[]error) map[stri
 		columnNames := make(map[string]struct{}, len(table.Columns))
 		columnIndexes := make(map[int]struct{}, len(table.Columns))
 		columnNameByIndex := make(map[int]string, len(table.Columns))
+		var autoIncrementColumns []schema.ColumnExport
 		validateColumnIndexes := contractColumnsHaveExplicitIndexes(table.Columns)
 		for position, column := range table.Columns {
 			validateContractName("schema.tables."+table.Name+".columns", column.Name, columnNames, errs)
@@ -97,6 +98,17 @@ func validateContractTables(tables []schema.TableExport, errs *[]error) map[stri
 				*errs = append(*errs, fmt.Errorf("schema.tables.%s.columns.%s type must not be empty", table.Name, column.Name))
 			} else if _, ok := valueKindFromExportString(column.Type); !ok {
 				*errs = append(*errs, fmt.Errorf("schema.tables.%s.columns.%s type %q is invalid", table.Name, column.Name, column.Type))
+			} else if column.AutoIncrement {
+				kind, _ := valueKindFromExportString(column.Type)
+				if _, _, ok := schema.AutoIncrementBounds(kind); !ok {
+					*errs = append(*errs, fmt.Errorf("schema.tables.%s.columns.%s: %w", table.Name, column.Name, schema.ErrAutoIncrementType))
+				}
+			}
+			if column.AutoIncrement {
+				autoIncrementColumns = append(autoIncrementColumns, column)
+				if column.Nullable {
+					*errs = append(*errs, fmt.Errorf("schema.tables.%s.columns.%s: %w", table.Name, column.Name, schema.ErrNullableAutoIncrement))
+				}
 			}
 		}
 		indexNames := make(map[string]struct{}, len(table.Indexes))
@@ -141,8 +153,25 @@ func validateContractTables(tables []schema.TableExport, errs *[]error) map[stri
 				}
 			}
 		}
+		if len(autoIncrementColumns) > 1 {
+			*errs = append(*errs, fmt.Errorf("schema.tables.%s: %w", table.Name, schema.ErrMultipleAutoIncrement))
+		}
+		for _, column := range autoIncrementColumns {
+			if !contractAutoIncrementHasKey(table.Indexes, column.Name) {
+				*errs = append(*errs, fmt.Errorf("schema.tables.%s.columns.%s: %w", table.Name, column.Name, schema.ErrAutoIncrementRequiresKey))
+			}
+		}
 	}
 	return names
+}
+
+func contractAutoIncrementHasKey(indexes []schema.IndexExport, columnName string) bool {
+	for _, index := range indexes {
+		if len(index.Columns) == 1 && index.Columns[0] == columnName && (index.Primary || index.Unique) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateContractReducers(reducers []schema.ReducerExport, errs *[]error) map[string]struct{} {
