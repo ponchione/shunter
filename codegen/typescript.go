@@ -84,8 +84,10 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	}
 	tableTypes := uniqueTypeScriptIdentifiers(tableNames, typeScriptPascalIdentifier)
 	tableConstants := uniqueTypeScriptIdentifiers(tableNames, typeScriptCamelIdentifier)
+	topLevelValueNames := typeScriptTopLevelValueNames()
+	tableRowTypes := typeScriptTableRowTypes(tableTypes, topLevelValueNames)
 	for i, table := range contract.Schema.Tables {
-		rowType := tableTypes[i].identifier + "Row"
+		rowType := tableRowTypes[i]
 		fmt.Fprintf(&b, "export interface %s {\n", rowType)
 		columnNames := make([]string, len(table.Columns))
 		for j, column := range table.Columns {
@@ -107,15 +109,14 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 
 	writeTypeScriptConstMap(&b, "tables", tableConstants)
 	b.WriteString("export type TableName = (typeof tables)[keyof typeof tables];\n\n")
-	writeTypeScriptTableRows(&b, contract.Schema.Tables, tableTypes)
-	topLevelValueNames := typeScriptTopLevelValueNames()
-	if _, err := writeTypeScriptTableRowDecoders(&b, contract.Schema.Tables, tableTypes, topLevelValueNames); err != nil {
+	writeTypeScriptTableRows(&b, contract.Schema.Tables, tableRowTypes)
+	if _, err := writeTypeScriptTableRowDecoders(&b, contract.Schema.Tables, tableRowTypes, topLevelValueNames); err != nil {
 		return nil, err
 	}
 	writeTypeScriptTableReadPolicies(&b, contract.Schema.Tables, tableConstants)
 	writeTypeScriptVisibilityFilters(&b, contract.VisibilityFilters)
 	for i, table := range contract.Schema.Tables {
-		rowType := tableTypes[i].identifier + "Row"
+		rowType := tableRowTypes[i]
 		functionName := uniqueTypeScriptIdentifier("subscribe"+tableTypes[i].identifier, topLevelValueNames)
 		fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>, onRows?: (rows: %s[]) => void, options: TableSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, rowType, rowType, rowType)
 		fmt.Fprintf(&b, "  const subscribeOptions: TableSubscriptionOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders[%s] } : options;\n", rowType, strconv.Quote(table.Name))
@@ -353,12 +354,55 @@ func typeScriptTopLevelValueNames() map[string]int {
 		"viewSQL",
 		"permissions",
 		"readModels",
+		"ReducerCaller",
+		"EncodedReducerCallOptions",
+		"EncodedReducerCallResultOptions",
+		"ReducerCallResult",
+		"ReducerCallResultOptions",
+		"QueryRunner",
+		"ViewSubscriber",
+		"DeclaredQueryRunner",
+		"DeclaredQueryOptions",
+		"DeclaredQueryRunOptions",
+		"RawDeclaredQueryResult",
+		"DeclaredQueryDecodeOptions",
+		"DeclaredQueryDecodedRunOptions",
+		"DecodedDeclaredQueryResult",
+		"DeclaredViewSubscriber",
+		"DeclaredViewHandleSubscriber",
+		"DeclaredViewSubscriptionOptions",
+		"SubscriptionUnsubscribe",
+		"SubscriptionHandle",
+		"SubscriptionHandleReturnOptions",
+		"TableName",
+		"TableRows",
+		"TableRow",
+		"TableSubscriber",
+		"TableSubscriptionOptions",
+		"TableRowDecoder",
+		"TableRowDecoders",
+		"UUID",
+		"ShunterSubprotocol",
+		"ReducerName",
+		"LifecycleReducerName",
+		"QueryName",
+		"ExecutableQueryName",
+		"ViewName",
+		"ExecutableViewName",
 	}
 	seen := make(map[string]int, len(names))
 	for _, name := range names {
 		seen[name] = 1
 	}
 	return seen
+}
+
+func typeScriptTableRowTypes(tableTypes []namedTypeScriptIdentifier, topLevelValueNames map[string]int) []string {
+	out := make([]string, len(tableTypes))
+	for i, tableType := range tableTypes {
+		out[i] = uniqueTypeScriptIdentifier(tableType.identifier+"Row", topLevelValueNames)
+	}
+	return out
 }
 
 func writeTypeScriptRuntimeImports(b *bytes.Buffer, runtimeImport string) {
@@ -507,20 +551,21 @@ func writeTypeScriptSQLConstMap(b *bytes.Buffer, name string, identifiers []name
 	b.WriteString("} as const;\n\n")
 }
 
-func writeTypeScriptTableRows(b *bytes.Buffer, tables []schema.TableExport, rowTypes []namedTypeScriptIdentifier) {
+func writeTypeScriptTableRows(b *bytes.Buffer, tables []schema.TableExport, rowTypes []string) {
 	b.WriteString("export type TableRows = {\n")
 	for i, table := range tables {
-		fmt.Fprintf(b, "  %s: %sRow;\n", strconv.Quote(table.Name), rowTypes[i].identifier)
+		fmt.Fprintf(b, "  %s: %s;\n", strconv.Quote(table.Name), rowTypes[i])
 	}
 	b.WriteString("};\n\n")
 }
 
-func writeTypeScriptTableRowDecoders(b *bytes.Buffer, tables []schema.TableExport, rowTypes []namedTypeScriptIdentifier, topLevelValueNames map[string]int) ([]typeScriptTableDecoder, error) {
+func writeTypeScriptTableRowDecoders(b *bytes.Buffer, tables []schema.TableExport, rowTypes []string, topLevelValueNames map[string]int) ([]typeScriptTableDecoder, error) {
 	decoders := make([]typeScriptTableDecoder, len(tables))
 	for i, table := range tables {
-		rowName := rowTypes[i].identifier + "Row"
-		columnsName := uniqueTypeScriptIdentifier(lowerFirst(rowTypes[i].identifier)+"Columns", topLevelValueNames)
-		decoderName := uniqueTypeScriptIdentifier("decode"+rowTypes[i].identifier+"Row", topLevelValueNames)
+		rowName := rowTypes[i]
+		rowBaseName := strings.TrimSuffix(rowName, "Row")
+		columnsName := uniqueTypeScriptIdentifier(lowerFirst(rowBaseName)+"Columns", topLevelValueNames)
+		decoderName := uniqueTypeScriptIdentifier("decode"+rowName, topLevelValueNames)
 		decoders[i] = typeScriptTableDecoder{
 			columnsIdentifier: columnsName,
 			decoderIdentifier: decoderName,

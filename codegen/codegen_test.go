@@ -1139,6 +1139,43 @@ func TestTypeScriptGeneratorDeclaredReadNoParamSignaturesRemainUnchanged(t *test
 	assertNotContains(t, ts, `subscribeLiveMessagesHandle(subscribeDeclaredView: DeclaredViewHandleSubscriber, params:`)
 }
 
+func TestTypeScriptGeneratorDisambiguatesTableAndDeclaredReadRowTypes(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables = append(contract.Schema.Tables, schema.TableExport{
+		Name: "messages_query",
+		Columns: []schema.ColumnExport{
+			{Name: "shadow", Type: "string"},
+		},
+	}, schema.TableExport{
+		Name: "table",
+		Columns: []schema.ColumnExport{
+			{Name: "value", Type: "string"},
+		},
+	})
+	contract.Queries = append(contract.Queries, shunter.QueryDescription{
+		Name: "messages",
+		SQL:  "SELECT id, body FROM messages",
+		RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "id", Type: "uint64"},
+			{Name: "body", Type: "string"},
+		}},
+		ResultShape: &shunter.ReadResultShape{Kind: shunter.ReadResultShapeProjection, Table: "messages"},
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, "export interface MessagesQueryRow {\n  shadow: string;\n}")
+	assertContains(t, ts, "export interface MessagesQueryRow2 {\n  id: bigint;\n  body: string;\n}")
+	assertContains(t, ts, "export interface TableRow2 {\n  value: string;\n}")
+	assertContains(t, ts, "  \"table\": TableRow2;")
+	assertContains(t, ts, "export type MessagesQueryRows = {\n  \"messages\": MessagesQueryRow2;\n}")
+	assertContains(t, ts, `export function decodeMessagesQueryRow2(row: Uint8Array): MessagesQueryRow2 {`)
+}
+
 func TestTypeScriptGeneratorDisambiguatesDeclaredReadHelperNameCollisions(t *testing.T) {
 	contract := contractFixture()
 	contract.Queries = append(contract.Queries, shunter.QueryDescription{Name: "recent-messages", SQL: "SELECT * FROM messages"})
