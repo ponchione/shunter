@@ -18,7 +18,7 @@ func TestExportSchemaIncludesTablesReducersAndLifecycle(t *testing.T) {
 	b.TableDef(TableDefinition{
 		Name: "players",
 		Columns: []ColumnDefinition{
-			{Name: "id", Type: KindUint64, PrimaryKey: true},
+			{Name: "id", Type: KindUint64, PrimaryKey: true, AutoIncrement: true},
 			{Name: "name", Type: KindString, Nullable: true},
 		},
 		Indexes: []IndexDefinition{{Name: "name_idx", Columns: []string{"name"}, Unique: true}},
@@ -41,8 +41,17 @@ func TestExportSchemaIncludesTablesReducersAndLifecycle(t *testing.T) {
 	if export.Tables[0].Name != "players" {
 		t.Fatalf("first exported table = %q, want players", export.Tables[0].Name)
 	}
+	if export.Tables[0].ID != 0 {
+		t.Fatalf("players table id = %d, want 0", export.Tables[0].ID)
+	}
 	if export.Tables[0].Columns[0].Type != "uint64" || export.Tables[0].Columns[1].Type != "string" {
 		t.Fatalf("column export types = %+v", export.Tables[0].Columns)
+	}
+	if export.Tables[0].Columns[0].Index != 0 || export.Tables[0].Columns[1].Index != 1 {
+		t.Fatalf("column export indexes = %+v, want indexes 0 and 1", export.Tables[0].Columns)
+	}
+	if !export.Tables[0].Columns[0].AutoIncrement {
+		t.Fatalf("id column auto_increment = false, want true")
 	}
 	if !export.Tables[0].Columns[1].Nullable {
 		t.Fatalf("nullable column export = %+v, want nullable name", export.Tables[0].Columns[1])
@@ -50,8 +59,14 @@ func TestExportSchemaIncludesTablesReducersAndLifecycle(t *testing.T) {
 	if export.Tables[0].Indexes[0].Columns[0] != "id" {
 		t.Fatalf("primary index column export = %v, want [id]", export.Tables[0].Indexes[0].Columns)
 	}
+	if export.Tables[0].Indexes[0].ID != 0 || !reflect.DeepEqual(export.Tables[0].Indexes[0].ColumnOrdinals, []int{0}) {
+		t.Fatalf("primary index durable identity = %+v, want id 0 column_ordinals [0]", export.Tables[0].Indexes[0])
+	}
 	if !export.Tables[0].Indexes[0].Primary || !export.Tables[0].Indexes[0].Unique {
 		t.Fatalf("primary index export flags = %+v", export.Tables[0].Indexes[0])
+	}
+	if export.Tables[0].Indexes[1].ID != 1 || !reflect.DeepEqual(export.Tables[0].Indexes[1].ColumnOrdinals, []int{1}) {
+		t.Fatalf("secondary index durable identity = %+v, want id 1 column_ordinals [1]", export.Tables[0].Indexes[1])
 	}
 	if export.Reducers[0] != (ReducerExport{Name: "CreatePlayer", Lifecycle: false}) {
 		t.Fatalf("first reducer export = %+v", export.Reducers[0])
@@ -203,6 +218,7 @@ func TestExportSchemaReturnsDetachedSnapshot(t *testing.T) {
 	export.Tables[0].Name = "mutated"
 	export.Tables[0].Columns[0].Name = "mutated_col"
 	export.Tables[0].Indexes[0].Columns[0] = "mutated_idx_col"
+	export.Tables[0].Indexes[0].ColumnOrdinals[0] = 99
 	export.Reducers = append(export.Reducers, ReducerExport{Name: "Mutated", Lifecycle: false})
 
 	again := e.ExportSchema()
@@ -214,6 +230,9 @@ func TestExportSchemaReturnsDetachedSnapshot(t *testing.T) {
 	}
 	if again.Tables[0].Indexes[0].Columns[0] != "id" {
 		t.Fatalf("detached index columns = %v, want [id]", again.Tables[0].Indexes[0].Columns)
+	}
+	if again.Tables[0].Indexes[0].ColumnOrdinals[0] != 0 {
+		t.Fatalf("detached index column ordinals = %v, want [0]", again.Tables[0].Indexes[0].ColumnOrdinals)
 	}
 }
 

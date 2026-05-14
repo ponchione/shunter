@@ -471,6 +471,7 @@ func normalizeSchemaExport(in schema.SchemaExport) schema.SchemaExport {
 
 func copyTableExport(in schema.TableExport) schema.TableExport {
 	out := schema.TableExport{
+		ID:         in.ID,
 		Name:       in.Name,
 		Columns:    make([]schema.ColumnExport, len(in.Columns)),
 		Indexes:    make([]schema.IndexExport, len(in.Indexes)),
@@ -479,10 +480,12 @@ func copyTableExport(in schema.TableExport) schema.TableExport {
 	copy(out.Columns, in.Columns)
 	for i, idx := range in.Indexes {
 		out.Indexes[i] = schema.IndexExport{
-			Name:    idx.Name,
-			Columns: normalizeStringSlice(idx.Columns),
-			Unique:  idx.Unique,
-			Primary: idx.Primary,
+			ID:             idx.ID,
+			Name:           idx.Name,
+			Columns:        normalizeStringSlice(idx.Columns),
+			ColumnOrdinals: normalizeIntSlice(idx.ColumnOrdinals),
+			Unique:         idx.Unique,
+			Primary:        idx.Primary,
 		}
 	}
 	if out.Columns == nil {
@@ -508,6 +511,13 @@ func normalizeSchemaReadPolicy(in schema.ReadPolicy) schema.ReadPolicy {
 		Access:      in.Access,
 		Permissions: normalizeStringSlice(in.Permissions),
 	}
+}
+
+func normalizeIntSlice(in []int) []int {
+	if len(in) == 0 {
+		return []int{}
+	}
+	return append([]int{}, in...)
 }
 
 func copyQueryDescriptions(in []QueryDescription) []QueryDescription {

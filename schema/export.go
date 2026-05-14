@@ -10,11 +10,19 @@ type SchemaExport struct {
 
 // ProductSchemaExport is the exported shape of one BSATN product row.
 type ProductSchemaExport struct {
-	Columns []ColumnExport `json:"columns"`
+	Columns []ProductColumnExport `json:"columns"`
+}
+
+// ProductColumnExport is one exported product-schema column.
+type ProductColumnExport struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Nullable bool   `json:"nullable,omitempty"`
 }
 
 // TableExport is the exported shape of one table.
 type TableExport struct {
+	ID         TableID        `json:"id"`
 	Name       string         `json:"name"`
 	Columns    []ColumnExport `json:"columns"`
 	Indexes    []IndexExport  `json:"indexes"`
@@ -23,17 +31,21 @@ type TableExport struct {
 
 // ColumnExport is the exported shape of one column.
 type ColumnExport struct {
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Nullable bool   `json:"nullable,omitempty"`
+	Index         int    `json:"index"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Nullable      bool   `json:"nullable,omitempty"`
+	AutoIncrement bool   `json:"auto_increment"`
 }
 
 // IndexExport is the exported shape of one index.
 type IndexExport struct {
-	Name    string   `json:"name"`
-	Columns []string `json:"columns"`
-	Unique  bool     `json:"unique"`
-	Primary bool     `json:"primary"`
+	ID             IndexID  `json:"id"`
+	Name           string   `json:"name"`
+	Columns        []string `json:"columns"`
+	ColumnOrdinals []int    `json:"column_ordinals"`
+	Unique         bool     `json:"unique"`
+	Primary        bool     `json:"primary"`
 }
 
 // ReducerExport is the exported shape of one reducer.
@@ -56,14 +68,26 @@ func (e *Engine) ExportSchema() *SchemaExport {
 		if !ok {
 			continue
 		}
-		te := TableExport{Name: ts.Name, ReadPolicy: normalizeReadPolicy(ts.ReadPolicy)}
+		te := TableExport{ID: ts.ID, Name: ts.Name, ReadPolicy: normalizeReadPolicy(ts.ReadPolicy)}
 		te.Columns = make([]ColumnExport, len(ts.Columns))
 		for i, col := range ts.Columns {
-			te.Columns[i] = ColumnExport{Name: col.Name, Type: ValueKindExportString(col.Type), Nullable: col.Nullable}
+			te.Columns[i] = ColumnExport{
+				Index:         col.Index,
+				Name:          col.Name,
+				Type:          ValueKindExportString(col.Type),
+				Nullable:      col.Nullable,
+				AutoIncrement: col.AutoIncrement,
+			}
 		}
 		te.Indexes = make([]IndexExport, len(ts.Indexes))
 		for i, idx := range ts.Indexes {
-			ie := IndexExport{Name: idx.Name, Unique: idx.Unique, Primary: idx.Primary}
+			ie := IndexExport{
+				ID:             idx.ID,
+				Name:           idx.Name,
+				ColumnOrdinals: append([]int(nil), idx.Columns...),
+				Unique:         idx.Unique,
+				Primary:        idx.Primary,
+			}
 			ie.Columns = make([]string, len(idx.Columns))
 			for j, colIdx := range idx.Columns {
 				if colIdx >= 0 && colIdx < len(ts.Columns) {

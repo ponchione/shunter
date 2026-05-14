@@ -60,16 +60,39 @@ func (c ModuleContract) Validate() error {
 
 func validateContractTables(tables []schema.TableExport, errs *[]error) map[string]struct{} {
 	names := make(map[string]struct{}, len(tables))
+	tableIDs := make(map[schema.TableID]struct{}, len(tables))
+	validateTableIDs := contractTablesHaveExplicitIDs(tables)
 	for _, table := range tables {
 		if !validateContractName("schema.tables", table.Name, names, errs) {
 			continue
+		}
+		if validateTableIDs {
+			if _, exists := tableIDs[table.ID]; exists {
+				*errs = append(*errs, fmt.Errorf("schema.tables.%s id %d is duplicated", table.Name, table.ID))
+			}
+			tableIDs[table.ID] = struct{}{}
 		}
 		if err := schema.ValidateReadPolicy(table.ReadPolicy); err != nil {
 			*errs = append(*errs, fmt.Errorf("schema.tables.%s.read_policy invalid: %v", table.Name, err))
 		}
 		columnNames := make(map[string]struct{}, len(table.Columns))
-		for _, column := range table.Columns {
+		columnIndexes := make(map[int]struct{}, len(table.Columns))
+		columnNameByIndex := make(map[int]string, len(table.Columns))
+		validateColumnIndexes := contractColumnsHaveExplicitIndexes(table.Columns)
+		for position, column := range table.Columns {
 			validateContractName("schema.tables."+table.Name+".columns", column.Name, columnNames, errs)
+			resolvedColumnIndex := position
+			if validateColumnIndexes {
+				if column.Index < 0 || column.Index >= len(table.Columns) {
+					*errs = append(*errs, fmt.Errorf("schema.tables.%s.columns.%s index %d is outside column range", table.Name, column.Name, column.Index))
+				} else if _, exists := columnIndexes[column.Index]; exists {
+					*errs = append(*errs, fmt.Errorf("schema.tables.%s.columns.%s index %d is duplicated", table.Name, column.Name, column.Index))
+				} else {
+					resolvedColumnIndex = column.Index
+				}
+				columnIndexes[column.Index] = struct{}{}
+			}
+			columnNameByIndex[resolvedColumnIndex] = column.Name
 			if strings.TrimSpace(column.Type) == "" {
 				*errs = append(*errs, fmt.Errorf("schema.tables.%s.columns.%s type must not be empty", table.Name, column.Name))
 			} else if _, ok := valueKindFromExportString(column.Type); !ok {
@@ -77,15 +100,26 @@ func validateContractTables(tables []schema.TableExport, errs *[]error) map[stri
 			}
 		}
 		indexNames := make(map[string]struct{}, len(table.Indexes))
+		indexIDs := make(map[schema.IndexID]struct{}, len(table.Indexes))
+		validateIndexIDs := contractIndexesHaveExplicitIDs(table.Indexes)
 		for _, index := range table.Indexes {
 			if !validateContractName("schema.tables."+table.Name+".indexes", index.Name, indexNames, errs) {
 				continue
 			}
+			if validateIndexIDs {
+				if _, exists := indexIDs[index.ID]; exists {
+					*errs = append(*errs, fmt.Errorf("schema.tables.%s.indexes.%s id %d is duplicated", table.Name, index.Name, index.ID))
+				}
+				indexIDs[index.ID] = struct{}{}
+			}
 			if len(index.Columns) == 0 {
 				*errs = append(*errs, fmt.Errorf("schema.tables.%s.indexes.%s columns must not be empty", table.Name, index.Name))
 			}
+			if len(index.ColumnOrdinals) != 0 && len(index.ColumnOrdinals) != len(index.Columns) {
+				*errs = append(*errs, fmt.Errorf("schema.tables.%s.indexes.%s column_ordinals length = %d, want %d", table.Name, index.Name, len(index.ColumnOrdinals), len(index.Columns)))
+			}
 			indexColumns := make(map[string]struct{}, len(index.Columns))
-			for _, column := range index.Columns {
+			for i, column := range index.Columns {
 				if strings.TrimSpace(column) == "" {
 					*errs = append(*errs, fmt.Errorf("schema.tables.%s.indexes.%s column must not be empty", table.Name, index.Name))
 					continue
@@ -96,6 +130,14 @@ func validateContractTables(tables []schema.TableExport, errs *[]error) map[stri
 				indexColumns[column] = struct{}{}
 				if _, ok := columnNames[column]; !ok {
 					*errs = append(*errs, fmt.Errorf("schema.tables.%s.indexes.%s references unknown column %q", table.Name, index.Name, column))
+				}
+				if len(index.ColumnOrdinals) != 0 {
+					ordinal := index.ColumnOrdinals[i]
+					if ordinal < 0 || ordinal >= len(table.Columns) {
+						*errs = append(*errs, fmt.Errorf("schema.tables.%s.indexes.%s column_ordinals[%d] = %d is outside column range", table.Name, index.Name, i, ordinal))
+					} else if columnNameByIndex[ordinal] != column {
+						*errs = append(*errs, fmt.Errorf("schema.tables.%s.indexes.%s column_ordinals[%d] = %d references %q, want %q", table.Name, index.Name, i, ordinal, columnNameByIndex[ordinal], column))
+					}
 				}
 			}
 		}
@@ -424,8 +466,10 @@ func newContractSchemaLookup(schemaExport schema.SchemaExport) contractSchemaLoo
 		byID:   make(map[schema.TableID]int, len(schemaExport.Tables)),
 		byName: make(map[string]int, len(schemaExport.Tables)),
 	}
+	useTableIDs := contractTablesHaveExplicitIDs(schemaExport.Tables)
 	for i, table := range schemaExport.Tables {
-		tableID := schema.TableID(i)
+		tableID := contractTableID(table, i, useTableIDs)
+		useColumnIndexes := contractColumnsHaveExplicitIndexes(table.Columns)
 		ts := schema.TableSchema{
 			ID:         tableID,
 			Name:       table.Name,
@@ -436,24 +480,26 @@ func newContractSchemaLookup(schemaExport schema.SchemaExport) contractSchemaLoo
 		columnByName := make(map[string]int, len(table.Columns))
 		for j, column := range table.Columns {
 			kind, _ := valueKindFromExportString(column.Type)
-			ts.Columns[j] = schema.ColumnSchema{
-				Index:    j,
-				Name:     column.Name,
-				Type:     kind,
-				Nullable: column.Nullable,
+			columnIndex := contractColumnIndex(column, j, len(table.Columns), useColumnIndexes)
+			ts.Columns[columnIndex] = schema.ColumnSchema{
+				Index:         columnIndex,
+				Name:          column.Name,
+				Type:          kind,
+				Nullable:      column.Nullable,
+				AutoIncrement: column.AutoIncrement,
 			}
 			if _, exists := columnByName[column.Name]; !exists {
-				columnByName[column.Name] = j
+				columnByName[column.Name] = columnIndex
 			}
 		}
+		useIndexIDs := contractIndexesHaveExplicitIDs(table.Indexes)
 		for j, index := range table.Indexes {
-			columns := make([]int, 0, len(index.Columns))
-			for _, columnName := range index.Columns {
-				if columnIndex, ok := columnByName[columnName]; ok {
-					columns = append(columns, columnIndex)
-				}
+			columns := contractIndexColumnOrdinals(index, columnByName, len(table.Columns))
+			indexID := schema.IndexID(j)
+			if useIndexIDs {
+				indexID = index.ID
 			}
-			ts.Indexes = append(ts.Indexes, schema.NewIndexSchema(schema.IndexID(j), index.Name, columns, index.Unique, index.Primary))
+			ts.Indexes = append(ts.Indexes, schema.NewIndexSchema(indexID, index.Name, columns, index.Unique, index.Primary))
 		}
 		lookup.byID[tableID] = len(lookup.tables)
 		if _, exists := lookup.byName[table.Name]; !exists {
@@ -598,4 +644,64 @@ func valueKindFromExportString(value string) (schema.ValueKind, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func contractTablesHaveExplicitIDs(tables []schema.TableExport) bool {
+	for _, table := range tables {
+		if table.ID != 0 {
+			return true
+		}
+	}
+	return len(tables) <= 1
+}
+
+func contractColumnsHaveExplicitIndexes(columns []schema.ColumnExport) bool {
+	for _, column := range columns {
+		if column.Index != 0 {
+			return true
+		}
+	}
+	return len(columns) <= 1
+}
+
+func contractIndexesHaveExplicitIDs(indexes []schema.IndexExport) bool {
+	for _, index := range indexes {
+		if index.ID != 0 {
+			return true
+		}
+	}
+	return len(indexes) <= 1
+}
+
+func contractTableID(table schema.TableExport, position int, explicit bool) schema.TableID {
+	if explicit {
+		return table.ID
+	}
+	return schema.TableID(position)
+}
+
+func contractColumnIndex(column schema.ColumnExport, position, columnCount int, explicit bool) int {
+	if explicit && column.Index >= 0 && column.Index < columnCount {
+		return column.Index
+	}
+	return position
+}
+
+func contractIndexColumnOrdinals(index schema.IndexExport, columnByName map[string]int, columnCount int) []int {
+	if len(index.ColumnOrdinals) == len(index.Columns) {
+		out := make([]int, 0, len(index.ColumnOrdinals))
+		for _, ordinal := range index.ColumnOrdinals {
+			if ordinal >= 0 && ordinal < columnCount {
+				out = append(out, ordinal)
+			}
+		}
+		return out
+	}
+	out := make([]int, 0, len(index.Columns))
+	for _, columnName := range index.Columns {
+		if columnIndex, ok := columnByName[columnName]; ok {
+			out = append(out, columnIndex)
+		}
+	}
+	return out
 }

@@ -12,7 +12,7 @@ import (
 func TestMigrationPlanReportsReviewActionsAndWarnings(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()
-	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Name: "sent_at", Type: "timestamp"})
+	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Index: 2, Name: "sent_at", Type: "timestamp"})
 	current.Schema.Tables = append(current.Schema.Tables, schema.TableExport{
 		Name:    "members",
 		Columns: []schema.ColumnExport{{Name: "id", Type: "uint64"}},
@@ -165,7 +165,7 @@ func TestMigrationPlanAddsBackupRestoreGuidanceForBlockingChanges(t *testing.T) 
 func TestMigrationPlanOmitsBackupRestoreGuidanceForReviewOnlyChanges(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()
-	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Name: "sent_at", Type: "timestamp"})
+	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Index: 2, Name: "sent_at", Type: "timestamp"})
 
 	plan := Plan(old, current, PlanOptions{})
 
@@ -314,7 +314,7 @@ func TestMigrationPlanIgnoresPermissionOrderOnlyChanges(t *testing.T) {
 func TestMigrationPlanJSONIsDeterministicAndNewlineTerminated(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()
-	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Name: "sent_at", Type: "timestamp"})
+	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Index: 2, Name: "sent_at", Type: "timestamp"})
 
 	plan, err := PlanJSON(mustContractJSON(t, old), mustContractJSON(t, current), PlanOptions{})
 	if err != nil {

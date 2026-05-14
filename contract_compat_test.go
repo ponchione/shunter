@@ -251,13 +251,13 @@ func TestV1CompatibilityModuleContractFixtureCoversStableJSONFields(t *testing.T
 	schemaJSON := assertJSONObjectKeys(t, top["schema"], "contract.schema", []string{"version", "tables", "reducers"})
 	tables := assertJSONArrayObjects(t, schemaJSON["tables"], "contract.schema.tables")
 	messagesTable := findJSONObjectByStringField(t, tables, "name", "messages", "contract.schema.tables")
-	assertJSONObjectKeys(t, mustMarshalRawObject(t, messagesTable), "contract.schema.tables.messages", []string{"name", "columns", "indexes", "read_policy"})
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, messagesTable), "contract.schema.tables.messages", []string{"id", "name", "columns", "indexes", "read_policy"})
 	columns := assertJSONArrayObjects(t, messagesTable["columns"], "contract.schema.tables.messages.columns")
 	topicColumn := findJSONObjectByStringField(t, columns, "name", "topic", "contract.schema.tables.messages.columns")
-	assertJSONObjectKeys(t, mustMarshalRawObject(t, topicColumn), "contract.schema.tables.messages.columns.topic", []string{"name", "type", "nullable"})
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, topicColumn), "contract.schema.tables.messages.columns.topic", []string{"index", "name", "type", "nullable", "auto_increment"})
 	indexes := assertJSONArrayObjects(t, messagesTable["indexes"], "contract.schema.tables.messages.indexes")
 	pkIndex := findJSONObjectByStringField(t, indexes, "name", "pk", "contract.schema.tables.messages.indexes")
-	assertJSONObjectKeys(t, mustMarshalRawObject(t, pkIndex), "contract.schema.tables.messages.indexes.pk", []string{"name", "columns", "unique", "primary"})
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, pkIndex), "contract.schema.tables.messages.indexes.pk", []string{"id", "name", "columns", "column_ordinals", "unique", "primary"})
 	assertJSONObjectKeys(t, messagesTable["read_policy"], "contract.schema.tables.messages.read_policy", []string{"access", "permissions"})
 	reducers := assertJSONArrayObjects(t, schemaJSON["reducers"], "contract.schema.reducers")
 	createMessageReducer := findJSONObjectByStringField(t, reducers, "name", "create_message", "contract.schema.reducers")
@@ -510,6 +510,9 @@ func assertV1FixtureTable(t *testing.T, contract ModuleContract) {
 		if got, want := table.ReadPolicy.Access, schema.TableAccessPermissioned; got != want {
 			t.Fatalf("messages read policy access = %s, want %s", got, want)
 		}
+		if table.ID != 0 {
+			t.Fatalf("messages table id = %d, want 0", table.ID)
+		}
 		if len(table.ReadPolicy.Permissions) != 1 || table.ReadPolicy.Permissions[0] != "messages:read" {
 			t.Fatalf("messages read permissions = %#v, want [messages:read]", table.ReadPolicy.Permissions)
 		}
@@ -520,6 +523,12 @@ func assertV1FixtureTable(t *testing.T, contract ModuleContract) {
 		}
 		if !v1FixtureColumnNullable(table.Columns, "topic") {
 			t.Fatalf("messages.topic nullable = false, want true: %#v", table.Columns)
+		}
+		if !v1FixtureColumnAutoIncrement(table.Columns, "id") {
+			t.Fatalf("messages.id auto_increment = false, want true: %#v", table.Columns)
+		}
+		if !v1FixtureHasIndexOrdinal(table.Indexes, "pk", 0) {
+			t.Fatalf("messages pk index missing column ordinal 0: %#v", table.Indexes)
 		}
 		return
 	}
@@ -605,6 +614,29 @@ func v1FixtureColumnNullable(columns []schema.ColumnExport, name string) bool {
 	for _, column := range columns {
 		if column.Name == name {
 			return column.Nullable
+		}
+	}
+	return false
+}
+
+func v1FixtureColumnAutoIncrement(columns []schema.ColumnExport, name string) bool {
+	for _, column := range columns {
+		if column.Name == name {
+			return column.AutoIncrement
+		}
+	}
+	return false
+}
+
+func v1FixtureHasIndexOrdinal(indexes []schema.IndexExport, name string, ordinal int) bool {
+	for _, index := range indexes {
+		if index.Name != name {
+			continue
+		}
+		for _, got := range index.ColumnOrdinals {
+			if got == ordinal {
+				return true
+			}
 		}
 	}
 	return false
@@ -796,16 +828,16 @@ func v1ContractJSONWithUnknownFields(t *testing.T, data []byte) []byte {
 			new: "  \"schema\": {\n    \"future_schema_field\": [\n      \"ignored\"\n    ],\n    \"version\": 3,",
 		},
 		{
-			old: "      {\n        \"name\": \"messages\",\n        \"columns\": [",
-			new: "      {\n        \"future_table_field\": \"ignored\",\n        \"name\": \"messages\",\n        \"columns\": [",
+			old: "      {\n        \"id\": 0,\n        \"name\": \"messages\",\n        \"columns\": [",
+			new: "      {\n        \"future_table_field\": \"ignored\",\n        \"id\": 0,\n        \"name\": \"messages\",\n        \"columns\": [",
 		},
 		{
-			old: "          {\n            \"name\": \"id\",\n            \"type\": \"uint64\"\n          }",
-			new: "          {\n            \"future_column_field\": \"ignored\",\n            \"name\": \"id\",\n            \"type\": \"uint64\"\n          }",
+			old: "          {\n            \"index\": 0,\n            \"name\": \"id\",\n            \"type\": \"uint64\",\n            \"auto_increment\": true\n          }",
+			new: "          {\n            \"future_column_field\": \"ignored\",\n            \"index\": 0,\n            \"name\": \"id\",\n            \"type\": \"uint64\",\n            \"auto_increment\": true\n          }",
 		},
 		{
-			old: "          {\n            \"name\": \"pk\",\n            \"columns\": [",
-			new: "          {\n            \"future_index_field\": \"ignored\",\n            \"name\": \"pk\",\n            \"columns\": [",
+			old: "          {\n            \"id\": 0,\n            \"name\": \"pk\",\n            \"columns\": [",
+			new: "          {\n            \"future_index_field\": \"ignored\",\n            \"id\": 0,\n            \"name\": \"pk\",\n            \"columns\": [",
 		},
 		{
 			old: "        \"read_policy\": {\n          \"access\": \"permissioned\",",

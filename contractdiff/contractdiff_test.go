@@ -29,7 +29,7 @@ func TestContractDiffDetectsAdditiveSurfaceChangesDeterministically(t *testing.T
 		Columns: []schema.ColumnExport{{Name: "id", Type: "uint64"}},
 		Indexes: []schema.IndexExport{{Name: "members_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
 	})
-	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Name: "sent_at", Type: "timestamp"})
+	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Index: 2, Name: "sent_at", Type: "timestamp"})
 	current.Queries = append(current.Queries, shunter.QueryDescription{Name: "recent_messages"})
 	current.Views = append(current.Views, shunter.ViewDescription{Name: "live_messages"})
 
@@ -75,6 +75,109 @@ func TestContractDiffDetectsNullableColumnChange(t *testing.T) {
 	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceColumn, "messages.id")
 	if text := report.Text(); !strings.Contains(text, "column nullable changed from false to true") {
 		t.Fatalf("diff text = %q, want nullable change", text)
+	}
+}
+
+func TestContractDiffDetectsDurableSchemaIdentityChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		fixture func() (shunter.ModuleContract, shunter.ModuleContract)
+		surface Surface
+		change  string
+		mutate  func(*shunter.ModuleContract)
+	}{
+		{
+			name: "table id",
+			fixture: func() (shunter.ModuleContract, shunter.ModuleContract) {
+				return contractFixture(), contractFixture()
+			},
+			surface: SurfaceTable,
+			change:  "messages",
+			mutate: func(current *shunter.ModuleContract) {
+				current.Schema.Tables[0].ID = 7
+			},
+		},
+		{
+			name: "table reorder",
+			fixture: func() (shunter.ModuleContract, shunter.ModuleContract) {
+				old := contractFixtureWithSecondTable()
+				current := contractFixtureWithSecondTable()
+				return old, current
+			},
+			surface: SurfaceTable,
+			change:  "messages",
+			mutate: func(current *shunter.ModuleContract) {
+				current.Schema.Tables[0], current.Schema.Tables[1] = current.Schema.Tables[1], current.Schema.Tables[0]
+			},
+		},
+		{
+			name: "column index",
+			fixture: func() (shunter.ModuleContract, shunter.ModuleContract) {
+				return contractFixture(), contractFixture()
+			},
+			surface: SurfaceColumn,
+			change:  "messages.body",
+			mutate: func(current *shunter.ModuleContract) {
+				current.Schema.Tables[0].Columns[1].Index = 3
+			},
+		},
+		{
+			name: "column reorder",
+			fixture: func() (shunter.ModuleContract, shunter.ModuleContract) {
+				return contractFixture(), contractFixture()
+			},
+			surface: SurfaceColumn,
+			change:  "messages.id",
+			mutate: func(current *shunter.ModuleContract) {
+				current.Schema.Tables[0].Columns[0], current.Schema.Tables[0].Columns[1] = current.Schema.Tables[0].Columns[1], current.Schema.Tables[0].Columns[0]
+			},
+		},
+		{
+			name: "column autoincrement",
+			fixture: func() (shunter.ModuleContract, shunter.ModuleContract) {
+				return contractFixture(), contractFixture()
+			},
+			surface: SurfaceColumn,
+			change:  "messages.id",
+			mutate: func(current *shunter.ModuleContract) {
+				current.Schema.Tables[0].Columns[0].AutoIncrement = true
+			},
+		},
+		{
+			name: "index id",
+			fixture: func() (shunter.ModuleContract, shunter.ModuleContract) {
+				return contractFixture(), contractFixture()
+			},
+			surface: SurfaceIndex,
+			change:  "messages.messages_pk",
+			mutate: func(current *shunter.ModuleContract) {
+				current.Schema.Tables[0].Indexes[0].ID = 5
+			},
+		},
+		{
+			name: "index reorder",
+			fixture: func() (shunter.ModuleContract, shunter.ModuleContract) {
+				old := contractFixtureWithSecondIndex()
+				current := contractFixtureWithSecondIndex()
+				return old, current
+			},
+			surface: SurfaceIndex,
+			change:  "messages.messages_pk",
+			mutate: func(current *shunter.ModuleContract) {
+				current.Schema.Tables[0].Indexes[0], current.Schema.Tables[0].Indexes[1] = current.Schema.Tables[0].Indexes[1], current.Schema.Tables[0].Indexes[0]
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			old, current := tc.fixture()
+			tc.mutate(&current)
+
+			report := Compare(old, current)
+			assertChange(t, report.Changes, ChangeKindBreaking, tc.surface, tc.change)
+
+			plan := Plan(old, current, PlanOptions{})
+			requirePlanEntry(t, plan, ChangeKindBreaking, tc.surface, tc.change)
+		})
 	}
 }
 
@@ -1039,12 +1142,13 @@ func contractFixture() shunter.ModuleContract {
 			Version: 1,
 			Tables: []schema.TableExport{
 				{
+					ID:   0,
 					Name: "messages",
 					Columns: []schema.ColumnExport{
-						{Name: "id", Type: "uint64"},
-						{Name: "body", Type: "string"},
+						{Index: 0, Name: "id", Type: "uint64"},
+						{Index: 1, Name: "body", Type: "string"},
 					},
-					Indexes: []schema.IndexExport{{Name: "messages_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+					Indexes: []schema.IndexExport{{ID: 0, Name: "messages_pk", Columns: []string{"id"}, ColumnOrdinals: []int{0}, Unique: true, Primary: true}},
 				},
 			},
 			Reducers: []schema.ReducerExport{{Name: "send_message"}},
@@ -1132,6 +1236,33 @@ func contractFixtureWithStableMetadata() shunter.ModuleContract {
 			},
 		},
 	}
+	return contract
+}
+
+func contractFixtureWithSecondTable() shunter.ModuleContract {
+	contract := contractFixture()
+	contract.Schema.Tables = append(contract.Schema.Tables, schema.TableExport{
+		ID:   1,
+		Name: "members",
+		Columns: []schema.ColumnExport{
+			{Index: 0, Name: "id", Type: "uint64"},
+			{Index: 1, Name: "display_name", Type: "string"},
+		},
+		Indexes: []schema.IndexExport{
+			{ID: 0, Name: "members_pk", Columns: []string{"id"}, ColumnOrdinals: []int{0}, Unique: true, Primary: true},
+		},
+	})
+	return contract
+}
+
+func contractFixtureWithSecondIndex() shunter.ModuleContract {
+	contract := contractFixture()
+	contract.Schema.Tables[0].Indexes = append(contract.Schema.Tables[0].Indexes, schema.IndexExport{
+		ID:             1,
+		Name:           "messages_body_idx",
+		Columns:        []string{"body"},
+		ColumnOrdinals: []int{1},
+	})
 	return contract
 }
 

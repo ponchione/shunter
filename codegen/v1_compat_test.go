@@ -568,16 +568,16 @@ func v1ContractJSONWithUnknownFields(t *testing.T, data []byte) []byte {
 			new: "  \"schema\": {\n    \"future_schema_field\": [\n      \"ignored\"\n    ],\n    \"version\": 3,",
 		},
 		{
-			old: "      {\n        \"name\": \"messages\",\n        \"columns\": [",
-			new: "      {\n        \"future_table_field\": \"ignored\",\n        \"name\": \"messages\",\n        \"columns\": [",
+			old: "      {\n        \"id\": 0,\n        \"name\": \"messages\",\n        \"columns\": [",
+			new: "      {\n        \"future_table_field\": \"ignored\",\n        \"id\": 0,\n        \"name\": \"messages\",\n        \"columns\": [",
 		},
 		{
-			old: "          {\n            \"name\": \"id\",\n            \"type\": \"uint64\"\n          }",
-			new: "          {\n            \"future_column_field\": \"ignored\",\n            \"name\": \"id\",\n            \"type\": \"uint64\"\n          }",
+			old: "          {\n            \"index\": 0,\n            \"name\": \"id\",\n            \"type\": \"uint64\",\n            \"auto_increment\": true\n          }",
+			new: "          {\n            \"future_column_field\": \"ignored\",\n            \"index\": 0,\n            \"name\": \"id\",\n            \"type\": \"uint64\",\n            \"auto_increment\": true\n          }",
 		},
 		{
-			old: "          {\n            \"name\": \"pk\",\n            \"columns\": [",
-			new: "          {\n            \"future_index_field\": \"ignored\",\n            \"name\": \"pk\",\n            \"columns\": [",
+			old: "          {\n            \"id\": 0,\n            \"name\": \"pk\",\n            \"columns\": [",
+			new: "          {\n            \"future_index_field\": \"ignored\",\n            \"id\": 0,\n            \"name\": \"pk\",\n            \"columns\": [",
 		},
 		{
 			old: "        \"read_policy\": {\n          \"access\": \"permissioned\",",

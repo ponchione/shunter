@@ -32,6 +32,14 @@ func TestRuntimeExportContractIncludesModuleSchemaDeclarationsAndReservedSection
 	if !hasTableExport(contract.Schema.Tables, "messages") {
 		t.Fatalf("tables = %#v, want messages table", contract.Schema.Tables)
 	}
+	if contract.Schema.Tables[0].ID != 0 ||
+		contract.Schema.Tables[0].Columns[0].Index != 0 ||
+		!contract.Schema.Tables[0].Columns[0].AutoIncrement ||
+		contract.Schema.Tables[0].Indexes[0].ID != 0 ||
+		len(contract.Schema.Tables[0].Indexes[0].ColumnOrdinals) != 1 ||
+		contract.Schema.Tables[0].Indexes[0].ColumnOrdinals[0] != 0 {
+		t.Fatalf("messages durable schema identity = %#v, want table/column/index identity exported", contract.Schema.Tables[0])
+	}
 	if !hasReducerExport(contract.Schema.Reducers, "send_message", false) {
 		t.Fatalf("reducers = %#v, want send_message reducer", contract.Schema.Reducers)
 	}
@@ -458,8 +466,9 @@ func TestModuleContractValidationAllowsMigrationMetadataNamesAcrossSurfaces(t *t
 func TestModuleContractValidationAcceptsUUIDColumnType(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Schema.Tables[0].Columns = append(contract.Schema.Tables[0].Columns, schema.ColumnExport{
-		Name: "external_id",
-		Type: "uuid",
+		Index: len(contract.Schema.Tables[0].Columns),
+		Name:  "external_id",
+		Type:  "uuid",
 	})
 
 	if err := ValidateModuleContract(contract); err != nil {
@@ -470,8 +479,9 @@ func TestModuleContractValidationAcceptsUUIDColumnType(t *testing.T) {
 func TestModuleContractValidationAcceptsDurationColumnType(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Schema.Tables[0].Columns = append(contract.Schema.Tables[0].Columns, schema.ColumnExport{
-		Name: "ttl",
-		Type: "duration",
+		Index: len(contract.Schema.Tables[0].Columns),
+		Name:  "ttl",
+		Type:  "duration",
 	})
 
 	if err := ValidateModuleContract(contract); err != nil {
@@ -482,8 +492,9 @@ func TestModuleContractValidationAcceptsDurationColumnType(t *testing.T) {
 func TestModuleContractValidationAcceptsJSONColumnType(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Schema.Tables[0].Columns = append(contract.Schema.Tables[0].Columns, schema.ColumnExport{
-		Name: "metadata",
-		Type: "json",
+		Index: len(contract.Schema.Tables[0].Columns),
+		Name:  "metadata",
+		Type:  "json",
 	})
 
 	if err := ValidateModuleContract(contract); err != nil {
@@ -1493,7 +1504,9 @@ func TestRuntimeExportContractReturnsDetachedSnapshot(t *testing.T) {
 	contract.Module.Metadata["team"] = "mutated"
 	contract.Schema.Tables[0].Name = "mutated_table"
 	contract.Schema.Tables[0].Columns[0].Name = "mutated_column"
+	contract.Schema.Tables[0].Columns[0].AutoIncrement = false
 	contract.Schema.Tables[0].Indexes[0].Columns[0] = "mutated_index_column"
+	contract.Schema.Tables[0].Indexes[0].ColumnOrdinals[0] = 99
 	contract.Schema.Reducers[0].Name = "mutated_reducer"
 	contract.Queries[0].Name = "mutated_query"
 	contract.Views[0].Name = "mutated_view"
@@ -1508,6 +1521,10 @@ func TestRuntimeExportContractReturnsDetachedSnapshot(t *testing.T) {
 	}
 	if !hasTableExport(again.Schema.Tables, "messages") {
 		t.Fatalf("second contract tables = %#v, want messages table", again.Schema.Tables)
+	}
+	if !again.Schema.Tables[0].Columns[0].AutoIncrement ||
+		again.Schema.Tables[0].Indexes[0].ColumnOrdinals[0] != 0 {
+		t.Fatalf("second contract durable schema identity = %#v, want detached metadata", again.Schema.Tables[0])
 	}
 	if !hasReducerExport(again.Schema.Reducers, "send_message", false) {
 		t.Fatalf("second contract reducers = %#v, want send_message reducer", again.Schema.Reducers)

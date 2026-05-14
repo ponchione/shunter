@@ -44,7 +44,7 @@ type ViewDescription struct {
 type ProductSchema = schema.ProductSchemaExport
 
 // ProductColumn is one exported product-schema column.
-type ProductColumn = schema.ColumnExport
+type ProductColumn = schema.ProductColumnExport
 
 const (
 	// ReadResultShapeTable is a table-shaped declared read result.

@@ -82,14 +82,15 @@ func contractOrderMetamorphicFixtures(tb testing.TB) (shunter.ModuleContract, sh
 		"team":   "runtime",
 	}
 	old.Schema.Tables = append(old.Schema.Tables, schema.TableExport{
+		ID:   1,
 		Name: "members",
 		Columns: []schema.ColumnExport{
-			{Name: "id", Type: "uint64"},
-			{Name: "display_name", Type: "string"},
+			{Index: 0, Name: "id", Type: "uint64"},
+			{Index: 1, Name: "display_name", Type: "string"},
 		},
 		Indexes: []schema.IndexExport{
-			{Name: "members_pk", Columns: []string{"id"}, Unique: true, Primary: true},
-			{Name: "members_name", Columns: []string{"display_name"}},
+			{ID: 0, Name: "members_pk", Columns: []string{"id"}, ColumnOrdinals: []int{0}, Unique: true, Primary: true},
+			{ID: 1, Name: "members_name", Columns: []string{"display_name"}, ColumnOrdinals: []int{1}},
 		},
 	})
 	old.Schema.Reducers = append(old.Schema.Reducers, schema.ReducerExport{Name: "update_member"})
@@ -107,15 +108,16 @@ func contractOrderMetamorphicFixtures(tb testing.TB) (shunter.ModuleContract, sh
 		"team":   "platform",
 		"tier":   "gauntlet",
 	}
-	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Name: "sent_at", Type: "timestamp"})
+	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Index: 2, Name: "sent_at", Type: "timestamp"})
 	current.Schema.Tables[1].Columns[1].Type = "bytes"
 	current.Schema.Tables = append(current.Schema.Tables, schema.TableExport{
+		ID:   2,
 		Name: "audit_log",
 		Columns: []schema.ColumnExport{
-			{Name: "id", Type: "uint64"},
-			{Name: "message_id", Type: "uint64"},
+			{Index: 0, Name: "id", Type: "uint64"},
+			{Index: 1, Name: "message_id", Type: "uint64"},
 		},
-		Indexes: []schema.IndexExport{{Name: "audit_log_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+		Indexes: []schema.IndexExport{{ID: 0, Name: "audit_log_pk", Columns: []string{"id"}, ColumnOrdinals: []int{0}, Unique: true, Primary: true}},
 	})
 	current.Schema.Reducers = append(current.Schema.Reducers, schema.ReducerExport{Name: "archive_message"})
 	current.Queries[0].SQL = "SELECT * FROM messages"
@@ -219,11 +221,6 @@ func contractOrderMetamorphicFixtures(tb testing.TB) (shunter.ModuleContract, sh
 }
 
 func shuffleContractDeclarationOrder(contract shunter.ModuleContract, r *rand.Rand) shunter.ModuleContract {
-	shuffleMetamorphicSlice(r, contract.Schema.Tables)
-	for i := range contract.Schema.Tables {
-		shuffleMetamorphicSlice(r, contract.Schema.Tables[i].Columns)
-		shuffleMetamorphicSlice(r, contract.Schema.Tables[i].Indexes)
-	}
 	shuffleMetamorphicSlice(r, contract.Schema.Reducers)
 	shuffleMetamorphicSlice(r, contract.Queries)
 	shuffleMetamorphicSlice(r, contract.Views)

@@ -230,7 +230,16 @@ Validation:
 - `rtk go test ./...` if reducer registry interfaces or root scheduler wiring
   change
 
-5. [ ] Make contract diffing compare durable schema identity.
+5. [x] Make contract diffing compare durable schema identity.
+
+Done: Added durable table/column/index identity fields to `schema.SchemaExport`
+and root contract copy/validation helpers; split product-schema columns from
+table columns; made `contractdiff` treat table/column/index order, IDs, column
+indexes, and `AutoIncrement` changes as breaking; updated metamorphic coverage,
+contract/codegen JSON fixtures, and root/schema/contractdiff regressions.
+Validation passed: `rtk go test ./contractdiff`;
+`rtk go test ./contractworkflow ./cmd/shunter`; `rtk go test . ./schema`;
+`rtk go vet ./contractdiff ./schema .`; `rtk go test ./...`.
 
 Owner: `contractdiff`, `schema`, root contract/export helpers
 

@@ -12,51 +12,74 @@
     "version": 3,
     "tables": [
       {
+        "id": 0,
         "name": "messages",
         "columns": [
           {
+            "index": 0,
             "name": "id",
-            "type": "uint64"
+            "type": "uint64",
+            "auto_increment": true
           },
           {
+            "index": 1,
             "name": "sender",
-            "type": "string"
+            "type": "string",
+            "auto_increment": false
           },
           {
+            "index": 2,
             "name": "topic",
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "auto_increment": false
           },
           {
+            "index": 3,
             "name": "body",
-            "type": "string"
+            "type": "string",
+            "auto_increment": false
           },
           {
+            "index": 4,
             "name": "sent_at",
-            "type": "timestamp"
+            "type": "timestamp",
+            "auto_increment": false
           }
         ],
         "indexes": [
           {
+            "id": 0,
             "name": "pk",
             "columns": [
               "id"
+            ],
+            "column_ordinals": [
+              0
             ],
             "unique": true,
             "primary": true
           },
           {
+            "id": 1,
             "name": "messages_sender_idx",
             "columns": [
               "sender"
+            ],
+            "column_ordinals": [
+              1
             ],
             "unique": false,
             "primary": false
           },
           {
+            "id": 2,
             "name": "messages_sent_at_idx",
             "columns": [
               "sent_at"
+            ],
+            "column_ordinals": [
+              4
             ],
             "unique": false,
             "primary": false
@@ -70,26 +93,37 @@
         }
       },
       {
+        "id": 1,
         "name": "sys_clients",
         "columns": [
           {
+            "index": 0,
             "name": "connection_id",
-            "type": "bytes"
+            "type": "bytes",
+            "auto_increment": false
           },
           {
+            "index": 1,
             "name": "identity",
-            "type": "bytes"
+            "type": "bytes",
+            "auto_increment": false
           },
           {
+            "index": 2,
             "name": "connected_at",
-            "type": "int64"
+            "type": "int64",
+            "auto_increment": false
           }
         ],
         "indexes": [
           {
+            "id": 0,
             "name": "pk",
             "columns": [
               "connection_id"
+            ],
+            "column_ordinals": [
+              0
             ],
             "unique": true,
             "primary": true
@@ -101,34 +135,49 @@
         }
       },
       {
+        "id": 2,
         "name": "sys_scheduled",
         "columns": [
           {
+            "index": 0,
             "name": "schedule_id",
-            "type": "uint64"
+            "type": "uint64",
+            "auto_increment": true
           },
           {
+            "index": 1,
             "name": "reducer_name",
-            "type": "string"
+            "type": "string",
+            "auto_increment": false
           },
           {
+            "index": 2,
             "name": "args",
-            "type": "bytes"
+            "type": "bytes",
+            "auto_increment": false
           },
           {
+            "index": 3,
             "name": "next_run_at_ns",
-            "type": "int64"
+            "type": "int64",
+            "auto_increment": false
           },
           {
+            "index": 4,
             "name": "repeat_ns",
-            "type": "int64"
+            "type": "int64",
+            "auto_increment": false
           }
         ],
         "indexes": [
           {
+            "id": 0,
             "name": "pk",
             "columns": [
               "schedule_id"
+            ],
+            "column_ordinals": [
+              0
             ],
             "unique": true,
             "primary": true

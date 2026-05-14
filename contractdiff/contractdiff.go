@@ -143,11 +143,15 @@ func compareTables(out *Report, oldTables, currentTables []schema.TableExport) {
 	oldByName := tableMap(oldTables)
 	currentByName := tableMap(currentTables)
 
+	compareTableOrder(out, oldTables, currentTables)
 	for name, current := range currentByName {
 		old, ok := oldByName[name]
 		if !ok {
 			out.add(ChangeKindAdditive, SurfaceTable, name, "table added")
 			continue
+		}
+		if old.ID != current.ID {
+			out.add(ChangeKindBreaking, SurfaceTable, name, fmt.Sprintf("table id changed from %d to %d", old.ID, current.ID))
 		}
 		compareTableReadPolicy(out, old.Name, old.ReadPolicy, current.ReadPolicy)
 		compareColumns(out, old.Name, old.Columns, current.Columns)
@@ -156,6 +160,16 @@ func compareTables(out *Report, oldTables, currentTables []schema.TableExport) {
 	for name := range oldByName {
 		if _, ok := currentByName[name]; !ok {
 			out.add(ChangeKindBreaking, SurfaceTable, name, "table removed")
+		}
+	}
+}
+
+func compareTableOrder(out *Report, oldTables, currentTables []schema.TableExport) {
+	currentPositions := tablePositionMap(currentTables)
+	for oldPos, table := range oldTables {
+		currentPos, ok := currentPositions[table.Name]
+		if ok && oldPos != currentPos {
+			out.add(ChangeKindBreaking, SurfaceTable, table.Name, fmt.Sprintf("table order changed from %d to %d", oldPos, currentPos))
 		}
 	}
 }
@@ -200,6 +214,7 @@ func tableAccessRank(policy schema.ReadPolicy) int {
 func compareIndexes(out *Report, tableName string, oldIndexes, currentIndexes []schema.IndexExport) {
 	oldByName := indexMap(oldIndexes)
 	currentByName := indexMap(currentIndexes)
+	compareIndexOrder(out, tableName, oldIndexes, currentIndexes)
 	for name, current := range currentByName {
 		old, ok := oldByName[name]
 		indexName := tableName + "." + name
@@ -221,6 +236,7 @@ func compareIndexes(out *Report, tableName string, oldIndexes, currentIndexes []
 func compareColumns(out *Report, tableName string, oldColumns, currentColumns []schema.ColumnExport) {
 	oldByName := columnMap(oldColumns)
 	currentByName := columnMap(currentColumns)
+	compareColumnOrder(out, tableName, oldColumns, currentColumns)
 	for name, current := range currentByName {
 		old, ok := oldByName[name]
 		columnName := tableName + "." + name
@@ -231,13 +247,39 @@ func compareColumns(out *Report, tableName string, oldColumns, currentColumns []
 		if old.Type != current.Type {
 			out.add(ChangeKindBreaking, SurfaceColumn, columnName, fmt.Sprintf("column type changed from %s to %s", old.Type, current.Type))
 		}
+		if old.Index != current.Index {
+			out.add(ChangeKindBreaking, SurfaceColumn, columnName, fmt.Sprintf("column index changed from %d to %d", old.Index, current.Index))
+		}
 		if old.Nullable != current.Nullable {
 			out.add(ChangeKindBreaking, SurfaceColumn, columnName, fmt.Sprintf("column nullable changed from %t to %t", old.Nullable, current.Nullable))
+		}
+		if old.AutoIncrement != current.AutoIncrement {
+			out.add(ChangeKindBreaking, SurfaceColumn, columnName, fmt.Sprintf("column autoincrement changed from %t to %t", old.AutoIncrement, current.AutoIncrement))
 		}
 	}
 	for name := range oldByName {
 		if _, ok := currentByName[name]; !ok {
 			out.add(ChangeKindBreaking, SurfaceColumn, tableName+"."+name, "column removed")
+		}
+	}
+}
+
+func compareColumnOrder(out *Report, tableName string, oldColumns, currentColumns []schema.ColumnExport) {
+	currentPositions := columnPositionMap(currentColumns)
+	for oldPos, column := range oldColumns {
+		currentPos, ok := currentPositions[column.Name]
+		if ok && oldPos != currentPos {
+			out.add(ChangeKindBreaking, SurfaceColumn, tableName+"."+column.Name, fmt.Sprintf("column order changed from %d to %d", oldPos, currentPos))
+		}
+	}
+}
+
+func compareIndexOrder(out *Report, tableName string, oldIndexes, currentIndexes []schema.IndexExport) {
+	currentPositions := indexPositionMap(currentIndexes)
+	for oldPos, index := range oldIndexes {
+		currentPos, ok := currentPositions[index.Name]
+		if ok && oldPos != currentPos {
+			out.add(ChangeKindBreaking, SurfaceIndex, tableName+"."+index.Name, fmt.Sprintf("index order changed from %d to %d", oldPos, currentPos))
 		}
 	}
 }
@@ -497,8 +539,16 @@ func tableMap(tables []schema.TableExport) map[string]schema.TableExport {
 	return mapBy(tables, func(table schema.TableExport) string { return table.Name })
 }
 
+func tablePositionMap(tables []schema.TableExport) map[string]int {
+	return positionMapBy(tables, func(table schema.TableExport) string { return table.Name })
+}
+
 func columnMap(columns []schema.ColumnExport) map[string]schema.ColumnExport {
 	return mapBy(columns, func(column schema.ColumnExport) string { return column.Name })
+}
+
+func columnPositionMap(columns []schema.ColumnExport) map[string]int {
+	return positionMapBy(columns, func(column schema.ColumnExport) string { return column.Name })
 }
 
 func reducerMap(reducers []schema.ReducerExport) map[string]schema.ReducerExport {
@@ -507,6 +557,10 @@ func reducerMap(reducers []schema.ReducerExport) map[string]schema.ReducerExport
 
 func indexMap(indexes []schema.IndexExport) map[string]schema.IndexExport {
 	return mapBy(indexes, func(index schema.IndexExport) string { return index.Name })
+}
+
+func indexPositionMap(indexes []schema.IndexExport) map[string]int {
+	return positionMapBy(indexes, func(index schema.IndexExport) string { return index.Name })
 }
 
 func queryMap(queries []shunter.QueryDescription) map[string]shunter.QueryDescription {
@@ -535,6 +589,17 @@ func mapBy[T any](values []T, key func(T) string) map[string]T {
 	out := make(map[string]T, len(values))
 	for _, value := range values {
 		out[key(value)] = value
+	}
+	return out
+}
+
+func positionMapBy[T any](values []T, key func(T) string) map[string]int {
+	out := make(map[string]int, len(values))
+	for i, value := range values {
+		name := key(value)
+		if _, exists := out[name]; !exists {
+			out[name] = i
+		}
 	}
 	return out
 }
@@ -583,13 +648,15 @@ func readPoliciesSemanticallyEqual(oldPolicy, currentPolicy schema.ReadPolicy) b
 }
 
 func indexesEqual(old, current schema.IndexExport) bool {
-	return old.Unique == current.Unique &&
+	return old.ID == current.ID &&
+		old.Unique == current.Unique &&
 		old.Primary == current.Primary &&
-		slices.Equal(old.Columns, current.Columns)
+		slices.Equal(old.Columns, current.Columns) &&
+		slices.Equal(old.ColumnOrdinals, current.ColumnOrdinals)
 }
 
 func indexSignature(index schema.IndexExport) string {
-	return fmt.Sprintf("columns=%q unique=%t primary=%t", index.Columns, index.Unique, index.Primary)
+	return fmt.Sprintf("id=%d columns=%q column_ordinals=%v unique=%t primary=%t", index.ID, index.Columns, index.ColumnOrdinals, index.Unique, index.Primary)
 }
 
 func readPolicySignature(policy schema.ReadPolicy) string {

@@ -52,7 +52,7 @@ func TestPolicyWarnsWhenBreakingChangeDeclaredCompatible(t *testing.T) {
 func TestPolicyWarnsWhenAdditiveChangeDeclaredBreaking(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()
-	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Name: "sent_at", Type: "timestamp"})
+	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Index: 2, Name: "sent_at", Type: "timestamp"})
 	current.Migrations.Declarations = []shunter.MigrationContractDeclaration{
 		{
 			Surface: shunter.MigrationSurfaceTable,

@@ -46,6 +46,14 @@ func TestRuntimeExportSchemaWorksBeforeStartAndIsDetached(t *testing.T) {
 	if !hasTableExport(export.Tables, "messages") {
 		t.Fatalf("tables = %#v, want messages table", export.Tables)
 	}
+	if export.Tables[0].ID != 0 ||
+		export.Tables[0].Columns[0].Index != 0 ||
+		!export.Tables[0].Columns[0].AutoIncrement ||
+		export.Tables[0].Indexes[0].ID != 0 ||
+		len(export.Tables[0].Indexes[0].ColumnOrdinals) != 1 ||
+		export.Tables[0].Indexes[0].ColumnOrdinals[0] != 0 {
+		t.Fatalf("messages durable schema identity = %#v, want table/column/index identity exported", export.Tables[0])
+	}
 	if len(export.Reducers) != 2 {
 		t.Fatalf("reducers = %#v, want normal reducer plus lifecycle", export.Reducers)
 	}
@@ -57,8 +65,12 @@ func TestRuntimeExportSchemaWorksBeforeStartAndIsDetached(t *testing.T) {
 	}
 
 	export.Tables[0].Name = "mutated"
+	export.Tables[0].Indexes[0].ColumnOrdinals[0] = 99
 	if got := rt.ExportSchema().Tables[0].Name; got != "messages" {
 		t.Fatalf("second ExportSchema table name = %q, want detached messages", got)
+	}
+	if got := rt.ExportSchema().Tables[0].Indexes[0].ColumnOrdinals[0]; got != 0 {
+		t.Fatalf("second ExportSchema index column ordinal = %d, want detached 0", got)
 	}
 }
 
