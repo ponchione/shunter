@@ -42,6 +42,7 @@ func validateStructure(b *Builder) []error {
 		// Column checks.
 		colNames := make(map[string]bool)
 		pkCount := 0
+		autoIncrementCount := 0
 		for _, c := range t.Columns {
 			if c.Name == "" {
 				errs = append(errs, fmt.Errorf("table %q: %w", t.Name, ErrEmptyColumnName))
@@ -61,6 +62,7 @@ func validateStructure(b *Builder) []error {
 				pkCount++
 			}
 			if c.AutoIncrement {
+				autoIncrementCount++
 				if c.Nullable {
 					errs = append(errs, fmt.Errorf("table %q column %q: %w", t.Name, c.Name, ErrNullableAutoIncrement))
 				}
@@ -84,6 +86,9 @@ func validateStructure(b *Builder) []error {
 		}
 		if pkCount > 1 {
 			errs = append(errs, fmt.Errorf("table %q: %w", t.Name, ErrDuplicatePrimaryKey))
+		}
+		if autoIncrementCount > 1 {
+			errs = append(errs, fmt.Errorf("table %q: %w", t.Name, ErrMultipleAutoIncrement))
 		}
 
 		// Index checks.

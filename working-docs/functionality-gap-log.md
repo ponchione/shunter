@@ -79,7 +79,12 @@ Validation:
 - `rtk go vet ./auth`
 - `rtk go test ./protocol` only if protocol auth behavior changes
 
-2. [ ] Reject multiple `AutoIncrement` columns per table.
+2. [x] Reject multiple `AutoIncrement` columns per table.
+
+Done: Added `ErrMultipleAutoIncrement` in `schema/errors.go`, table-level
+auto-increment counting in `schema/validate_structure.go`, and a regression in
+`schema/audit_regression_test.go` for two keyed auto-increment columns.
+Validation passed: `rtk go test ./schema`; `rtk go vet ./schema`.
 
 Owner: `schema`
 

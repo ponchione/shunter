@@ -7,6 +7,7 @@ var (
 	ErrInvalidTableName          = errors.New("invalid table name")
 	ErrDuplicateTableName        = errors.New("duplicate table name")
 	ErrDuplicatePrimaryKey       = errors.New("at most one primarykey column per table")
+	ErrMultipleAutoIncrement     = errors.New("at most one autoincrement column per table")
 	ErrAutoIncrementType         = errors.New("autoincrement requires an integer-typed column")
 	ErrAutoIncrementRequiresKey  = errors.New("autoincrement requires primarykey or unique")
 	ErrNullableAutoIncrement     = errors.New("autoincrement columns must not be nullable")

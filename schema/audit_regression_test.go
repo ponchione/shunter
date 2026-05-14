@@ -131,6 +131,25 @@ func TestBuildRejectsAutoIncrementWithoutKey(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsMultipleAutoIncrementColumns(t *testing.T) {
+	b := NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(TableDefinition{
+		Name: "jobs",
+		Columns: []ColumnDefinition{
+			{Name: "id", Type: KindUint64, PrimaryKey: true, AutoIncrement: true},
+			{Name: "sequence", Type: KindUint64, AutoIncrement: true},
+		},
+		Indexes: []IndexDefinition{
+			{Name: "unique_sequence", Columns: []string{"sequence"}, Unique: true},
+		},
+	})
+	_, err := b.Build(EngineOptions{})
+	if err == nil || !errors.Is(err, ErrMultipleAutoIncrement) {
+		t.Fatalf("expected ErrMultipleAutoIncrement, got %v", err)
+	}
+}
+
 func TestBuildRejectsExplicitIndexContainingPrimaryKeyColumn(t *testing.T) {
 	b := NewBuilder()
 	b.SchemaVersion(1)
