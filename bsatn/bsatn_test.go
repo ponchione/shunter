@@ -537,19 +537,37 @@ func TestDecodeJSONRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestDecodeValueRejectsHugeTruncatedLengthWithoutAllocation(t *testing.T) {
+func TestDecodeValueRejectsHugeLengthBeforePayloadRead(t *testing.T) {
 	for _, tag := range []byte{TagString, TagBytes, TagJSON} {
 		raw := []byte{tag, 0xff, 0xff, 0xff, 0xff}
 		_, err := DecodeValue(bytes.NewReader(raw))
-		if !errors.Is(err, io.ErrUnexpectedEOF) {
-			t.Fatalf("DecodeValue tag %d err = %v, want io.ErrUnexpectedEOF", tag, err)
+		if !errors.Is(err, ErrValueTooLarge) {
+			t.Fatalf("DecodeValue tag %d err = %v, want ErrValueTooLarge", tag, err)
 		}
 	}
+}
 
-	raw := []byte{TagArrayString, 0xff, 0xff, 0xff, 0xff}
+func TestDecodeValueRejectsHugeArrayStringCountBeforePayloadRead(t *testing.T) {
+	var count [4]byte
+	binary.LittleEndian.PutUint32(count[:], maxDecodedArrayStringItems+1)
+	raw := append([]byte{TagArrayString}, count[:]...)
 	_, err := DecodeValue(bytes.NewReader(raw))
-	if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Fatalf("DecodeValue ArrayString err = %v, want EOF", err)
+	if !errors.Is(err, ErrValueTooLarge) {
+		t.Fatalf("DecodeValue ArrayString err = %v, want ErrValueTooLarge", err)
+	}
+}
+
+func TestDecodeValueRejectsArrayStringPayloadBudgetBeforePayloadRead(t *testing.T) {
+	var u32 [4]byte
+	raw := []byte{TagArrayString}
+	binary.LittleEndian.PutUint32(u32[:], 1)
+	raw = append(raw, u32[:]...)
+	binary.LittleEndian.PutUint32(u32[:], maxDecodedValuePayloadBytes)
+	raw = append(raw, u32[:]...)
+
+	_, err := DecodeValue(bytes.NewReader(raw))
+	if !errors.Is(err, ErrValueTooLarge) {
+		t.Fatalf("DecodeValue ArrayString err = %v, want ErrValueTooLarge", err)
 	}
 }
 
@@ -563,8 +581,8 @@ func TestDecodeProductValueFromBytesRejectsImpossibleArrayStringCount(t *testing
 	raw := []byte{TagArrayString, 0xff, 0xff, 0xff, 0xff}
 
 	_, err := DecodeProductValueFromBytes(raw, ts)
-	if !errors.Is(err, ErrRowLengthMismatch) {
-		t.Fatalf("DecodeProductValueFromBytes err = %v, want ErrRowLengthMismatch", err)
+	if !errors.Is(err, ErrValueTooLarge) {
+		t.Fatalf("DecodeProductValueFromBytes err = %v, want ErrValueTooLarge", err)
 	}
 
 	raw = []byte{TagArrayString, 2, 0, 0, 0}

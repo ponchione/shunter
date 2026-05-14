@@ -5,12 +5,18 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"unicode/utf8"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
+)
+
+const (
+	maxDecodedValuePayloadBytes = 64 << 20
+	maxDecodedArrayStringItems  = 1 << 20
 )
 
 // DecodeValue reads a BSATN-encoded Value.
@@ -202,12 +208,24 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 			return types.Value{}, err
 		}
 		count := binary.LittleEndian.Uint32(buf[:4])
+		if count > maxDecodedArrayStringItems {
+			return types.Value{}, decodedValueTooLarge("array string count", uint64(count), maxDecodedArrayStringItems)
+		}
+		remaining := uint64(maxDecodedValuePayloadBytes - 4)
 		xs := make([]string, 0, initialArrayStringCap(count))
 		for range count {
+			if remaining < 4 {
+				return types.Value{}, decodedValueTooLarge("array string payload", uint64(maxDecodedValuePayloadBytes)+4-remaining, maxDecodedValuePayloadBytes)
+			}
 			if _, err := io.ReadFull(r, buf[:4]); err != nil {
 				return types.Value{}, err
 			}
+			remaining -= 4
 			n := binary.LittleEndian.Uint32(buf[:4])
+			if uint64(n) > remaining {
+				return types.Value{}, decodedValueTooLarge("array string payload", uint64(maxDecodedValuePayloadBytes)+uint64(n)-remaining, maxDecodedValuePayloadBytes)
+			}
+			remaining -= uint64(n)
 			data, err := readLengthPrefixedPayload(r, n)
 			if err != nil {
 				return types.Value{}, err
@@ -243,17 +261,8 @@ func readLengthPrefixedPayload(r io.Reader, n uint32) ([]byte, error) {
 	if n == 0 {
 		return []byte{}, nil
 	}
-	const maxDirectPayloadRead = 64 << 20
-	if n > maxDirectPayloadRead {
-		lr := &io.LimitedReader{R: r, N: int64(n)}
-		var buf bytes.Buffer
-		if _, err := buf.ReadFrom(lr); err != nil {
-			return nil, err
-		}
-		if lr.N != 0 {
-			return nil, io.ErrUnexpectedEOF
-		}
-		return buf.Bytes(), nil
+	if n > maxDecodedValuePayloadBytes {
+		return nil, decodedValueTooLarge("payload", uint64(n), maxDecodedValuePayloadBytes)
 	}
 	data := make([]byte, n)
 	if _, err := io.ReadFull(r, data); err != nil {
@@ -263,6 +272,10 @@ func readLengthPrefixedPayload(r io.Reader, n uint32) ([]byte, error) {
 		return nil, err
 	}
 	return data, nil
+}
+
+func decodedValueTooLarge(label string, got uint64, max uint64) error {
+	return fmt.Errorf("%w: %s length %d exceeds max %d", ErrValueTooLarge, label, got, max)
 }
 
 func initialArrayStringCap(count uint32) int {
