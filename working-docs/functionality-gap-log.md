@@ -375,7 +375,13 @@ Do not:
 Validation:
 - `rtk git diff --check -- working-docs/specs`
 
-8. [ ] Update SPEC-005 SQL read-surface guidance.
+8. [x] Update SPEC-005 SQL read-surface guidance.
+
+Done: Updated `working-docs/specs/005-protocol/SPEC-005-protocol.md`
+§7.1.1, §7.4, and §16 to describe the shared SQL parser, per-read-surface
+feature gates, table-shaped raw subscription limits, current one-off/declared
+read support, declared parameters, and SQL non-goals. Validation passed:
+`rtk git diff --check -- working-docs/specs`.
 
 Owner: `working-docs/specs`, `query/sql`, `internal/queryplan`, `protocol`
 

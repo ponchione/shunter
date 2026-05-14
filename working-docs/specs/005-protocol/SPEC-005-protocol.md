@@ -335,18 +335,32 @@ After `SubscribeSingleApplied`, the caller receives the heavy `TransactionUpdate
 The current v1 wire carries a **SQL query string** rather than the older structured `Query{table_name, predicates[]}` value. The handler parses the string with `query/sql.Parse` and lowers it into the same SPEC-004 predicate tree the structured wire used to build directly. The structured wire shape is gone; only the `QueryString` field exists on the envelope.
 
 ```
-query_string : string    — SQL SELECT against exactly one table; single-row result set per match
+query_string : string    — SQL SELECT; admitted features depend on the read surface
 ```
 
-v1 SQL subset supported by `query/sql.Parse` for subscriptions:
-- `SELECT * FROM <table>` or `SELECT <qualifier>.* FROM <table> [alias] [JOIN <table> [alias] [ON <qcol> = <qcol>]]`
-- optional single-table `WHERE` clause combining column-equality, column-range (`<`, `<=`, `>`, `>=`), `AND`, and `OR`
-- optional join `WHERE` literal filters for `INNER JOIN ... ON ...`; cross-join `WHERE` is rejected on the subscription path
-- the outermost single-table expression may be a single range/equality predicate, an `AND` tree, or an `OR` tree
+`query/sql.Parse` is shared by raw subscriptions, one-off reads, declared
+queries, and declared views. It accepts a bounded `SELECT` surface with table
+aliases, `AS` output aliases, qualified stars, explicit projection columns,
+`COUNT(*)`, `COUNT(column)`, `COUNT(DISTINCT column)`, `SUM(column)`, inner
+joins, cross joins, self joins, multi-way joins, boolean predicates, `IS NULL`
+/ `IS NOT NULL`, `ORDER BY`, `LIMIT`, `OFFSET`, quoted identifiers, the
+`:sender` caller placeholder, and app parameter placeholders used by declared
+read templates.
+
+Read surfaces gate the parsed features:
+- raw `SubscribeSingle` / `SubscribeMulti` queries must remain table-shaped:
+  `SELECT *` or one qualified-star projection from the returned relation. They
+  reject explicit column projections, aggregates, `ORDER BY`, `LIMIT`, and
+  `OFFSET` before registration.
+- `OneOffQuery`, `DeclaredQuery`, and declared-view validation admit the wider
+  projection, aggregate, ordering, limit, offset, and multi-relation surface.
+  Declared reads may declare and bind app parameter placeholders; raw SQL
+  protocol messages reject undeclared app parameters. `:sender` is reserved for
+  caller identity and is not an app parameter.
 
 SQL identifier lookup is byte-exact after quoted-identifier unescaping. Table names, column names, aliases, and qualifiers must match the declared schema or relation alias exactly; quoting preserves the written spelling and does not enable case-folded lookup. Once a relation alias is introduced, the base table name is no longer an in-scope qualifier for SQL WHERE or projection references.
 
-Normalization into the SPEC-004 model:
+Raw subscription normalization into the SPEC-004 model:
 - no `WHERE` clause → `AllRows(table_name)`
 - single equality → `ColEq(table_name, column, value)`
 - single range → `ColLt` / `ColLe` / `ColGt` / `ColGe`
@@ -355,9 +369,9 @@ Normalization into the SPEC-004 model:
 - indexed `INNER JOIN ... ON left.col = right.col` → SPEC-004 `Join`; unindexed subscription joins fail before registration
 - two-relation `JOIN` without `ON` and without `WHERE` → SPEC-004 `CrossJoin`
 
-Still rejected in protocol v1 (each as `SubscriptionError`):
-- cross-join `WHERE`, inner-join `WHERE` field-vs-field comparisons, and joins with more than two relations
-- aggregates, column-list projections, ordering, limits, offsets
+Current SQL non-goals are DML, `SET` / `SHOW`, scalar functions, arithmetic,
+subqueries, set operations, outer joins, natural joins, `GROUP BY`, `HAVING`,
+JSON-path expressions, full-text search, transactions, and stored procedures.
 
 `SubscribeSingle` validation MUST fail with `SubscriptionError` if:
 - `query_string` fails to parse as SQL
@@ -450,7 +464,12 @@ query_string: string    — SQL query per §7.1.1
 
 The executor runs a read-only query against `CommittedState.Snapshot()` directly. This read is not atomic with subscription registration because it does not register subscription state; it only returns a point-in-time result from committed state.
 
-Implementation status: the one-off SELECT surface is intentionally broader than the subscription SQL subset. Current query-only widenings include `LIMIT`, `OFFSET` after optional `LIMIT`, column projections, `COUNT(*) [AS] alias`, `COUNT(<column>) [AS] alias`, `COUNT(DISTINCT <column>) [AS] alias`, `SUM(<column>) [AS] alias`, multi-column `ORDER BY` over resolved projected-table columns or unique output names from explicit column projections, `ORDER BY` over a one-row aggregate output alias, optional `ASC` / `DESC`, unindexed two-table joins, cross-join `WHERE` column equality, and the bounded cross-join `WHERE` equality-plus-one-column-literal-filter shape; subscriptions still reject `ORDER BY`, `OFFSET`, aggregates, and cross-join `WHERE` before executor registration. Inner-join `WHERE` field-vs-field comparisons and broader cross-join boolean expressions are rejected at compile time.
+Implementation status: `OneOffQuery` uses the wider read surface from §7.1.1:
+column projections, `COUNT` / `SUM`, multi-column `ORDER BY`, `LIMIT`,
+`OFFSET`, aliases, self joins, cross joins, and multi-way joins. Raw
+subscriptions share the parser but keep the table-shaped result gate and reject
+projections, aggregates, ordering, limits, and offsets before executor
+registration.
 
 For empty aggregate inputs, `COUNT(*)`, `COUNT(<column>)`, and
 `COUNT(DISTINCT <column>)` return `0`. `SUM(<column>)` returns zero in the
@@ -1019,7 +1038,11 @@ Subscribe and OneOffQuery handlers need to resolve table names to IDs and valida
 - **TransactionUpdate shape:** v1 uses a heavy/light envelope split (§8.5, §8.8). `Failed` collapses Shunter's internal `failed_user`/`failed_panic`/`not_found` distinction onto one arm with the detail carried in the error string.
 - **Subscription RPC surface:** v1 exposes `SubscribeSingle`, `SubscribeMulti`, `UnsubscribeSingle`, `UnsubscribeMulti`, `CallReducer`, `OneOffQuery`, `DeclaredQuery`, and `SubscribeDeclaredView` (§6, §7). V2 adds parameterized declared-read request messages without changing raw SQL request shapes. There is no legacy single `Subscribe` / `Unsubscribe` wire family or separate `QuerySetId` protocol family.
 - **CallReducer wire shape:** v1 `CallReducer` carries `{request_id, reducer_name, args, flags}` (§7.3). The `flags` byte matches the reference `CallReducerFlags` (FullUpdate / NoSuccessNotify); no other flag values are defined in v1.
-- **OneOffQuery language:** v1 `OneOffQuery` uses the same SQL subset as `SubscribeSingle` / `SubscribeMulti` (§7.4 / §7.1.1), giving Shunter clients one read-query surface.
+- **SQL read surfaces:** v1 uses one SQL parser across raw subscriptions,
+  one-off reads, declared queries, and declared views (§7.1.1). Admission gates
+  differ by surface: raw subscriptions stay table-shaped, while one-off and
+  declared reads admit projections, aggregates, ordering, limits, offsets, and
+  the wider join surface.
 - **Close-code policy:** Shunter's documented close behavior includes `1000`, `1002`, `1008`, and `1011` with Shunter-specific reason strings for protocol/policy failures (§11.1). It does not try to mirror the reference runtime's full close-code/reason matrix.
 - **Energy model:** v1 has no energy subsystem. There is no `energy_quanta_used` field and no `UpdateStatus::OutOfEnergy` arm. reference-style hosted billing/metering is not a Shunter product goal.
 - **ConnectionID reuse semantics:** reusing `connection_id` on reconnect is only a client hint for future resume features; it has no server-side resume semantics in v1 (§2.3, §11.3).
