@@ -572,6 +572,9 @@ func TestStartup_ReplayEnqueuesPastDueBeforeAccept(t *testing.T) {
 		schedules: []sysScheduledSeed{
 			{id: 42, reducerName: "past-due", nextRunAtNs: time.Unix(50, 0).UnixNano()},
 		},
+		reducers: []RegisteredReducer{
+			noopRegisteredReducer("past-due"),
+		},
 	}
 	h := newStartupHarness(t, seed)
 	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
@@ -591,6 +594,40 @@ func TestStartup_ReplayEnqueuesPastDueBeforeAccept(t *testing.T) {
 		}
 	default:
 		t.Fatal("past-due scheduled row was not enqueued during Startup replay")
+	}
+}
+
+func TestStartup_InvalidRecoveredSchedulesDeletedBeforeReplay(t *testing.T) {
+	tests := []struct {
+		name        string
+		reducerName string
+	}{
+		{name: "unknown", reducerName: "missing-recovered"},
+		{name: "lifecycle", reducerName: "OnDisconnect"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seed := startupSeed{
+				schedules: []sysScheduledSeed{
+					{id: 88, reducerName: tt.reducerName, nextRunAtNs: time.Unix(50, 0).UnixNano()},
+				},
+			}
+			h := newStartupHarness(t, seed)
+			if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+				t.Fatalf("Startup: %v", err)
+			}
+			if rows := h.sysScheduledRows(); len(rows) != 0 {
+				t.Fatalf("invalid recovered schedule rows=%d, want 0", len(rows))
+			}
+			select {
+			case cmd := <-h.exec.inbox:
+				t.Fatalf("invalid recovered schedule enqueued %+v, want cleanup before replay", cmd)
+			default:
+			}
+			if got := len(h.dur.txIDs); got != 1 {
+				t.Fatalf("invalid recovered schedule cleanup commits=%d, want 1", got)
+			}
+		})
 	}
 }
 
@@ -708,6 +745,10 @@ func TestStartup_ReplayOverflowDoesNotBlockDanglingClientSweep(t *testing.T) {
 		schedules: []sysScheduledSeed{
 			{id: 41, reducerName: "past-due-a", nextRunAtNs: time.Unix(50, 0).UnixNano()},
 			{id: 42, reducerName: "past-due-b", nextRunAtNs: time.Unix(60, 0).UnixNano()},
+		},
+		reducers: []RegisteredReducer{
+			noopRegisteredReducer("past-due-a"),
+			noopRegisteredReducer("past-due-b"),
 		},
 	}
 	h := newStartupHarness(t, seed)
@@ -2224,6 +2265,9 @@ func TestStartup_NilSchedulerSkipsReplay(t *testing.T) {
 		schedules: []sysScheduledSeed{
 			{id: 1, reducerName: "past-due", nextRunAtNs: time.Unix(50, 0).UnixNano()},
 		},
+		reducers: []RegisteredReducer{
+			noopRegisteredReducer("past-due"),
+		},
 	}
 	h := newStartupHarness(t, seed)
 	if err := h.exec.Startup(context.Background(), nil); err != nil {
@@ -2847,6 +2891,13 @@ func recordStringReducer(name string, ch chan<- string) RegisteredReducer {
 			ch <- name
 			return nil, nil
 		}),
+	}
+}
+
+func noopRegisteredReducer(name string) RegisteredReducer {
+	return RegisteredReducer{
+		Name:    name,
+		Handler: noopReducerHandler,
 	}
 }
 

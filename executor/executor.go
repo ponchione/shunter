@@ -158,6 +158,10 @@ func (e *Executor) Startup(ctx context.Context, scheduler *Scheduler) error {
 			e.startupErr = err
 			return
 		}
+		if err := e.sweepInvalidSchedules(ctx); err != nil {
+			e.startupErr = err
+			return
+		}
 		if scheduler != nil {
 			e.attachScheduler(scheduler)
 			scheduler.ReplayFromCommitted()

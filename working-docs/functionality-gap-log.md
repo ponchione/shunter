@@ -173,7 +173,15 @@ Validation:
 - `rtk go test ./...` if validation changes affect protocol, contract, or root
   runtime behavior
 
-4. [ ] Prevent invalid scheduled reducer retry loops.
+4. [x] Prevent invalid scheduled reducer retry loops.
+
+Done: Wired `schedulerHandle` target validation through `ReducerRegistry` in
+`executor/scheduler.go`, rejecting unknown reducers with `ErrReducerNotFound`
+and lifecycle targets with `ErrLifecycleReducer` before schedule ID allocation;
+added startup cleanup for invalid recovered `sys_scheduled` rows before replay;
+updated scheduler/startup/replay tests in `executor/*_test.go` to cover invalid
+targets, ID preservation, and recovered-row cleanup. Validation passed:
+`rtk go test ./executor`; `rtk go vet ./executor`; `rtk go test ./...`.
 
 Owner: `executor`
 

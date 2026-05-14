@@ -454,6 +454,9 @@ func TestNewExecutorResetsSchedSeqFromExistingRows(t *testing.T) {
 	seedSchedule(t, cs, schedTS.ID, 1, "z", nil, time.Unix(100, 0).UnixNano(), 0)
 
 	rr := NewReducerRegistry()
+	if err := rr.Register(RegisteredReducer{Name: "new", Handler: noopReducerHandler}); err != nil {
+		t.Fatal(err)
+	}
 	rr.Freeze()
 	exec := NewExecutor(ExecutorConfig{InboxCapacity: 4}, rr, cs, reg, 0)
 
@@ -493,6 +496,9 @@ func TestNewExecutorExhaustedRecoveredSchedSeqFailsWithoutWrapping(t *testing.T)
 	seedSchedule(t, cs, schedTS.ID, ^uint64(0), "last", nil, time.Unix(100, 0).UnixNano(), 0)
 
 	rr := NewReducerRegistry()
+	if err := rr.Register(RegisteredReducer{Name: "wrapped", Handler: noopReducerHandler}); err != nil {
+		t.Fatal(err)
+	}
 	rr.Freeze()
 	exec := NewExecutor(ExecutorConfig{InboxCapacity: 4}, rr, cs, reg, 0)
 

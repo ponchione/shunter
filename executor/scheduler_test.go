@@ -40,13 +40,28 @@ func setupScheduler(t *testing.T) (*store.Transaction, *schedulerHandle, schema.
 	}
 
 	tx := store.NewTransaction(cs, reg)
+	rr := NewReducerRegistry()
+	for _, name := range []string{"greet", "tick", "r", "r1", "r2"} {
+		if err := rr.Register(RegisteredReducer{Name: name, Handler: noopReducerHandler}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := rr.Register(RegisteredReducer{Name: "OnConnect", Handler: noopReducerHandler, Lifecycle: LifecycleOnConnect}); err != nil {
+		t.Fatal(err)
+	}
+	rr.Freeze()
 	h := &schedulerHandle{
 		tx:      tx,
 		tableID: ts.ID,
 		seq:     store.NewSequence(),
+		reg:     rr,
 	}
 	return tx, h, reg
 }
+
+var noopReducerHandler = types.ReducerHandler(func(*types.ReducerContext, []byte) ([]byte, error) {
+	return nil, nil
+})
 
 func TestSchedulerHandleScheduleInsertsRow(t *testing.T) {
 	tx, h, _ := setupScheduler(t)
@@ -139,6 +154,59 @@ func TestSchedulerHandleScheduleRepeatRejectsNonPositiveInterval(t *testing.T) {
 	}
 }
 
+func TestSchedulerHandleRejectsInvalidTargetsWithoutConsumingID(t *testing.T) {
+	tests := []struct {
+		name        string
+		target      string
+		repeat      bool
+		wantErr     error
+		validTarget string
+	}{
+		{name: "unknown one-shot", target: "missing", wantErr: ErrReducerNotFound, validTarget: "greet"},
+		{name: "lifecycle one-shot", target: "OnConnect", wantErr: ErrLifecycleReducer, validTarget: "greet"},
+		{name: "unknown repeat", target: "missing", repeat: true, wantErr: ErrReducerNotFound, validTarget: "tick"},
+		{name: "lifecycle repeat", target: "OnConnect", repeat: true, wantErr: ErrLifecycleReducer, validTarget: "tick"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tx, h, _ := setupScheduler(t)
+			var (
+				id  ScheduleID
+				err error
+			)
+			if tt.repeat {
+				id, err = h.ScheduleRepeat(tt.target, nil, time.Second)
+			} else {
+				id, err = h.Schedule(tt.target, nil, time.Unix(1, 0))
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("invalid schedule err = %v, want %v", err, tt.wantErr)
+			}
+			if id != 0 {
+				t.Fatalf("invalid schedule id = %d, want 0", id)
+			}
+			if got := len(tx.TxState().Inserts(h.tableID)); got != 0 {
+				t.Fatalf("invalid schedule inserted %d rows, want 0", got)
+			}
+			if got := h.seq.Peek(); got != 1 {
+				t.Fatalf("sequence after invalid schedule = %d, want 1", got)
+			}
+
+			if tt.repeat {
+				id, err = h.ScheduleRepeat(tt.validTarget, nil, time.Second)
+			} else {
+				id, err = h.Schedule(tt.validTarget, nil, time.Unix(2, 0))
+			}
+			if err != nil {
+				t.Fatalf("valid schedule after invalid attempt: %v", err)
+			}
+			if id != 1 {
+				t.Fatalf("first valid id after invalid attempt = %d, want 1", id)
+			}
+		})
+	}
+}
+
 func TestSchedulerHandleScheduleDistinctIDs(t *testing.T) {
 	_, h, _ := setupScheduler(t)
 
@@ -219,6 +287,7 @@ func TestSchedulerHandleCommitPersistsRow(t *testing.T) {
 			return nil, err
 		}),
 	})
+	rr.Register(RegisteredReducer{Name: "tick", Handler: noopReducerHandler})
 	rr.Freeze()
 
 	exec := NewExecutor(ExecutorConfig{InboxCapacity: 4}, rr, cs, reg, 0)
@@ -269,6 +338,7 @@ func TestSchedulerHandleRollbackDiscardsSchedule(t *testing.T) {
 			return nil, sentinel.err
 		}),
 	})
+	rr.Register(RegisteredReducer{Name: "tick", Handler: noopReducerHandler})
 	rr.Freeze()
 
 	exec := NewExecutor(ExecutorConfig{InboxCapacity: 4}, rr, cs, reg, 0)

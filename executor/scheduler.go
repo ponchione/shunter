@@ -1,6 +1,8 @@
 package executor
 
 import (
+	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -66,6 +68,7 @@ func (e *Executor) newSchedulerHandle(tx *store.Transaction) *schedulerHandle {
 		tx:      tx,
 		tableID: e.schedTableID,
 		seq:     e.schedSeq,
+		reg:     e.registry,
 	}
 }
 
@@ -76,6 +79,7 @@ type schedulerHandle struct {
 	tx      *store.Transaction
 	tableID schema.TableID
 	seq     *store.Sequence
+	reg     *ReducerRegistry
 }
 
 func (h *schedulerHandle) close() {
@@ -126,6 +130,9 @@ func (h *schedulerHandle) insertRepeatSchedule(reducerName string, args []byte, 
 }
 
 func (h *schedulerHandle) insertScheduleLocked(reducerName string, args []byte, nextRunAtNs, repeatNs int64) (ScheduleID, error) {
+	if err := validateScheduledReducerTarget(h.reg, reducerName); err != nil {
+		return 0, err
+	}
 	if h.seq.Peek() == 0 {
 		return 0, ErrScheduleIDExhausted
 	}
@@ -141,6 +148,81 @@ func (h *schedulerHandle) insertScheduleLocked(reducerName string, args []byte, 
 		return 0, err
 	}
 	return id, nil
+}
+
+func validateScheduledReducerTarget(reg *ReducerRegistry, reducerName string) error {
+	if reg == nil {
+		return fmt.Errorf("%w: %s", ErrReducerNotFound, reducerName)
+	}
+	rr, ok := reg.Lookup(reducerName)
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrReducerNotFound, reducerName)
+	}
+	if rr.Lifecycle != LifecycleNone {
+		return fmt.Errorf("%w: %s", ErrLifecycleReducer, reducerName)
+	}
+	return nil
+}
+
+func (e *Executor) sweepInvalidSchedules(ctx context.Context) error {
+	type invalidSchedule struct {
+		id          ScheduleID
+		reducerName string
+	}
+
+	var targets []invalidSchedule
+	view := e.committed.Snapshot()
+	for _, row := range view.TableScan(e.schedTableID) {
+		id := ScheduleID(row[SysScheduledColScheduleID].AsUint64())
+		reducerName := row[SysScheduledColReducerName].AsString()
+		if err := validateScheduledReducerTarget(e.registry, reducerName); err != nil {
+			targets = append(targets, invalidSchedule{id: id, reducerName: reducerName})
+		}
+	}
+	view.Close()
+
+	for _, target := range targets {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := e.latchDurabilityFatal(0); err != nil {
+			return err
+		}
+		tx := store.NewTransaction(e.committed, e.schemaReg)
+		if err := deleteSysScheduledRow(tx, e.schedTableID, target.id); err != nil {
+			store.Rollback(tx)
+			return fmt.Errorf("sweep sys_scheduled delete schedule_id=%d reducer=%q: %w", target.id, target.reducerName, err)
+		}
+		txID, err := e.nextCommitTxID()
+		if err != nil {
+			store.Rollback(tx)
+			return err
+		}
+		tx.Seal()
+		changeset, err := e.commitTransaction(tx)
+		if err != nil {
+			store.Rollback(tx)
+			return fmt.Errorf("sweep invalid schedule schedule_id=%d reducer=%q: %w", target.id, target.reducerName, err)
+		}
+		e.consumeCommitTxID()
+		changeset.TxID = txID
+		e.committed.SetCommittedTxID(txID)
+		e.postCommit(txID, changeset, nil, CallReducerCmd{}, postCommitOptions{source: CallSourceLifecycle})
+		if e.fatal.Load() {
+			return fmt.Errorf("sweep invalid schedule aborted: %w", ErrExecutorFatal)
+		}
+	}
+	return nil
+}
+
+func deleteSysScheduledRow(tx *store.Transaction, tableID schema.TableID, id ScheduleID) error {
+	target := uint64(id)
+	for rowID, row := range tx.ScanTable(tableID) {
+		if row[SysScheduledColScheduleID].AsUint64() == target {
+			return tx.Delete(tableID, rowID)
+		}
+	}
+	return nil
 }
 
 // Cancel removes the schedule row for id. Returns (true, nil) if a row was
