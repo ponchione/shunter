@@ -344,7 +344,7 @@ func TestRunLifecycleZeroServerOptionsUseDefaults(t *testing.T) {
 }
 
 func TestRunLifecycleOnConnectRejectClosesWith1008(t *testing.T) {
-	rejectErr := errors.New("admission denied by policy")
+	rejectErr := errors.New("admission denied by policy token=secret")
 	inbox := &fakeInbox{onConnectErr: rejectErr}
 	s, mgr := lifecycleServer(t, inbox)
 	srv := newTestServer(t, s)
@@ -366,6 +366,16 @@ func TestRunLifecycleOnConnectRejectClosesWith1008(t *testing.T) {
 	code := websocket.CloseStatus(err)
 	if code != websocket.StatusPolicyViolation {
 		t.Errorf("close code = %d, want %d (StatusPolicyViolation)", code, websocket.StatusPolicyViolation)
+	}
+	var closeErr websocket.CloseError
+	if !errors.As(err, &closeErr) {
+		t.Fatalf("read error = %T %[1]v, want websocket.CloseError", err)
+	}
+	if closeErr.Reason != CloseReasonOnConnectRejected {
+		t.Fatalf("close reason = %q, want %q", closeErr.Reason, CloseReasonOnConnectRejected)
+	}
+	if strings.Contains(closeErr.Reason, "token=secret") || strings.Contains(closeErr.Reason, "admission denied") {
+		t.Fatalf("close reason leaked OnConnect error detail: %q", closeErr.Reason)
 	}
 
 	// Rejected connection must not appear in ConnManager.

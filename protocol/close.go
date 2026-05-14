@@ -27,6 +27,7 @@ const (
 	CloseReasonSendBufferFull       = "send buffer full"
 	CloseReasonIdleTimeout          = "idle timeout"
 	CloseReasonServerShutdown       = "server shutdown"
+	CloseReasonOnConnectRejected    = "onconnect rejected"
 )
 
 // closeWithHandshake runs a bounded WebSocket close handshake.

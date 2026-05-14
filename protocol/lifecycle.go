@@ -133,8 +133,7 @@ func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnM
 		}
 	}()
 	if err := inbox.OnConnect(ctx, c.ID, c.Identity, c.Principal.Copy()); err != nil {
-		reason := truncateCloseReason("onconnect rejected: " + err.Error())
-		_ = c.ws.Close(websocket.StatusPolicyViolation, reason)
+		_ = c.ws.Close(websocket.StatusPolicyViolation, CloseReasonOnConnectRejected)
 		return fmt.Errorf("%w: onconnect rejected: %v", ErrExecutorAdmissionRejected, err)
 	}
 

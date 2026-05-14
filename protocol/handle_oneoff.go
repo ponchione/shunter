@@ -158,7 +158,7 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 				matchedRows = rows
 				rowsAlreadyProjected = true
 			} else {
-				rows, err := evaluateOneOffJoin(ctx, view, tableID, joinPred, resolver, scanLimit)
+				rows, err := evaluateOneOffJoin(ctx, view, joinPred, resolver, scanLimit)
 				if err != nil {
 					return SQLQueryResult{}, err
 				}
@@ -638,7 +638,7 @@ func sliceOneOffRows(rows []types.ProductValue, offset int, limit int) []types.P
 
 func countOneOffMatches(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver) (uint64, error) {
 	if joinPred, ok := pred.(subscription.Join); ok {
-		return countOneOffJoin(ctx, view, tableID, joinPred, resolver)
+		return countOneOffJoin(ctx, view, joinPred, resolver)
 	}
 	if crossPred, ok := pred.(subscription.CrossJoin); ok {
 		return countOneOffCrossJoin(ctx, view, tableID, crossPred)
@@ -755,11 +755,9 @@ func oneOffAggregateRowColumnValue(row types.ProductValue, tableID schema.TableI
 	return row[idx], true
 }
 
-func evaluateOneOffJoin(ctx context.Context, view store.CommittedReadView, projectedTable schema.TableID, join subscription.Join, resolver schema.IndexResolver, limit int) ([]types.ProductValue, error) {
-	// Trust Join.ProjectRight (compile-time signal) over projectedTable
-	// equality, because a self-join has Left == Right == projectedTable on
-	// both sides and only the boolean disambiguates.
-	_ = projectedTable
+func evaluateOneOffJoin(ctx context.Context, view store.CommittedReadView, join subscription.Join, resolver schema.IndexResolver, limit int) ([]types.ProductValue, error) {
+	// Trust Join.ProjectRight because a self-join has the same table ID on both
+	// sides and only the compile-time signal disambiguates the projected side.
 	var rows []types.ProductValue
 	err := visitOneOffJoinPairs(ctx, view, join, resolver, func(leftRow, rightRow types.ProductValue) bool {
 		if join.ProjectRight {
@@ -772,8 +770,7 @@ func evaluateOneOffJoin(ctx context.Context, view store.CommittedReadView, proje
 	return rows, err
 }
 
-func countOneOffJoin(ctx context.Context, view store.CommittedReadView, projectedTable schema.TableID, join subscription.Join, resolver schema.IndexResolver) (uint64, error) {
-	_ = projectedTable
+func countOneOffJoin(ctx context.Context, view store.CommittedReadView, join subscription.Join, resolver schema.IndexResolver) (uint64, error) {
 	var count uint64
 	err := visitOneOffJoinPairs(ctx, view, join, resolver, func(leftRow, rightRow types.ProductValue) bool {
 		count++
