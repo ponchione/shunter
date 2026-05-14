@@ -675,11 +675,11 @@ Recovery applies replayed `Changeset` values to `CommittedState`. The snapshot w
 
 The reference runtime is useful design evidence for durability choices, but Shunter owns its commit-log and snapshot formats. Each entry below is an explicit v1 choice for Shunter's single-node runtime. Future specs or implementations should change these only when a Shunter workload, correctness issue, or product need justifies the tradeoff. (§3.1 — BSATN naming — is documented inline at §3.1 / §3.3 as the canonical disclaimer; not repeated here.)
 
-### 12.1 No offset index file; recovery performs a linear scan
+### 12.1 Offset index sidecars are advisory accelerators
 
-The reference runtime maintains a per-segment offset index (`tx_offset → byte_pos`) so replay can seek in O(log) instead of scanning. Shunter has no offset index. `ReplayLog` skips records by decoding framing and discarding when `tx_id ≤ fromTxID`; cost is O(total records since log origin), not O(records after snapshot).
+Shunter maintains optional per-segment `*.idx` sidecars that map transaction IDs to segment byte offsets. After a snapshot is selected, `ReplayLog` can seek near the replay horizon instead of decoding every covered record. Startup recovery can also use a valid sidecar while evaluating a snapshot boundary, then scans the suffix needed to compute the durable horizon, damaged-tail status, and resume plan.
 
-Rationale: the recovery-time target in §10 (`< 5 s` for snapshot + 10k log records) is achievable without an index, and v1 prioritizes a single canonical replay path over a second indexed path that would have to be kept in sync. Revisit if recovery latency shows up as a bottleneck under long-history workloads with infrequent snapshots — in that case, an offset-index sidecar file (one per segment) is the cheapest fix.
+Rationale: indexes are accelerators, not correctness inputs. Missing, corrupt, non-monotonic, stale, or otherwise untrusted sidecars fall back to the linear scan path. Recovery from genesis still validates the commit log linearly.
 
 ### 12.2 Single TX per record vs the reference runtime 1–65535-TX commits
 

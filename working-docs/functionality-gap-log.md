@@ -352,7 +352,12 @@ Validation:
 
 ## Documentation and Stale-Guidance Cleanup
 
-7. [ ] Update SPEC-002 offset-index guidance.
+7. [x] Update SPEC-002 offset-index guidance.
+
+Done: Updated `working-docs/specs/002-commitlog/SPEC-002-commitlog.md`
+§12.1 to describe advisory per-segment `*.idx` sidecars, replay/startup
+snapshot-boundary acceleration, and linear fallback for unsafe or absent
+indexes. Validation passed: `rtk git diff --check -- working-docs/specs`.
 
 Owner: `working-docs/specs` and `commitlog` docs
 
