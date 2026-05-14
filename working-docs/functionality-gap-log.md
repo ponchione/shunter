@@ -382,7 +382,9 @@ Validation:
 Done: Updated `working-docs/specs/005-protocol/SPEC-005-protocol.md`
 §7.1.1, §7.4, and §16 to describe the shared SQL parser, per-read-surface
 feature gates, table-shaped raw subscription limits, current one-off/declared
-read support, declared parameters, and SQL non-goals. Validation passed:
+read support, declared parameters, and SQL non-goals. Audit follow-up:
+clarified declared live-view `ORDER BY`/`LIMIT`/`OFFSET` gating as
+single-table, non-aggregate, initial-snapshot-only behavior. Validation passed:
 `rtk git diff --check -- working-docs/specs`.
 
 Owner: `working-docs/specs`, `query/sql`, `internal/queryplan`, `protocol`
@@ -435,7 +437,9 @@ Done: Updated `docs/reference/read-surface.md` and
 `docs/how-to/reads-queries-views.md` to document declared live-view joins,
 multi-way joins, `COUNT`/`SUM` aggregate views including multi-way aggregates,
 and initial-snapshot-only `ORDER BY`/`LIMIT`/`OFFSET` behavior with no
-maintained top-N/windowed live views. Validation passed:
+maintained top-N/windowed live views. Audit follow-up: clarified that
+`ORDER BY`/`LIMIT`/`OFFSET` are supported only for single-table,
+non-aggregate declared live views. Validation passed:
 `rtk git diff --check -- docs`.
 
 Owner: docs under `docs/reference` and `docs/how-to`

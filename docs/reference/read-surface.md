@@ -101,8 +101,9 @@ shapes differ by read surface:
   joins, multi-way joins, projections over the emitted relation, and
   `COUNT`/`SUM` aggregate views, including join and multi-way aggregate views.
   `COUNT(DISTINCT column)` is supported. Aggregate aliases must use `AS`.
-  `ORDER BY`, `LIMIT`, and `OFFSET` shape the initial snapshot only; Shunter
-  does not maintain top-N/windowed live view membership after commits.
+  `ORDER BY`, `LIMIT`, and `OFFSET` are supported only for single-table,
+  non-aggregate live views and shape the initial snapshot only; Shunter does
+  not maintain top-N/windowed live view membership after commits.
   Non-aggregate post-commit delivery remains row deltas over matching rows, and
   aggregate views emit replacement aggregate rows when the aggregate changes.
   Declared app placeholders follow the same parameter rules as declared

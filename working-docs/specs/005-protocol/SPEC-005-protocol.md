@@ -357,6 +357,9 @@ Read surfaces gate the parsed features:
   Declared reads may declare and bind app parameter placeholders; raw SQL
   protocol messages reject undeclared app parameters. `:sender` is reserved for
   caller identity and is not an app parameter.
+  Executable declared live views further gate `ORDER BY`, `LIMIT`, and
+  `OFFSET` to single-table, non-aggregate subscriptions; those clauses shape
+  only the initial snapshot, not maintained live membership.
 
 SQL identifier lookup is byte-exact after quoted-identifier unescaping. Table names, column names, aliases, and qualifiers must match the declared schema or relation alias exactly; quoting preserves the written spelling and does not enable case-folded lookup. Once a relation alias is introduced, the base table name is no longer an in-scope qualifier for SQL WHERE or projection references.
 
