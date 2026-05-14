@@ -113,75 +113,50 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		var run func()
 		switch m := msg.(type) {
 		case SubscribeSingleMsg:
-			if handlers.OnSubscribeSingle == nil {
-				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, CloseReasonUnsupportedMessage)
-				return
+			if h := handlers.OnSubscribeSingle; h != nil {
+				run = func() { h(handlerCtx, c, &m) }
 			}
-			run = func() { handlers.OnSubscribeSingle(handlerCtx, c, &m) }
 		case SubscribeMultiMsg:
-			if handlers.OnSubscribeMulti == nil {
-				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, CloseReasonUnsupportedMessage)
-				return
+			if h := handlers.OnSubscribeMulti; h != nil {
+				run = func() { h(handlerCtx, c, &m) }
 			}
-			run = func() { handlers.OnSubscribeMulti(handlerCtx, c, &m) }
 		case UnsubscribeSingleMsg:
-			if handlers.OnUnsubscribeSingle == nil {
-				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, CloseReasonUnsupportedMessage)
-				return
+			if h := handlers.OnUnsubscribeSingle; h != nil {
+				run = func() { h(handlerCtx, c, &m) }
 			}
-			run = func() { handlers.OnUnsubscribeSingle(handlerCtx, c, &m) }
 		case UnsubscribeMultiMsg:
-			if handlers.OnUnsubscribeMulti == nil {
-				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, CloseReasonUnsupportedMessage)
-				return
+			if h := handlers.OnUnsubscribeMulti; h != nil {
+				run = func() { h(handlerCtx, c, &m) }
 			}
-			run = func() { handlers.OnUnsubscribeMulti(handlerCtx, c, &m) }
 		case CallReducerMsg:
-			if handlers.OnCallReducer == nil {
-				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, CloseReasonUnsupportedMessage)
-				return
+			if h := handlers.OnCallReducer; h != nil {
+				run = func() { h(handlerCtx, c, &m) }
 			}
-			run = func() { handlers.OnCallReducer(handlerCtx, c, &m) }
 		case OneOffQueryMsg:
-			if handlers.OnOneOffQuery == nil {
-				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, CloseReasonUnsupportedMessage)
-				return
+			if h := handlers.OnOneOffQuery; h != nil {
+				run = func() { h(handlerCtx, c, &m) }
 			}
-			run = func() { handlers.OnOneOffQuery(handlerCtx, c, &m) }
 		case DeclaredQueryMsg:
-			if handlers.OnDeclaredQuery == nil {
-				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, CloseReasonUnsupportedMessage)
-				return
+			if h := handlers.OnDeclaredQuery; h != nil {
+				run = func() { h(handlerCtx, c, &m) }
 			}
-			run = func() { handlers.OnDeclaredQuery(handlerCtx, c, &m) }
 		case DeclaredQueryWithParametersMsg:
-			if handlers.OnDeclaredQueryWithParameters == nil {
-				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, CloseReasonUnsupportedMessage)
-				return
+			if h := handlers.OnDeclaredQueryWithParameters; h != nil {
+				run = func() { h(handlerCtx, c, &m) }
 			}
-			run = func() { handlers.OnDeclaredQueryWithParameters(handlerCtx, c, &m) }
 		case SubscribeDeclaredViewMsg:
-			if handlers.OnSubscribeDeclaredView == nil {
-				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, CloseReasonUnsupportedMessage)
-				return
+			if h := handlers.OnSubscribeDeclaredView; h != nil {
+				run = func() { h(handlerCtx, c, &m) }
 			}
-			run = func() { handlers.OnSubscribeDeclaredView(handlerCtx, c, &m) }
 		case SubscribeDeclaredViewWithParametersMsg:
-			if handlers.OnSubscribeDeclaredViewWithParameters == nil {
-				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, CloseReasonUnsupportedMessage)
-				return
+			if h := handlers.OnSubscribeDeclaredViewWithParameters; h != nil {
+				run = func() { h(handlerCtx, c, &m) }
 			}
-			run = func() { handlers.OnSubscribeDeclaredViewWithParameters(handlerCtx, c, &m) }
+		}
+		if run == nil {
+			recordProtocolMessage(c.Observer, kind, "internal_error")
+			closeProtocolError(c, CloseReasonUnsupportedMessage)
+			return
 		}
 
 		// Incoming backpressure (SPEC-005 §10.2, Story 6.2):
