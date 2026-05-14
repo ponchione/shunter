@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -114,6 +115,58 @@ func TestValidateJWTIssuerAllowlistRejected(t *testing.T) {
 	_, err := ValidateJWT(s, cfg)
 	if !errors.Is(err, ErrJWTIssuerMismatch) {
 		t.Fatalf("error = %v, want ErrJWTIssuerMismatch", err)
+	}
+}
+
+func TestValidateJWTSubjectByteLimit(t *testing.T) {
+	cfg := &JWTConfig{SigningKey: testKey, Issuers: []string{"issuer"}}
+	exactSubject := strings.Repeat("a", MaxSubjectBytes)
+	s := mintHS256(t, jwt.MapClaims{
+		"sub": exactSubject,
+		"iss": "issuer",
+	})
+	claims, err := ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatalf("ValidateJWT exact subject limit error = %v, want nil", err)
+	}
+	if len(claims.Subject) != MaxSubjectBytes {
+		t.Fatalf("Subject byte length = %d, want %d", len(claims.Subject), MaxSubjectBytes)
+	}
+
+	oversizedSubject := strings.Repeat("a", MaxSubjectBytes+1)
+	s = mintHS256(t, jwt.MapClaims{
+		"sub": oversizedSubject,
+		"iss": "issuer",
+	})
+	_, err = ValidateJWT(s, cfg)
+	if !errors.Is(err, ErrJWTClaimTooLarge) {
+		t.Fatalf("ValidateJWT oversized subject error = %T %[1]v, want ErrJWTClaimTooLarge", err)
+	}
+}
+
+func TestValidateJWTIssuerByteLimit(t *testing.T) {
+	exactIssuer := strings.Repeat("i", MaxIssuerBytes)
+	cfg := &JWTConfig{SigningKey: testKey, Issuers: []string{exactIssuer}}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub": "alice",
+		"iss": exactIssuer,
+	})
+	claims, err := ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatalf("ValidateJWT exact issuer limit error = %v, want nil", err)
+	}
+	if len(claims.Issuer) != MaxIssuerBytes {
+		t.Fatalf("Issuer byte length = %d, want %d", len(claims.Issuer), MaxIssuerBytes)
+	}
+
+	oversizedIssuer := strings.Repeat("i", MaxIssuerBytes+1)
+	s = mintHS256(t, jwt.MapClaims{
+		"sub": "alice",
+		"iss": oversizedIssuer,
+	})
+	_, err = ValidateJWT(s, cfg)
+	if !errors.Is(err, ErrJWTClaimTooLarge) {
+		t.Fatalf("ValidateJWT oversized issuer error = %T %[1]v, want ErrJWTClaimTooLarge", err)
 	}
 }
 

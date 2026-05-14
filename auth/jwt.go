@@ -21,6 +21,11 @@ const (
 	AuthModeAnonymous
 )
 
+const (
+	MaxIssuerBytes  = 1024
+	MaxSubjectBytes = 1024
+)
+
 // JWTConfig is the engine-level auth configuration. SigningKey
 // interpretation is algorithm-dependent — HMAC secret for HS*, PEM
 // public key for RS*/ES*. Story 2.2 exposes the HS256 path; other
@@ -75,6 +80,7 @@ var (
 	ErrJWTIssuerMismatch      = errors.New("auth: JWT issuer not in configured list")
 	ErrJWTHexIdentityMismatch = errors.New("auth: hex_identity does not match derived identity")
 	ErrJWTAudienceMismatch    = errors.New("auth: JWT audience not in configured list")
+	ErrJWTClaimTooLarge       = errors.New("auth: JWT claim too large")
 )
 
 // ValidateJWT parses + verifies tokenString against config and
@@ -112,6 +118,12 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	iss, _ := mc["iss"].(string)
 	if iss == "" {
 		return nil, fmt.Errorf("%w: iss", ErrJWTMissingClaim)
+	}
+	if len(sub) > MaxSubjectBytes {
+		return nil, fmt.Errorf("%w: sub exceeds %d bytes", ErrJWTClaimTooLarge, MaxSubjectBytes)
+	}
+	if len(iss) > MaxIssuerBytes {
+		return nil, fmt.Errorf("%w: iss exceeds %d bytes", ErrJWTClaimTooLarge, MaxIssuerBytes)
 	}
 	if len(config.Issuers) > 0 && !slices.Contains(config.Issuers, iss) {
 		return nil, fmt.Errorf("%w: got %q, allowed %v", ErrJWTIssuerMismatch, iss, config.Issuers)
