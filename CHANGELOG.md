@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Protocol dispatch now recovers panics from detached message-handler
+  goroutines, records an internal protocol error, and closes the connection
+  with 1011 instead of letting one bad handler crash the process.
+- TypeScript client unsubscribe request IDs now avoid pending subscription
+  request IDs, preventing response routing ambiguity after explicit low IDs.
 - Protocol option defaults and validation now share one normalization path
   between runtime config and transport setup.
 - Protocol dispatch now treats a nil handler table as unsupported messages

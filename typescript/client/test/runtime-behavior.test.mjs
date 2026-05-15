@@ -353,6 +353,18 @@ function subscribeSingleAppliedFrameFor({
   return frame;
 }
 
+function unsubscribeSingleAppliedFrameFor({ requestId, queryId }) {
+  const frame = new Uint8Array(1 + 4 + 8 + 4 + 1);
+  let offset = 0;
+  frame[offset] = SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_SINGLE_APPLIED;
+  offset += 1;
+  offset = writeUint32LE(frame, offset, requestId);
+  offset += 8;
+  offset = writeUint32LE(frame, offset, queryId);
+  frame[offset] = 0;
+  return frame;
+}
+
 const decodedBsatnMessage = decodeBsatnProduct(
   bytesFromHex("0801000000000000000b05000000616c6963650b000b0500000068656c6c6f110200000000000000"),
   [
@@ -2055,6 +2067,66 @@ autoSubscriptionIdSockets[0].message(subscribeSingleAppliedFrameFor({
 const autoAllocatedUnsubscribe = await autoAllocatedSubscription;
 assert.equal(typeof autoAllocatedUnsubscribe, "function");
 await autoSubscriptionIdClient.close();
+
+const unsubscribeRequestIdCollisionSockets = [];
+const unsubscribeRequestIdCollisionClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    unsubscribeRequestIdCollisionSockets.push(socket);
+    return socket;
+  },
+});
+const unsubscribeRequestIdCollisionConnecting = unsubscribeRequestIdCollisionClient.connect();
+await nextTurn();
+unsubscribeRequestIdCollisionSockets[0].open();
+unsubscribeRequestIdCollisionSockets[0].message(identityTokenFrame().buffer);
+await unsubscribeRequestIdCollisionConnecting;
+const unsubscribeRequestIdCollisionActiveSubscription = unsubscribeRequestIdCollisionClient.subscribeTable(
+  "users",
+  undefined,
+  {
+    requestId: 0x01020304,
+    queryId: 1,
+    returnHandle: true,
+  },
+);
+unsubscribeRequestIdCollisionSockets[0].message(subscribeSingleAppliedFrameFor({
+  requestId: 0x01020304,
+  queryId: 1,
+}));
+const unsubscribeRequestIdCollisionHandle = await unsubscribeRequestIdCollisionActiveSubscription;
+const unsubscribeRequestIdCollisionPendingSubscription = unsubscribeRequestIdCollisionClient.subscribeTable(
+  "users",
+  undefined,
+  {
+    requestId: 1,
+    queryId: 2,
+  },
+);
+assert.equal(unsubscribeRequestIdCollisionSockets[0].sent.length, 2);
+assert.deepEqual(
+  unsubscribeRequestIdCollisionSockets[0].sent[1],
+  encodeTableSubscriptionRequest("users", {
+    requestId: 1,
+    queryId: 2,
+  }).frame,
+);
+const unsubscribeRequestIdCollisionUnsubscribe = unsubscribeRequestIdCollisionHandle.unsubscribe();
+assert.equal(unsubscribeRequestIdCollisionSockets[0].sent.length, 3);
+assert.deepEqual(
+  unsubscribeRequestIdCollisionSockets[0].sent[2],
+  encodeUnsubscribeSingleRequest(1, { requestId: 2 }).frame,
+);
+unsubscribeRequestIdCollisionSockets[0].message(unsubscribeSingleAppliedFrameFor({
+  requestId: 2,
+  queryId: 1,
+}));
+await unsubscribeRequestIdCollisionUnsubscribe;
+const unsubscribeRequestIdCollisionClose = unsubscribeRequestIdCollisionClient.close();
+await assert.rejects(unsubscribeRequestIdCollisionPendingSubscription, ShunterClosedClientError);
+await unsubscribeRequestIdCollisionClose;
 
 const deniedTableSubscription = client.subscribeTable("users", undefined, {
   requestId: 0x41424344,

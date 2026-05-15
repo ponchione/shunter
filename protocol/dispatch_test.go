@@ -125,6 +125,47 @@ func TestDispatchLoop_ValidSubscribe(t *testing.T) {
 	}
 }
 
+func TestDispatchLoop_HandlerPanicClosesInternal(t *testing.T) {
+	conn, client := testConnPair(t, nil)
+
+	handlers := &MessageHandlers{
+		OnSubscribeSingle: func(context.Context, *Conn, *SubscribeSingleMsg) {
+			panic("handler boom")
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := runDispatchAsync(conn, ctx, handlers)
+
+	frame, err := EncodeClientMessage(SubscribeSingleMsg{
+		RequestID:   1,
+		QueryID:     42,
+		QueryString: "SELECT * FROM users",
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), time.Second)
+	defer writeCancel()
+	if err := client.Write(writeCtx, websocket.MessageBinary, frame); err != nil {
+		t.Fatalf("client write: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatch loop did not exit after handler panic")
+	}
+
+	readCtx, readCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer readCancel()
+	_, _, readErr := client.Read(readCtx)
+	if code := websocket.CloseStatus(readErr); code != CloseInternal {
+		t.Errorf("close code = %d, want %d (CloseInternal)", code, CloseInternal)
+	}
+}
+
 func TestDispatchLoop_V2DeclaredQueryWithParameters(t *testing.T) {
 	conn, client := testConnPair(t, nil)
 	conn.ProtocolVersion = ProtocolVersionV2

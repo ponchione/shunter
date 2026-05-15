@@ -1291,7 +1291,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           throw new ShunterClosedClientError(closedMessage);
         }
         const request = encodeRequest(queryId, {
-          requestId: allocateRequestId(),
+          requestId: allocateSubscriptionRequestId(),
         });
         if (
           pendingUnsubscribesByRequest.has(request.requestId) ||

@@ -866,7 +866,7 @@ export function createShunterClient(options) {
                     throw new ShunterClosedClientError(closedMessage);
                 }
                 const request = encodeRequest(queryId, {
-                    requestId: allocateRequestId(),
+                    requestId: allocateSubscriptionRequestId(),
                 });
                 if (pendingUnsubscribesByRequest.has(request.requestId) ||
                     pendingUnsubscribesByQuery.has(request.queryId)) {

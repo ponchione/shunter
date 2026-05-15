@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/ponchione/websocket"
 )
@@ -175,9 +176,21 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 			return
 		}
 
-		go func(run func()) {
-			defer func() { <-c.inflightSem }()
-			run()
-		}(run)
+		go c.runMessageHandler(kind, run)
 	}
+}
+
+func (c *Conn) runMessageHandler(kind string, run func()) {
+	defer func() { <-c.inflightSem }()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err := fmt.Errorf("protocol handler panic: %v", recovered)
+			recordProtocolMessage(c.Observer, kind, "internal_error")
+			logProtocolError(c.Observer, kind, "handler_panic", err)
+			if c.ws != nil {
+				go closeWithHandshake(c.ws, CloseInternal, "internal error", c.closeHandshakeTimeout())
+			}
+		}
+	}()
+	run()
 }
