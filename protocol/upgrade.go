@@ -103,7 +103,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		s.writeAuthRejected(w, authRejectedUnavailable, http.StatusInternalServerError, "jwt_misconfigured", err)
 		return
 	}
-	options, err := normalizeProtocolOptions(s.Options)
+	options, err := NormalizeProtocolOptions(s.Options)
 	if err != nil {
 		s.writeRejected(w, "invalid protocol options: "+err.Error(), http.StatusInternalServerError, "rejected_internal", err)
 		return

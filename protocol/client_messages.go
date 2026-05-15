@@ -523,6 +523,9 @@ func requireCountFitsRemaining(name string, count uint32, body []byte, off int, 
 	if minPerItem <= 0 {
 		panic("minPerItem must be positive")
 	}
+	if off < 0 || off > len(body) {
+		return fmt.Errorf("%w: %s offset %d exceeds body length %d", ErrMalformedMessage, name, off, len(body))
+	}
 	remaining := len(body) - off
 	if uint64(count) > uint64(remaining/minPerItem) {
 		return fmt.Errorf("%w: %s count %d exceeds remaining %d", ErrMalformedMessage, name, count, remaining)

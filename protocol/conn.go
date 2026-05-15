@@ -73,7 +73,7 @@ func NewConn(
 	normalized := DefaultProtocolOptions()
 	if opts != nil {
 		var err error
-		normalized, err = normalizeProtocolOptions(*opts)
+		normalized, err = NormalizeProtocolOptions(*opts)
 		if err != nil {
 			panic("protocol: invalid options: " + err.Error())
 		}

@@ -364,6 +364,13 @@ func TestDecodeClientMessageRejectsTrailingBytes(t *testing.T) {
 	}
 }
 
+func TestRequireCountFitsRemainingRejectsInvalidOffset(t *testing.T) {
+	err := requireCountFitsRemaining("SubscribeMulti query_strings", 1, []byte{0x01, 0x02}, 3, 4)
+	if !errors.Is(err, ErrMalformedMessage) {
+		t.Fatalf("err = %v, want ErrMalformedMessage", err)
+	}
+}
+
 func TestEncodeClientMessageUnknownType(t *testing.T) {
 	type bogus struct{}
 	_, err := EncodeClientMessage(bogus{})

@@ -34,7 +34,7 @@ func TestDefaultProtocolOptions(t *testing.T) {
 }
 
 func TestNormalizeProtocolOptionsFillsDefaults(t *testing.T) {
-	opts, err := normalizeProtocolOptions(ProtocolOptions{})
+	opts, err := NormalizeProtocolOptions(ProtocolOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,10 +44,10 @@ func TestNormalizeProtocolOptionsFillsDefaults(t *testing.T) {
 }
 
 func TestNormalizeProtocolOptionsRejectsNegativeValues(t *testing.T) {
-	if _, err := normalizeProtocolOptions(ProtocolOptions{IncomingQueueMessages: -1}); err == nil {
+	if _, err := NormalizeProtocolOptions(ProtocolOptions{IncomingQueueMessages: -1}); err == nil {
 		t.Fatal("expected negative IncomingQueueMessages to be rejected")
 	}
-	if _, err := normalizeProtocolOptions(ProtocolOptions{WriteTimeout: -1}); err == nil {
+	if _, err := NormalizeProtocolOptions(ProtocolOptions{WriteTimeout: -1}); err == nil {
 		t.Fatal("expected negative WriteTimeout to be rejected")
 	}
 }

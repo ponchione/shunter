@@ -407,6 +407,35 @@ func TestDispatchLoop_NilHandlerCloses(t *testing.T) {
 	}
 }
 
+func TestDispatchLoop_NilHandlersCloses(t *testing.T) {
+	conn, client := testConnPair(t, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := runDispatchAsync(conn, ctx, nil)
+
+	frame, err := EncodeClientMessage(SubscribeSingleMsg{
+		RequestID:   1,
+		QueryID:     10,
+		QueryString: "SELECT * FROM items",
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), time.Second)
+	defer writeCancel()
+	if err := client.Write(writeCtx, websocket.MessageBinary, frame); err != nil {
+		t.Fatalf("client write: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatch loop did not exit on nil handlers")
+	}
+}
+
 func TestDispatchLoop_MalformedBodyCloses(t *testing.T) {
 	conn, client := testConnPair(t, nil)
 

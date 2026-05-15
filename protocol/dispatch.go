@@ -48,6 +48,10 @@ func closeProtocolError(conn *Conn, reason string) {
 // Handler contexts also cancel when the Conn closes so blocked executor sends
 // cannot leak past disconnect.
 func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
+	if handlers == nil {
+		handlers = &MessageHandlers{}
+	}
+
 	readCtx := ctx
 	if c.readCtx != nil {
 		combinedCtx, cancel := context.WithCancel(ctx)

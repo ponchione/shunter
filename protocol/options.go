@@ -57,7 +57,9 @@ func DefaultProtocolOptions() ProtocolOptions {
 	}
 }
 
-func normalizeProtocolOptions(opts ProtocolOptions) (ProtocolOptions, error) {
+// NormalizeProtocolOptions validates ProtocolOptions and fills zero-valued
+// fields from DefaultProtocolOptions.
+func NormalizeProtocolOptions(opts ProtocolOptions) (ProtocolOptions, error) {
 	if opts.PingInterval < 0 {
 		return ProtocolOptions{}, fmt.Errorf("ping interval must not be negative")
 	}

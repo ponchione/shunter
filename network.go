@@ -38,55 +38,18 @@ var (
 )
 
 func buildProtocolOptions(cfg ProtocolConfig) (protocol.ProtocolOptions, error) {
-	if cfg.PingInterval < 0 {
-		return protocol.ProtocolOptions{}, fmt.Errorf("protocol ping interval must not be negative")
-	}
-	if cfg.IdleTimeout < 0 {
-		return protocol.ProtocolOptions{}, fmt.Errorf("protocol idle timeout must not be negative")
-	}
-	if cfg.CloseHandshakeTimeout < 0 {
-		return protocol.ProtocolOptions{}, fmt.Errorf("protocol close handshake timeout must not be negative")
-	}
-	if cfg.WriteTimeout < 0 {
-		return protocol.ProtocolOptions{}, fmt.Errorf("protocol write timeout must not be negative")
-	}
-	if cfg.DisconnectTimeout < 0 {
-		return protocol.ProtocolOptions{}, fmt.Errorf("protocol disconnect timeout must not be negative")
-	}
-	if cfg.OutgoingBufferMessages < 0 {
-		return protocol.ProtocolOptions{}, fmt.Errorf("protocol outgoing buffer messages must not be negative")
-	}
-	if cfg.IncomingQueueMessages < 0 {
-		return protocol.ProtocolOptions{}, fmt.Errorf("protocol incoming queue messages must not be negative")
-	}
-	if cfg.MaxMessageSize < 0 {
-		return protocol.ProtocolOptions{}, fmt.Errorf("protocol max message size must not be negative")
-	}
-
-	opts := protocol.DefaultProtocolOptions()
-	if cfg.PingInterval != 0 {
-		opts.PingInterval = cfg.PingInterval
-	}
-	if cfg.IdleTimeout != 0 {
-		opts.IdleTimeout = cfg.IdleTimeout
-	}
-	if cfg.CloseHandshakeTimeout != 0 {
-		opts.CloseHandshakeTimeout = cfg.CloseHandshakeTimeout
-	}
-	if cfg.WriteTimeout != 0 {
-		opts.WriteTimeout = cfg.WriteTimeout
-	}
-	if cfg.DisconnectTimeout != 0 {
-		opts.DisconnectTimeout = cfg.DisconnectTimeout
-	}
-	if cfg.OutgoingBufferMessages != 0 {
-		opts.OutgoingBufferMessages = cfg.OutgoingBufferMessages
-	}
-	if cfg.IncomingQueueMessages != 0 {
-		opts.IncomingQueueMessages = cfg.IncomingQueueMessages
-	}
-	if cfg.MaxMessageSize != 0 {
-		opts.MaxMessageSize = cfg.MaxMessageSize
+	opts, err := protocol.NormalizeProtocolOptions(protocol.ProtocolOptions{
+		PingInterval:           cfg.PingInterval,
+		IdleTimeout:            cfg.IdleTimeout,
+		CloseHandshakeTimeout:  cfg.CloseHandshakeTimeout,
+		WriteTimeout:           cfg.WriteTimeout,
+		DisconnectTimeout:      cfg.DisconnectTimeout,
+		OutgoingBufferMessages: cfg.OutgoingBufferMessages,
+		IncomingQueueMessages:  cfg.IncomingQueueMessages,
+		MaxMessageSize:         cfg.MaxMessageSize,
+	})
+	if err != nil {
+		return protocol.ProtocolOptions{}, fmt.Errorf("protocol %w", err)
 	}
 	return opts, nil
 }
