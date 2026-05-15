@@ -334,6 +334,20 @@ func TestBTreeInsertSeek(t *testing.T) {
 	}
 }
 
+func TestBTreeInsertDuplicateRowIDIsIdempotent(t *testing.T) {
+	bt := NewBTreeIndex()
+	k := NewIndexKey(types.NewUint64(1))
+	bt.Insert(k, 10)
+	bt.Insert(k, 10)
+
+	if got := bt.Seek(k); !slices.Equal(got, []types.RowID{10}) {
+		t.Fatalf("Seek duplicate rowID = %v, want [10]", got)
+	}
+	if got := bt.Len(); got != 1 {
+		t.Fatalf("Len after duplicate rowID insert = %d, want 1", got)
+	}
+}
+
 func TestBTreeSeekReturnsDetachedRowIDs(t *testing.T) {
 	bt := NewBTreeIndex()
 	k := NewIndexKey(types.NewUint64(1))

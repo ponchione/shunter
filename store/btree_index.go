@@ -109,7 +109,10 @@ func (b *BTreeIndex) Insert(key IndexKey, rowID types.RowID) {
 		if len(e.rowIDs) == 0 || e.rowIDs[len(e.rowIDs)-1] < rowID {
 			e.rowIDs = append(e.rowIDs, rowID)
 		} else {
-			pos, _ := slices.BinarySearch(e.rowIDs, rowID)
+			pos, exists := slices.BinarySearch(e.rowIDs, rowID)
+			if exists {
+				return
+			}
 			e.rowIDs = slices.Insert(e.rowIDs, pos, rowID)
 		}
 		b.mappings++
