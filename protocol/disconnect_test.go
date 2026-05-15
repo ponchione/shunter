@@ -109,6 +109,28 @@ func TestDisconnectIdempotent(t *testing.T) {
 	}
 }
 
+func TestDisconnectWithoutTeardownDependenciesDoesNotPanic(t *testing.T) {
+	c, _, cleanup := loopbackConn(t, DefaultProtocolOptions())
+	defer cleanup()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.Disconnect(context.Background(), websocket.StatusNormalClosure, "", nil, nil)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Disconnect with nil teardown dependencies did not return")
+	}
+	select {
+	case <-c.closed:
+	default:
+		t.Fatal("Disconnect with nil teardown dependencies did not close local connection state")
+	}
+}
+
 func TestDisconnectConcurrentCallersShortSoak(t *testing.T) {
 	const (
 		seed    = uint64(0xd15c0de)
