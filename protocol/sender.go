@@ -117,7 +117,13 @@ func (s *connManagerSender) enqueue(connID types.ConnectionID, msg any) error {
 }
 
 func (s *connManagerSender) enqueueOnConn(conn *Conn, connID types.ConnectionID, msg any) error {
+	return sendOnConn(conn, connID, msg, s.inbox, s.mgr)
+}
 
+func sendOnConn(conn *Conn, connID types.ConnectionID, msg any, inbox ExecutorInbox, mgr *ConnManager) error {
+	if conn == nil {
+		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
+	}
 	frame, err := EncodeServerMessage(msg)
 	if err != nil {
 		return fmt.Errorf("encode server message: %w", err)
@@ -132,7 +138,7 @@ func (s *connManagerSender) enqueueOnConn(conn *Conn, connID types.ConnectionID,
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
 	case outboundSendFull:
 		logProtocolBackpressure(conn.Observer, "outbound", "buffer_full")
-		conn.startOutboundOverflowDisconnect(s.inbox, s.mgr)
+		conn.startOutboundOverflowDisconnect(inbox, mgr)
 		return fmt.Errorf("%w: %x", ErrClientBufferFull, connID[:])
 	default:
 		panic("protocol: unknown outbound send result")

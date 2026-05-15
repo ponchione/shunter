@@ -18,24 +18,7 @@ func (s connOnlySender) Send(connID types.ConnectionID, msg any) error {
 	if s.conn == nil || connID != s.conn.ID {
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
 	}
-	frame, err := EncodeServerMessage(msg)
-	if err != nil {
-		return fmt.Errorf("encode server message: %w", err)
-	}
-	wrapped := EncodeFrame(frame[0], frame[1:], s.conn.Compression, outboundCompressionMode(s.conn))
-
-	switch s.conn.trySendOutbound(wrapped) {
-	case outboundSendSent:
-		return nil
-	case outboundSendClosed:
-		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
-	case outboundSendFull:
-		logProtocolBackpressure(s.conn.Observer, "outbound", "buffer_full")
-		s.conn.startOutboundOverflowDisconnect(nil, nil)
-		return fmt.Errorf("%w: %x", ErrClientBufferFull, connID[:])
-	default:
-		panic("protocol: unknown outbound send result")
-	}
+	return sendOnConn(s.conn, connID, msg, nil, nil)
 }
 
 func (s connOnlySender) SendTransactionUpdate(connID types.ConnectionID, update *TransactionUpdate) error {
