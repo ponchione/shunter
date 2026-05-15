@@ -127,6 +127,15 @@ func (m *Manager) evaluate(ctx context.Context, txID types.TxID, changeset *stor
 	fanout := CommitFanout{}
 	errs := make(map[types.ConnectionID][]SubscriptionError)
 
+	for hash, err := range m.collectMultiJoinDeltaLimitErrors(dv) {
+		qs := m.registry.getQuery(hash)
+		if qs == nil {
+			continue
+		}
+		m.handleEvalError(txID, qs, err, errs)
+		delete(candidates, hash)
+	}
+
 	for hash := range candidates {
 		qs := m.registry.getQuery(hash)
 		if qs == nil {

@@ -340,6 +340,39 @@ func TestFanOutSenderAdapter_SendSubscriptionErrorTransactionOriginClearsIDs(t *
 	}
 }
 
+func TestFanOutSenderAdapter_SendSubscriptionLimitErrorKeepsDiagnosticsInternal(t *testing.T) {
+	mock := &mockClientSender{}
+	adapter := NewFanOutSenderAdapter(mock)
+	in := subscription.SubscriptionError{
+		RequestID:      55,
+		SubscriptionID: 77,
+		QueryHash:      subscription.QueryHash{1, 2, 3},
+		Predicate:      "secret predicate details",
+		Message:        "subscription: evaluation failed: subscription: multi-way join limit exceeded",
+	}
+	if err := adapter.SendSubscriptionError(connID(4), in); err != nil {
+		t.Fatal(err)
+	}
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.genericMsgs) != 1 {
+		t.Fatalf("genericMsgs=%d want 1", len(mock.genericMsgs))
+	}
+	msg, ok := mock.genericMsgs[0].(SubscriptionError)
+	if !ok {
+		t.Fatalf("message type = %T, want SubscriptionError", mock.genericMsgs[0])
+	}
+	if msg.RequestID != nil || msg.QueryID != nil || msg.TableID != nil {
+		t.Fatalf("diagnostic IDs leaked onto wire: request=%v query=%v table=%v", msg.RequestID, msg.QueryID, msg.TableID)
+	}
+	if msg.Error != in.Message {
+		t.Fatalf("Error = %q, want %q", msg.Error, in.Message)
+	}
+	if bytes.Contains([]byte(msg.Error), []byte(in.Predicate)) {
+		t.Fatalf("Error = %q leaked predicate diagnostics", msg.Error)
+	}
+}
+
 func TestFanOutSenderAdapter_MemoizesRowEncodingAcrossLightCalls(t *testing.T) {
 	mock := &mockClientSender{}
 	adapter := NewFanOutSenderAdapter(mock)

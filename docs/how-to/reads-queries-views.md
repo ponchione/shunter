@@ -283,5 +283,6 @@ with untrusted query shapes or high-cardinality tables, set
 `Config.SubscriptionMaxMultiJoinRelations` and/or
 `Config.SubscriptionMaxMultiJoinRowsPerRelation`. These limits reject matching
 declared live views at admission and drop already-live subscriptions with a
-sanitized subscription error if a later commit grows an input relation past the
-configured ceiling. Zero leaves the compatibility behavior unlimited.
+sanitized subscription error before post-commit evaluation if a later commit
+leaves an input relation past the configured ceiling, even when pruning would
+otherwise skip the view. Zero leaves the compatibility behavior unlimited.

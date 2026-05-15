@@ -67,6 +67,25 @@ func (m *Manager) checkMultiJoinDeltaLimits(ctx context.Context, pred Predicate,
 	return nil
 }
 
+func (m *Manager) collectMultiJoinDeltaLimitErrors(dv *DeltaView) map[QueryHash]error {
+	if m.MaxMultiJoinRelations <= 0 && m.MaxMultiJoinRowsPerRelation <= 0 {
+		return nil
+	}
+	var out map[QueryHash]error
+	for hash, qs := range m.registry.byHash {
+		if qs == nil {
+			continue
+		}
+		if err := m.checkMultiJoinDeltaLimits(context.Background(), qs.predicate, dv); err != nil {
+			if out == nil {
+				out = make(map[QueryHash]error)
+			}
+			out[hash] = err
+		}
+	}
+	return out
+}
+
 func (m *Manager) checkMultiJoinRelationLimit(multi MultiJoin) error {
 	if m.MaxMultiJoinRelations <= 0 || len(multi.Relations) <= m.MaxMultiJoinRelations {
 		return nil
