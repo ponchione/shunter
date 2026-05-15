@@ -187,18 +187,14 @@ Review later:
 - Index requirements.
 - Interaction with joins and aggregates.
 
-11. [ ] Production limits or incremental plans for high-cardinality multi-way
-   live views.
+11. [ ] Incremental plans and default limit policy for high-cardinality
+   multi-way live views.
 
 Owner: `subscription`, `protocol`
 
 Deferred decision:
-- Keep current multi-way joins correctness-first; incremental join planning is
-  still deferred.
-- Production guardrails now include optional
-  `Config.SubscriptionMaxMultiJoinRelations` and
-  `Config.SubscriptionMaxMultiJoinRowsPerRelation`. Zero preserves the
-  previous unlimited behavior.
+- Keep current multi-way joins correctness-first while incremental join
+  planning remains deferred.
 
 Review later:
 - Refreshed benchmark numbers for relation count, cardinality, self-joins,
