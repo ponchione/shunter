@@ -755,10 +755,7 @@ type SnapshotTableData struct {
 
 func ReadSnapshot(dir string) (*SnapshotData, error) {
 	path := filepath.Join(dir, snapshotFileName)
-	if err := requireRegularSnapshotFile(path); err != nil {
-		return nil, err
-	}
-	f, err := os.Open(path)
+	f, err := openExistingRegularFile(path, os.O_RDONLY, ErrSnapshot, "snapshot file")
 	if err != nil {
 		return nil, err
 	}
@@ -813,10 +810,6 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 		NextIDs:               nextIDs,
 		Schema:                tables,
 	}, nil
-}
-
-func requireRegularSnapshotFile(path string) error {
-	return requireRegularFilePath(path, ErrSnapshot, "snapshot file")
 }
 
 func snapshotReadError(err error) error {

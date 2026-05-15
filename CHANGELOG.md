@@ -9,6 +9,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Protocol dispatch now treats a nil handler table as unsupported messages
   instead of panicking, and client-message count guards reject invalid offsets
   before count math.
+- Commit-log segment, offset-index, and snapshot opens now verify the opened
+  file still matches the pre-open regular-file check, closing a path
+  replacement race.
 - Strict protocol auth now supports local multi-key JWT verification through
   `Config.AuthVerificationKeys`, including HS256, RS256, ES256, and optional
   `kid` matching for overlapping key rotation.

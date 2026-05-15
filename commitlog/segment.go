@@ -295,10 +295,7 @@ func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) 
 	if err := rejectBootstrapSegmentStart(startTxID, path); err != nil {
 		return nil, err
 	}
-	if err := requireRegularSegmentFile(path); err != nil {
-		return nil, err
-	}
-	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	f, err := openExistingRegularFile(path, os.O_RDWR, ErrOpen, "segment file")
 	if err != nil {
 		return nil, err
 	}
@@ -456,10 +453,7 @@ type SegmentReader struct {
 
 // OpenSegment opens and validates a segment file.
 func OpenSegment(path string) (*SegmentReader, error) {
-	if err := requireRegularSegmentFile(path); err != nil {
-		return nil, err
-	}
-	f, err := os.Open(path)
+	f, err := openExistingRegularFile(path, os.O_RDONLY, ErrOpen, "segment file")
 	if err != nil {
 		return nil, err
 	}
@@ -478,17 +472,50 @@ func OpenSegment(path string) (*SegmentReader, error) {
 	return &SegmentReader{file: f, startTx: startTx}, nil
 }
 
-func requireRegularSegmentFile(path string) error {
-	return requireRegularFilePath(path, ErrOpen, "segment file")
+// openRegularFileAfterLstatHook is a test-only instrumentation point for
+// exercising path replacement between Lstat and OpenFile.
+var openRegularFileAfterLstatHook func(string)
+
+func openExistingRegularFile(path string, flag int, category error, label string) (*os.File, error) {
+	info, err := regularFilePathInfo(path, category, label)
+	if err != nil {
+		return nil, err
+	}
+	if openRegularFileAfterLstatHook != nil {
+		openRegularFileAfterLstatHook(path)
+	}
+	f, err := os.OpenFile(path, flag, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := verifyOpenedRegularFile(path, info, f, category, label); err != nil {
+		closeErr := f.Close()
+		return nil, errors.Join(err, closeErr)
+	}
+	return f, nil
 }
 
-func requireRegularFilePath(path string, category error, label string) error {
+func regularFilePathInfo(path string, category error, label string) (os.FileInfo, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%w: %s %s is not a regular file", category, label, path)
+		return nil, fmt.Errorf("%w: %s %s is not a regular file", category, label, path)
+	}
+	return info, nil
+}
+
+func verifyOpenedRegularFile(path string, expected os.FileInfo, f *os.File, category error, label string) error {
+	opened, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("%w: stat opened %s %s: %w", category, label, path, err)
+	}
+	if !opened.Mode().IsRegular() {
+		return fmt.Errorf("%w: opened %s %s is not a regular file", category, label, path)
+	}
+	if !os.SameFile(expected, opened) {
+		return fmt.Errorf("%w: %s %s changed before open", category, label, path)
 	}
 	return nil
 }

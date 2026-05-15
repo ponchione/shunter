@@ -215,10 +215,7 @@ func scanOneSegmentFromOffsetIndex(path string, isLast bool, target types.TxID) 
 }
 
 func openRecoveryOffsetIndex(path string) (*OffsetIndex, error) {
-	if err := requireRegularOffsetIndexPath(path); err != nil {
-		return nil, err
-	}
-	f, err := os.Open(path)
+	f, err := openExistingRegularFile(path, os.O_RDONLY, ErrOpen, "offset index file")
 	if err != nil {
 		return nil, err
 	}

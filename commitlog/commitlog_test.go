@@ -157,6 +157,36 @@ func TestOpenSegmentRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestOpenSegmentRejectsPathReplacementBetweenLstatAndOpen(t *testing.T) {
+	dir := t.TempDir()
+	path := makeScanTestSegment(t, dir, 1, 1)
+	targetDir := t.TempDir()
+	targetPath := makeScanTestSegment(t, targetDir, 1, 1)
+
+	previous := openRegularFileAfterLstatHook
+	openRegularFileAfterLstatHook = func(got string) {
+		if got != path {
+			return
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove segment: %v", err)
+		}
+		symlinkOrSkip(t, targetPath, path)
+	}
+	defer func() {
+		openRegularFileAfterLstatHook = previous
+	}()
+
+	sr, err := OpenSegment(path)
+	if err == nil {
+		_ = sr.Close()
+		t.Fatal("expected replaced segment path to fail")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("OpenSegment error = %v, want ErrOpen category", err)
+	}
+}
+
 func TestOpenSegmentRejectsDirectoryArtifactWithoutRemoving(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, SegmentFileName(1))

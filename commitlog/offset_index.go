@@ -76,10 +76,7 @@ func OpenOffsetIndexMut(path string, cap uint64) (*OffsetIndexMut, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := requireRegularOffsetIndexPath(path); err != nil {
-		return nil, err
-	}
-	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	f, err := openExistingRegularFile(path, os.O_RDWR, ErrOpen, "offset index file")
 	if err != nil {
 		return nil, err
 	}
@@ -114,10 +111,6 @@ func OpenOffsetIndexMut(path string, cap uint64) (*OffsetIndexMut, error) {
 
 func requireCreatableOffsetIndexPath(path string) error {
 	return requireCreatableRegularFilePath(path, ErrOpen, "offset index file")
-}
-
-func requireRegularOffsetIndexPath(path string) error {
-	return requireRegularFilePath(path, ErrOpen, "offset index file")
 }
 
 func offsetIndexFileSize(cap uint64) (int64, error) {
@@ -261,10 +254,7 @@ type OffsetIndex struct {
 
 // OpenOffsetIndex opens an existing index file read-only.
 func OpenOffsetIndex(path string) (*OffsetIndex, error) {
-	if err := requireRegularOffsetIndexPath(path); err != nil {
-		return nil, err
-	}
-	f, err := os.Open(path)
+	f, err := openExistingRegularFile(path, os.O_RDONLY, ErrOpen, "offset index file")
 	if err != nil {
 		return nil, err
 	}
