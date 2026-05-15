@@ -213,6 +213,32 @@ func TestAppendValueRejectsInvalidUTF8AndRollsBack(t *testing.T) {
 	}
 }
 
+func TestAppendProductValueRollsBackOnEncodeError(t *testing.T) {
+	prefix := []byte{0xaa, 0xbb}
+	invalid := string([]byte{0xff})
+	row := types.ProductValue{types.NewUint64(7), types.NewString(invalid)}
+
+	got, err := AppendProductValue(append([]byte(nil), prefix...), row)
+	if !errors.Is(err, types.ErrInvalidUTF8) {
+		t.Fatalf("AppendProductValue invalid string err = %v, want ErrInvalidUTF8", err)
+	}
+	if !bytes.Equal(got, prefix) {
+		t.Fatalf("AppendProductValue invalid string buffer = %x, want prefix %x", got, prefix)
+	}
+
+	columns := []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: types.KindUint64},
+		{Index: 1, Name: "nickname", Type: types.KindString, Nullable: true},
+	}
+	got, err = AppendProductValueForColumns(append([]byte(nil), prefix...), row, columns)
+	if !errors.Is(err, types.ErrInvalidUTF8) {
+		t.Fatalf("AppendProductValueForColumns invalid nullable string err = %v, want ErrInvalidUTF8", err)
+	}
+	if !bytes.Equal(got, prefix) {
+		t.Fatalf("AppendProductValueForColumns invalid nullable string buffer = %x, want prefix %x", got, prefix)
+	}
+}
+
 func TestEncodeValueRejectsInvalidUTF8BeforeWriting(t *testing.T) {
 	var buf bytes.Buffer
 	invalid := string([]byte{0xff})

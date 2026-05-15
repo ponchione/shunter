@@ -467,6 +467,9 @@ func TestCopyRegularFileRejectsSourceChangedDuringCopy(t *testing.T) {
 		t.Fatal("copyRegularFile returned nil for source changed during copy")
 	}
 	assertErrorContains(t, err, "changed while copying")
+	if _, statErr := os.Lstat(dst); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("destination stat after rejected copy = %v, want not exist", statErr)
+	}
 }
 
 func TestCopyRegularFileRejectsSourceReplacedDuringCopy(t *testing.T) {
@@ -497,6 +500,9 @@ func TestCopyRegularFileRejectsSourceReplacedDuringCopy(t *testing.T) {
 		t.Fatal("copyRegularFile returned nil for source replaced during copy")
 	}
 	assertErrorContains(t, err, "changed while copying")
+	if _, statErr := os.Lstat(dst); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("destination stat after rejected copy = %v, want not exist", statErr)
+	}
 }
 
 func TestRestoreDataDirRejectsSymlinkBackupSourcesAndEntries(t *testing.T) {

@@ -276,11 +276,12 @@ func EncodeProductValueForColumns(w io.Writer, pv types.ProductValue, columns []
 
 // AppendProductValue appends all columns in order.
 func AppendProductValue(dst []byte, pv types.ProductValue) ([]byte, error) {
+	start := len(dst)
 	var err error
 	for _, v := range pv {
 		dst, err = AppendValue(dst, v)
 		if err != nil {
-			return dst, err
+			return dst[:start], err
 		}
 	}
 	return dst, nil
@@ -296,6 +297,7 @@ func AppendProductValueForSchema(dst []byte, pv types.ProductValue, ts *schema.T
 
 // AppendProductValueForColumns appends all columns using nullable metadata from columns.
 func AppendProductValueForColumns(dst []byte, pv types.ProductValue, columns []schema.ColumnSchema) ([]byte, error) {
+	start := len(dst)
 	if len(pv) != len(columns) {
 		return dst, errors.Join(
 			ErrRowLengthMismatch,
@@ -306,7 +308,7 @@ func AppendProductValueForColumns(dst []byte, pv types.ProductValue, columns []s
 	for i, col := range columns {
 		dst, err = appendColumnValue(dst, pv[i], col)
 		if err != nil {
-			return dst, err
+			return dst[:start], err
 		}
 	}
 	return dst, nil

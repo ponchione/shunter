@@ -240,8 +240,12 @@ func copyRegularFile(src, dst string, mode fs.FileMode, expected fs.FileInfo) (e
 		return fmt.Errorf("create destination file %s: %w", dst, err)
 	}
 	defer func() {
-		if closeErr := out.Close(); err == nil && closeErr != nil {
+		closeErr := out.Close()
+		if err == nil && closeErr != nil {
 			err = fmt.Errorf("close destination file %s: %w", dst, closeErr)
+		}
+		if err != nil {
+			_ = os.Remove(dst)
 		}
 	}()
 
