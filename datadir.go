@@ -213,6 +213,10 @@ func copyDirectoryContents(src, dst string) error {
 	})
 }
 
+// copyRegularFileAfterCopyHook is a test-only instrumentation point for
+// copyRegularFile source mutation races.
+var copyRegularFileAfterCopyHook func(string)
+
 func copyRegularFile(src, dst string, mode fs.FileMode, expected fs.FileInfo) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
@@ -243,6 +247,16 @@ func copyRegularFile(src, dst string, mode fs.FileMode, expected fs.FileInfo) (e
 
 	if _, err := io.Copy(out, in); err != nil {
 		return fmt.Errorf("copy %s to %s: %w", src, dst, err)
+	}
+	if copyRegularFileAfterCopyHook != nil {
+		copyRegularFileAfterCopyHook(src)
+	}
+	srcInfo, err = os.Lstat(src)
+	if err != nil {
+		return fmt.Errorf("stat source entry %s after copy: %w", src, err)
+	}
+	if expected != nil && !sameFileSnapshot(expected, srcInfo) {
+		return fmt.Errorf("source entry %s changed while copying; refusing to copy", src)
 	}
 	if err := out.Chmod(mode); err != nil {
 		return fmt.Errorf("chmod destination file %s: %w", dst, err)

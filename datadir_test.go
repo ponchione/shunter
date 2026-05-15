@@ -442,6 +442,63 @@ func TestCopyRegularFileRejectsReplacedSource(t *testing.T) {
 	}
 }
 
+func TestCopyRegularFileRejectsSourceChangedDuringCopy(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source")
+	dst := filepath.Join(dir, "copied")
+	if err := os.WriteFile(src, []byte("original"), 0o666); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	sourceInfo, err := os.Lstat(src)
+	if err != nil {
+		t.Fatalf("stat source: %v", err)
+	}
+
+	previous := copyRegularFileAfterCopyHook
+	copyRegularFileAfterCopyHook = func(path string) {
+		if err := os.WriteFile(path, []byte("mutated-after-copy"), 0o666); err != nil {
+			t.Fatalf("mutate source: %v", err)
+		}
+	}
+	defer func() { copyRegularFileAfterCopyHook = previous }()
+
+	err = copyRegularFile(src, dst, sourceInfo.Mode().Perm(), sourceInfo)
+	if err == nil {
+		t.Fatal("copyRegularFile returned nil for source changed during copy")
+	}
+	assertErrorContains(t, err, "changed while copying")
+}
+
+func TestCopyRegularFileRejectsSourceReplacedDuringCopy(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source")
+	dst := filepath.Join(dir, "copied")
+	if err := os.WriteFile(src, []byte("original"), 0o666); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	sourceInfo, err := os.Lstat(src)
+	if err != nil {
+		t.Fatalf("stat source: %v", err)
+	}
+
+	previous := copyRegularFileAfterCopyHook
+	copyRegularFileAfterCopyHook = func(path string) {
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove source: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("replacement"), 0o666); err != nil {
+			t.Fatalf("replace source: %v", err)
+		}
+	}
+	defer func() { copyRegularFileAfterCopyHook = previous }()
+
+	err = copyRegularFile(src, dst, sourceInfo.Mode().Perm(), sourceInfo)
+	if err == nil {
+		t.Fatal("copyRegularFile returned nil for source replaced during copy")
+	}
+	assertErrorContains(t, err, "changed while copying")
+}
+
 func TestRestoreDataDirRejectsSymlinkBackupSourcesAndEntries(t *testing.T) {
 	dir := t.TempDir()
 	backupDir := filepath.Join(dir, "backup")
