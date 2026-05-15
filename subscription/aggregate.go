@@ -329,6 +329,9 @@ func (m *Manager) initialAggregateUpdates(ctx context.Context, pred Predicate, a
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := m.checkMultiJoinLimits(ctx, pred, view); err != nil {
+		return nil, err
+	}
 	table, ok := aggregateEmittedTable(pred)
 	if !ok {
 		return nil, nil
@@ -351,6 +354,9 @@ func (m *Manager) evalAggregateQuery(ctx context.Context, qs *queryState, dv *De
 	table, ok := aggregateEmittedTable(qs.predicate)
 	if !ok || qs.aggregate == nil {
 		return nil, nil
+	}
+	if err := m.checkMultiJoinDeltaLimits(ctx, qs.predicate, dv); err != nil {
+		return nil, err
 	}
 	after, err := aggregateCommittedValue(ctx, dv.CommittedView(), table, qs.predicate, qs.aggregate, m.resolver)
 	if err != nil {

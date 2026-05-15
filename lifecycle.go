@@ -157,6 +157,8 @@ func (r *Runtime) Start(ctx context.Context) error {
 		r.registry,
 		subscription.WithFanOutInbox(fanOutInbox),
 		subscription.WithObserver(r.observability),
+		subscription.WithMaxMultiJoinRelations(r.buildConfig.SubscriptionMaxMultiJoinRelations),
+		subscription.WithMaxMultiJoinRowsPerRelation(r.buildConfig.SubscriptionMaxMultiJoinRowsPerRelation),
 	)
 	exec := executor.NewExecutor(executor.ExecutorConfig{
 		InboxCapacity: r.buildConfig.ExecutorQueueCapacity,

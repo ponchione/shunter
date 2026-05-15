@@ -1,6 +1,7 @@
 package shunter
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -203,6 +204,59 @@ func TestBuildWithBlankDataDirNormalizesToRuntimeDefault(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Fatalf("default data dir path is not a directory")
+	}
+}
+
+func TestBuildRejectsNegativeSubscriptionMultiJoinLimits(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{
+			name: "relations",
+			cfg:  Config{DataDir: t.TempDir(), SubscriptionMaxMultiJoinRelations: -1},
+			want: "subscription max multi-join relations must not be negative",
+		},
+		{
+			name: "rows per relation",
+			cfg:  Config{DataDir: t.TempDir(), SubscriptionMaxMultiJoinRowsPerRelation: -1},
+			want: "subscription max multi-join rows per relation must not be negative",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Build(validChatModule(), tt.cfg)
+			if err == nil {
+				t.Fatal("Build returned nil error, want negative multi-join limit rejection")
+			}
+			assertErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func TestStartConfiguresSubscriptionMultiJoinLimits(t *testing.T) {
+	rt, err := Build(validChatModule(), Config{
+		DataDir:                                 t.TempDir(),
+		SubscriptionMaxMultiJoinRelations:       4,
+		SubscriptionMaxMultiJoinRowsPerRelation: 256,
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	if rt.subscriptions == nil {
+		t.Fatal("subscriptions manager is nil after Start")
+	}
+	if rt.subscriptions.MaxMultiJoinRelations != 4 {
+		t.Fatalf("MaxMultiJoinRelations = %d, want 4", rt.subscriptions.MaxMultiJoinRelations)
+	}
+	if rt.subscriptions.MaxMultiJoinRowsPerRelation != 256 {
+		t.Fatalf("MaxMultiJoinRowsPerRelation = %d, want 256", rt.subscriptions.MaxMultiJoinRowsPerRelation)
 	}
 }
 

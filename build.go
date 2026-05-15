@@ -85,6 +85,12 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	if cfg.DurabilityQueueCapacity < 0 {
 		return Config{}, "", fmt.Errorf("durability queue capacity must not be negative")
 	}
+	if cfg.SubscriptionMaxMultiJoinRelations < 0 {
+		return Config{}, "", fmt.Errorf("subscription max multi-join relations must not be negative")
+	}
+	if cfg.SubscriptionMaxMultiJoinRowsPerRelation < 0 {
+		return Config{}, "", fmt.Errorf("subscription max multi-join rows per relation must not be negative")
+	}
 	if cfg.AuthMode != AuthModeDev && cfg.AuthMode != AuthModeStrict {
 		return Config{}, "", fmt.Errorf("auth mode is invalid")
 	}

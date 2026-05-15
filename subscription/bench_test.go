@@ -475,6 +475,48 @@ func BenchmarkMultiWayLiveJoinEvalSizes(b *testing.B) {
 	}
 }
 
+func BenchmarkMultiWayLiveJoinRelationShapes(b *testing.B) {
+	const size = 128
+	b.Run("chain3", func(b *testing.B) {
+		changed := types.ProductValue{types.NewUint64(uint64(size + 1000)), types.NewUint64(uint64(size/2 + 1))}
+		benchmarkMultiWayLiveJoinShape(b, multiJoinTestSchema(), multiJoinTestPredicate(), benchmarkMultiJoinCommitted(size, false), benchmarkMultiJoinCommitted(size, true), 3, changed)
+	})
+	b.Run("self_alias3", func(b *testing.B) {
+		changed := types.ProductValue{types.NewUint64(uint64(size + 2000)), types.NewUint64(uint64(size/2 + 1))}
+		benchmarkMultiWayLiveJoinShape(b, multiJoinTestSchema(), repeatedMultiJoinConditionPredicate(), benchmarkMultiJoinCommitted(size, false), benchmarkMultiJoinSelfAliasCommitted(size, true), 2, changed)
+	})
+	b.Run("chain4", func(b *testing.B) {
+		changed := types.ProductValue{types.NewUint64(uint64(size + 3000)), types.NewUint64(uint64(size/2 + 1))}
+		benchmarkMultiWayLiveJoinShape(b, multiJoinFourRelationTestSchema(), multiJoinFourRelationPredicate(), benchmarkMultiJoinFourRelationCommitted(size, false), benchmarkMultiJoinFourRelationCommitted(size, true), 4, changed)
+	})
+}
+
+func benchmarkMultiWayLiveJoinShape(b *testing.B, s *fakeSchema, pred MultiJoin, before, after *mockCommitted, changedTable TableID, changed types.ProductValue) {
+	b.Helper()
+	inbox := make(chan FanOutMessage, 1024)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{9},
+		QueryID:    90,
+		Predicates: []Predicate{pred},
+	}, before); err != nil {
+		b.Fatalf("RegisterSet: %v", err)
+	}
+	drainBenchmarkInbox(b, inbox)
+	cs := &store.Changeset{
+		TxID: 1,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			changedTable: {TableID: changedTable, TableName: fmt.Sprintf("t%d", changedTable), Inserts: []types.ProductValue{changed}},
+		},
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		mgr.EvalAndBroadcast(types.TxID(uint64(i+2)), cs, after, PostCommitMeta{})
+	}
+}
+
 func benchmarkMultiWayLiveJoinEval(b *testing.B, size int, aggregate *Aggregate) {
 	s := multiJoinTestSchema()
 	inbox := make(chan FanOutMessage, 1024)
@@ -533,6 +575,47 @@ func benchmarkMultiJoinCommitted(size int, includeChanged bool) *mockCommitted {
 		2: sRows,
 		3: rRows,
 	})
+}
+
+func benchmarkMultiJoinSelfAliasCommitted(size int, includeChanged bool) *mockCommitted {
+	s := multiJoinTestSchema()
+	tRows := make([]types.ProductValue, size)
+	sRows := make([]types.ProductValue, size, size+1)
+	for i := 0; i < size; i++ {
+		key := types.NewUint64(uint64(i + 1))
+		tRows[i] = types.ProductValue{key, key}
+		sRows[i] = types.ProductValue{types.NewUint64(uint64(i + 1001)), key}
+	}
+	if includeChanged {
+		sRows = append(sRows, types.ProductValue{
+			types.NewUint64(uint64(size + 2000)),
+			types.NewUint64(uint64(size/2 + 1)),
+		})
+	}
+	return buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: tRows,
+		2: sRows,
+	})
+}
+
+func benchmarkMultiJoinFourRelationCommitted(size int, includeChanged bool) *mockCommitted {
+	s := multiJoinFourRelationTestSchema()
+	rows := make(map[TableID][]types.ProductValue, 4)
+	for table := TableID(1); table <= 4; table++ {
+		tableRows := make([]types.ProductValue, size)
+		for i := 0; i < size; i++ {
+			key := types.NewUint64(uint64(i + 1))
+			tableRows[i] = types.ProductValue{types.NewUint64(uint64(i) + uint64(table)*1000), key}
+		}
+		rows[table] = tableRows
+	}
+	if includeChanged {
+		rows[4] = append(rows[4], types.ProductValue{
+			types.NewUint64(uint64(size + 3000)),
+			types.NewUint64(uint64(size/2 + 1)),
+		})
+	}
+	return buildMockCommitted(s, rows)
 }
 
 func BenchmarkDeltaIndexConstruction(b *testing.B) {

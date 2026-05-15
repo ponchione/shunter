@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -38,6 +39,42 @@ func multiJoinTestPredicate() MultiJoin {
 		},
 		ProjectedRelation: 0,
 		Filter:            ColNe{Table: 3, Column: 0, Alias: 2, Value: types.NewUint64(99)},
+	}
+}
+
+func multiJoinFourRelationTestSchema() *fakeSchema {
+	s := newFakeSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	s.addTable(1, cols, 1)
+	s.addTable(2, cols, 1)
+	s.addTable(3, cols, 1)
+	s.addTable(4, cols, 1)
+	return s
+}
+
+func multiJoinFourRelationPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 2, Alias: 1},
+			{Table: 3, Alias: 2},
+			{Table: 4, Alias: 3},
+		},
+		Conditions: []MultiJoinCondition{
+			{
+				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
+				Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
+				Right: MultiJoinColumnRef{Relation: 3, Table: 4, Column: 1, Alias: 3},
+			},
+		},
+		ProjectedRelation: 0,
 	}
 }
 
@@ -268,6 +305,77 @@ func multiJoinCommitted(includeExtraR bool) *mockCommitted {
 		contents[3] = append(contents[3], types.ProductValue{types.NewUint64(301), types.NewUint64(20)})
 	}
 	return buildMockCommitted(s, contents)
+}
+
+func TestRegisterSetMultiJoinLimitRejectsTooManyRelations(t *testing.T) {
+	s := multiJoinFourRelationTestSchema()
+	mgr := NewManager(s, s, WithMaxMultiJoinRelations(3))
+
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    701,
+		Predicates: []Predicate{multiJoinFourRelationPredicate()},
+	}, nil)
+	if !errors.Is(err, ErrMultiJoinLimit) {
+		t.Fatalf("RegisterSet multi-join relation limit error = %v, want ErrMultiJoinLimit", err)
+	}
+	if active := mgr.ActiveSubscriptionSets(); active != 0 {
+		t.Fatalf("ActiveSubscriptionSets = %d, want 0 after rejected multi-join", active)
+	}
+}
+
+func TestRegisterSetMultiJoinLimitRejectsLargeInputRelation(t *testing.T) {
+	s := multiJoinTestSchema()
+	mgr := NewManager(s, s, WithMaxMultiJoinRowsPerRelation(2))
+
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    702,
+		Predicates: []Predicate{multiJoinTestPredicate()},
+	}, multiJoinCommitted(false))
+	if !errors.Is(err, ErrMultiJoinLimit) {
+		t.Fatalf("RegisterSet multi-join input limit error = %v, want ErrMultiJoinLimit", err)
+	}
+	if active := mgr.ActiveSubscriptionSets(); active != 0 {
+		t.Fatalf("ActiveSubscriptionSets = %d, want 0 after rejected multi-join", active)
+	}
+}
+
+func TestMultiJoinRuntimeLimitQueuesEvalError(t *testing.T) {
+	s := multiJoinTestSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox), WithMaxMultiJoinRowsPerRelation(3))
+	connID := types.ConnectionID{7}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    703,
+		RequestID:  73,
+		Predicates: []Predicate{multiJoinTestPredicate()},
+	}, multiJoinCommitted(false)); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+
+	extra := types.ProductValue{types.NewUint64(301), types.NewUint64(20)}
+	cs := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Inserts: []types.ProductValue{extra}},
+		},
+	}
+	mgr.EvalAndBroadcast(types.TxID(1), cs, multiJoinCommitted(true), PostCommitMeta{})
+
+	msg := <-inbox
+	errs := msg.Errors[connID]
+	if len(errs) != 1 {
+		t.Fatalf("subscription errors = %v, want one", msg.Errors)
+	}
+	if !strings.Contains(errs[0].Message, ErrMultiJoinLimit.Error()) {
+		t.Fatalf("subscription error = %q, want multi-join limit", errs[0].Message)
+	}
+	dropped := mgr.DrainDroppedClients()
+	if len(dropped) != 1 || dropped[0] != connID {
+		t.Fatalf("dropped clients = %v, want [%v]", dropped, connID)
+	}
 }
 
 func TestMultiJoinAggregatesRegisterInitialRowsAndDeltas(t *testing.T) {

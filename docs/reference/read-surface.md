@@ -108,5 +108,9 @@ shapes differ by read surface:
   aggregate views emit replacement aggregate rows when the aggregate changes.
   Declared app placeholders follow the same parameter rules as declared
   queries.
+- Runtime config may cap admitted live multi-way views with
+  `SubscriptionMaxMultiJoinRelations` and
+  `SubscriptionMaxMultiJoinRowsPerRelation`. Zero leaves these compatibility
+  limits disabled.
 - Local ad hoc raw SQL is out of scope for v1. Use `Runtime.Read`,
   `Runtime.CallQuery`, or `Runtime.SubscribeView` instead.

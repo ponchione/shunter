@@ -51,6 +51,14 @@ type Config struct {
 	AnonymousTokenAudience string
 	AnonymousTokenTTL      time.Duration
 
+	// SubscriptionMaxMultiJoinRelations caps live multi-way join relation
+	// count. Zero leaves the current unlimited behavior.
+	SubscriptionMaxMultiJoinRelations int
+	// SubscriptionMaxMultiJoinRowsPerRelation caps committed input rows per
+	// relation for live multi-way joins. Zero leaves the current unlimited
+	// behavior.
+	SubscriptionMaxMultiJoinRowsPerRelation int
+
 	Protocol      ProtocolConfig
 	Observability ObservabilityConfig
 }

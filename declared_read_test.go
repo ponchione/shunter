@@ -723,6 +723,39 @@ func TestDeclaredViewMultiWayJoinSubscribes(t *testing.T) {
 	}
 }
 
+func TestDeclaredViewMultiWayJoinObeysRuntimeInputLimit(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, NewModule("multi_join_view_limits").
+		SchemaVersion(1).
+		TableDef(joinReadIndexedTableDef("t")).
+		TableDef(joinReadIndexedTableDef("s")).
+		Reducer("seed_join_rows", seedJoinRowsReducer).
+		View(ViewDeclaration{
+			Name:        "live_matching_tuple_rows",
+			SQL:         "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32 WHERE r.id <> 99",
+			Permissions: PermissionMetadata{Required: []string{"joins:subscribe"}},
+		}), Config{
+		DataDir:                                 t.TempDir(),
+		SubscriptionMaxMultiJoinRowsPerRelation: 2,
+	})
+	defer rt.Close()
+
+	res, err := rt.CallReducer(context.Background(), "seed_join_rows", nil)
+	if err != nil {
+		t.Fatalf("seed reducer admission: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("seed reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+
+	_, err = rt.SubscribeView(context.Background(), "live_matching_tuple_rows", 16, WithDeclaredReadPermissions("joins:subscribe"))
+	if !errors.Is(err, subscription.ErrMultiJoinLimit) {
+		t.Fatalf("SubscribeView error = %v, want ErrMultiJoinLimit", err)
+	}
+	if active := rt.subscriptions.ActiveSubscriptionSets(); active != 0 {
+		t.Fatalf("ActiveSubscriptionSets = %d, want 0 after rejected declared view", active)
+	}
+}
+
 func TestDeclaredViewMultiWayJoinAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x31)
 	bob := visibilityRuntimeIdentity(0x32)

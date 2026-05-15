@@ -16,9 +16,12 @@ intent for the root runtime config.
 | `EnableProtocol` | Enables WebSocket protocol serving. | Set true for external protocol clients. |
 | `ListenAddr` | Address used by `Runtime.ListenAndServe`. | Set when Shunter owns the HTTP server lifecycle. |
 | `AuthMode` | Development or strict auth behavior. | Use zero-value dev mode for local work, strict mode for public serving. |
+| `SubscriptionMaxMultiJoinRelations` | Optional live multi-way join relation-count limit. | Leave zero for compatibility; set before admitting untrusted/high-cardinality live views. |
+| `SubscriptionMaxMultiJoinRowsPerRelation` | Optional committed input-row limit for each live multi-way join relation. | Leave zero for compatibility; set from measured production envelopes. |
 
 Zero queue capacities are normalized to conservative non-zero defaults by the
-runtime.
+runtime. Zero subscription multi-way join limits mean unlimited. Negative
+subscription multi-way join limits are rejected during `Build`.
 
 ## Auth Fields
 

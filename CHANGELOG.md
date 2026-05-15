@@ -7,6 +7,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Strict protocol auth now supports local multi-key JWT verification through
   `Config.AuthVerificationKeys`, including HS256, RS256, ES256, and optional
   `kid` matching for overlapping key rotation.
+- Live multi-way joins now support opt-in production guardrails through
+  `Config.SubscriptionMaxMultiJoinRelations` and
+  `Config.SubscriptionMaxMultiJoinRowsPerRelation`.
 - Restored the source and private TypeScript client package metadata to the
   post-`v1.1.0` `v1.1.1-dev` development line.
 - New commit-log segments, offset indexes, snapshot files, and snapshot lock

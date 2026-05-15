@@ -112,6 +112,12 @@ type Manager struct {
 	// InitialRowLimit caps the initial-query row count returned to the
 	// client. Zero means unlimited.
 	InitialRowLimit int
+	// MaxMultiJoinRelations caps the number of relations accepted by a live
+	// multi-way join. Zero means unlimited.
+	MaxMultiJoinRelations int
+	// MaxMultiJoinRowsPerRelation caps committed input rows per multi-way
+	// join relation. Zero means unlimited.
+	MaxMultiJoinRowsPerRelation int
 }
 
 // ManagerOption configures optional fields on the Manager.
@@ -120,6 +126,18 @@ type ManagerOption func(*Manager)
 // WithInitialRowLimit sets the per-registration initial row cap.
 func WithInitialRowLimit(n int) ManagerOption {
 	return func(m *Manager) { m.InitialRowLimit = n }
+}
+
+// WithMaxMultiJoinRelations caps live multi-way join relation count.
+// Non-positive values disable this guardrail.
+func WithMaxMultiJoinRelations(n int) ManagerOption {
+	return func(m *Manager) { m.MaxMultiJoinRelations = n }
+}
+
+// WithMaxMultiJoinRowsPerRelation caps committed input rows for each live
+// multi-way join relation. Non-positive values disable this guardrail.
+func WithMaxMultiJoinRowsPerRelation(n int) ManagerOption {
+	return func(m *Manager) { m.MaxMultiJoinRowsPerRelation = n }
 }
 
 // WithFanOutInbox wires the inbox channel used by EvalAndBroadcast to hand

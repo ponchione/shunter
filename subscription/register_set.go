@@ -99,6 +99,9 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		if err := m.checkMultiJoinLimits(ctx, pred, view); err != nil {
+			return nil, err
+		}
 		var rows []types.ProductValue
 		var err error
 		switch p := p.(type) {
@@ -698,6 +701,9 @@ func (m *Manager) RegisterSet(
 		}
 		canonical := canonicalizePredicate(p)
 		if err := ValidatePredicate(canonical, m.schema); err != nil {
+			return SubscriptionSetRegisterResult{}, fmt.Errorf("predicate validation: %w", err)
+		}
+		if err := m.checkMultiJoinLimits(ctx, canonical, view); err != nil {
 			return SubscriptionSetRegisterResult{}, fmt.Errorf("predicate validation: %w", err)
 		}
 		if err := validateProjectionColumns(canonical, projections[i], m.schema); err != nil {

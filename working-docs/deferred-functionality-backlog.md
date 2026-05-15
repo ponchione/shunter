@@ -193,15 +193,18 @@ Review later:
 Owner: `subscription`, `protocol`
 
 Deferred decision:
-- Keep current multi-way joins correctness-first and avoid advertising
-  high-cardinality production safety until profiled.
+- Keep current multi-way joins correctness-first; incremental join planning is
+  still deferred.
+- Production guardrails now include optional
+  `Config.SubscriptionMaxMultiJoinRelations` and
+  `Config.SubscriptionMaxMultiJoinRowsPerRelation`. Zero preserves the
+  previous unlimited behavior.
 
 Review later:
-- Benchmarks for relation count, cardinality, self-joins, cross joins, and
-  aggregate shapes.
-- Admission limits.
+- Refreshed benchmark numbers for relation count, cardinality, self-joins,
+  cross joins, and aggregate shapes.
 - Incremental join plan design.
-- Public behavior gates.
+- Hard default limits, if production canaries justify them.
 
 ## Deferred Auth Expansion
 

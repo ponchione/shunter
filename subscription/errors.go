@@ -26,6 +26,8 @@ var (
 var (
 	// ErrInitialRowLimit — initial snapshot exceeded the configured row limit.
 	ErrInitialRowLimit = errors.New("subscription: initial row limit exceeded")
+	// ErrMultiJoinLimit — live multi-way join exceeds configured production limits.
+	ErrMultiJoinLimit = errors.New("subscription: multi-way join limit exceeded")
 	// ErrInitialQuery wraps initial-snapshot evaluation failures.
 	ErrInitialQuery = errors.New("initial query")
 	// ErrFinalQuery wraps final-delta evaluation failures.

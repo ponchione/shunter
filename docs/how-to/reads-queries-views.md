@@ -276,3 +276,12 @@ Indexes matter for reads that must stay fast:
 
 Large scans, unindexed live joins, and high-fanout subscriptions should be
 treated as app design risks until the app has measured its workload.
+
+Live multi-way joins are correctness-first and may materialize input relation
+rows during initial snapshots and post-commit deltas. For production workloads
+with untrusted query shapes or high-cardinality tables, set
+`Config.SubscriptionMaxMultiJoinRelations` and/or
+`Config.SubscriptionMaxMultiJoinRowsPerRelation`. These limits reject matching
+declared live views at admission and drop already-live subscriptions with a
+sanitized subscription error if a later commit grows an input relation past the
+configured ceiling. Zero leaves the compatibility behavior unlimited.
