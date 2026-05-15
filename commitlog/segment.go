@@ -141,10 +141,10 @@ func isZeroRecordHeader(buf [RecordHeaderSize]byte) bool {
 	return allBytesZero(buf[:])
 }
 
-// DecodeRecord reads and validates a record. An all-zero full or partial
-// record header is treated as an end-of-stream sentinel so preallocated zero
-// tails are ignored during recovery/replay instead of surfacing as corrupt
-// records.
+// DecodeRecord reads and validates a record. A zero maxPayload applies the
+// default commit-log payload limit. An all-zero full or partial record header
+// is treated as an end-of-stream sentinel so preallocated zero tails are
+// ignored during recovery/replay instead of surfacing as corrupt records.
 func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 	var buf [RecordHeaderSize]byte
 	if n, err := io.ReadFull(r, buf[:]); err != nil {
@@ -167,6 +167,9 @@ func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 	}
 	dataLen := binary.LittleEndian.Uint32(buf[10:14])
 
+	if maxPayload == 0 {
+		maxPayload = DefaultCommitLogOptions().MaxRecordPayloadBytes
+	}
 	if maxPayload > 0 && dataLen > maxPayload {
 		return nil, &RecordTooLargeError{Size: dataLen, Max: maxPayload}
 	}

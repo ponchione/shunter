@@ -172,15 +172,19 @@ func TestDecodeRecordPartialZeroHeaderIsSafeEOF(t *testing.T) {
 	}
 }
 
-func TestDecodeRecordHugeTruncatedPayloadIsSafe(t *testing.T) {
+func TestDecodeRecordHugePayloadUsesDefaultLimit(t *testing.T) {
 	var header [RecordHeaderSize]byte
 	binary.LittleEndian.PutUint64(header[:8], 1)
 	header[8] = RecordTypeChangeset
 	binary.LittleEndian.PutUint32(header[10:14], ^uint32(0))
 
 	_, err := DecodeRecord(bytes.NewReader(header[:]), 0)
-	if !errors.Is(err, ErrTruncatedRecord) {
-		t.Fatalf("huge truncated payload error = %v, want ErrTruncatedRecord", err)
+	var tooLargeErr *RecordTooLargeError
+	if !errors.As(err, &tooLargeErr) {
+		t.Fatalf("huge payload error = %v, want RecordTooLargeError", err)
+	}
+	if tooLargeErr.Max != DefaultCommitLogOptions().MaxRecordPayloadBytes {
+		t.Fatalf("max = %d, want %d", tooLargeErr.Max, DefaultCommitLogOptions().MaxRecordPayloadBytes)
 	}
 }
 

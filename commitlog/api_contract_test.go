@@ -1,6 +1,7 @@
 package commitlog
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -50,6 +51,23 @@ func TestSegmentReaderNextUsesDefaultMaxPayload(t *testing.T) {
 	defer sr.Close()
 	if _, err := sr.Next(); err == nil {
 		t.Fatal("expected ErrRecordTooLarge from no-arg Next")
+	}
+}
+
+func TestDecodeRecordUsesDefaultMaxPayloadBeforeReadingBody(t *testing.T) {
+	tooLarge := DefaultCommitLogOptions().MaxRecordPayloadBytes + 1
+	var header [RecordHeaderSize]byte
+	binary.LittleEndian.PutUint64(header[:8], 1)
+	header[8] = RecordTypeChangeset
+	binary.LittleEndian.PutUint32(header[10:14], tooLarge)
+
+	_, err := DecodeRecord(bytes.NewReader(header[:]), 0)
+	var tooLargeErr *RecordTooLargeError
+	if !errors.As(err, &tooLargeErr) {
+		t.Fatalf("DecodeRecord err = %v, want RecordTooLargeError", err)
+	}
+	if tooLargeErr.Max != DefaultCommitLogOptions().MaxRecordPayloadBytes {
+		t.Fatalf("max = %d, want %d", tooLargeErr.Max, DefaultCommitLogOptions().MaxRecordPayloadBytes)
 	}
 }
 
