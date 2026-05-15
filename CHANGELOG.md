@@ -12,6 +12,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Commit-log segment, offset-index, and snapshot opens now verify the opened
   file still matches the pre-open regular-file check, closing a path
   replacement race.
+- Protocol upgrade auth now rejects malformed `Authorization` headers before
+  considering query-token fallback or anonymous token minting.
+- SQL bytes coercion no longer treats escaped string text beginning with
+  uppercase `X'` as a hex literal; proper `X'..'` hex tokens still decode
+  normally.
 - Strict protocol auth now supports local multi-key JWT verification through
   `Config.AuthVerificationKeys`, including HS256, RS256, ES256, and optional
   `kid` matching for overlapping key rotation.

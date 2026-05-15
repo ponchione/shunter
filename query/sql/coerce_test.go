@@ -1225,6 +1225,11 @@ func TestCoerceParserStrNumHexOnBytesViaFromHexPad(t *testing.T) {
 		_, err := Coerce(lit, types.KindBytes)
 		assertInvalidLiteral(t, err, "x'AB", "Array<U8>")
 	})
+	t.Run("uppercase_x_escaped_string_emits_invalid_literal_array_u8", func(t *testing.T) {
+		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = 'X''AB'")
+		_, err := Coerce(lit, types.KindBytes)
+		assertInvalidLiteral(t, err, "X'AB", "Array<U8>")
+	})
 	t.Run("float_emits_invalid_literal_array_u8", func(t *testing.T) {
 		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = 1.3")
 		_, err := Coerce(lit, types.KindBytes)

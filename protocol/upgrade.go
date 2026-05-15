@@ -94,6 +94,8 @@ const (
 	authRejectedMissingToken = "missing token"
 )
 
+var errMalformedAuthorizationHeader = errors.New("malformed Authorization header")
+
 // HandleSubscribe is the net/http handler for the `/subscribe`
 // endpoint (SPEC-005 §2.3). It authenticates, validates request
 // parameters, upgrades the connection, and hands control to s.Upgraded.
@@ -110,7 +112,11 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Auth — strict requires a token, anonymous mints on absence.
-	token, hasToken := extractToken(r)
+	token, hasToken, err := extractToken(r)
+	if err != nil {
+		s.writeAuthRejected(w, authRejectedInvalidToken, http.StatusUnauthorized, "invalid_token", err)
+		return
+	}
 	var claims *auth.Claims
 	var mintedToken string
 	var identity types.Identity
@@ -330,17 +336,21 @@ func (s *Server) buildMessageHandlers() *MessageHandlers {
 // extractToken pulls a JWT from either the Authorization: Bearer
 // header (preferred, SPEC-005 §2.3) or the ?token= query parameter.
 // Returns the token and whether one was found.
-func extractToken(r *http.Request) (string, bool) {
-	if h := r.Header.Get("Authorization"); h != "" {
-		scheme, token, ok := strings.Cut(strings.TrimSpace(h), " ")
-		if ok && strings.EqualFold(scheme, "Bearer") {
-			return strings.TrimSpace(token), true
+func extractToken(r *http.Request) (string, bool, error) {
+	if values := r.Header.Values("Authorization"); len(values) != 0 {
+		if len(values) != 1 {
+			return "", false, errMalformedAuthorizationHeader
 		}
+		fields := strings.Fields(values[0])
+		if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
+			return "", false, errMalformedAuthorizationHeader
+		}
+		return fields[1], true, nil
 	}
 	if q := r.URL.Query().Get("token"); q != "" {
-		return q, true
+		return q, true, nil
 	}
-	return "", false
+	return "", false, nil
 }
 
 // resolveConnectionID returns the client-supplied ConnectionID if

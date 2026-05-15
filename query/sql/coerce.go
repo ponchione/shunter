@@ -317,12 +317,7 @@ func renderLiteralSourceText(lit Literal) (string, bool) {
 // decodeReferenceHex decodes the SQL source-text forms accepted for bytes
 // columns. Decode errors are returned for the caller to wrap.
 func decodeReferenceHex(text string) ([]byte, error) {
-	body := text
-	if strings.HasPrefix(body, "0x") {
-		body = body[2:]
-	} else if len(body) >= 2 && body[0] == 'X' && body[1] == '\'' {
-		body = body[2:]
-	}
+	body := strings.TrimPrefix(text, "0x")
 	return hex.DecodeString(body)
 }
 

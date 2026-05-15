@@ -408,6 +408,26 @@ func TestUpgradeValidTokenQueryParamSucceeds(t *testing.T) {
 	}
 }
 
+func TestUpgradeMalformedAuthorizationHeaderRejectsQueryTokenFallback(t *testing.T) {
+	s, _ := strictServer(t)
+	srv := newTestServer(t, s)
+
+	_, resp, err := dialWS(t, srv, wsDialOpts{
+		authHeader:   "Basic credentials",
+		query:        "token=" + mintValidToken(t),
+		subprotocols: []string{"v1.bsatn.shunter"},
+	})
+	if err == nil {
+		t.Fatal("dial should fail when Authorization is malformed")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %v, want 401", resp)
+	}
+	if body := responseBodyString(t, resp); body != authRejectedInvalidToken+"\n" {
+		t.Fatalf("response body = %q, want sanitized invalid-token body", body)
+	}
+}
+
 func TestUpgradeStrictNoTokenRejected(t *testing.T) {
 	s, _ := strictServer(t)
 	srv := newTestServer(t, s)
@@ -527,6 +547,25 @@ func TestUpgradeInvalidProtocolOptionsRejected(t *testing.T) {
 	}
 	if resp == nil || resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %v, want 500", resp)
+	}
+}
+
+func TestUpgradeAnonymousMalformedAuthorizationHeaderDoesNotMint(t *testing.T) {
+	s, _ := anonymousServer(t)
+	srv := newTestServer(t, s)
+
+	_, resp, err := dialWS(t, srv, wsDialOpts{
+		authHeader:   "Basic credentials",
+		subprotocols: []string{"v1.bsatn.shunter"},
+	})
+	if err == nil {
+		t.Fatal("dial should fail when Authorization is malformed")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %v, want 401", resp)
+	}
+	if body := responseBodyString(t, resp); body != authRejectedInvalidToken+"\n" {
+		t.Fatalf("response body = %q, want sanitized invalid-token body", body)
 	}
 }
 
