@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Protocol compression-envelope decoding now applies the default message-size
+  limit in `UnwrapCompressed`, preventing unbounded gzip expansion by default.
 - Commit-log `DecodeRecord` now applies the default max payload limit when
   callers pass zero, rejecting oversized headers before payload allocation.
 - Protocol dispatch now recovers panics from detached message-handler

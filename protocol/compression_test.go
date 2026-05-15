@@ -168,6 +168,28 @@ func TestUnwrapCompressedWithLimitRejectsGzipExpansion(t *testing.T) {
 	}
 }
 
+func TestUnwrapCompressedUsesDefaultLimitForGzipExpansion(t *testing.T) {
+	maxMessageSize := DefaultProtocolOptions().MaxMessageSize
+	body := bytes.Repeat([]byte{0x42}, int(maxMessageSize))
+	frame := EncodeFrame(TagTransactionUpdate, body, true, CompressionGzip)
+	if frame[0] != CompressionGzip {
+		t.Fatalf("compression byte = %d, want CompressionGzip", frame[0])
+	}
+
+	_, _, err := UnwrapCompressed(frame)
+	if !errors.Is(err, ErrMessageTooLarge) {
+		t.Fatalf("err = %v, want ErrMessageTooLarge", err)
+	}
+
+	_, got, err := UnwrapCompressedWithLimit(frame, 0)
+	if err != nil {
+		t.Fatalf("explicit unlimited unwrap: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("body len = %d, want %d", len(got), len(body))
+	}
+}
+
 func TestUnwrapCompressedTruncated(t *testing.T) {
 	_, _, err := UnwrapCompressed(nil)
 	if !errors.Is(err, ErrMalformedMessage) {

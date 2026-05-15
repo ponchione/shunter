@@ -113,11 +113,12 @@ func WrapCompressed(tag uint8, body []byte, mode uint8) ([]byte, error) {
 }
 
 // UnwrapCompressed reads a compression-envelope frame and returns the
-// tag + uncompressed body. Unknown compression byte maps to
-// ErrUnknownCompressionTag; gzip failure maps to
-// ErrDecompressionFailed.
+// tag + uncompressed body. It applies the default protocol message-size limit;
+// callers that intentionally need a custom or unlimited limit should use
+// UnwrapCompressedWithLimit. Unknown compression byte maps to
+// ErrUnknownCompressionTag; gzip failure maps to ErrDecompressionFailed.
 func UnwrapCompressed(frame []byte) (uint8, []byte, error) {
-	return unwrapCompressed(frame, 0)
+	return unwrapCompressed(frame, DefaultProtocolOptions().MaxMessageSize)
 }
 
 // UnwrapCompressedWithLimit reads a compression-envelope frame and returns the

@@ -208,6 +208,8 @@ func compressionFuzzErrorCategory(err error) string {
 		return "brotli"
 	case errors.Is(err, ErrDecompressionFailed):
 		return "decompression"
+	case errors.Is(err, ErrMessageTooLarge):
+		return "too-large"
 	default:
 		return ""
 	}
