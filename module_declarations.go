@@ -505,16 +505,9 @@ func copyMigrationMetadata(in MigrationMetadata) MigrationMetadata {
 		ContractVersion: in.ContractVersion,
 		PreviousVersion: in.PreviousVersion,
 		Compatibility:   in.Compatibility,
-		Classifications: copyMigrationClassifications(in.Classifications),
+		Classifications: copySlice(in.Classifications),
 		Notes:           in.Notes,
 	}
-}
-
-func copyMigrationClassifications(in []MigrationClassification) []MigrationClassification {
-	if len(in) == 0 {
-		return nil
-	}
-	return slices.Clone(in)
 }
 
 func copyMigrationMetadataMap(in map[string]MigrationMetadata) map[string]MigrationMetadata {
@@ -547,15 +540,23 @@ func hasMigrationMetadata(in MigrationMetadata) bool {
 }
 
 func copyStringSlice(in []string) []string {
+	return copySlice(in)
+}
+
+func normalizeStringSlice(in []string) []string {
+	return normalizeSlice(in)
+}
+
+func copySlice[T any](in []T) []T {
 	if len(in) == 0 {
 		return nil
 	}
 	return slices.Clone(in)
 }
 
-func normalizeStringSlice(in []string) []string {
+func normalizeSlice[T any](in []T) []T {
 	if len(in) == 0 {
-		return []string{}
+		return []T{}
 	}
-	return copyStringSlice(in)
+	return copySlice(in)
 }

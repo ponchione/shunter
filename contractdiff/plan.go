@@ -1,10 +1,10 @@
 package contractdiff
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	shunter "github.com/ponchione/shunter"
@@ -478,43 +478,29 @@ func migrationClassificationsText(classifications []shunter.MigrationClassificat
 }
 
 func sortPlanEntries(entries []PlanEntry) {
-	sort.SliceStable(entries, func(i, j int) bool {
-		a, b := entries[i], entries[j]
-		if a.Kind != b.Kind {
-			return a.Kind < b.Kind
-		}
-		if a.Surface != b.Surface {
-			return a.Surface < b.Surface
-		}
-		if a.Name != b.Name {
-			return a.Name < b.Name
-		}
-		return a.Detail < b.Detail
+	slices.SortStableFunc(entries, func(a, b PlanEntry) int {
+		return cmp.Or(
+			cmp.Compare(a.Kind, b.Kind),
+			cmp.Compare(a.Surface, b.Surface),
+			cmp.Compare(a.Name, b.Name),
+			cmp.Compare(a.Detail, b.Detail),
+		)
 	})
 }
 
 func sortPlanWarnings(warnings []PlanWarning) {
-	sort.SliceStable(warnings, func(i, j int) bool {
-		a, b := warnings[i], warnings[j]
-		if a.Code != b.Code {
-			return a.Code < b.Code
-		}
-		if a.Surface != b.Surface {
-			return a.Surface < b.Surface
-		}
-		if a.Name != b.Name {
-			return a.Name < b.Name
-		}
-		return a.Detail < b.Detail
+	slices.SortStableFunc(warnings, func(a, b PlanWarning) int {
+		return cmp.Or(
+			cmp.Compare(a.Code, b.Code),
+			cmp.Compare(a.Surface, b.Surface),
+			cmp.Compare(a.Name, b.Name),
+			cmp.Compare(a.Detail, b.Detail),
+		)
 	})
 }
 
 func sortPlanGuidance(guidance []PlanGuidance) {
-	sort.SliceStable(guidance, func(i, j int) bool {
-		a, b := guidance[i], guidance[j]
-		if a.Code != b.Code {
-			return a.Code < b.Code
-		}
-		return a.Detail < b.Detail
+	slices.SortStableFunc(guidance, func(a, b PlanGuidance) int {
+		return cmp.Or(cmp.Compare(a.Code, b.Code), cmp.Compare(a.Detail, b.Detail))
 	})
 }

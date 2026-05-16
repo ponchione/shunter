@@ -31,7 +31,7 @@ type VisibilityFilterDescription struct {
 // VisibilityFilter registers a row-level visibility filter declaration and
 // returns the receiver for fluent module declarations.
 func (m *Module) VisibilityFilter(decl VisibilityFilterDeclaration) *Module {
-	m.visibilityFilters = append(m.visibilityFilters, copyVisibilityFilterDeclaration(decl))
+	m.visibilityFilters = append(m.visibilityFilters, decl)
 	return m
 }
 
@@ -114,13 +114,6 @@ func visibilityFilterDescription(filter VisibilityFilterDeclaration, sl protocol
 	}, nil
 }
 
-func copyVisibilityFilterDeclaration(filter VisibilityFilterDeclaration) VisibilityFilterDeclaration {
-	return VisibilityFilterDeclaration{
-		Name: filter.Name,
-		SQL:  filter.SQL,
-	}
-}
-
 func describeVisibilityFilterDeclarations(in []VisibilityFilterDeclaration) []VisibilityFilterDescription {
 	if len(in) == 0 {
 		return nil
@@ -135,25 +128,8 @@ func describeVisibilityFilterDeclarations(in []VisibilityFilterDeclaration) []Vi
 	return out
 }
 
-func copyVisibilityFilterDescription(filter VisibilityFilterDescription) VisibilityFilterDescription {
-	return VisibilityFilterDescription{
-		Name:               filter.Name,
-		SQL:                filter.SQL,
-		ReturnTable:        filter.ReturnTable,
-		ReturnTableID:      filter.ReturnTableID,
-		UsesCallerIdentity: filter.UsesCallerIdentity,
-	}
-}
-
 func copyVisibilityFilterDescriptions(in []VisibilityFilterDescription) []VisibilityFilterDescription {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]VisibilityFilterDescription, len(in))
-	for i, filter := range in {
-		out[i] = copyVisibilityFilterDescription(filter)
-	}
-	return out
+	return copySlice(in)
 }
 
 func normalizeVisibilityFilterDescriptions(in []VisibilityFilterDescription) []VisibilityFilterDescription {

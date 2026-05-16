@@ -1,11 +1,11 @@
 package contractdiff
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	shunter "github.com/ponchione/shunter"
@@ -520,18 +520,13 @@ func (r *Report) add(kind ChangeKind, surface Surface, name, detail string) {
 }
 
 func sortChanges(changes []Change) {
-	sort.SliceStable(changes, func(i, j int) bool {
-		a, b := changes[i], changes[j]
-		if a.Kind != b.Kind {
-			return a.Kind < b.Kind
-		}
-		if a.Surface != b.Surface {
-			return a.Surface < b.Surface
-		}
-		if a.Name != b.Name {
-			return a.Name < b.Name
-		}
-		return a.Detail < b.Detail
+	slices.SortStableFunc(changes, func(a, b Change) int {
+		return cmp.Or(
+			cmp.Compare(a.Kind, b.Kind),
+			cmp.Compare(a.Surface, b.Surface),
+			cmp.Compare(a.Name, b.Name),
+			cmp.Compare(a.Detail, b.Detail),
+		)
 	})
 }
 

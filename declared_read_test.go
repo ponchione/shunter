@@ -2676,7 +2676,7 @@ func copyDeclaredReadSubscriptionUpdates(in []subscription.SubscriptionUpdate) [
 	}
 	out := append([]subscription.SubscriptionUpdate(nil), in...)
 	for i := range out {
-		out[i].Columns = copyColumnSchemas(out[i].Columns)
+		out[i].Columns = copySlice(out[i].Columns)
 		out[i].Inserts = types.CopyProductValues(out[i].Inserts)
 		out[i].Deletes = types.CopyProductValues(out[i].Deletes)
 	}

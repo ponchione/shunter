@@ -58,9 +58,9 @@ func (r *queryRegistry) createQueryState(hash QueryHash, pred Predicate, project
 	qs := &queryState{
 		hash:        hash,
 		predicate:   pred,
-		projection:  copyProjectionColumns(projection),
+		projection:  copySlice(projection),
 		aggregate:   copyAggregate(aggregate),
-		orderBy:     copyOrderByColumns(orderBy),
+		orderBy:     copySlice(orderBy),
 		limit:       copyRowLimit(limit),
 		offset:      copyRowOffset(offset),
 		subscribers: make(map[types.ConnectionID]map[types.SubscriptionID]subscriptionDeliveryMeta),

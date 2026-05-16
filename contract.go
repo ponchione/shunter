@@ -101,7 +101,7 @@ func (r *Runtime) ExportContract() ModuleContract {
 	schemaExport := copySchemaExport(r.ExportSchema())
 	reducers := r.module.reducerDeclarations()
 	schemaExport = applyReducerProductSchemas(schemaExport, reducers)
-	queries = withDeclaredReadResultMetadata(queries, declaredReadKindQuery, schemaExport)
+	queries = withDeclaredReadResultMetadata(queries, schemaExport)
 	views = withDeclaredViewResultMetadata(views, schemaExport)
 	return ModuleContract{
 		ContractVersion: ModuleContractVersion,
@@ -361,7 +361,7 @@ func applyReducerProductSchemas(schemaExport schema.SchemaExport, reducers []Red
 	return schemaExport
 }
 
-func withDeclaredReadResultMetadata(queries []QueryDescription, kind declaredReadKind, schemaExport schema.SchemaExport) []QueryDescription {
+func withDeclaredReadResultMetadata(queries []QueryDescription, schemaExport schema.SchemaExport) []QueryDescription {
 	if len(queries) == 0 {
 		return queries
 	}
@@ -369,7 +369,7 @@ func withDeclaredReadResultMetadata(queries []QueryDescription, kind declaredRea
 	out := make([]QueryDescription, len(queries))
 	for i, query := range queries {
 		out[i] = copyQueryDescription(query)
-		rowSchema, resultShape := declaredReadResultMetadata(query.SQL, query.Parameters, kind, lookup)
+		rowSchema, resultShape := declaredReadResultMetadata(query.SQL, query.Parameters, lookup)
 		out[i].RowSchema = rowSchema
 		out[i].ResultShape = resultShape
 	}
@@ -384,18 +384,18 @@ func withDeclaredViewResultMetadata(views []ViewDescription, schemaExport schema
 	out := make([]ViewDescription, len(views))
 	for i, view := range views {
 		out[i] = copyViewDescription(view)
-		rowSchema, resultShape := declaredReadResultMetadata(view.SQL, view.Parameters, declaredReadKindView, lookup)
+		rowSchema, resultShape := declaredReadResultMetadata(view.SQL, view.Parameters, lookup)
 		out[i].RowSchema = rowSchema
 		out[i].ResultShape = resultShape
 	}
 	return out
 }
 
-func declaredReadResultMetadata(sqlText string, parameters *ProductSchema, kind declaredReadKind, lookup contractSchemaLookup) (*ProductSchema, *ReadResultShape) {
+func declaredReadResultMetadata(sqlText string, parameters *ProductSchema, lookup contractSchemaLookup) (*ProductSchema, *ReadResultShape) {
 	if strings.TrimSpace(sqlText) == "" {
 		return nil, nil
 	}
-	compiled, err := compileDeclaredReadSQLTemplate(sqlText, lookup, validationOptionsForDeclaredRead(kind), parameters)
+	compiled, err := compileDeclaredReadSQLTemplate(sqlText, lookup, declaredReadSQLValidation, parameters)
 	if err != nil {
 		return nil, nil
 	}
@@ -483,7 +483,7 @@ func copyTableExport(in schema.TableExport) schema.TableExport {
 			ID:             idx.ID,
 			Name:           idx.Name,
 			Columns:        normalizeStringSlice(idx.Columns),
-			ColumnOrdinals: normalizeIntSlice(idx.ColumnOrdinals),
+			ColumnOrdinals: normalizeSlice(idx.ColumnOrdinals),
 			Unique:         idx.Unique,
 			Primary:        idx.Primary,
 		}
@@ -511,13 +511,6 @@ func normalizeSchemaReadPolicy(in schema.ReadPolicy) schema.ReadPolicy {
 		Access:      in.Access,
 		Permissions: normalizeStringSlice(in.Permissions),
 	}
-}
-
-func normalizeIntSlice(in []int) []int {
-	if len(in) == 0 {
-		return []int{}
-	}
-	return append([]int{}, in...)
 }
 
 func copyQueryDescriptions(in []QueryDescription) []QueryDescription {

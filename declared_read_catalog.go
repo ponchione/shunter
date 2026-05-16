@@ -2,7 +2,6 @@ package shunter
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/ponchione/shunter/protocol"
@@ -115,7 +114,7 @@ func declaredReadCatalogEntry(spec declaredReadSpec, sl protocol.SchemaLookup) (
 			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 		}
 		if spec.Kind == declaredReadKindView {
-			if err := validateDeclaredViewSQLTemplate(template, sl); err != nil {
+			if err := validateDeclaredViewSQL(template, sl); err != nil {
 				return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 			}
 		}
@@ -130,29 +129,7 @@ func declaredReadCatalogEntry(spec declaredReadSpec, sl protocol.SchemaLookup) (
 		return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 	}
 	if spec.Kind == declaredReadKindView {
-		if aggregate := compiled.SubscriptionAggregate(); aggregate != nil {
-			if err := subscription.ValidateAggregate(compiled.Predicate(), aggregate, sl); err != nil {
-				return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
-			}
-			if compiled.HasOrderBy() {
-				return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, fmt.Errorf("%w: live ORDER BY views do not support aggregate views", subscription.ErrInvalidPredicate))
-			}
-			if compiled.HasLimit() {
-				return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, fmt.Errorf("%w: live LIMIT views do not support aggregate views", subscription.ErrInvalidPredicate))
-			}
-			if compiled.HasOffset() {
-				return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, fmt.Errorf("%w: live OFFSET views do not support aggregate views", subscription.ErrInvalidPredicate))
-			}
-		} else if err := subscription.ValidateProjection(compiled.Predicate(), compiled.SubscriptionProjection(), sl); err != nil {
-			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
-		}
-		if err := subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), compiled.SubscriptionAggregate(), sl); err != nil {
-			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
-		}
-		if err := subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), compiled.SubscriptionAggregate(), sl); err != nil {
-			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
-		}
-		if err := subscription.ValidateOffset(compiled.Predicate(), compiled.SubscriptionOffset(), compiled.SubscriptionAggregate(), sl); err != nil {
+		if err := validateDeclaredViewSQL(compiled, sl); err != nil {
 			return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 		}
 	}
@@ -174,7 +151,19 @@ func compileDeclaredReadSQLTemplate(sqlText string, sl protocol.SchemaLookup, op
 	return protocol.CompileSQLQueryTemplateString(sqlText, sl, &caller, opts, sqlParameters)
 }
 
-func validateDeclaredViewSQLTemplate(compiled protocol.CompiledSQLQueryTemplate, sl protocol.SchemaLookup) error {
+type declaredViewSQLSource interface {
+	Predicate() subscription.Predicate
+	SubscriptionAggregate() *subscription.Aggregate
+	HasOrderBy() bool
+	HasLimit() bool
+	HasOffset() bool
+	SubscriptionProjection() []subscription.ProjectionColumn
+	SubscriptionOrderBy() []subscription.OrderByColumn
+	SubscriptionLimit() *uint64
+	SubscriptionOffset() *uint64
+}
+
+func validateDeclaredViewSQL(compiled declaredViewSQLSource, sl protocol.SchemaLookup) error {
 	if aggregate := compiled.SubscriptionAggregate(); aggregate != nil {
 		if err := subscription.ValidateAggregate(compiled.Predicate(), aggregate, sl); err != nil {
 			return err
@@ -251,7 +240,7 @@ func copyDeclaredReadEntry(in declaredReadEntry) declaredReadEntry {
 		Permissions:        copyPermissionMetadata(in.Permissions),
 		ReadModel:          copyReadModelMetadata(in.ReadModel),
 		Migration:          copyMigrationMetadata(in.Migration),
-		ReferencedTables:   copyTableIDSlice(in.ReferencedTables),
+		ReferencedTables:   copySlice(in.ReferencedTables),
 		UsesCallerIdentity: in.UsesCallerIdentity,
 	}
 	if in.compiled != nil {
@@ -263,11 +252,4 @@ func copyDeclaredReadEntry(in declaredReadEntry) declaredReadEntry {
 		out.template = &template
 	}
 	return out
-}
-
-func copyTableIDSlice(in []schema.TableID) []schema.TableID {
-	if len(in) == 0 {
-		return nil
-	}
-	return slices.Clone(in)
 }

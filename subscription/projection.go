@@ -2,7 +2,6 @@ package subscription
 
 import (
 	"fmt"
-	"slices"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
@@ -15,13 +14,6 @@ type ProjectionColumn struct {
 	Table  TableID
 	Column ColID
 	Alias  uint8
-}
-
-func copyProjectionColumns(in []ProjectionColumn) []ProjectionColumn {
-	if len(in) == 0 {
-		return nil
-	}
-	return slices.Clone(in)
 }
 
 // ValidateProjection checks that a live row projection can be applied to the

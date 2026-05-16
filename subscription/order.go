@@ -19,13 +19,6 @@ type OrderByColumn struct {
 	Desc   bool
 }
 
-func copyOrderByColumns(in []OrderByColumn) []OrderByColumn {
-	if len(in) == 0 {
-		return nil
-	}
-	return slices.Clone(in)
-}
-
 // ValidateOrderBy checks the narrow executable live ORDER BY surface.
 func ValidateOrderBy(pred Predicate, orderBy []OrderByColumn, aggregate *Aggregate, s SchemaLookup) error {
 	return validateOrderByColumns(pred, orderBy, aggregate, s)

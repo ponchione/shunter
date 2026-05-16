@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/ponchione/shunter/commitlog"
 	"github.com/ponchione/shunter/schema"
@@ -85,13 +84,6 @@ func (c *MigrationContext) Transaction() *store.Transaction {
 	return c.tx
 }
 
-func copyMigrationHooks(in []MigrationHook) []MigrationHook {
-	if len(in) == 0 {
-		return nil
-	}
-	return slices.Clone(in)
-}
-
 // RunDataDirMigrations runs app-owned migration hooks against cfg.DataDir
 // without starting normal runtime services. It is intended for app-owned
 // binaries that link the module directly; callers must stop any runtime that
@@ -167,12 +159,12 @@ func RunModuleDataDirMigrations(ctx context.Context, mod *Module, cfg Config) (M
 	if mod == nil {
 		return RunDataDirMigrations(ctx, mod, cfg)
 	}
-	hooks := copyMigrationHooks(mod.migrationHooks)
+	hooks := copySlice(mod.migrationHooks)
 	return RunDataDirMigrations(ctx, mod, cfg, hooks...)
 }
 
 func (r *Runtime) runMigrationHooks(ctx context.Context, durability *commitlog.DurabilityWorker) error {
-	hooks := copyMigrationHooks(r.module.migrationHooks)
+	hooks := copySlice(r.module.migrationHooks)
 	if len(hooks) == 0 {
 		return nil
 	}

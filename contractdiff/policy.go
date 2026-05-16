@@ -1,8 +1,9 @@
 package contractdiff
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	shunter "github.com/ponchione/shunter"
@@ -156,17 +157,12 @@ func (r *PolicyResult) addWarning(code WarningCode, surface Surface, name, detai
 }
 
 func sortPolicyWarnings(warnings []PolicyWarning) {
-	sort.SliceStable(warnings, func(i, j int) bool {
-		a, b := warnings[i], warnings[j]
-		if a.Code != b.Code {
-			return a.Code < b.Code
-		}
-		if a.Surface != b.Surface {
-			return a.Surface < b.Surface
-		}
-		if a.Name != b.Name {
-			return a.Name < b.Name
-		}
-		return a.Detail < b.Detail
+	slices.SortStableFunc(warnings, func(a, b PolicyWarning) int {
+		return cmp.Or(
+			cmp.Compare(a.Code, b.Code),
+			cmp.Compare(a.Surface, b.Surface),
+			cmp.Compare(a.Name, b.Name),
+			cmp.Compare(a.Detail, b.Detail),
+		)
 	})
 }

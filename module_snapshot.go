@@ -27,7 +27,7 @@ func newModuleSnapshot(mod *Module, visibilityFilters []VisibilityFilterDescript
 		visibilityFilters: copyVisibilityFilterDescriptions(visibilityFilters),
 		migration:         copyMigrationMetadata(mod.migration),
 		tableMigrations:   copyMigrationMetadataMap(mod.tableMigrations),
-		migrationHooks:    copyMigrationHooks(mod.migrationHooks),
+		migrationHooks:    copySlice(mod.migrationHooks),
 	}
 }
 

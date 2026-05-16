@@ -1,5 +1,14 @@
 package subscription
 
+import "slices"
+
+func copySlice[T any](in []T) []T {
+	if len(in) == 0 {
+		return nil
+	}
+	return slices.Clone(in)
+}
+
 func mapKeys[K comparable, V any](m map[K]V) []K {
 	if len(m) == 0 {
 		return []K{}

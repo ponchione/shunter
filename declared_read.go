@@ -160,7 +160,7 @@ func (r *Runtime) CallQuery(ctx context.Context, name string, opts ...DeclaredRe
 	return DeclaredQueryResult{
 		Name:      entry.Name,
 		TableName: result.TableName,
-		Columns:   copyColumnSchemas(result.Columns),
+		Columns:   copySlice(result.Columns),
 		Rows:      types.CopyProductValues(result.Rows),
 	}, nil
 }
@@ -430,10 +430,10 @@ func (r *Runtime) executableDeclaredRead(entry declaredReadEntry, caller types.C
 		return protocol.CompiledSQLQuery{}, err
 	}
 	if len(bindings) != 0 {
-		return protocol.CompileSQLQueryStringWithParameters(entry.SQL, r.registry, &caller.Identity, validationOptionsForDeclaredRead(entry.Kind), bindings)
+		return protocol.CompileSQLQueryStringWithParameters(entry.SQL, r.registry, &caller.Identity, declaredReadSQLValidation, bindings)
 	}
 	if entry.UsesCallerIdentity {
-		return protocol.CompileSQLQueryString(entry.SQL, r.registry, &caller.Identity, validationOptionsForDeclaredRead(entry.Kind))
+		return protocol.CompileSQLQueryString(entry.SQL, r.registry, &caller.Identity, declaredReadSQLValidation)
 	}
 	return entry.compiled.Copy(), nil
 }
@@ -480,13 +480,6 @@ func (r *Runtime) applyDeclaredReadVisibility(compiled protocol.CompiledSQLQuery
 	)
 }
 
-func validationOptionsForDeclaredRead(kind declaredReadKind) protocol.SQLQueryValidationOptions {
-	if kind == declaredReadKindView {
-		return protocol.SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true}
-	}
-	return protocol.SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true}
-}
-
 func declaredViewTableName(plan declaredViewAdmissionPlan, updates []subscription.SubscriptionUpdate) string {
 	for _, update := range updates {
 		if update.TableName != "" {
@@ -507,7 +500,7 @@ func collectDeclaredInitialRows(updates []subscription.SubscriptionUpdate) []typ
 func declaredViewColumns(plan declaredViewAdmissionPlan, updates []subscription.SubscriptionUpdate, sl schema.SchemaLookup) []schema.ColumnSchema {
 	for _, update := range updates {
 		if len(update.Columns) != 0 {
-			return copyColumnSchemas(update.Columns)
+			return copySlice(update.Columns)
 		}
 	}
 	if len(plan.projection) != 0 {
@@ -522,7 +515,7 @@ func declaredViewColumns(plan declaredViewAdmissionPlan, updates []subscription.
 	}
 	if sl != nil {
 		if _, ts, ok := sl.TableByName(plan.tableName); ok && ts != nil {
-			return copyColumnSchemas(ts.Columns)
+			return copySlice(ts.Columns)
 		}
 	}
 	return nil
@@ -771,15 +764,6 @@ func encodeDeclaredReadRows(rows []types.ProductValue, columns []schema.ColumnSc
 		return protocol.EncodeProductRowsForColumns(rows, columns)
 	}
 	return protocol.EncodeProductRows(rows)
-}
-
-func copyColumnSchemas(in []schema.ColumnSchema) []schema.ColumnSchema {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]schema.ColumnSchema, len(in))
-	copy(out, in)
-	return out
 }
 
 func declaredReadElapsedMicrosI64(receipt time.Time) int64 {

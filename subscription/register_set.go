@@ -676,13 +676,13 @@ func (m *Manager) RegisterSet(
 	limits := make([]*uint64, len(req.Predicates))
 	offsets := make([]*uint64, len(req.Predicates))
 	predicateCount := len(req.Predicates)
-	if err := copyRegisterSetOption("projection column", req.ProjectionColumns, predicateCount, projections, copyProjectionColumns); err != nil {
+	if err := copyRegisterSetOption("projection column", req.ProjectionColumns, predicateCount, projections, copySlice[ProjectionColumn]); err != nil {
 		return SubscriptionSetRegisterResult{}, err
 	}
 	if err := copyRegisterSetOption("aggregate", req.Aggregates, predicateCount, aggregates, copyAggregate); err != nil {
 		return SubscriptionSetRegisterResult{}, err
 	}
-	if err := copyRegisterSetOption("order-by column", req.OrderByColumns, predicateCount, orderBys, copyOrderByColumns); err != nil {
+	if err := copyRegisterSetOption("order-by column", req.OrderByColumns, predicateCount, orderBys, copySlice[OrderByColumn]); err != nil {
 		return SubscriptionSetRegisterResult{}, err
 	}
 	if err := copyRegisterSetOption("limit", req.Limits, predicateCount, limits, copyRowLimit); err != nil {
