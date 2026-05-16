@@ -406,61 +406,41 @@ func copyViewDeclaration(view viewDeclaration) viewDeclaration {
 }
 
 func copyQueryDeclarations(in []queryDeclaration) []queryDeclaration {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]queryDeclaration, len(in))
-	for i, query := range in {
-		out[i] = copyQueryDeclaration(query)
-	}
-	return out
+	return mapNonEmptySlice(in, copyQueryDeclaration)
 }
 
 func copyViewDeclarations(in []viewDeclaration) []viewDeclaration {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]viewDeclaration, len(in))
-	for i, view := range in {
-		out[i] = copyViewDeclaration(view)
-	}
-	return out
+	return mapNonEmptySlice(in, copyViewDeclaration)
 }
 
 func describeQueryDeclarations(in []queryDeclaration) []QueryDescription {
-	if len(in) == 0 {
-		return nil
+	return mapNonEmptySlice(in, describeQueryDeclaration)
+}
+
+func describeQueryDeclaration(query queryDeclaration) QueryDescription {
+	return QueryDescription{
+		Name:        query.Name,
+		SQL:         query.SQL,
+		Parameters:  copyProductSchemaPtr(query.Parameters),
+		Permissions: copyPermissionMetadata(query.Permissions),
+		ReadModel:   copyReadModelMetadata(query.ReadModel),
+		Migration:   copyMigrationMetadata(query.Migration),
 	}
-	out := make([]QueryDescription, len(in))
-	for i, query := range in {
-		out[i] = QueryDescription{
-			Name:        query.Name,
-			SQL:         query.SQL,
-			Parameters:  copyProductSchemaPtr(query.Parameters),
-			Permissions: copyPermissionMetadata(query.Permissions),
-			ReadModel:   copyReadModelMetadata(query.ReadModel),
-			Migration:   copyMigrationMetadata(query.Migration),
-		}
-	}
-	return out
 }
 
 func describeViewDeclarations(in []viewDeclaration) []ViewDescription {
-	if len(in) == 0 {
-		return nil
+	return mapNonEmptySlice(in, describeViewDeclaration)
+}
+
+func describeViewDeclaration(view viewDeclaration) ViewDescription {
+	return ViewDescription{
+		Name:        view.Name,
+		SQL:         view.SQL,
+		Parameters:  copyProductSchemaPtr(view.Parameters),
+		Permissions: copyPermissionMetadata(view.Permissions),
+		ReadModel:   copyReadModelMetadata(view.ReadModel),
+		Migration:   copyMigrationMetadata(view.Migration),
 	}
-	out := make([]ViewDescription, len(in))
-	for i, view := range in {
-		out[i] = ViewDescription{
-			Name:        view.Name,
-			SQL:         view.SQL,
-			Parameters:  copyProductSchemaPtr(view.Parameters),
-			Permissions: copyPermissionMetadata(view.Permissions),
-			ReadModel:   copyReadModelMetadata(view.ReadModel),
-			Migration:   copyMigrationMetadata(view.Migration),
-		}
-	}
-	return out
 }
 
 func copyReducerDeclarations(in []ReducerDeclaration) []ReducerDeclaration {
@@ -559,4 +539,15 @@ func normalizeSlice[T any](in []T) []T {
 		return []T{}
 	}
 	return copySlice(in)
+}
+
+func mapNonEmptySlice[T, U any](in []T, f func(T) U) []U {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]U, len(in))
+	for i, item := range in {
+		out[i] = f(item)
+	}
+	return out
 }

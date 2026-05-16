@@ -142,52 +142,41 @@ func normalizeModuleContract(c ModuleContract) ModuleContract {
 		c.Module.Metadata = map[string]string{}
 	}
 	c.Schema = normalizeSchemaExport(c.Schema)
-	if c.Queries == nil {
-		c.Queries = []QueryDescription{}
-	}
-	for i := range c.Queries {
-		c.Queries[i] = copyQueryDescription(c.Queries[i])
-	}
-	if c.Views == nil {
-		c.Views = []ViewDescription{}
-	}
-	for i := range c.Views {
-		c.Views[i] = copyViewDescription(c.Views[i])
-	}
+	c.Queries = copyQueryDescriptions(c.Queries)
+	c.Views = copyViewDescriptions(c.Views)
 	c.VisibilityFilters = normalizeVisibilityFilterDescriptions(c.VisibilityFilters)
-	if c.Permissions.Reducers == nil {
-		c.Permissions.Reducers = []PermissionContractDeclaration{}
-	}
-	for i := range c.Permissions.Reducers {
-		c.Permissions.Reducers[i].Required = normalizeStringSlice(c.Permissions.Reducers[i].Required)
-	}
-	if c.Permissions.Queries == nil {
-		c.Permissions.Queries = []PermissionContractDeclaration{}
-	}
-	for i := range c.Permissions.Queries {
-		c.Permissions.Queries[i].Required = normalizeStringSlice(c.Permissions.Queries[i].Required)
-	}
-	if c.Permissions.Views == nil {
-		c.Permissions.Views = []PermissionContractDeclaration{}
-	}
-	for i := range c.Permissions.Views {
-		c.Permissions.Views[i].Required = normalizeStringSlice(c.Permissions.Views[i].Required)
-	}
-	if c.ReadModel.Declarations == nil {
-		c.ReadModel.Declarations = []ReadModelContractDeclaration{}
-	}
-	for i := range c.ReadModel.Declarations {
-		c.ReadModel.Declarations[i].Tables = normalizeStringSlice(c.ReadModel.Declarations[i].Tables)
-		c.ReadModel.Declarations[i].Tags = normalizeStringSlice(c.ReadModel.Declarations[i].Tags)
-	}
-	if c.Migrations.Declarations == nil {
-		c.Migrations.Declarations = []MigrationContractDeclaration{}
-	}
+	c.Permissions.Reducers = normalizePermissionContractDeclarations(c.Permissions.Reducers)
+	c.Permissions.Queries = normalizePermissionContractDeclarations(c.Permissions.Queries)
+	c.Permissions.Views = normalizePermissionContractDeclarations(c.Permissions.Views)
+	c.ReadModel.Declarations = normalizeReadModelContractDeclarations(c.ReadModel.Declarations)
 	c.Migrations.Module = normalizeMigrationMetadata(c.Migrations.Module)
-	for i := range c.Migrations.Declarations {
-		c.Migrations.Declarations[i].Metadata = normalizeMigrationMetadata(c.Migrations.Declarations[i].Metadata)
-	}
+	c.Migrations.Declarations = normalizeMigrationContractDeclarations(c.Migrations.Declarations)
 	return c
+}
+
+func normalizePermissionContractDeclarations(in []PermissionContractDeclaration) []PermissionContractDeclaration {
+	out := normalizeSlice(in)
+	for i := range out {
+		out[i].Required = normalizeStringSlice(out[i].Required)
+	}
+	return out
+}
+
+func normalizeReadModelContractDeclarations(in []ReadModelContractDeclaration) []ReadModelContractDeclaration {
+	out := normalizeSlice(in)
+	for i := range out {
+		out[i].Tables = normalizeStringSlice(out[i].Tables)
+		out[i].Tags = normalizeStringSlice(out[i].Tags)
+	}
+	return out
+}
+
+func normalizeMigrationContractDeclarations(in []MigrationContractDeclaration) []MigrationContractDeclaration {
+	out := normalizeSlice(in)
+	for i := range out {
+		out[i].Metadata = normalizeMigrationMetadata(out[i].Metadata)
+	}
+	return out
 }
 
 func emptyModuleContract() ModuleContract {
@@ -413,9 +402,6 @@ func productSchemaForColumnSchemas(columns []schema.ColumnSchema) *ProductSchema
 			Nullable: column.Nullable,
 		}
 	}
-	if product.Columns == nil {
-		product.Columns = []ProductColumn{}
-	}
 	return product
 }
 
@@ -460,12 +446,6 @@ func normalizeSchemaExport(in schema.SchemaExport) schema.SchemaExport {
 	for i, reducer := range in.Reducers {
 		out.Reducers[i] = copyReducerExport(reducer)
 	}
-	if out.Tables == nil {
-		out.Tables = []schema.TableExport{}
-	}
-	if out.Reducers == nil {
-		out.Reducers = []schema.ReducerExport{}
-	}
 	return out
 }
 
@@ -487,12 +467,6 @@ func copyTableExport(in schema.TableExport) schema.TableExport {
 			Unique:         idx.Unique,
 			Primary:        idx.Primary,
 		}
-	}
-	if out.Columns == nil {
-		out.Columns = []schema.ColumnExport{}
-	}
-	if out.Indexes == nil {
-		out.Indexes = []schema.IndexExport{}
 	}
 	return out
 }

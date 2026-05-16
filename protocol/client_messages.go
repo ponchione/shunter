@@ -258,10 +258,7 @@ func decodeSubscribeSingle(body []byte) (SubscribeSingleMsg, error) {
 	var m SubscribeSingleMsg
 	var off int
 	var err error
-	if m.RequestID, m.QueryID, off, err = readRequestQueryID(body); err != nil {
-		return m, err
-	}
-	if m.QueryString, off, err = readString(body, off); err != nil {
+	if m.RequestID, m.QueryID, m.QueryString, off, err = readRequestQueryIDAndString(body); err != nil {
 		return m, err
 	}
 	if err := requireFullyConsumed(body, off, "SubscribeSingle"); err != nil {
@@ -314,10 +311,7 @@ func decodeOneOffQuery(body []byte) (OneOffQueryMsg, error) {
 	var m OneOffQueryMsg
 	var off int
 	var err error
-	if m.MessageID, off, err = readBytes(body, 0); err != nil {
-		return m, err
-	}
-	if m.QueryString, off, err = readString(body, off); err != nil {
+	if m.MessageID, m.QueryString, off, err = readBytesAndString(body, 0); err != nil {
 		return m, err
 	}
 	if err := requireFullyConsumed(body, off, "OneOffQuery"); err != nil {
@@ -330,10 +324,7 @@ func decodeDeclaredQuery(body []byte) (DeclaredQueryMsg, error) {
 	var m DeclaredQueryMsg
 	var off int
 	var err error
-	if m.MessageID, off, err = readBytes(body, 0); err != nil {
-		return m, err
-	}
-	if m.Name, off, err = readString(body, off); err != nil {
+	if m.MessageID, m.Name, off, err = readBytesAndString(body, 0); err != nil {
 		return m, err
 	}
 	if err := requireFullyConsumed(body, off, "DeclaredQuery"); err != nil {
@@ -346,10 +337,7 @@ func decodeDeclaredQueryWithParameters(body []byte) (DeclaredQueryWithParameters
 	var m DeclaredQueryWithParametersMsg
 	var off int
 	var err error
-	if m.MessageID, off, err = readBytes(body, 0); err != nil {
-		return m, err
-	}
-	if m.Name, off, err = readString(body, off); err != nil {
+	if m.MessageID, m.Name, off, err = readBytesAndString(body, 0); err != nil {
 		return m, err
 	}
 	if m.Params, off, err = readBytes(body, off); err != nil {
@@ -394,10 +382,7 @@ func decodeSubscribeDeclaredView(body []byte) (SubscribeDeclaredViewMsg, error) 
 	var m SubscribeDeclaredViewMsg
 	var off int
 	var err error
-	if m.RequestID, m.QueryID, off, err = readRequestQueryID(body); err != nil {
-		return m, err
-	}
-	if m.Name, off, err = readString(body, off); err != nil {
+	if m.RequestID, m.QueryID, m.Name, off, err = readRequestQueryIDAndString(body); err != nil {
 		return m, err
 	}
 	if err := requireFullyConsumed(body, off, "SubscribeDeclaredView"); err != nil {
@@ -410,10 +395,7 @@ func decodeSubscribeDeclaredViewWithParameters(body []byte) (SubscribeDeclaredVi
 	var m SubscribeDeclaredViewWithParametersMsg
 	var off int
 	var err error
-	if m.RequestID, m.QueryID, off, err = readRequestQueryID(body); err != nil {
-		return m, err
-	}
-	if m.Name, off, err = readString(body, off); err != nil {
+	if m.RequestID, m.QueryID, m.Name, off, err = readRequestQueryIDAndString(body); err != nil {
 		return m, err
 	}
 	if m.Params, off, err = readBytes(body, off); err != nil {
@@ -446,6 +428,22 @@ func readRequestQueryID(body []byte) (requestID uint32, queryID uint32, off int,
 		return 0, 0, off, err
 	}
 	return requestID, queryID, off, nil
+}
+
+func readRequestQueryIDAndString(body []byte) (requestID uint32, queryID uint32, value string, off int, err error) {
+	if requestID, queryID, off, err = readRequestQueryID(body); err != nil {
+		return
+	}
+	value, off, err = readString(body, off)
+	return
+}
+
+func readBytesAndString(body []byte, off int) (b []byte, s string, next int, err error) {
+	if b, next, err = readBytes(body, off); err != nil {
+		return
+	}
+	s, next, err = readString(body, next)
+	return
 }
 
 // --- Framing primitives ---

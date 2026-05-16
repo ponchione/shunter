@@ -81,26 +81,10 @@ func OpenAndRecoverDetailed(dir string, reg schema.SchemaRegistry) (*store.Commi
 func OpenAndRecoverWithReport(dir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, RecoveryResumePlan, RecoveryReport, error) {
 	segments, durableHorizon, snapshot, skippedSnapshots, err := scanRecoverySegmentsAndSelectSnapshot(dir, reg)
 	if err != nil {
-		report := RecoveryReport{
-			HasDurableLog:       len(segments) > 0,
-			DamagedTailSegments: damagedTailSegments(segments),
-			SegmentCoverage:     SegmentCoverage(segments),
-			SkippedSnapshots:    skippedSnapshots,
-		}
-		if report.HasDurableLog {
-			report.DurableLogHorizon = durableHorizon
-		}
+		report := newRecoveryReport(segments, durableHorizon, skippedSnapshots)
 		return nil, 0, RecoveryResumePlan{}, report, err
 	}
-	report := RecoveryReport{
-		HasDurableLog:       len(segments) > 0,
-		DamagedTailSegments: damagedTailSegments(segments),
-		SegmentCoverage:     SegmentCoverage(segments),
-		SkippedSnapshots:    skippedSnapshots,
-	}
-	if report.HasDurableLog {
-		report.DurableLogHorizon = durableHorizon
-	}
+	report := newRecoveryReport(segments, durableHorizon, skippedSnapshots)
 	if len(segments) == 0 {
 		durableHorizon = types.TxID(^uint64(0))
 	}
@@ -162,6 +146,19 @@ func OpenAndRecoverWithReport(dir string, reg schema.SchemaRegistry) (*store.Com
 	report.ResumePlan = plan
 
 	return committed, maxAppliedTxID, plan, report, nil
+}
+
+func newRecoveryReport(segments []SegmentInfo, durableHorizon types.TxID, skipped []SkippedSnapshotReport) RecoveryReport {
+	report := RecoveryReport{
+		HasDurableLog:       len(segments) > 0,
+		DamagedTailSegments: damagedTailSegments(segments),
+		SegmentCoverage:     SegmentCoverage(segments),
+		SkippedSnapshots:    skipped,
+	}
+	if report.HasDurableLog {
+		report.DurableLogHorizon = durableHorizon
+	}
+	return report
 }
 
 func isEmptyDamagedTail(segment SegmentInfo) bool {
