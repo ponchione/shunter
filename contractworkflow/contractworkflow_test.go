@@ -220,6 +220,52 @@ func TestGenerateFileWritesDeterministicTypeScriptFromContractJSON(t *testing.T)
 	assertContains(t, first, `export function callSendMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`)
 }
 
+func TestFindReducerUsesLocalContractDeclarations(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = append(contract.Schema.Reducers, schema.ReducerExport{
+		Name:      "archive_message",
+		Lifecycle: true,
+	})
+
+	reducer, ok := FindReducer(contract, " archive_message ")
+	if !ok {
+		t.Fatal("FindReducer did not find reducer with trimmed name")
+	}
+	if reducer.Name != "archive_message" || !reducer.Lifecycle {
+		t.Fatalf("FindReducer reducer = %+v", reducer)
+	}
+
+	if _, ok := FindReducer(contract, "missing_reducer"); ok {
+		t.Fatal("FindReducer found missing reducer")
+	}
+	if _, ok := FindReducer(contract, " \t"); ok {
+		t.Fatal("FindReducer found empty reducer name")
+	}
+}
+
+func TestFindQueryUsesLocalContractDeclarations(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = append(contract.Queries, shunter.QueryDescription{
+		Name: "recent_messages",
+		SQL:  "SELECT * FROM messages",
+	})
+
+	query, ok := FindQuery(contract, " recent_messages ")
+	if !ok {
+		t.Fatal("FindQuery did not find query with trimmed name")
+	}
+	if query.Name != "recent_messages" || query.SQL != "SELECT * FROM messages" {
+		t.Fatalf("FindQuery query = %+v", query)
+	}
+
+	if _, ok := FindQuery(contract, "missing_query"); ok {
+		t.Fatal("FindQuery found missing query")
+	}
+	if _, ok := FindQuery(contract, " \t"); ok {
+		t.Fatal("FindQuery found empty query name")
+	}
+}
+
 func TestExportRuntimeFileWritesCanonicalContractJSON(t *testing.T) {
 	dir := t.TempDir()
 	rt := buildWorkflowRuntime(t)

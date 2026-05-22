@@ -11,6 +11,7 @@ import (
 	"github.com/ponchione/shunter/codegen"
 	"github.com/ponchione/shunter/contractdiff"
 	"github.com/ponchione/shunter/internal/atomicfile"
+	"github.com/ponchione/shunter/schema"
 )
 
 const (
@@ -162,6 +163,34 @@ func ValidateFormat(format string) error {
 	default:
 		return unsupportedFormatError(format)
 	}
+}
+
+// FindReducer returns the reducer declaration named by name from contract.
+func FindReducer(contract shunter.ModuleContract, name string) (schema.ReducerExport, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return schema.ReducerExport{}, false
+	}
+	for _, reducer := range contract.Schema.Reducers {
+		if reducer.Name == name {
+			return reducer, true
+		}
+	}
+	return schema.ReducerExport{}, false
+}
+
+// FindQuery returns the declared query named by name from contract.
+func FindQuery(contract shunter.ModuleContract, name string) (shunter.QueryDescription, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return shunter.QueryDescription{}, false
+	}
+	for _, query := range contract.Queries {
+		if query.Name == name {
+			return query, true
+		}
+	}
+	return shunter.QueryDescription{}, false
 }
 
 // FormatDiff renders a contract diff report in text or JSON form.

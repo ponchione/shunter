@@ -31,6 +31,8 @@ The contract path stays required even when the app can expose its own contract.
 The CLI should use the local contract to validate names, permissions metadata,
 parameter schemas, and generated-style argument encoding before sending any
 request.
+Use local contract helpers such as `contractworkflow.FindReducer` and
+`contractworkflow.FindQuery` for name validation before dialing a running app.
 
 ## Transport Decision
 
