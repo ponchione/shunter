@@ -22,6 +22,7 @@ func TestHelpDocumentsAppOwnedContractExport(t *testing.T) {
 	assertContains(t, out, "Runtime.ExportContractJSON")
 	assertContains(t, out, "app-owned binary")
 	assertContains(t, out, "shunter describe --contract shunter.contract.json")
+	assertContains(t, out, "--section all|tables|reducers|queries|views|visibility")
 	assertContains(t, out, "shunter backup --data-dir ./data --out ./backup")
 	assertContains(t, out, "shunter restore --backup ./backup --data-dir ./data")
 	assertContains(t, out, "offline DataDir")
@@ -84,6 +85,16 @@ func TestDescribeCommandReadsContractJSON(t *testing.T) {
 			Name    string `json:"name"`
 			Version string `json:"version"`
 		} `json:"module"`
+		Section string `json:"section"`
+		Counts  struct {
+			Tables            int `json:"tables"`
+			Columns           int `json:"columns"`
+			Indexes           int `json:"indexes"`
+			Reducers          int `json:"reducers"`
+			Queries           int `json:"queries"`
+			Views             int `json:"views"`
+			VisibilityFilters int `json:"visibility_filters"`
+		} `json:"counts"`
 		Tables []struct {
 			Name    string   `json:"name"`
 			Columns []string `json:"columns"`
@@ -98,11 +109,85 @@ func TestDescribeCommandReadsContractJSON(t *testing.T) {
 	if summary.Module.Name != "chat" || summary.Module.Version != "v1.0.0" {
 		t.Fatalf("module summary = %+v", summary.Module)
 	}
+	if summary.Section != "all" {
+		t.Fatalf("section = %q, want all", summary.Section)
+	}
+	if summary.Counts.Tables != 1 || summary.Counts.Columns != 2 || summary.Counts.Indexes != 1 ||
+		summary.Counts.Reducers != 1 || summary.Counts.Queries != 1 || summary.Counts.Views != 0 ||
+		summary.Counts.VisibilityFilters != 0 {
+		t.Fatalf("counts = %+v", summary.Counts)
+	}
 	if len(summary.Tables) != 1 || summary.Tables[0].Name != "messages" || len(summary.Tables[0].Columns) != 2 {
 		t.Fatalf("table summary = %+v", summary.Tables)
 	}
 	if len(summary.Reducers) != 1 || summary.Reducers[0].Name != "send_message" {
 		t.Fatalf("reducer summary = %+v", summary.Reducers)
+	}
+}
+
+func TestDescribeCommandFiltersSections(t *testing.T) {
+	dir := t.TempDir()
+	contract := cliContractFixture()
+	contract.Views = append(contract.Views, shunter.ViewDescription{
+		Name: "live_messages",
+		SQL:  "SELECT * FROM messages",
+		ResultShape: &shunter.ReadResultShape{
+			Kind:  shunter.ReadResultShapeTable,
+			Table: "messages",
+		},
+		RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "id", Type: "uint64"},
+			{Name: "body", Type: "string"},
+		}},
+	})
+	contractPath := writeCLIContract(t, dir, "contract.json", contract)
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{"describe", "--contract", contractPath, "--section", "reducers"})
+	if code != 0 {
+		t.Fatalf("describe --section reducers exit code = %d, stderr = %s", code, stderr.String())
+	}
+	out := stdout.String()
+	assertContains(t, out, "Section: reducers")
+	assertContains(t, out, "Reducers (1):")
+	assertContains(t, out, "  - send_message")
+	if strings.Contains(out, "Tables (") || strings.Contains(out, "Queries (") || strings.Contains(out, "Views (") {
+		t.Fatalf("filtered text output includes unrelated sections:\n%s", out)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run(&stdout, &stderr, []string{"describe", "--contract", contractPath, "--section", "views", "--format", "json"})
+	if code != 0 {
+		t.Fatalf("describe --section views --format json exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var summary struct {
+		Section string `json:"section"`
+		Counts  struct {
+			Tables int `json:"tables"`
+			Views  int `json:"views"`
+		} `json:"counts"`
+		Tables []struct {
+			Name string `json:"name"`
+		} `json:"tables"`
+		Views []struct {
+			Name string `json:"name"`
+		} `json:"views"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
+		t.Fatalf("decode describe section JSON: %v\n%s", err, stdout.String())
+	}
+	if summary.Section != "views" {
+		t.Fatalf("section = %q, want views", summary.Section)
+	}
+	if summary.Counts.Tables != 1 || summary.Counts.Views != 1 {
+		t.Fatalf("counts = %+v", summary.Counts)
+	}
+	if len(summary.Views) != 1 || summary.Views[0].Name != "live_messages" {
+		t.Fatalf("views = %+v", summary.Views)
+	}
+	if summary.Tables != nil {
+		t.Fatalf("tables = %+v, want nil for filtered JSON section", summary.Tables)
 	}
 }
 
@@ -133,6 +218,12 @@ func TestDescribeCommandRejectsInvalidInputsBeforeFileIO(t *testing.T) {
 			args:       []string{"describe", "--contract", missingPath, "--format", "yaml"},
 			wantCode:   2,
 			wantStderr: `unsupported contract workflow output format "yaml"`,
+		},
+		{
+			name:       "unsupported-section",
+			args:       []string{"describe", "--contract", missingPath, "--section", "health"},
+			wantCode:   2,
+			wantStderr: `unsupported describe section "health"`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

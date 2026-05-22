@@ -182,6 +182,7 @@ Useful commands:
 
 ```bash
 rtk go run ./cmd/shunter describe --contract shunter.contract.json
+rtk go run ./cmd/shunter describe --contract shunter.contract.json --section tables --format json
 rtk go run ./cmd/shunter contract diff --previous old.json --current shunter.contract.json
 rtk go run ./cmd/shunter contract policy --previous old.json --current shunter.contract.json --strict
 rtk go run ./cmd/shunter contract plan --previous old.json --current shunter.contract.json --validate
@@ -189,7 +190,9 @@ rtk go run ./cmd/shunter contract plan --previous old.json --current shunter.con
 
 The generic CLI operates on existing contract JSON files and offline data
 directories. `describe` gives a local summary of the exported app surface; it
-does not inspect a running module or load module code.
+does not inspect a running module or load module code. Use `--section` to
+focus human or JSON output on one contract surface, and use JSON `counts` when
+operator gates need stable inventory assertions.
 
 ## Migrations
 

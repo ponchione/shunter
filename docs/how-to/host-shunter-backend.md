@@ -81,6 +81,7 @@ Inspect the generated contract before handing it to frontend code:
 
 ```bash
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json
+rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json --format json
 ```
 
 Typecheck the frontend-shaped client:
@@ -104,4 +105,5 @@ rtk ./scripts/hosted-chat-gate.sh
 ```
 
 It runs the Go example tests, builds the server, exports and describes the
-contract, regenerates TypeScript, and typechecks the frontend example.
+contract, checks describe JSON counts, regenerates TypeScript, and typechecks
+the frontend example.

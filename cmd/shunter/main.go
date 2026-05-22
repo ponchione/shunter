@@ -303,7 +303,7 @@ func printRootHelp(w io.Writer) {
 
 Usage:
   shunter version
-  shunter describe --contract shunter.contract.json [--format text|json]
+  shunter describe --contract shunter.contract.json [--section all|tables|reducers|queries|views|visibility] [--format text|json]
   shunter contract diff --previous old.json --current current.json [--format text|json]
   shunter contract policy --previous old.json --current current.json [--strict] [--require-previous-version] [--format text|json]
   shunter contract plan --previous old.json --current current.json [--strict] [--require-previous-version] [--validate] [--format text|json]
