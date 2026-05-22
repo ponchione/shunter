@@ -48,6 +48,56 @@ The first implementation should avoid new server endpoints. If HTTP admin
 routes are later added, they must be opt-in and documented as a distinct
 management surface, not enabled implicitly by `shunter.Run`.
 
+## Package Boundaries
+
+The first implementation should add a small Go protocol client package before
+adding CLI commands. Keep it separate from the server-side protocol lifecycle
+code so command behavior can be tested without starting the full CLI.
+
+Suggested split:
+
+- `protocolclient`: owns WebSocket dialing, subprotocol negotiation, bearer
+  token presentation, request IDs, bounded waits for responses, protocol
+  message encode/decode, and connection shutdown.
+- `cmd/shunter`: owns flags, environment fallback, terminal output, exit
+  status, file reading, and command help.
+- `contractworkflow` or a narrow internal helper: owns loading and validating a
+  `ModuleContract` from JSON for CLI use.
+- A contract argument encoding helper: owns JSON object to `types.ProductValue`
+  conversion from exported product schemas, then delegates BSATN byte encoding
+  to existing runtime encoding code.
+
+Do not make `protocolclient` responsible for operator policy, interactive
+confirmation, local contract discovery, or command output. It should be a
+typed transport helper that can also support app-owned maintenance binaries
+later.
+
+The existing `protocol` package should remain the shared wire-codec and server
+transport package. A client package can reuse exported message types and
+`EncodeClientMessage` / `DecodeServerMessage` rather than duplicating frame
+formats. Server admission, subscription fanout, and runtime lifecycle should
+stay out of the client package.
+
+## Timeout Behavior
+
+Running-app commands need a bounded end-to-end deadline, not separate unbounded
+dial, write, and read waits.
+
+Minimum behavior:
+
+- Add `--timeout` with a conservative default.
+- Derive a context with deadline before dialing.
+- Apply the same deadline to WebSocket dial, token handshake, request write,
+  response wait, and close.
+- Return a non-zero exit status on timeout and include the target URL, command
+  kind, and reducer or query name in the error.
+- Do not retry reducer calls automatically. If a query retry is added later, it
+  must be explicit and limited to transport failures before the request is
+  accepted.
+
+The client package should surface timeout errors distinctly enough for CLI tests
+to assert them without parsing human text.
+
 ## Auth Requirements
 
 Running-app commands must require an explicit credential flag or environment
@@ -63,6 +113,11 @@ When multiple sources are supplied, command-line flags should win over the
 environment. Errors should say that a token is required for running-app admin
 commands. Development conveniences can be added later only with an explicit
 `--allow-dev-anonymous` flag.
+
+`cmd/shunter` should resolve the credential source and pass only the selected
+token to the client package. The client package should attach the token using
+the same protocol authentication path expected by normal clients and should not
+read environment variables itself.
 
 ## Encoding Rules
 
@@ -83,6 +138,23 @@ Implementation rules:
 The CLI should not infer reducer argument formats when the contract does not
 declare them. In that case, operators must use raw bytes mode or the app should
 export product schemas.
+
+Generated TypeScript already provides the user-facing model for contract-aware
+encoding: helpers know the reducer or declared-read schema, encode strongly
+typed arguments, and decode rows through contract metadata. The Go CLI should
+reuse the same contract semantics, but it should not depend on generated
+TypeScript artifacts at runtime.
+
+For the CLI, prefer adding a Go helper that converts JSON values to
+`types.Value` / `types.ProductValue` using exported product schemas and then
+delegates binary encoding to `bsatn` or the existing protocol row encoders.
+This keeps the CLI independent of frontend builds while preserving the same
+field names, required fields, type checks, and row decoding rules that generated
+clients use.
+
+Avoid CLI-specific BSATN writers. If a needed primitive cannot be represented
+through current `types.Value` or `bsatn` helpers, add the missing shared helper
+with tests rather than open-coding binary layouts under `cmd/shunter`.
 
 ## Safety Defaults
 
@@ -122,3 +194,25 @@ Before implementing `call` or `query`:
 4. Add hosted-chat gate coverage against a real running example server.
 5. Document the command as a running-app client, separate from local
    contract-only commands such as `describe` and `health --contract`.
+
+## Test Strategy
+
+Build the feature in layers:
+
+- Unit-test JSON-to-product conversion with the same schema shapes exported by
+  hosted-chat: successful object input, missing required fields, unknown
+  fields, type mismatches, null handling, arrays or objects where scalars are
+  required, and deterministic column ordering.
+- Unit-test `protocolclient` with `httptest` and the real WebSocket protocol
+  handler where possible. Cover missing or rejected tokens, subprotocol
+  negotiation failure, malformed server frames, reducer failures, declared
+  query responses, context cancellation, and timeouts.
+- Command tests should exercise flag precedence, `SHUNTER_TOKEN` fallback,
+  `--token-file`, missing token errors, schema-less JSON rejection, raw bytes
+  mode, text output, JSON output, and exit status.
+- Hosted-chat gate coverage should start a real example server on an ephemeral
+  address, export the matching contract, run one reducer call, run one declared
+  query, and shut the server down cleanly.
+
+Tests should assert structured errors or JSON fields whenever practical. Human
+text can stay terse and should not be the only contract for automation.
