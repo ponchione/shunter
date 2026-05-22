@@ -198,6 +198,34 @@ automation. Failed JSON output should include:
   `reducer_error`, `query_error`, or `decode_error`.
 - `message`: a human-readable summary.
 
+Example missing-token JSON error:
+
+```json
+{
+  "status": "error",
+  "scope": "running_app",
+  "command": "call",
+  "target_url": "http://127.0.0.1:3000",
+  "surface": "send_message",
+  "error_code": "missing_token",
+  "message": "token is required for running-app admin commands"
+}
+```
+
+Example timeout JSON error:
+
+```json
+{
+  "status": "error",
+  "scope": "running_app",
+  "command": "query",
+  "target_url": "http://127.0.0.1:3000",
+  "surface": "recent_messages",
+  "error_code": "timeout",
+  "message": "query recent_messages timed out before a response was received"
+}
+```
+
 Do not put bearer tokens, raw request payloads, or decoded private rows in error
 objects. If a future implementation needs deeper diagnostics, add an explicit
 verbose or trace mode that redacts credentials before printing.
