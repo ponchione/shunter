@@ -7,6 +7,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added the hosted-backend app path with `shunter.Run`, `ConfigFromEnv`, a
   canonical `examples/hosted-chat` app, TypeScript generation workflow, and a
   hosted-chat release gate script.
+- Added `shunter describe --contract` for local ModuleContract inventory in
+  text or JSON form, and wired the hosted-chat gate to exercise it.
 - Protocol compression-envelope decoding now applies the default message-size
   limit in `UnwrapCompressed`, preventing unbounded gzip expansion by default.
 - Commit-log `DecodeRecord` now applies the default max payload limit when

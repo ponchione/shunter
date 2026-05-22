@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,10 +21,170 @@ func TestHelpDocumentsAppOwnedContractExport(t *testing.T) {
 	out := stdout.String()
 	assertContains(t, out, "Runtime.ExportContractJSON")
 	assertContains(t, out, "app-owned binary")
+	assertContains(t, out, "shunter describe --contract shunter.contract.json")
 	assertContains(t, out, "shunter backup --data-dir ./data --out ./backup")
 	assertContains(t, out, "shunter restore --backup ./backup --data-dir ./data")
 	assertContains(t, out, "offline DataDir")
 	assertContains(t, out, "No dynamic module loading")
+}
+
+func TestDescribeCommandReadsContractText(t *testing.T) {
+	dir := t.TempDir()
+	contract := cliContractFixture()
+	contract.Views = append(contract.Views, shunter.ViewDescription{
+		Name: "live_messages",
+		SQL:  "SELECT * FROM messages",
+		ResultShape: &shunter.ReadResultShape{
+			Kind:  shunter.ReadResultShapeTable,
+			Table: "messages",
+		},
+		RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "id", Type: "uint64"},
+			{Name: "body", Type: "string"},
+		}},
+	})
+	contractPath := writeCLIContract(t, dir, "contract.json", contract)
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{"describe", "--contract", contractPath})
+	if code != 0 {
+		t.Fatalf("describe exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("describe stderr = %s, want empty", stderr.String())
+	}
+	out := stdout.String()
+	assertContains(t, out, "Module: chat v1.0.0")
+	assertContains(t, out, "Contract version: 1")
+	assertContains(t, out, "Schema version: 1")
+	assertContains(t, out, "Tables (1):")
+	assertContains(t, out, "  - messages: 2 columns, 1 indexes")
+	assertContains(t, out, "Reducers (1):")
+	assertContains(t, out, "  - send_message")
+	assertContains(t, out, "Queries (1):")
+	assertContains(t, out, "  - history metadata-only")
+	assertContains(t, out, "Views (1):")
+	assertContains(t, out, "  - live_messages executable, table messages, row columns 2")
+}
+
+func TestDescribeCommandReadsContractJSON(t *testing.T) {
+	dir := t.TempDir()
+	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{"describe", "--contract", contractPath, "--format", "json"})
+	if code != 0 {
+		t.Fatalf("describe --format json exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("describe --format json stderr = %s, want empty", stderr.String())
+	}
+	var summary struct {
+		Module struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		} `json:"module"`
+		Tables []struct {
+			Name    string   `json:"name"`
+			Columns []string `json:"columns"`
+		} `json:"tables"`
+		Reducers []struct {
+			Name string `json:"name"`
+		} `json:"reducers"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
+		t.Fatalf("decode describe JSON: %v\n%s", err, stdout.String())
+	}
+	if summary.Module.Name != "chat" || summary.Module.Version != "v1.0.0" {
+		t.Fatalf("module summary = %+v", summary.Module)
+	}
+	if len(summary.Tables) != 1 || summary.Tables[0].Name != "messages" || len(summary.Tables[0].Columns) != 2 {
+		t.Fatalf("table summary = %+v", summary.Tables)
+	}
+	if len(summary.Reducers) != 1 || summary.Reducers[0].Name != "send_message" {
+		t.Fatalf("reducer summary = %+v", summary.Reducers)
+	}
+}
+
+func TestDescribeCommandRejectsInvalidInputsBeforeFileIO(t *testing.T) {
+	dir := t.TempDir()
+	missingPath := filepath.Join(dir, "missing.json")
+
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		wantCode   int
+		wantStderr string
+	}{
+		{
+			name:       "missing-contract-flag",
+			args:       []string{"describe", "--format", "json"},
+			wantCode:   2,
+			wantStderr: "--contract is required",
+		},
+		{
+			name:       "unexpected-arg",
+			args:       []string{"describe", "--contract", missingPath, "extra"},
+			wantCode:   2,
+			wantStderr: `unexpected argument "extra"`,
+		},
+		{
+			name:       "unsupported-format",
+			args:       []string{"describe", "--contract", missingPath, "--format", "yaml"},
+			wantCode:   2,
+			wantStderr: `unsupported contract workflow output format "yaml"`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(&stdout, &stderr, tc.args)
+			if code != tc.wantCode {
+				t.Fatalf("%s exit code = %d, stderr = %s", tc.name, code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("%s stdout = %s, want empty", tc.name, stdout.String())
+			}
+			assertContains(t, stderr.String(), tc.wantStderr)
+			if strings.Contains(stderr.String(), "read contract") {
+				t.Fatalf("%s read contract before validation: %s", tc.name, stderr.String())
+			}
+		})
+	}
+}
+
+func TestDescribeCommandRejectsMissingAndInvalidContracts(t *testing.T) {
+	dir := t.TempDir()
+	missingPath := filepath.Join(dir, "missing.json")
+	invalidPath := writeCLIBytes(t, dir, "invalid.json", []byte(`{"contract_version":0}`))
+
+	for _, tc := range []struct {
+		name       string
+		path       string
+		wantStderr string
+	}{
+		{
+			name:       "missing",
+			path:       missingPath,
+			wantStderr: "read contract",
+		},
+		{
+			name:       "invalid",
+			path:       invalidPath,
+			wantStderr: "invalid module contract JSON",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(&stdout, &stderr, []string{"describe", "--contract", tc.path})
+			if code != 1 {
+				t.Fatalf("%s exit code = %d, stderr = %s", tc.name, code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("%s stdout = %s, want empty", tc.name, stdout.String())
+			}
+			assertContains(t, stderr.String(), tc.wantStderr)
+		})
+	}
 }
 
 func TestVersionCommandPrintsBuildInfo(t *testing.T) {

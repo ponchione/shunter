@@ -74,12 +74,15 @@ Keep a previous contract artifact for review. Then run the generic CLI against
 old and new JSON files.
 
 ```bash
+rtk go run ./cmd/shunter describe --contract shunter.contract.json
 rtk go run ./cmd/shunter contract diff --previous old.json --current shunter.contract.json
 rtk go run ./cmd/shunter contract policy --previous old.json --current shunter.contract.json --strict
 rtk go run ./cmd/shunter contract plan --previous old.json --current shunter.contract.json --validate
 ```
 
-Use the output to decide whether a change is additive, breaking, or requires a
+Use `describe` for a quick local inventory of module name, schema version,
+tables, reducers, declared reads, and visibility filters. Use the diff, policy,
+and plan output to decide whether a change is additive, breaking, or requires a
 backup/migration plan.
 
 ## Generate TypeScript

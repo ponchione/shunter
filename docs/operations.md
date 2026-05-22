@@ -181,13 +181,15 @@ Before deploying a module/schema change:
 Useful commands:
 
 ```bash
+rtk go run ./cmd/shunter describe --contract shunter.contract.json
 rtk go run ./cmd/shunter contract diff --previous old.json --current shunter.contract.json
 rtk go run ./cmd/shunter contract policy --previous old.json --current shunter.contract.json --strict
 rtk go run ./cmd/shunter contract plan --previous old.json --current shunter.contract.json --validate
 ```
 
-The generic CLI operates on existing contract JSON files. It does not inspect a
-running module or load module code.
+The generic CLI operates on existing contract JSON files and offline data
+directories. `describe` gives a local summary of the exported app surface; it
+does not inspect a running module or load module code.
 
 ## Migrations
 

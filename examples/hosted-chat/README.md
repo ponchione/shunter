@@ -39,6 +39,12 @@ rtk go run ./cmd/shunter contract codegen \
   --out examples/hosted-chat/frontend/src/generated/hosted_chat.ts
 ```
 
+Inspect the exported app surface with the generic CLI:
+
+```bash
+rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json
+```
+
 Typecheck the frontend-shaped client:
 
 ```bash
