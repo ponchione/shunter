@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added `shunter contract assert --contract` for local ModuleContract release
+  gates with module, schema-version, and app-surface count assertions in text
+  or JSON form.
 - Added the hosted-backend app path with `shunter.Run`, `ConfigFromEnv`, a
   canonical `examples/hosted-chat` app, TypeScript generation workflow, and a
   hosted-chat release gate script.

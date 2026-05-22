@@ -24,6 +24,7 @@ func TestHelpDocumentsAppOwnedContractExport(t *testing.T) {
 	assertContains(t, out, "shunter describe --contract shunter.contract.json")
 	assertContains(t, out, "shunter health --contract shunter.contract.json")
 	assertContains(t, out, "shunter contract validate --contract shunter.contract.json")
+	assertContains(t, out, "shunter contract assert --contract shunter.contract.json")
 	assertContains(t, out, "--section all|tables|reducers|queries|views|visibility")
 	assertContains(t, out, "shunter backup --data-dir ./data --out ./backup")
 	assertContains(t, out, "shunter restore --backup ./backup --data-dir ./data")
@@ -553,6 +554,225 @@ func TestContractValidateCommandRejectsMissingAndInvalidContracts(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := run(&stdout, &stderr, []string{"contract", "validate", "--contract", tc.path})
+			if code != 1 {
+				t.Fatalf("%s exit code = %d, stderr = %s", tc.name, code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("%s stdout = %s, want empty", tc.name, stdout.String())
+			}
+			assertContains(t, stderr.String(), tc.wantStderr)
+		})
+	}
+}
+
+func TestContractAssertCommandPassesText(t *testing.T) {
+	dir := t.TempDir()
+	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "assert",
+		"--contract", contractPath,
+		"--module", "chat",
+		"--schema-version", "1",
+		"--tables", "1",
+		"--columns", "2",
+		"--indexes", "1",
+		"--reducers", "1",
+		"--queries", "1",
+		"--views", "0",
+		"--visibility-filters", "0",
+	})
+	if code != 0 {
+		t.Fatalf("contract assert exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("contract assert stderr = %s, want empty", stderr.String())
+	}
+	out := stdout.String()
+	assertContains(t, out, "Status: passed")
+	assertContains(t, out, "Scope: contract")
+	assertContains(t, out, "9 contract assertion(s) passed")
+	assertContains(t, out, "Module: chat v1.0.0")
+	assertContains(t, out, "  - module: ok expected chat actual chat")
+	assertContains(t, out, "  - tables: ok expected 1 actual 1")
+}
+
+func TestContractAssertCommandPassesJSON(t *testing.T) {
+	dir := t.TempDir()
+	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "assert",
+		"--contract", contractPath,
+		"--module", "chat",
+		"--tables", "1",
+		"--reducers", "1",
+		"--format", "json",
+	})
+	if code != 0 {
+		t.Fatalf("contract assert --format json exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("contract assert --format json stderr = %s, want empty", stderr.String())
+	}
+	var report struct {
+		Status  string `json:"status"`
+		Scope   string `json:"scope"`
+		Message string `json:"message"`
+		Module  struct {
+			Name string `json:"name"`
+		} `json:"module"`
+		Counts struct {
+			Tables   int `json:"tables"`
+			Reducers int `json:"reducers"`
+		} `json:"counts"`
+		Assertions []struct {
+			Name     string `json:"name"`
+			Expected any    `json:"expected"`
+			Actual   any    `json:"actual"`
+			Passed   bool   `json:"passed"`
+		} `json:"assertions"`
+		Failures []struct {
+			Name string `json:"name"`
+		} `json:"failures"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode contract assert JSON: %v\n%s", err, stdout.String())
+	}
+	if report.Status != "passed" || report.Scope != "contract" || report.Module.Name != "chat" {
+		t.Fatalf("contract assert report = %+v", report)
+	}
+	if report.Counts.Tables != 1 || report.Counts.Reducers != 1 {
+		t.Fatalf("contract assert counts = %+v", report.Counts)
+	}
+	if len(report.Assertions) != 3 || len(report.Failures) != 0 {
+		t.Fatalf("contract assert assertions = %+v failures = %+v", report.Assertions, report.Failures)
+	}
+	for _, assertion := range report.Assertions {
+		if !assertion.Passed {
+			t.Fatalf("assertion failed unexpectedly: %+v", assertion)
+		}
+	}
+}
+
+func TestContractAssertCommandFailsMismatches(t *testing.T) {
+	dir := t.TempDir()
+	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "assert",
+		"--contract", contractPath,
+		"--module", "messages",
+		"--tables", "2",
+		"--format", "json",
+	})
+	if code != 1 {
+		t.Fatalf("contract assert mismatch exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("contract assert mismatch stderr = %s, want empty", stderr.String())
+	}
+	var report struct {
+		Status   string `json:"status"`
+		Message  string `json:"message"`
+		Failures []struct {
+			Name     string `json:"name"`
+			Expected any    `json:"expected"`
+			Actual   any    `json:"actual"`
+			Passed   bool   `json:"passed"`
+		} `json:"failures"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode contract assert mismatch JSON: %v\n%s", err, stdout.String())
+	}
+	if report.Status != "failed" || len(report.Failures) != 2 {
+		t.Fatalf("contract assert mismatch report = %+v", report)
+	}
+	assertContains(t, report.Message, "2 contract assertion(s) failed")
+	if report.Failures[0].Passed || report.Failures[1].Passed {
+		t.Fatalf("failures marked passed: %+v", report.Failures)
+	}
+}
+
+func TestContractAssertCommandRejectsInvalidInputsBeforeFileIO(t *testing.T) {
+	dir := t.TempDir()
+	missingPath := filepath.Join(dir, "missing.json")
+
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		wantCode   int
+		wantStderr string
+	}{
+		{
+			name:       "missing-contract-flag",
+			args:       []string{"contract", "assert", "--tables", "1"},
+			wantCode:   2,
+			wantStderr: "--contract is required",
+		},
+		{
+			name:       "unexpected-arg",
+			args:       []string{"contract", "assert", "--contract", missingPath, "extra"},
+			wantCode:   2,
+			wantStderr: `unexpected argument "extra"`,
+		},
+		{
+			name:       "unsupported-format",
+			args:       []string{"contract", "assert", "--contract", missingPath, "--format", "yaml"},
+			wantCode:   2,
+			wantStderr: `unsupported contract workflow output format "yaml"`,
+		},
+		{
+			name:       "negative-count",
+			args:       []string{"contract", "assert", "--contract", missingPath, "--tables", "-2"},
+			wantCode:   2,
+			wantStderr: "--tables must be >= 0",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(&stdout, &stderr, tc.args)
+			if code != tc.wantCode {
+				t.Fatalf("%s exit code = %d, stderr = %s", tc.name, code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("%s stdout = %s, want empty", tc.name, stdout.String())
+			}
+			assertContains(t, stderr.String(), tc.wantStderr)
+			if strings.Contains(stderr.String(), "read contract") {
+				t.Fatalf("%s read contract before validation: %s", tc.name, stderr.String())
+			}
+		})
+	}
+}
+
+func TestContractAssertCommandRejectsMissingAndInvalidContracts(t *testing.T) {
+	dir := t.TempDir()
+	missingPath := filepath.Join(dir, "missing.json")
+	invalidPath := writeCLIBytes(t, dir, "invalid.json", []byte(`{"contract_version":0}`))
+
+	for _, tc := range []struct {
+		name       string
+		path       string
+		wantStderr string
+	}{
+		{
+			name:       "missing",
+			path:       missingPath,
+			wantStderr: "read contract",
+		},
+		{
+			name:       "invalid",
+			path:       invalidPath,
+			wantStderr: "invalid module contract JSON: assert contract",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(&stdout, &stderr, []string{"contract", "assert", "--contract", tc.path, "--tables", "1"})
 			if code != 1 {
 				t.Fatalf("%s exit code = %d, stderr = %s", tc.name, code, stderr.String())
 			}
