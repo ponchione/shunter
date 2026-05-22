@@ -61,6 +61,7 @@ func TestContractAssertHelpDocumentsExamples(t *testing.T) {
 	assertContains(t, out, "shunter contract assert --contract shunter.contract.json [assertions] [--format text|json]")
 	assertContains(t, out, "Examples:")
 	assertContains(t, out, "shunter contract assert --contract shunter.contract.json --module chat --module-version v0.1.0 --contract-version 1 --tables 1 --reducers 1 --format json")
+	assertContains(t, out, "assertion_count and failure_count aggregate fields")
 	assertContains(t, out, "-contract")
 	assertContains(t, out, "-module-version")
 	assertContains(t, out, "-visibility-filters")

@@ -93,6 +93,9 @@ for release gates and review scripts.
 `shunter contract assert --contract` validates the local contract artifact and
 then checks explicit module, module-version, contract-version, schema-version,
 and surface-count expectations for release gates.
+When run with `--format json`, it includes `assertion_count` and
+`failure_count` aggregate fields so gates can check totals without walking the
+full assertion list.
 
 `shunter health --contract` validates the local contract artifact only. It
 does not check a running Shunter server or protocol endpoint.

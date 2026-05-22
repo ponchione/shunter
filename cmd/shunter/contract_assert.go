@@ -313,6 +313,9 @@ Examples:
   shunter contract assert --contract shunter.contract.json --module chat --module-version v0.1.0 --contract-version 1 --tables 1 --reducers 1 --format json
   shunter contract assert --contract shunter.contract.json
 
+JSON output includes assertion_count and failure_count aggregate fields for
+release gates that only need pass/fail totals.
+
 Flags:
 `)
 	fs.PrintDefaults()
