@@ -171,6 +171,37 @@ conservative:
 Declared queries are reads, but they can still expose private data. `query`
 must use the same auth and timeout rules as `call`.
 
+## Error Contract
+
+Future running-app commands should use the same broad exit-code shape as the
+existing CLI:
+
+- Exit `0` for successful calls or queries.
+- Exit `1` for runtime failures after flags and local inputs are valid,
+  including auth rejection, connection failure, timeout, protocol errors,
+  reducer errors, query errors, malformed server responses, stale contract
+  mismatches, and response decoding failures.
+- Exit `2` for local command misuse, including missing required flags, invalid
+  flag values, malformed JSON input, unknown reducer or query names, missing
+  token sources, and schema-less JSON argument mode.
+
+Text output can stay terse, but JSON output must be stable enough for operator
+automation. Failed JSON output should include:
+
+- `status`: `"error"`.
+- `scope`: `"running_app"`.
+- `command`: `"call"` or `"query"`.
+- `target_url`: the requested app URL.
+- `surface`: the reducer or query name when known.
+- `error_code`: a stable snake_case classifier such as `missing_token`,
+  `unknown_surface`, `timeout`, `auth_rejected`, `protocol_error`,
+  `reducer_error`, `query_error`, or `decode_error`.
+- `message`: a human-readable summary.
+
+Do not put bearer tokens, raw request payloads, or decoded private rows in error
+objects. If a future implementation needs deeper diagnostics, add an explicit
+verbose or trace mode that redacts credentials before printing.
+
 ## Non-Goals For The First Slice
 
 Do not include these in the first implementation:
