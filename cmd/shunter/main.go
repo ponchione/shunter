@@ -315,7 +315,7 @@ Usage:
   shunter contract policy --previous old.json --current current.json [--strict] [--require-previous-version] [--format text|json]
   shunter contract plan --previous old.json --current current.json [--strict] [--require-previous-version] [--validate] [--format text|json]
   shunter contract validate --contract shunter.contract.json [--format text|json]
-  shunter contract assert --contract shunter.contract.json [--module name] [--schema-version n] [--tables n] [--columns n] [--indexes n] [--reducers n] [--queries n] [--views n] [--visibility-filters n] [--format text|json]
+  shunter contract assert --contract shunter.contract.json [--module name] [--module-version v] [--contract-version n] [--schema-version n] [--tables n] [--columns n] [--indexes n] [--reducers n] [--queries n] [--views n] [--visibility-filters n] [--format text|json]
   shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
   shunter backup --data-dir ./data --out ./backup
   shunter restore --backup ./backup --data-dir ./data
@@ -334,7 +334,7 @@ func printContractHelp(w io.Writer) {
   shunter contract policy --previous old.json --current current.json [--strict] [--require-previous-version] [--format text|json]
   shunter contract plan --previous old.json --current current.json [--strict] [--require-previous-version] [--validate] [--format text|json]
   shunter contract validate --contract shunter.contract.json [--format text|json]
-  shunter contract assert --contract shunter.contract.json [--module name] [--schema-version n] [--tables n] [--columns n] [--indexes n] [--reducers n] [--queries n] [--views n] [--visibility-filters n] [--format text|json]
+  shunter contract assert --contract shunter.contract.json [--module name] [--module-version v] [--contract-version n] [--schema-version n] [--tables n] [--columns n] [--indexes n] [--reducers n] [--queries n] [--views n] [--visibility-filters n] [--format text|json]
   shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
 
 Contract commands operate on canonical ModuleContract JSON files only.

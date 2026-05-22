@@ -77,7 +77,7 @@ old and new JSON files.
 rtk go run ./cmd/shunter describe --contract shunter.contract.json
 rtk go run ./cmd/shunter describe --contract shunter.contract.json --section reducers --format json
 rtk go run ./cmd/shunter contract validate --contract shunter.contract.json --format json
-rtk go run ./cmd/shunter contract assert --contract shunter.contract.json --module chat --tables 1 --reducers 1 --queries 1 --format json
+rtk go run ./cmd/shunter contract assert --contract shunter.contract.json --module chat --module-version v0.1.0 --contract-version 1 --tables 1 --reducers 1 --queries 1 --format json
 rtk go run ./cmd/shunter health --contract shunter.contract.json --format json
 rtk go run ./cmd/shunter contract diff --previous old.json --current shunter.contract.json
 rtk go run ./cmd/shunter contract policy --previous old.json --current shunter.contract.json --strict
@@ -88,8 +88,9 @@ Use `describe` for a quick local inventory of module name, schema version,
 tables, reducers, declared reads, and visibility filters. `--section` narrows
 detail output for review scripts, and JSON output includes a `counts` object
 for review scripts. Use `contract assert` when a release gate needs explicit
-module, schema-version, or count expectations for tables, columns, indexes,
-reducers, queries, views, or visibility filters. Use `contract validate` when a
+module, module-version, contract-version, schema-version, or count expectations
+for tables, columns, indexes, reducers, queries, views, or visibility filters.
+Use `contract validate` when a
 gate needs an explicit local contract-validity status. Use `health --contract`
 when the same gate wants a contract-local health-shaped status; it does not
 check a running server. Use the diff, policy, and plan output to decide whether

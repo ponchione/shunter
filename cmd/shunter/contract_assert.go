@@ -15,6 +15,8 @@ func runContractAssert(stdout, stderr io.Writer, args []string) int {
 	contractPath := fs.String("contract", "", "contract JSON path")
 	format := fs.String("format", contractworkflow.FormatText, "output format: text or json")
 	module := fs.String("module", "", "expected module name")
+	moduleVersion := fs.String("module-version", "", "expected app module version")
+	contractVersion := fs.Int("contract-version", -1, "expected contract format version")
 	schemaVersion := fs.Int("schema-version", -1, "expected schema version")
 	tables := fs.Int("tables", -1, "expected table count")
 	columns := fs.Int("columns", -1, "expected column count")
@@ -38,6 +40,8 @@ func runContractAssert(stdout, stderr io.Writer, args []string) int {
 	}
 	assertions := contractAssertions{
 		Module:            strings.TrimSpace(*module),
+		ModuleVersion:     strings.TrimSpace(*moduleVersion),
+		ContractVersion:   *contractVersion,
 		SchemaVersion:     *schemaVersion,
 		Tables:            *tables,
 		Columns:           *columns,
@@ -80,6 +84,8 @@ const (
 
 type contractAssertions struct {
 	Module            string
+	ModuleVersion     string
+	ContractVersion   int
 	SchemaVersion     int
 	Tables            int
 	Columns           int
@@ -101,6 +107,7 @@ func (a contractAssertions) validate() error {
 
 func (a contractAssertions) countAssertions() []contractAssertExpectedCount {
 	return []contractAssertExpectedCount{
+		{name: "contract-version", expected: a.ContractVersion},
 		{name: "schema-version", expected: a.SchemaVersion},
 		{name: "tables", expected: a.Tables},
 		{name: "columns", expected: a.Columns},
@@ -145,7 +152,11 @@ func buildContractAssertReport(contract shunter.ModuleContract, assertions contr
 	if assertions.Module != "" {
 		report.addStringAssertion("module", assertions.Module, summary.Module.Name)
 	}
+	if assertions.ModuleVersion != "" {
+		report.addStringAssertion("module-version", assertions.ModuleVersion, summary.Module.Version)
+	}
 	report.addCountAssertions([]contractAssertCountCheck{
+		{Name: "contract-version", Expected: assertions.ContractVersion, Actual: int(summary.ContractVersion)},
 		{Name: "schema-version", Expected: assertions.SchemaVersion, Actual: int(summary.SchemaVersion)},
 		{Name: "tables", Expected: assertions.Tables, Actual: summary.Counts.Tables},
 		{Name: "columns", Expected: assertions.Columns, Actual: summary.Counts.Columns},

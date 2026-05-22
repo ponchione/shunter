@@ -574,6 +574,8 @@ func TestContractAssertCommandPassesText(t *testing.T) {
 		"contract", "assert",
 		"--contract", contractPath,
 		"--module", "chat",
+		"--module-version", "v1.0.0",
+		"--contract-version", "1",
 		"--schema-version", "1",
 		"--tables", "1",
 		"--columns", "2",
@@ -592,9 +594,11 @@ func TestContractAssertCommandPassesText(t *testing.T) {
 	out := stdout.String()
 	assertContains(t, out, "Status: passed")
 	assertContains(t, out, "Scope: contract")
-	assertContains(t, out, "9 contract assertion(s) passed")
+	assertContains(t, out, "11 contract assertion(s) passed")
 	assertContains(t, out, "Module: chat v1.0.0")
 	assertContains(t, out, "  - module: ok expected chat actual chat")
+	assertContains(t, out, "  - module-version: ok expected v1.0.0 actual v1.0.0")
+	assertContains(t, out, "  - contract-version: ok expected 1 actual 1")
 	assertContains(t, out, "  - tables: ok expected 1 actual 1")
 }
 
@@ -607,6 +611,8 @@ func TestContractAssertCommandPassesJSON(t *testing.T) {
 		"contract", "assert",
 		"--contract", contractPath,
 		"--module", "chat",
+		"--module-version", "v1.0.0",
+		"--contract-version", "1",
 		"--tables", "1",
 		"--reducers", "1",
 		"--format", "json",
@@ -647,7 +653,7 @@ func TestContractAssertCommandPassesJSON(t *testing.T) {
 	if report.Counts.Tables != 1 || report.Counts.Reducers != 1 {
 		t.Fatalf("contract assert counts = %+v", report.Counts)
 	}
-	if len(report.Assertions) != 3 || len(report.Failures) != 0 {
+	if len(report.Assertions) != 5 || len(report.Failures) != 0 {
 		t.Fatalf("contract assert assertions = %+v failures = %+v", report.Assertions, report.Failures)
 	}
 	for _, assertion := range report.Assertions {
@@ -666,6 +672,8 @@ func TestContractAssertCommandFailsMismatches(t *testing.T) {
 		"contract", "assert",
 		"--contract", contractPath,
 		"--module", "messages",
+		"--module-version", "v9.9.9",
+		"--contract-version", "2",
 		"--tables", "2",
 		"--format", "json",
 	})
@@ -688,10 +696,10 @@ func TestContractAssertCommandFailsMismatches(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatalf("decode contract assert mismatch JSON: %v\n%s", err, stdout.String())
 	}
-	if report.Status != "failed" || len(report.Failures) != 2 {
+	if report.Status != "failed" || len(report.Failures) != 4 {
 		t.Fatalf("contract assert mismatch report = %+v", report)
 	}
-	assertContains(t, report.Message, "2 contract assertion(s) failed")
+	assertContains(t, report.Message, "4 contract assertion(s) failed")
 	if report.Failures[0].Passed || report.Failures[1].Passed {
 		t.Fatalf("failures marked passed: %+v", report.Failures)
 	}
@@ -730,6 +738,12 @@ func TestContractAssertCommandRejectsInvalidInputsBeforeFileIO(t *testing.T) {
 			args:       []string{"contract", "assert", "--contract", missingPath, "--tables", "-2"},
 			wantCode:   2,
 			wantStderr: "--tables must be >= 0",
+		},
+		{
+			name:       "negative-contract-version",
+			args:       []string{"contract", "assert", "--contract", missingPath, "--contract-version", "-2"},
+			wantCode:   2,
+			wantStderr: "--contract-version must be >= 0",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

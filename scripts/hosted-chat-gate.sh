@@ -17,6 +17,8 @@ rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contra
 rtk go run ./cmd/shunter contract assert \
   --contract examples/hosted-chat/shunter.contract.json \
   --module hosted_chat \
+  --module-version v0.1.0 \
+  --contract-version 1 \
   --schema-version 1 \
   --tables 3 \
   --reducers 1 \
