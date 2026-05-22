@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	shunter "github.com/ponchione/shunter"
-	"github.com/ponchione/shunter/contractdiff"
 	"github.com/ponchione/shunter/contractworkflow"
 	"github.com/ponchione/shunter/schema"
 )
@@ -58,18 +56,7 @@ func readDescribeContract(path string) (shunter.ModuleContract, error) {
 }
 
 func readContractFile(path, context string) (shunter.ModuleContract, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return shunter.ModuleContract{}, fmt.Errorf("read contract %q: %w", path, err)
-	}
-	var contract shunter.ModuleContract
-	if err := json.Unmarshal(data, &contract); err != nil {
-		return shunter.ModuleContract{}, fmt.Errorf("%w: %s: %v", contractdiff.ErrInvalidContractJSON, context, err)
-	}
-	if err := shunter.ValidateModuleContract(contract); err != nil {
-		return shunter.ModuleContract{}, fmt.Errorf("%w: %s: %v", contractdiff.ErrInvalidContractJSON, context, err)
-	}
-	return contract, nil
+	return contractworkflow.LoadContractFile(path, context)
 }
 
 const (

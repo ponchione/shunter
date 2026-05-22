@@ -199,6 +199,64 @@ func TestPlanFilesIncludesBackupGuidanceForBlockingPlan(t *testing.T) {
 	assertContains(t, string(jsonOut), `"code": "backup-restore"`)
 }
 
+func TestLoadContractFileReadsValidatedLocalContract(t *testing.T) {
+	dir := t.TempDir()
+	contractPath := writeContractFixture(t, dir, "contract.json", workflowContractFixture())
+
+	contract, err := LoadContractFile(contractPath, "operator contract")
+	if err != nil {
+		t.Fatalf("LoadContractFile returned error: %v", err)
+	}
+	if contract.Module.Name != "chat" || len(contract.Schema.Reducers) != 1 {
+		t.Fatalf("LoadContractFile contract = %+v", contract)
+	}
+}
+
+func TestLoadContractFileRejectsMissingMalformedAndInvalidContracts(t *testing.T) {
+	dir := t.TempDir()
+	missingPath := filepath.Join(dir, "missing.json")
+	malformedPath := filepath.Join(dir, "malformed.json")
+	if err := writeFile(malformedPath, []byte(`{`)); err != nil {
+		t.Fatalf("write malformed contract: %v", err)
+	}
+	invalidPath := filepath.Join(dir, "invalid.json")
+	if err := writeFile(invalidPath, []byte(`{"contract_version":0}`)); err != nil {
+		t.Fatalf("write invalid contract: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name        string
+		path        string
+		wantContext string
+	}{
+		{
+			name:        "missing",
+			path:        missingPath,
+			wantContext: "read contract",
+		},
+		{
+			name:        "malformed",
+			path:        malformedPath,
+			wantContext: "invalid module contract JSON: release gate",
+		},
+		{
+			name:        "invalid",
+			path:        invalidPath,
+			wantContext: "invalid module contract JSON: release gate",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadContractFile(tc.path, "release gate")
+			if err == nil {
+				t.Fatal("LoadContractFile returned nil error")
+			}
+			if !strings.Contains(err.Error(), tc.wantContext) {
+				t.Fatalf("LoadContractFile error = %v, want context %q", err, tc.wantContext)
+			}
+		})
+	}
+}
+
 func TestGenerateFileWritesDeterministicTypeScriptFromContractJSON(t *testing.T) {
 	dir := t.TempDir()
 	contractPath := writeContractFixture(t, dir, "contract.json", workflowContractFixture())

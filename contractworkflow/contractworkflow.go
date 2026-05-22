@@ -76,6 +76,18 @@ func PlanFiles(previousPath, currentPath string, opts contractdiff.PlanOptions) 
 	return contractdiff.PlanJSON(previousData, currentData, opts)
 }
 
+// LoadContractFile reads and validates a local ModuleContract JSON file.
+func LoadContractFile(path, context string) (shunter.ModuleContract, error) {
+	if strings.TrimSpace(path) == "" {
+		return shunter.ModuleContract{}, fmt.Errorf("contract path is required")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return shunter.ModuleContract{}, fmt.Errorf("read contract %q: %w", path, err)
+	}
+	return decodeContract(data, context)
+}
+
 // ExportRuntimeFile exports runtime's canonical ModuleContract JSON to outputPath.
 func ExportRuntimeFile(runtime *shunter.Runtime, outputPath string) error {
 	if strings.TrimSpace(outputPath) == "" {
@@ -301,12 +313,20 @@ func marshalWorkflowJSON(value any) ([]byte, error) {
 }
 
 func decodeCurrentContract(data []byte) (shunter.ModuleContract, error) {
+	return decodeContract(data, "current contract")
+}
+
+func decodeContract(data []byte, context string) (shunter.ModuleContract, error) {
+	context = strings.TrimSpace(context)
+	if context == "" {
+		context = "contract"
+	}
 	var contract shunter.ModuleContract
 	if err := json.Unmarshal(data, &contract); err != nil {
-		return shunter.ModuleContract{}, fmt.Errorf("%w: current contract: %v", contractdiff.ErrInvalidContractJSON, err)
+		return shunter.ModuleContract{}, fmt.Errorf("%w: %s: %v", contractdiff.ErrInvalidContractJSON, context, err)
 	}
 	if err := shunter.ValidateModuleContract(contract); err != nil {
-		return shunter.ModuleContract{}, fmt.Errorf("%w: current contract: %v", contractdiff.ErrInvalidContractJSON, err)
+		return shunter.ModuleContract{}, fmt.Errorf("%w: %s: %v", contractdiff.ErrInvalidContractJSON, context, err)
 	}
 	return contract, nil
 }
