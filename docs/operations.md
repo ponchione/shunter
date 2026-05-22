@@ -199,7 +199,8 @@ operator scripts need stable inventory data. Use `contract assert` when a gate
 needs explicit module, module-version, contract-version, schema-version, or
 surface-count expectations after local contract validation. JSON assertion
 entries expose `value_type` plus typed `expected_string`/`actual_string` or
-`expected_number`/`actual_number` fields for script-friendly comparisons. `contract
+`expected_number`/`actual_number` fields for script-friendly comparisons, plus
+`assertion_count` and `failure_count` aggregate fields. `contract
 validate` reports whether the local contract artifact validates.
 `health --contract` reports the same local artifact status in a health-shaped
 envelope; it is not a live health or readiness probe.

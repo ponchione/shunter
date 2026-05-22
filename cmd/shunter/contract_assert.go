@@ -125,13 +125,15 @@ type contractAssertExpectedCount struct {
 }
 
 type contractAssertReport struct {
-	Status     string                `json:"status"`
-	Scope      string                `json:"scope"`
-	Message    string                `json:"message"`
-	Module     describeModule        `json:"module"`
-	Counts     describeCounts        `json:"counts"`
-	Assertions []contractAssertCheck `json:"assertions"`
-	Failures   []contractAssertCheck `json:"failures,omitempty"`
+	Status         string                `json:"status"`
+	Scope          string                `json:"scope"`
+	Message        string                `json:"message"`
+	Module         describeModule        `json:"module"`
+	Counts         describeCounts        `json:"counts"`
+	AssertionCount int                   `json:"assertion_count"`
+	FailureCount   int                   `json:"failure_count"`
+	Assertions     []contractAssertCheck `json:"assertions"`
+	Failures       []contractAssertCheck `json:"failures,omitempty"`
 }
 
 type contractAssertCheck struct {
@@ -169,12 +171,14 @@ func buildContractAssertReport(contract shunter.ModuleContract, assertions contr
 		{Name: "views", Expected: assertions.Views, Actual: summary.Counts.Views},
 		{Name: "visibility-filters", Expected: assertions.VisibilityFilters, Actual: summary.Counts.VisibilityFilters},
 	})
-	if len(report.Failures) > 0 {
+	report.AssertionCount = len(report.Assertions)
+	report.FailureCount = len(report.Failures)
+	if report.FailureCount > 0 {
 		report.Status = contractAssertStatusFailed
-		report.Message = fmt.Sprintf("%d contract assertion(s) failed", len(report.Failures))
+		report.Message = fmt.Sprintf("%d contract assertion(s) failed", report.FailureCount)
 		return report
 	}
-	report.Message = fmt.Sprintf("%d contract assertion(s) passed", len(report.Assertions))
+	report.Message = fmt.Sprintf("%d contract assertion(s) passed", report.AssertionCount)
 	return report
 }
 

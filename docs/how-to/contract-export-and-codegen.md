@@ -93,6 +93,8 @@ for tables, columns, indexes, reducers, queries, views, or visibility filters.
 JSON assertion entries use `value_type` plus typed
 `expected_string`/`actual_string` or `expected_number`/`actual_number` fields,
 so review scripts do not need to infer assertion value types.
+JSON output also includes `assertion_count` and `failure_count` fields for
+gates that only need the aggregate result.
 Use `contract validate` when a
 gate needs an explicit local contract-validity status. Use `health --contract`
 when the same gate wants a contract-local health-shaped status; it does not

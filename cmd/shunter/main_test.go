@@ -639,10 +639,12 @@ func TestContractAssertCommandPassesJSON(t *testing.T) {
 		t.Fatalf("contract assert --format json stderr = %s, want empty", stderr.String())
 	}
 	var report struct {
-		Status  string `json:"status"`
-		Scope   string `json:"scope"`
-		Message string `json:"message"`
-		Module  struct {
+		Status         string `json:"status"`
+		Scope          string `json:"scope"`
+		Message        string `json:"message"`
+		AssertionCount int    `json:"assertion_count"`
+		FailureCount   int    `json:"failure_count"`
+		Module         struct {
 			Name string `json:"name"`
 		} `json:"module"`
 		Counts struct {
@@ -671,7 +673,8 @@ func TestContractAssertCommandPassesJSON(t *testing.T) {
 	if report.Counts.Tables != 1 || report.Counts.Reducers != 1 {
 		t.Fatalf("contract assert counts = %+v", report.Counts)
 	}
-	if len(report.Assertions) != 5 || len(report.Failures) != 0 {
+	if report.AssertionCount != 5 || report.FailureCount != 0 ||
+		len(report.Assertions) != 5 || len(report.Failures) != 0 {
 		t.Fatalf("contract assert assertions = %+v failures = %+v", report.Assertions, report.Failures)
 	}
 	for _, assertion := range report.Assertions {
@@ -724,15 +727,18 @@ func TestContractAssertCommandAllowsZeroAssertions(t *testing.T) {
 		t.Fatalf("contract assert without assertions JSON stderr = %s, want empty", stderr.String())
 	}
 	var report struct {
-		Status     string                `json:"status"`
-		Message    string                `json:"message"`
-		Assertions []contractAssertCheck `json:"assertions"`
-		Failures   []contractAssertCheck `json:"failures"`
+		Status         string                `json:"status"`
+		Message        string                `json:"message"`
+		AssertionCount int                   `json:"assertion_count"`
+		FailureCount   int                   `json:"failure_count"`
+		Assertions     []contractAssertCheck `json:"assertions"`
+		Failures       []contractAssertCheck `json:"failures"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatalf("decode contract assert zero-assertion JSON: %v\n%s", err, stdout.String())
 	}
 	if report.Status != "passed" || report.Message != "0 contract assertion(s) passed" ||
+		report.AssertionCount != 0 || report.FailureCount != 0 ||
 		len(report.Assertions) != 0 || len(report.Failures) != 0 {
 		t.Fatalf("zero-assertion report = %+v", report)
 	}
@@ -759,9 +765,11 @@ func TestContractAssertCommandFailsMismatches(t *testing.T) {
 		t.Fatalf("contract assert mismatch stderr = %s, want empty", stderr.String())
 	}
 	var report struct {
-		Status   string `json:"status"`
-		Message  string `json:"message"`
-		Failures []struct {
+		Status         string `json:"status"`
+		Message        string `json:"message"`
+		AssertionCount int    `json:"assertion_count"`
+		FailureCount   int    `json:"failure_count"`
+		Failures       []struct {
 			Name           string  `json:"name"`
 			ValueType      string  `json:"value_type"`
 			ExpectedString *string `json:"expected_string"`
@@ -774,7 +782,8 @@ func TestContractAssertCommandFailsMismatches(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatalf("decode contract assert mismatch JSON: %v\n%s", err, stdout.String())
 	}
-	if report.Status != "failed" || len(report.Failures) != 4 {
+	if report.Status != "failed" || report.AssertionCount != 4 ||
+		report.FailureCount != 4 || len(report.Failures) != 4 {
 		t.Fatalf("contract assert mismatch report = %+v", report)
 	}
 	assertContains(t, report.Message, "4 contract assertion(s) failed")
