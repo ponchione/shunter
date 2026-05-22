@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -25,6 +26,9 @@ func runContractAssert(stdout, stderr io.Writer, args []string) int {
 	queries := fs.Int("queries", -1, "expected query count")
 	views := fs.Int("views", -1, "expected view count")
 	visibilityFilters := fs.Int("visibility-filters", -1, "expected visibility filter count")
+	fs.Usage = func() {
+		printContractAssertHelp(fs.Output(), fs)
+	}
 	if code, stop := parseFlags(fs, args); stop {
 		return code
 	}
@@ -299,4 +303,17 @@ func (c contractAssertCheck) actualDisplay() string {
 		return fmt.Sprint(*c.ActualNumber)
 	}
 	return ""
+}
+
+func printContractAssertHelp(w io.Writer, fs *flag.FlagSet) {
+	fmt.Fprint(w, `Usage:
+  shunter contract assert --contract shunter.contract.json [assertions] [--format text|json]
+
+Examples:
+  shunter contract assert --contract shunter.contract.json --module chat --module-version v0.1.0 --contract-version 1 --tables 1 --reducers 1 --format json
+  shunter contract assert --contract shunter.contract.json
+
+Flags:
+`)
+	fs.PrintDefaults()
 }

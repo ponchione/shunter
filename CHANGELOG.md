@@ -4,6 +4,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added command-specific examples to `shunter contract assert --help`.
 - Added `assertion_count` and `failure_count` to `contract assert --format json`
   output for aggregate release-gate checks.
 - Added `contract assert` help examples and test coverage for zero-assertion

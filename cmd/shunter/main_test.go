@@ -47,6 +47,25 @@ func TestContractHelpDocumentsAssertExamples(t *testing.T) {
 	assertContains(t, out, "shunter contract assert --contract shunter.contract.json")
 }
 
+func TestContractAssertHelpDocumentsExamples(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{"contract", "assert", "--help"})
+	if code != 0 {
+		t.Fatalf("run contract assert --help exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("run contract assert --help stdout = %s, want empty", stdout.String())
+	}
+	out := stderr.String()
+	assertContains(t, out, "Usage:")
+	assertContains(t, out, "shunter contract assert --contract shunter.contract.json [assertions] [--format text|json]")
+	assertContains(t, out, "Examples:")
+	assertContains(t, out, "shunter contract assert --contract shunter.contract.json --module chat --module-version v0.1.0 --contract-version 1 --tables 1 --reducers 1 --format json")
+	assertContains(t, out, "-contract")
+	assertContains(t, out, "-module-version")
+	assertContains(t, out, "-visibility-filters")
+}
+
 func TestDescribeCommandReadsContractText(t *testing.T) {
 	dir := t.TempDir()
 	contract := cliContractFixture()
