@@ -90,6 +90,9 @@ detail output for review scripts, and JSON output includes a `counts` object
 for review scripts. Use `contract assert` when a release gate needs explicit
 module, module-version, contract-version, schema-version, or count expectations
 for tables, columns, indexes, reducers, queries, views, or visibility filters.
+JSON assertion entries use `value_type` plus typed
+`expected_string`/`actual_string` or `expected_number`/`actual_number` fields,
+so review scripts do not need to infer assertion value types.
 Use `contract validate` when a
 gate needs an explicit local contract-validity status. Use `health --contract`
 when the same gate wants a contract-local health-shaped status; it does not

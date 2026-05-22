@@ -635,10 +635,13 @@ func TestContractAssertCommandPassesJSON(t *testing.T) {
 			Reducers int `json:"reducers"`
 		} `json:"counts"`
 		Assertions []struct {
-			Name     string `json:"name"`
-			Expected any    `json:"expected"`
-			Actual   any    `json:"actual"`
-			Passed   bool   `json:"passed"`
+			Name           string  `json:"name"`
+			ValueType      string  `json:"value_type"`
+			ExpectedString *string `json:"expected_string"`
+			ActualString   *string `json:"actual_string"`
+			ExpectedNumber *int    `json:"expected_number"`
+			ActualNumber   *int    `json:"actual_number"`
+			Passed         bool    `json:"passed"`
 		} `json:"assertions"`
 		Failures []struct {
 			Name string `json:"name"`
@@ -661,6 +664,22 @@ func TestContractAssertCommandPassesJSON(t *testing.T) {
 			t.Fatalf("assertion failed unexpectedly: %+v", assertion)
 		}
 	}
+	moduleAssertion := report.Assertions[0]
+	if moduleAssertion.Name != "module" || moduleAssertion.ValueType != "string" ||
+		moduleAssertion.ExpectedString == nil || *moduleAssertion.ExpectedString != "chat" ||
+		moduleAssertion.ActualString == nil || *moduleAssertion.ActualString != "chat" ||
+		moduleAssertion.ExpectedNumber != nil || moduleAssertion.ActualNumber != nil {
+		t.Fatalf("module assertion JSON shape = %+v", moduleAssertion)
+	}
+	contractVersionAssertion := report.Assertions[2]
+	if contractVersionAssertion.Name != "contract-version" || contractVersionAssertion.ValueType != "number" ||
+		contractVersionAssertion.ExpectedNumber == nil || *contractVersionAssertion.ExpectedNumber != 1 ||
+		contractVersionAssertion.ActualNumber == nil || *contractVersionAssertion.ActualNumber != 1 ||
+		contractVersionAssertion.ExpectedString != nil || contractVersionAssertion.ActualString != nil {
+		t.Fatalf("contract-version assertion JSON shape = %+v", contractVersionAssertion)
+	}
+	assertNotContains(t, stdout.String(), `"expected":`)
+	assertNotContains(t, stdout.String(), `"actual":`)
 }
 
 func TestContractAssertCommandFailsMismatches(t *testing.T) {
@@ -687,10 +706,13 @@ func TestContractAssertCommandFailsMismatches(t *testing.T) {
 		Status   string `json:"status"`
 		Message  string `json:"message"`
 		Failures []struct {
-			Name     string `json:"name"`
-			Expected any    `json:"expected"`
-			Actual   any    `json:"actual"`
-			Passed   bool   `json:"passed"`
+			Name           string  `json:"name"`
+			ValueType      string  `json:"value_type"`
+			ExpectedString *string `json:"expected_string"`
+			ActualString   *string `json:"actual_string"`
+			ExpectedNumber *int    `json:"expected_number"`
+			ActualNumber   *int    `json:"actual_number"`
+			Passed         bool    `json:"passed"`
 		} `json:"failures"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
@@ -703,6 +725,22 @@ func TestContractAssertCommandFailsMismatches(t *testing.T) {
 	if report.Failures[0].Passed || report.Failures[1].Passed {
 		t.Fatalf("failures marked passed: %+v", report.Failures)
 	}
+	moduleFailure := report.Failures[0]
+	if moduleFailure.Name != "module" || moduleFailure.ValueType != "string" ||
+		moduleFailure.ExpectedString == nil || *moduleFailure.ExpectedString != "messages" ||
+		moduleFailure.ActualString == nil || *moduleFailure.ActualString != "chat" ||
+		moduleFailure.ExpectedNumber != nil || moduleFailure.ActualNumber != nil {
+		t.Fatalf("module failure JSON shape = %+v", moduleFailure)
+	}
+	contractVersionFailure := report.Failures[2]
+	if contractVersionFailure.Name != "contract-version" || contractVersionFailure.ValueType != "number" ||
+		contractVersionFailure.ExpectedNumber == nil || *contractVersionFailure.ExpectedNumber != 2 ||
+		contractVersionFailure.ActualNumber == nil || *contractVersionFailure.ActualNumber != 1 ||
+		contractVersionFailure.ExpectedString != nil || contractVersionFailure.ActualString != nil {
+		t.Fatalf("contract-version failure JSON shape = %+v", contractVersionFailure)
+	}
+	assertNotContains(t, stdout.String(), `"expected":`)
+	assertNotContains(t, stdout.String(), `"actual":`)
 }
 
 func TestContractAssertCommandRejectsInvalidInputsBeforeFileIO(t *testing.T) {

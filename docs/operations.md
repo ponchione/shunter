@@ -197,7 +197,9 @@ does not inspect a running module or load module code. Use `--section` to
 focus human or JSON output on one contract surface, and use JSON `counts` when
 operator scripts need stable inventory data. Use `contract assert` when a gate
 needs explicit module, module-version, contract-version, schema-version, or
-surface-count expectations after local contract validation. `contract
+surface-count expectations after local contract validation. JSON assertion
+entries expose `value_type` plus typed `expected_string`/`actual_string` or
+`expected_number`/`actual_number` fields for script-friendly comparisons. `contract
 validate` reports whether the local contract artifact validates.
 `health --contract` reports the same local artifact status in a health-shaped
 envelope; it is not a live health or readiness probe.

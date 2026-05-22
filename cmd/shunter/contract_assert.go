@@ -135,10 +135,13 @@ type contractAssertReport struct {
 }
 
 type contractAssertCheck struct {
-	Name     string `json:"name"`
-	Expected any    `json:"expected"`
-	Actual   any    `json:"actual"`
-	Passed   bool   `json:"passed"`
+	Name           string  `json:"name"`
+	ValueType      string  `json:"value_type"`
+	ExpectedString *string `json:"expected_string,omitempty"`
+	ActualString   *string `json:"actual_string,omitempty"`
+	ExpectedNumber *int    `json:"expected_number,omitempty"`
+	ActualNumber   *int    `json:"actual_number,omitempty"`
+	Passed         bool    `json:"passed"`
 }
 
 func buildContractAssertReport(contract shunter.ModuleContract, assertions contractAssertions) contractAssertReport {
@@ -177,10 +180,11 @@ func buildContractAssertReport(contract shunter.ModuleContract, assertions contr
 
 func (r *contractAssertReport) addStringAssertion(name, expected, actual string) {
 	check := contractAssertCheck{
-		Name:     name,
-		Expected: expected,
-		Actual:   actual,
-		Passed:   expected == actual,
+		Name:           name,
+		ValueType:      "string",
+		ExpectedString: stringPtr(expected),
+		ActualString:   stringPtr(actual),
+		Passed:         expected == actual,
 	}
 	r.Assertions = append(r.Assertions, check)
 	if !check.Passed {
@@ -200,16 +204,25 @@ func (r *contractAssertReport) addCountAssertions(checks []contractAssertCountCh
 			continue
 		}
 		assertion := contractAssertCheck{
-			Name:     check.Name,
-			Expected: check.Expected,
-			Actual:   check.Actual,
-			Passed:   check.Expected == check.Actual,
+			Name:           check.Name,
+			ValueType:      "number",
+			ExpectedNumber: intPtr(check.Expected),
+			ActualNumber:   intPtr(check.Actual),
+			Passed:         check.Expected == check.Actual,
 		}
 		r.Assertions = append(r.Assertions, assertion)
 		if !assertion.Passed {
 			r.Failures = append(r.Failures, assertion)
 		}
 	}
+}
+
+func stringPtr(value string) *string {
+	return &value
+}
+
+func intPtr(value int) *int {
+	return &value
 }
 
 func formatContractAssertReport(report contractAssertReport, format string) ([]byte, error) {
@@ -258,8 +271,28 @@ func (r contractAssertReport) Text() string {
 			marker = "fail"
 		}
 		fmt.Fprintf(&b, "  - %s: %s", assertion.Name, marker)
-		fmt.Fprintf(&b, " expected %v actual %v", assertion.Expected, assertion.Actual)
+		fmt.Fprintf(&b, " expected %s actual %s", assertion.expectedDisplay(), assertion.actualDisplay())
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+func (c contractAssertCheck) expectedDisplay() string {
+	if c.ExpectedString != nil {
+		return *c.ExpectedString
+	}
+	if c.ExpectedNumber != nil {
+		return fmt.Sprint(*c.ExpectedNumber)
+	}
+	return ""
+}
+
+func (c contractAssertCheck) actualDisplay() string {
+	if c.ActualString != nil {
+		return *c.ActualString
+	}
+	if c.ActualNumber != nil {
+		return fmt.Sprint(*c.ActualNumber)
+	}
+	return ""
 }

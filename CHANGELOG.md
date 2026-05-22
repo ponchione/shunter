@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Changed `shunter contract assert --format json` assertion entries to expose
+  typed expected/actual string or number fields for script-friendly gates.
 - Added `shunter contract assert --contract` for local ModuleContract release
   gates with module, module-version, contract-version, schema-version, and
   app-surface count assertions in text or JSON form.
