@@ -9,6 +9,19 @@ tests, admin tools, and app-owned HTTP handlers that do not need the protocol.
 
 ## Runtime-Owned Server
 
+For a standard hosted-backend app, prefer the root convenience API:
+
+```go
+cfg := shunter.ConfigFromEnv()
+cfg.EnableProtocol = true
+if err := shunter.Run(ctx, app.Module(), cfg); err != nil {
+	return err
+}
+```
+
+`Run` builds the runtime, serves the runtime-owned HTTP/protocol lifecycle, and
+returns nil for normal context-canceled shutdown.
+
 Use `Runtime.ListenAndServe` when Shunter should own the HTTP server lifecycle.
 
 ```go

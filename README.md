@@ -5,9 +5,10 @@ combines module definition, embedded relational storage, durable commit logging,
 serialized reducer execution, subscription delta evaluation, and WebSocket
 delivery behind a single runtime-owned API.
 
-The v1 line is focused on self-hosted Go applications that embed Shunter as a
-runtime library. Core subsystems are implemented and covered by the v1
-support docs, hardening tests, TypeScript SDK tests, and the external
+The v1 line is focused on self-hosted Go applications that link Shunter as a
+runtime library or run it as the app's backend server from a static Go binary.
+Core subsystems are implemented and covered by the v1 support docs, hardening
+tests, TypeScript SDK tests, the hosted-chat example gate, and the external
 `opsboard-canary` release gate.
 
 ## Project Status
@@ -18,7 +19,11 @@ The supported app-facing entrypoint is the root `shunter` package:
   views, visibility filters, metadata, and migration metadata.
 - `Config` controls runtime startup, persistence, authentication, protocol
   settings, and serving behavior.
+- `ConfigFromEnv` reads the small Shunter-scoped hosted-app environment
+  surface for data directory, listen address, protocol, and local auth basics.
 - `Build` validates and constructs a runtime from a module definition.
+- `Run` builds a runtime, serves it with the runtime-owned HTTP/protocol
+  lifecycle, and shuts down cleanly when the supplied context is canceled.
 - `Runtime` owns lifecycle, local reads, reducer calls, declared reads,
   contract/schema export, HTTP serving, snapshots, compaction, and graceful
   shutdown.
@@ -76,9 +81,19 @@ subsystems:
 
 ## Runtime Entrypoint
 
-Shunter does not currently bundle a canonical example application in this
-repository. The root package is the maintained integration surface for
-application code and tests.
+The shortest hosted-backend entrypoint is:
+
+```go
+cfg := shunter.ConfigFromEnv()
+if err := shunter.Run(context.Background(), app.Module(), cfg); err != nil {
+	log.Fatal(err)
+}
+```
+
+Applications that need custom HTTP routing can still use `Build`,
+`Runtime.Start`, `Runtime.HTTPHandler`, and `Runtime.Close` directly. The root
+package remains the maintained integration surface for application code and
+tests.
 
 Important public APIs include:
 
@@ -89,6 +104,9 @@ Important public APIs include:
 - `Module.View`
 - `Module.VisibilityFilter`
 - `Build`
+- `ConfigFromEnv`
+- `ConfigFromEnvE`
+- `Run`
 - `Runtime.Start`
 - `Runtime.Close`
 - `Runtime.CallReducer`
@@ -101,16 +119,18 @@ Important public APIs include:
 - `Runtime.ExportSchema`
 - `Runtime.ExportContract`
 
-A bundled runnable example should be added to this repository only when it
-captures a stable integration pattern worth maintaining.
+The canonical hosted example is
+[`examples/hosted-chat`](examples/hosted-chat/README.md). It demonstrates a Go
+module, `shunter.Run`, contract export, TypeScript generation, and a
+frontend-shaped client that calls a reducer and subscribes to a live view.
 
 ## Current Limitations
 
 The runtime has meaningful implementation depth, but several areas are still
 early or intentionally narrow:
 
-- no bundled canonical example application is maintained in this repo; the
-  maintained release canary is the external `opsboard-canary` application
+- the bundled hosted-chat example is intentionally small; the broader
+  maintained product canary remains the external `opsboard-canary` application
 - generated TypeScript and the private local package-shaped `@shunter/client`
   runtime are the v1 client path
 - SQL support is scoped to the documented v1 read surfaces; Shunter does not

@@ -1,6 +1,10 @@
 package shunter
 
 import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ponchione/shunter/auth"
@@ -61,6 +65,70 @@ type Config struct {
 
 	Protocol      ProtocolConfig
 	Observability ObservabilityConfig
+}
+
+// ConfigFromEnv returns a hosted-app Config populated from Shunter-scoped
+// environment variables. Blank or unset variables leave the same local
+// development defaults used by the runtime.
+//
+// Supported variables:
+//   - SHUNTER_DATA_DIR
+//   - SHUNTER_LISTEN_ADDR
+//   - SHUNTER_ENABLE_PROTOCOL
+//   - SHUNTER_AUTH_MODE: dev or strict
+//   - SHUNTER_AUTH_SIGNING_KEY
+//   - SHUNTER_AUTH_ISSUERS: comma-separated
+//   - SHUNTER_AUTH_AUDIENCES: comma-separated
+func ConfigFromEnv() Config {
+	cfg, err := ConfigFromEnvE()
+	if err != nil {
+		panic(err)
+	}
+	return cfg
+}
+
+// ConfigFromEnvE is the error-returning form of ConfigFromEnv.
+func ConfigFromEnvE() (Config, error) {
+	var cfg Config
+	cfg.DataDir = strings.TrimSpace(os.Getenv("SHUNTER_DATA_DIR"))
+	cfg.ListenAddr = strings.TrimSpace(os.Getenv("SHUNTER_LISTEN_ADDR"))
+	if value := strings.TrimSpace(os.Getenv("SHUNTER_ENABLE_PROTOCOL")); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("SHUNTER_ENABLE_PROTOCOL: %w", err)
+		}
+		cfg.EnableProtocol = enabled
+	}
+	if value := strings.TrimSpace(os.Getenv("SHUNTER_AUTH_MODE")); value != "" {
+		switch strings.ToLower(value) {
+		case "dev", "development":
+			cfg.AuthMode = AuthModeDev
+		case "strict":
+			cfg.AuthMode = AuthModeStrict
+		default:
+			return Config{}, fmt.Errorf("SHUNTER_AUTH_MODE: unsupported auth mode %q", value)
+		}
+	}
+	if value := os.Getenv("SHUNTER_AUTH_SIGNING_KEY"); value != "" {
+		cfg.AuthSigningKey = []byte(value)
+	}
+	cfg.AuthIssuers = splitEnvList(os.Getenv("SHUNTER_AUTH_ISSUERS"))
+	cfg.AuthAudiences = splitEnvList(os.Getenv("SHUNTER_AUTH_AUDIENCES"))
+	return cfg, nil
+}
+
+func splitEnvList(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 // ProtocolConfig exposes narrow top-level WebSocket protocol tuning. Zero

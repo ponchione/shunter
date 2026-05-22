@@ -46,19 +46,20 @@ A runtime is the built, stateful owner of one module. It owns committed state,
 durable logging, recovery, reducer execution, subscriptions, local reads,
 protocol serving, health, diagnostics, and contract export.
 
-Use `shunter.Build(mod, cfg)` to construct a runtime, then `Runtime.Start` or
-`Runtime.ListenAndServe` to make it active.
+Use `shunter.Run(ctx, mod, cfg)` for the standard hosted-backend path. Use
+`shunter.Build(mod, cfg)` plus `Runtime.Start`, `Runtime.ListenAndServe`, or
+`Runtime.HTTPHandler` when the application needs lower-level lifecycle or HTTP
+control.
 
 After `Build`, mutating the original `Module` value does not change the built
 runtime.
 
 ## Application Shell
 
-The application shell is your Go process around Shunter. It owns dependency
-injection, service startup, HTTP routing outside Shunter, CLI commands,
-workers, tests, and deployment policy. The shell builds and starts runtimes,
-calls reducers or reads when it needs in-process access, and closes runtimes
-during shutdown.
+The application shell is your Go process around Shunter. In the hosted-backend
+path it can be as small as `ConfigFromEnv` plus `Run`. In lower-level embedded
+paths it owns dependency injection, service startup, HTTP routing outside
+Shunter, CLI commands, workers, tests, and deployment policy.
 
 Shunter does not dynamically load module code into a separate process. Your app
 binary links the module and exports contracts from that binary.

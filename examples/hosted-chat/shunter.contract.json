@@ -1,0 +1,247 @@
+{
+  "contract_version": 1,
+  "module": {
+    "name": "hosted_chat",
+    "version": "v0.1.0",
+    "metadata": {}
+  },
+  "schema": {
+    "version": 1,
+    "tables": [
+      {
+        "id": 0,
+        "name": "messages",
+        "columns": [
+          {
+            "index": 0,
+            "name": "id",
+            "type": "uint64",
+            "auto_increment": true
+          },
+          {
+            "index": 1,
+            "name": "author",
+            "type": "string",
+            "auto_increment": false
+          },
+          {
+            "index": 2,
+            "name": "body",
+            "type": "string",
+            "auto_increment": false
+          }
+        ],
+        "indexes": [
+          {
+            "id": 0,
+            "name": "pk",
+            "columns": [
+              "id"
+            ],
+            "column_ordinals": [
+              0
+            ],
+            "unique": true,
+            "primary": true
+          }
+        ],
+        "read_policy": {
+          "access": "private",
+          "permissions": []
+        }
+      },
+      {
+        "id": 1,
+        "name": "sys_clients",
+        "columns": [
+          {
+            "index": 0,
+            "name": "connection_id",
+            "type": "bytes",
+            "auto_increment": false
+          },
+          {
+            "index": 1,
+            "name": "identity",
+            "type": "bytes",
+            "auto_increment": false
+          },
+          {
+            "index": 2,
+            "name": "connected_at",
+            "type": "int64",
+            "auto_increment": false
+          }
+        ],
+        "indexes": [
+          {
+            "id": 0,
+            "name": "pk",
+            "columns": [
+              "connection_id"
+            ],
+            "column_ordinals": [
+              0
+            ],
+            "unique": true,
+            "primary": true
+          }
+        ],
+        "read_policy": {
+          "access": "private",
+          "permissions": []
+        }
+      },
+      {
+        "id": 2,
+        "name": "sys_scheduled",
+        "columns": [
+          {
+            "index": 0,
+            "name": "schedule_id",
+            "type": "uint64",
+            "auto_increment": true
+          },
+          {
+            "index": 1,
+            "name": "reducer_name",
+            "type": "string",
+            "auto_increment": false
+          },
+          {
+            "index": 2,
+            "name": "args",
+            "type": "bytes",
+            "auto_increment": false
+          },
+          {
+            "index": 3,
+            "name": "next_run_at_ns",
+            "type": "int64",
+            "auto_increment": false
+          },
+          {
+            "index": 4,
+            "name": "repeat_ns",
+            "type": "int64",
+            "auto_increment": false
+          }
+        ],
+        "indexes": [
+          {
+            "id": 0,
+            "name": "pk",
+            "columns": [
+              "schedule_id"
+            ],
+            "column_ordinals": [
+              0
+            ],
+            "unique": true,
+            "primary": true
+          }
+        ],
+        "read_policy": {
+          "access": "private",
+          "permissions": []
+        }
+      }
+    ],
+    "reducers": [
+      {
+        "name": "send_message",
+        "lifecycle": false,
+        "args": {
+          "columns": [
+            {
+              "name": "author",
+              "type": "string"
+            },
+            {
+              "name": "body",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "queries": [
+    {
+      "name": "recent_messages",
+      "sql": "SELECT * FROM messages ORDER BY id DESC LIMIT 20",
+      "row_schema": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uint64"
+          },
+          {
+            "name": "author",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "type": "string"
+          }
+        ]
+      },
+      "result_shape": {
+        "kind": "table",
+        "table": "messages"
+      }
+    }
+  ],
+  "views": [
+    {
+      "name": "live_messages",
+      "sql": "SELECT * FROM messages",
+      "row_schema": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uint64"
+          },
+          {
+            "name": "author",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "type": "string"
+          }
+        ]
+      },
+      "result_shape": {
+        "kind": "table",
+        "table": "messages"
+      }
+    }
+  ],
+  "visibility_filters": [],
+  "permissions": {
+    "reducers": [],
+    "queries": [],
+    "views": []
+  },
+  "read_model": {
+    "declarations": []
+  },
+  "migrations": {
+    "module": {
+      "module_version": "",
+      "schema_version": 0,
+      "contract_version": 0,
+      "previous_version": "",
+      "compatibility": "",
+      "classifications": [],
+      "notes": ""
+    },
+    "declarations": []
+  },
+  "codegen": {
+    "contract_format": "shunter.module_contract",
+    "contract_version": 1,
+    "default_snapshot_filename": "shunter.contract.json"
+  }
+}

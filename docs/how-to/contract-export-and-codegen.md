@@ -130,6 +130,9 @@ clients, and tests.
 See [Use generated TypeScript clients](typescript-client.md) for local
 `@shunter/client` installs, `createShunterClient`, stale-binding checks, typed
 reducers, decoded declared reads, managed subscriptions, and reconnect.
+The hosted end-to-end example under
+[`examples/hosted-chat`](../../examples/hosted-chat/README.md) shows these
+commands against a runnable app server and frontend-shaped TypeScript client.
 
 ## What Contracts Are Good For
 

@@ -3,3 +3,5 @@
 .vscode
 .tmp_*
 node_modules/
+examples/hosted-chat/.contract-data/
+examples/hosted-chat/data/

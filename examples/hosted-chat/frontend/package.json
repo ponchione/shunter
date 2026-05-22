@@ -1,0 +1,14 @@
+{
+  "name": "@shunter/example-hosted-chat-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "npm exec --yes --package typescript -- tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@shunter/client": "file:../../../typescript/client"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

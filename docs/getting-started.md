@@ -5,26 +5,29 @@ Scope: first orientation path for application authors embedding Shunter in a Go
 application.
 
 Shunter is a Go library for hosting stateful realtime application modules.
-An application defines a module, builds a runtime from that module, starts the
-runtime, then writes through reducers and reads through committed read APIs,
-declared queries, declared views, or protocol clients.
+An application defines a module, then either runs Shunter as the app's backend
+server with `shunter.Run` or builds a lower-level runtime and owns more of the
+HTTP/lifecycle wiring itself.
 
 This page is intentionally short. Use it to learn the order of operations, then
 move to the task-specific guides under [docs/how-to](how-to/README.md).
 
 ## The Short Version
 
-The normal application flow is:
+The normal hosted-backend flow is:
 
 1. Add Shunter as a Go dependency and import the root package.
 2. Define a module with tables, reducers, reads, permissions, and metadata.
-3. Build a runtime with `shunter.Build`.
-4. Start the runtime with `Runtime.Start` or `Runtime.ListenAndServe`.
-5. Call reducers for writes.
-6. Read committed state with `Runtime.Read`, `Runtime.CallQuery`, or
-   `Runtime.SubscribeView`.
-7. Close the runtime during shutdown.
-8. Export a contract when app-facing schema or read surfaces change.
+3. Read config with `shunter.ConfigFromEnv`.
+4. Run the backend with `shunter.Run`.
+5. Export a contract when app-facing schema or read surfaces change.
+6. Generate TypeScript bindings for frontend clients.
+
+The embedded/runtime-library path still exists for applications that need
+custom HTTP routing, in-process workers, or lower-level lifecycle control:
+build with `shunter.Build`, start with `Runtime.Start` or
+`Runtime.ListenAndServe`, call reducers and reads locally, and close the
+runtime during shutdown.
 
 In an application module, add the dependency in the usual Go way:
 
@@ -108,7 +111,40 @@ Reducer arguments and results are byte slices at the runtime boundary. Your app
 can use `bsatn`, JSON, protobuf, or a narrow app-specific encoding. Keep the
 choice consistent across local calls, protocol clients, and tests.
 
-## Build And Start
+## Run As A Backend
+
+For a standard hosted app server, keep the application shell thin:
+
+```go
+package main
+
+import (
+	"context"
+	"log"
+
+	"github.com/ponchione/shunter"
+	"example.com/myapp/internal/app"
+)
+
+func main() {
+	cfg := shunter.ConfigFromEnv()
+	cfg.EnableProtocol = true
+	if cfg.DataDir == "" {
+		cfg.DataDir = "./data/myapp"
+	}
+
+	if err := shunter.Run(context.Background(), app.Module(), cfg); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+`ConfigFromEnv` reads `SHUNTER_DATA_DIR`, `SHUNTER_LISTEN_ADDR`,
+`SHUNTER_ENABLE_PROTOCOL`, `SHUNTER_AUTH_MODE`, `SHUNTER_AUTH_SIGNING_KEY`,
+`SHUNTER_AUTH_ISSUERS`, and `SHUNTER_AUTH_AUDIENCES`. Use dev auth for local
+work and strict auth with explicit key material for public protocol serving.
+
+## Build And Start Manually
 
 `Build` validates the module and opens or initializes runtime state. `Start`
 starts runtime-owned lifecycle, durability, executor, subscription, and
@@ -214,6 +250,11 @@ if err := rt.ListenAndServe(ctx); err != nil && !errors.Is(err, context.Canceled
 If your application already owns the HTTP server, call `Runtime.Start` and mount
 `Runtime.HTTPHandler()` instead.
 
+The canonical hosted example is
+[`examples/hosted-chat`](../examples/hosted-chat/README.md). It shows the
+server entrypoint, contract export binary, generated TypeScript path, and a
+frontend-shaped client that calls a reducer and subscribes to a live view.
+
 ## Export A Contract
 
 Export a contract from an app-owned binary that links your module. Contract
@@ -240,6 +281,8 @@ dynamically load your module code.
   live views.
 - [Serve protocol traffic](how-to/serve-protocol-traffic.md) covers HTTP and
   WebSocket serving.
+- [Host Shunter as a backend](how-to/host-shunter-backend.md) covers the
+  standard static Go app server path.
 - [Persistence and shutdown](how-to/persistence-and-shutdown.md) covers
   `DataDir`, snapshots, backup, restore, and shutdown.
 - [Contract export and codegen](how-to/contract-export-and-codegen.md) covers

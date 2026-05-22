@@ -8,24 +8,26 @@ Shunter integration path.
 
 Recommended order for a new app integration:
 
-1. [Module anatomy](module-anatomy.md) - declare modules, tables, reducers,
+1. [Host Shunter as a backend](host-shunter-backend.md) - run the standard
+   static Go backend server and follow the hosted-chat example workflow.
+2. [Module anatomy](module-anatomy.md) - declare modules, tables, reducers,
    reads, metadata, lifecycle hooks, migrations, and visibility filters.
-2. [Reducer patterns](reducer-patterns.md) - write reducers, use the
+3. [Reducer patterns](reducer-patterns.md) - write reducers, use the
    transactional reducer DB, and avoid unsafe executor behavior.
-3. [Reads, queries, and views](reads-queries-views.md) - choose between local
+4. [Reads, queries, and views](reads-queries-views.md) - choose between local
    reads, declared queries, and declared live views.
-4. [Configure auth](configure-auth.md) - choose dev or strict auth and pass
+5. [Configure auth](configure-auth.md) - choose dev or strict auth and pass
    caller metadata.
-5. [Serve protocol traffic](serve-protocol-traffic.md) - expose Shunter
+6. [Serve protocol traffic](serve-protocol-traffic.md) - expose Shunter
    protocol traffic through runtime-owned or app-owned HTTP serving.
-6. [Persistence and shutdown](persistence-and-shutdown.md) - use `DataDir`,
+7. [Persistence and shutdown](persistence-and-shutdown.md) - use `DataDir`,
    shutdown cleanly, snapshot, compact, backup, restore, and run migrations.
-7. [Contract export and codegen](contract-export-and-codegen.md) - export
+8. [Contract export and codegen](contract-export-and-codegen.md) - export
    contracts, review compatibility, and generate TypeScript bindings.
-8. [Use generated TypeScript clients](typescript-client.md) - install the local
+9. [Use generated TypeScript clients](typescript-client.md) - install the local
    SDK runtime package, connect clients, call reducers, read declared queries,
    subscribe to views/tables, and opt into reconnect.
-9. [Testing Shunter modules](testing-shunter-modules.md) - test modules through
+10. [Testing Shunter modules](testing-shunter-modules.md) - test modules through
    the root runtime API.
 
 For a linear introduction, start with [Getting started](../getting-started.md).
