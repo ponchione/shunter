@@ -339,5 +339,9 @@ func printContractHelp(w io.Writer) {
 
 Contract commands operate on canonical ModuleContract JSON files only.
 Export app module contracts from an app-owned binary with Runtime.ExportContractJSON.
+
+Examples:
+  shunter contract assert --contract shunter.contract.json --module chat --module-version v0.1.0 --contract-version 1 --tables 1 --reducers 1 --format json
+  shunter contract assert --contract shunter.contract.json
 `)
 }

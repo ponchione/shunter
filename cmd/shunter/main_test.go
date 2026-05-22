@@ -32,6 +32,21 @@ func TestHelpDocumentsAppOwnedContractExport(t *testing.T) {
 	assertContains(t, out, "No dynamic module loading")
 }
 
+func TestContractHelpDocumentsAssertExamples(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{"contract", "--help"})
+	if code != 0 {
+		t.Fatalf("run contract --help exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("run contract --help stderr = %s, want empty", stderr.String())
+	}
+	out := stdout.String()
+	assertContains(t, out, "Examples:")
+	assertContains(t, out, "shunter contract assert --contract shunter.contract.json --module chat --module-version v0.1.0 --contract-version 1 --tables 1 --reducers 1 --format json")
+	assertContains(t, out, "shunter contract assert --contract shunter.contract.json")
+}
+
 func TestDescribeCommandReadsContractText(t *testing.T) {
 	dir := t.TempDir()
 	contract := cliContractFixture()
@@ -680,6 +695,47 @@ func TestContractAssertCommandPassesJSON(t *testing.T) {
 	}
 	assertNotContains(t, stdout.String(), `"expected":`)
 	assertNotContains(t, stdout.String(), `"actual":`)
+}
+
+func TestContractAssertCommandAllowsZeroAssertions(t *testing.T) {
+	dir := t.TempDir()
+	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{"contract", "assert", "--contract", contractPath})
+	if code != 0 {
+		t.Fatalf("contract assert without assertions exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("contract assert without assertions stderr = %s, want empty", stderr.String())
+	}
+	out := stdout.String()
+	assertContains(t, out, "Status: passed")
+	assertContains(t, out, "0 contract assertion(s) passed")
+	assertContains(t, out, "Assertions: none")
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run(&stdout, &stderr, []string{"contract", "assert", "--contract", contractPath, "--format", "json"})
+	if code != 0 {
+		t.Fatalf("contract assert without assertions JSON exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("contract assert without assertions JSON stderr = %s, want empty", stderr.String())
+	}
+	var report struct {
+		Status     string                `json:"status"`
+		Message    string                `json:"message"`
+		Assertions []contractAssertCheck `json:"assertions"`
+		Failures   []contractAssertCheck `json:"failures"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode contract assert zero-assertion JSON: %v\n%s", err, stdout.String())
+	}
+	if report.Status != "passed" || report.Message != "0 contract assertion(s) passed" ||
+		len(report.Assertions) != 0 || len(report.Failures) != 0 {
+		t.Fatalf("zero-assertion report = %+v", report)
+	}
 }
 
 func TestContractAssertCommandFailsMismatches(t *testing.T) {
