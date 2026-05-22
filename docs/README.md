@@ -12,8 +12,9 @@ notes, and future-work trackers live under `../working-docs/`.
 3. [How-to guides](how-to/README.md) cover specific integration tasks such as
    declaring modules, writing reducers, serving protocol traffic, configuring
    auth, persistence, contracts, generated TypeScript clients, and tests.
-4. [Reference notes](reference/README.md) summarize config, lifecycle, and read
-   surface choices that Go doc alone does not explain.
+4. [Reference notes](reference/README.md) summarize config, lifecycle, read
+   surface, and future running-app admin CLI choices that Go doc alone does
+   not explain.
 
 Use [authentication](authentication.md) for the full current auth contract,
 [operations](operations.md) for backup/restore and release runbooks, and
