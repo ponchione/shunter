@@ -10,7 +10,8 @@ rtk go run ./examples/hosted-chat/cmd/export-contract --out examples/hosted-chat
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json
 describe_json="$(mktemp)"
 health_json="$(mktemp)"
-trap 'rm -f "$describe_json" "$health_json"' EXIT
+validate_json="$(mktemp)"
+trap 'rm -f "$describe_json" "$health_json" "$validate_json"' EXIT
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json --format json > "$describe_json"
 rtk grep '"tables": 3' "$describe_json"
 rtk grep '"reducers": 1' "$describe_json"
@@ -19,6 +20,9 @@ rtk grep '"views": 1' "$describe_json"
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json --section reducers --format json > "$describe_json"
 rtk grep '"section": "reducers"' "$describe_json"
 rtk grep '"name": "send_message"' "$describe_json"
+rtk go run ./cmd/shunter contract validate --contract examples/hosted-chat/shunter.contract.json --format json > "$validate_json"
+rtk grep '"status": "valid"' "$validate_json"
+rtk grep '"scope": "contract"' "$validate_json"
 rtk go run ./cmd/shunter health --contract examples/hosted-chat/shunter.contract.json --format json > "$health_json"
 rtk grep '"status": "ok"' "$health_json"
 rtk grep '"scope": "contract"' "$health_json"

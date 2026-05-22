@@ -44,6 +44,7 @@ Inspect the exported app surface with the generic CLI:
 ```bash
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json --section reducers --format json
+rtk go run ./cmd/shunter contract validate --contract examples/hosted-chat/shunter.contract.json
 rtk go run ./cmd/shunter health --contract examples/hosted-chat/shunter.contract.json
 ```
 
@@ -68,5 +69,5 @@ rtk ./scripts/hosted-chat-gate.sh
 ```
 
 The gate builds and tests the Go example, exports the contract, checks
-describe JSON counts, validates contract-local health, regenerates the
-TypeScript bindings, and runs the frontend typecheck.
+describe JSON counts, validates the contract artifact, checks contract-local
+health, regenerates the TypeScript bindings, and runs the frontend typecheck.
