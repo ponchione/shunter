@@ -34,6 +34,8 @@ func run(stdout, stderr io.Writer, args []string) int {
 		return 0
 	case "describe":
 		return runDescribe(stdout, stderr, args[1:])
+	case "health":
+		return runHealth(stdout, stderr, args[1:])
 	case "contract":
 		return runContract(stdout, stderr, args[1:])
 	case "backup":
@@ -304,6 +306,7 @@ func printRootHelp(w io.Writer) {
 Usage:
   shunter version
   shunter describe --contract shunter.contract.json [--section all|tables|reducers|queries|views|visibility] [--format text|json]
+  shunter health --contract shunter.contract.json [--format text|json]
   shunter contract diff --previous old.json --current current.json [--format text|json]
   shunter contract policy --previous old.json --current current.json [--strict] [--require-previous-version] [--format text|json]
   shunter contract plan --previous old.json --current current.json [--strict] [--require-previous-version] [--validate] [--format text|json]

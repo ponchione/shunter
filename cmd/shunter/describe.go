@@ -54,16 +54,20 @@ func runDescribe(stdout, stderr io.Writer, args []string) int {
 }
 
 func readDescribeContract(path string) (shunter.ModuleContract, error) {
+	return readContractFile(path, "describe contract")
+}
+
+func readContractFile(path, context string) (shunter.ModuleContract, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return shunter.ModuleContract{}, fmt.Errorf("read contract %q: %w", path, err)
 	}
 	var contract shunter.ModuleContract
 	if err := json.Unmarshal(data, &contract); err != nil {
-		return shunter.ModuleContract{}, fmt.Errorf("%w: describe contract: %v", contractdiff.ErrInvalidContractJSON, err)
+		return shunter.ModuleContract{}, fmt.Errorf("%w: %s: %v", contractdiff.ErrInvalidContractJSON, context, err)
 	}
 	if err := shunter.ValidateModuleContract(contract); err != nil {
-		return shunter.ModuleContract{}, fmt.Errorf("%w: describe contract: %v", contractdiff.ErrInvalidContractJSON, err)
+		return shunter.ModuleContract{}, fmt.Errorf("%w: %s: %v", contractdiff.ErrInvalidContractJSON, context, err)
 	}
 	return contract, nil
 }

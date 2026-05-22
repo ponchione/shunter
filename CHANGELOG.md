@@ -9,6 +9,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   hosted-chat release gate script.
 - Added `shunter describe --contract` for local ModuleContract inventory in
   text or JSON form, and wired the hosted-chat gate to exercise it.
+- Added `shunter health --contract` for contract-local validation status in
+  text or JSON form, without implying a running server probe.
 - Protocol compression-envelope decoding now applies the default message-size
   limit in `UnwrapCompressed`, preventing unbounded gzip expansion by default.
 - Commit-log `DecodeRecord` now applies the default max payload limit when

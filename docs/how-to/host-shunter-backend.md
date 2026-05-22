@@ -82,7 +82,11 @@ Inspect the generated contract before handing it to frontend code:
 ```bash
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json --format json
+rtk go run ./cmd/shunter health --contract examples/hosted-chat/shunter.contract.json
 ```
+
+`shunter health --contract` validates the local contract artifact only. It
+does not check a running Shunter server or protocol endpoint.
 
 Typecheck the frontend-shaped client:
 
@@ -105,5 +109,5 @@ rtk ./scripts/hosted-chat-gate.sh
 ```
 
 It runs the Go example tests, builds the server, exports and describes the
-contract, checks describe JSON counts, regenerates TypeScript, and typechecks
-the frontend example.
+contract, checks describe JSON counts, validates contract-local health,
+regenerates TypeScript, and typechecks the frontend example.
