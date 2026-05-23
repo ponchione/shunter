@@ -262,11 +262,13 @@ Reference purpose:
 - Let procedure code manually enter transactions when it needs state changes.
 
 Shunter decision:
-- This is relevant if Shunter is the backend.
+- This is a required hosted-backend capability.
 - Because Shunter is Go-hosted, the app shell can already call external
-  services. A first-class procedure-like surface should be added only when the
-  frontend needs to call external-service workflows through Shunter's auth,
-  permission, and generated SDK surfaces.
+  services. A first-class procedure-like surface gives frontends a Shunter-owned
+  path for external-service workflows without turning reducers into I/O
+  handlers.
+- Procedures should be general extension points, not built-in provider
+  integrations. Provider clients and credentials stay in the app shell.
 
 Needed Shunter work:
 - define whether procedures are client-callable named functions.
@@ -415,10 +417,12 @@ Reference purpose:
 - DML/admin workflows.
 
 Shunter decision:
-- Narrow SQL reads are useful.
-- SQL DML should remain out of scope until there is a specific operator need.
+- Declared reads and narrow read-only SQL are useful.
+- Broad SQL compatibility, PGWire, and SQL DML are not product goals.
 - Reducers should remain the write boundary.
-- PGWire is not a priority.
+- Admin tooling should call reducers, declared queries, or explicitly scoped
+  read-only inspection surfaces rather than growing into a general SQL database
+  interface.
 
 Needed Shunter work:
 - improve declared-query and one-off read ergonomics.
@@ -427,12 +431,55 @@ Needed Shunter work:
   - declared query calls
   - narrow read SQL
   - schema/contract inspection
-- keep DML rejected unless the mutation model is revisited.
+- keep DML rejected.
 
 Rationale:
 - SQL writes bypass reducer-owned invariants.
 - SQL DML complicates subscription, durability, permissions, and app logic.
+- PGWire invites tooling expectations Shunter does not intend to satisfy:
+  general transactions, schema mutation, broad SQL functions, query planning,
+  and relational admin workflows outside the reducer/read contract.
 - Most frontend workflows should use generated declared reads/views.
+
+### App Blob And Object Storage
+
+Reference purpose:
+- Some database engines keep internal blob stores for large values, snapshots,
+  or page/object repositories.
+- Applications often need user uploads, images, videos, exports, attachments,
+  and other large binary objects.
+
+Shunter decision:
+- Shunter may use internal storage mechanics when they serve runtime
+  durability, snapshots, or value encoding.
+- Shunter should not become app-facing blob/object storage.
+- App-level files should live in object storage such as S3-compatible storage,
+  Cloudflare R2, Supabase Storage, or MinIO.
+- Shunter should store metadata and workflow state for those objects: key,
+  owner, content type, byte size, checksum, scan status, visibility, and domain
+  references.
+
+Rationale:
+- Large binary objects have different operational needs from realtime app
+  state: multipart upload, resumability, range reads, CDN integration,
+  lifecycle policies, antivirus/media processing, signed URLs, and regional
+  replication.
+- Putting large objects in Shunter would put pressure on commit latency,
+  snapshots, compaction, backup/restore time, memory residency, subscription
+  fanout, and recovery behavior.
+- Object stores already solve cheap durable byte storage and delivery. Shunter
+  should own the transactional metadata and reducer-owned business invariants
+  around those objects.
+
+Example flow:
+
+```text
+Frontend requests upload intent
+  -> Shunter reducer creates pending asset row and returns signed-upload metadata
+  -> frontend uploads bytes directly to object storage
+  -> worker/procedure validates object and calls reducer to mark asset ready
+  -> Shunter subscriptions update app state
+```
 
 ### Auth And Identity
 
@@ -471,6 +518,27 @@ cfg.AuthOIDCIssuers = []shunter.OIDCIssuer{
 	},
 }
 ```
+
+### Companion Service Defaults
+
+Shunter should document a small set of app-shell companion services for common
+hosted-backend deployments. These are recommended defaults for applications,
+not dependencies of the Shunter runtime.
+
+High-confidence defaults:
+- Auth, login, and sessions: Supabase Auth. Shunter verifies bearer tokens and
+  derives caller identity; Supabase remains the app auth authority.
+- App object/blob storage: Cloudflare R2 for production S3-compatible object
+  storage, with MinIO as a local/self-hosted substitute when needed. Supabase
+  Storage remains a reasonable app choice when tight Supabase integration is
+  more valuable than R2's storage/CDN economics.
+- Transactional email: Resend as the developer-friendly default. Use Postmark
+  when a product has stricter transactional-delivery requirements.
+- Search indexing: Meilisearch for simple app search. Use Typesense only when
+  faceting, typo tolerance, or search UX becomes central enough to justify the
+  choice explicitly.
+- Payments and subscriptions: Stripe. Use Paddle or Lemon Squeezy only when
+  merchant-of-record handling is a product requirement.
 
 ### Visibility And Row-Level Security
 
@@ -738,23 +806,26 @@ Good Shunter-owned data:
 - reducer-owned business invariants
 
 Keep outside Shunter unless a concrete app says otherwise:
-- large object/blob storage
+- large app-facing object/blob storage; keep bytes in object storage and keep
+  transactional metadata in Shunter
 - analytics and BI history
 - search indexing
 - billing/payment ledger integrations
 - external audit exports
 - third-party sync logs
-- workloads needing arbitrary ad hoc SQL or mature relational tooling
+- workloads needing arbitrary ad hoc SQL, SQL DML, PGWire, or mature relational
+  tooling
 
 Example architecture:
 
 ```text
 Nuxt frontend
   -> Shunter TypeScript SDK for app state
-  -> optional upload endpoint for object storage
+  -> direct or brokered uploads to object storage
 
 Go Shunter app server
   -> Shunter runtime for tables/reducers/views/subscriptions
+  -> asset metadata and upload-state reducers
   -> MapBox service adapter for geocoding
   -> email/payment/search adapters as needed
   -> optional Postgres/warehouse only for non-realtime support data
@@ -781,6 +852,7 @@ Medium priority:
 Low priority:
 - PGWire
 - SQL DML
+- broad SQL compatibility
 - dynamic publish/update
 - transactional catalog and online DDL
 - out-of-process modules
