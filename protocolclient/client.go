@@ -14,6 +14,7 @@ import (
 )
 
 var (
+	ErrURLRequired         = errors.New("protocol client URL is required")
 	ErrTokenRequired       = errors.New("protocol client token is required")
 	ErrTimeout             = errors.New("protocol client timeout")
 	ErrUnexpectedMessage   = errors.New("protocol client unexpected message")
@@ -46,7 +47,7 @@ func Dial(ctx context.Context, opts Options) (*Client, protocol.IdentityToken, e
 	}
 	target := strings.TrimSpace(opts.URL)
 	if target == "" {
-		return nil, protocol.IdentityToken{}, fmt.Errorf("protocol client URL is required")
+		return nil, protocol.IdentityToken{}, ErrURLRequired
 	}
 	token := strings.TrimSpace(opts.Token)
 	if token == "" {

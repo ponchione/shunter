@@ -74,6 +74,13 @@ func TestDialRequiresExplicitTokenBeforeNetwork(t *testing.T) {
 	}
 }
 
+func TestDialRequiresExplicitURLBeforeNetwork(t *testing.T) {
+	_, _, err := Dial(context.Background(), Options{URL: " \t", Token: "operator-token"})
+	if !errors.Is(err, ErrURLRequired) {
+		t.Fatalf("Dial error = %v, want ErrURLRequired", err)
+	}
+}
+
 func TestDialClassifiesIdentityReadTimeout(t *testing.T) {
 	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		ws := acceptProtocolClientTestConn(t, w, r)
