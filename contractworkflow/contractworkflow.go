@@ -22,8 +22,10 @@ const (
 )
 
 var (
-	ErrUnsupportedFormat = errors.New("unsupported contract workflow output format")
-	ErrRuntimeRequired   = errors.New("contract workflow runtime is required")
+	ErrUnsupportedFormat     = errors.New("unsupported contract workflow output format")
+	ErrRuntimeRequired       = errors.New("contract workflow runtime is required")
+	ErrSurfaceNotFound       = errors.New("contract surface not found")
+	ErrArgumentSchemaMissing = errors.New("contract argument schema missing")
 
 	syncDir = atomicfile.SyncDir
 )
@@ -203,6 +205,30 @@ func FindQuery(contract shunter.ModuleContract, name string) (shunter.QueryDescr
 		}
 	}
 	return shunter.QueryDescription{}, false
+}
+
+// ReducerArgumentSchema returns the exported argument schema for reducer name.
+func ReducerArgumentSchema(contract shunter.ModuleContract, name string) (schema.ProductSchemaExport, error) {
+	reducer, ok := FindReducer(contract, name)
+	if !ok {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: reducer %q", ErrSurfaceNotFound, strings.TrimSpace(name))
+	}
+	if reducer.Args == nil {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: reducer %q", ErrArgumentSchemaMissing, reducer.Name)
+	}
+	return *reducer.Args, nil
+}
+
+// QueryArgumentSchema returns the exported parameter schema for declared query name.
+func QueryArgumentSchema(contract shunter.ModuleContract, name string) (schema.ProductSchemaExport, error) {
+	query, ok := FindQuery(contract, name)
+	if !ok {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: query %q", ErrSurfaceNotFound, strings.TrimSpace(name))
+	}
+	if query.Parameters == nil {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: query %q", ErrArgumentSchemaMissing, query.Name)
+	}
+	return *query.Parameters, nil
 }
 
 // FormatDiff renders a contract diff report in text or JSON form.

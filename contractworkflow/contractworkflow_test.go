@@ -324,6 +324,100 @@ func TestFindQueryUsesLocalContractDeclarations(t *testing.T) {
 	}
 }
 
+func TestReducerArgumentSchemaSelectsContractSchema(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{
+		{
+			Name: "send_message",
+			Args: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+				{Name: "body", Type: "string"},
+			}},
+		},
+		{
+			Name: "ping",
+			Args: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{}},
+		},
+	}
+
+	args, err := ReducerArgumentSchema(contract, " send_message ")
+	if err != nil {
+		t.Fatalf("ReducerArgumentSchema returned error: %v", err)
+	}
+	if len(args.Columns) != 1 || args.Columns[0].Name != "body" || args.Columns[0].Type != "string" {
+		t.Fatalf("ReducerArgumentSchema args = %+v", args)
+	}
+
+	emptyArgs, err := ReducerArgumentSchema(contract, "ping")
+	if err != nil {
+		t.Fatalf("ReducerArgumentSchema empty schema returned error: %v", err)
+	}
+	if emptyArgs.Columns == nil || len(emptyArgs.Columns) != 0 {
+		t.Fatalf("ReducerArgumentSchema empty args = %+v, want present empty columns", emptyArgs)
+	}
+}
+
+func TestReducerArgumentSchemaRejectsUnknownAndSchemaLessReducers(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{{Name: "send_message"}}
+
+	_, err := ReducerArgumentSchema(contract, "missing")
+	if !errors.Is(err, ErrSurfaceNotFound) {
+		t.Fatalf("ReducerArgumentSchema missing error = %v, want ErrSurfaceNotFound", err)
+	}
+
+	_, err = ReducerArgumentSchema(contract, "send_message")
+	if !errors.Is(err, ErrArgumentSchemaMissing) {
+		t.Fatalf("ReducerArgumentSchema schema-less error = %v, want ErrArgumentSchemaMissing", err)
+	}
+}
+
+func TestQueryArgumentSchemaSelectsContractParameters(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{
+		{
+			Name: "recent_messages",
+			Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+				{Name: "topic", Type: "string"},
+			}},
+		},
+		{
+			Name:       "all_messages",
+			Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{}},
+		},
+	}
+
+	args, err := QueryArgumentSchema(contract, " recent_messages ")
+	if err != nil {
+		t.Fatalf("QueryArgumentSchema returned error: %v", err)
+	}
+	if len(args.Columns) != 1 || args.Columns[0].Name != "topic" || args.Columns[0].Type != "string" {
+		t.Fatalf("QueryArgumentSchema args = %+v", args)
+	}
+
+	emptyArgs, err := QueryArgumentSchema(contract, "all_messages")
+	if err != nil {
+		t.Fatalf("QueryArgumentSchema empty schema returned error: %v", err)
+	}
+	if emptyArgs.Columns == nil || len(emptyArgs.Columns) != 0 {
+		t.Fatalf("QueryArgumentSchema empty args = %+v, want present empty columns", emptyArgs)
+	}
+}
+
+func TestQueryArgumentSchemaRejectsUnknownAndSchemaLessQueries(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{Name: "history"}}
+
+	_, err := QueryArgumentSchema(contract, "missing")
+	if !errors.Is(err, ErrSurfaceNotFound) {
+		t.Fatalf("QueryArgumentSchema missing error = %v, want ErrSurfaceNotFound", err)
+	}
+
+	_, err = QueryArgumentSchema(contract, "history")
+	if !errors.Is(err, ErrArgumentSchemaMissing) {
+		t.Fatalf("QueryArgumentSchema schema-less error = %v, want ErrArgumentSchemaMissing", err)
+	}
+}
+
 func TestExportRuntimeFileWritesCanonicalContractJSON(t *testing.T) {
 	dir := t.TempDir()
 	rt := buildWorkflowRuntime(t)
