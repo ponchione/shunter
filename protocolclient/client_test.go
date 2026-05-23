@@ -676,6 +676,77 @@ func TestClientExecuteDeclaredQueryReusesResponseValidation(t *testing.T) {
 	}
 }
 
+func TestDialAndExecuteDeclaredQueryUsesExplicitTokenAndCloses(t *testing.T) {
+	const token = "operator-token"
+	wantIdentity := protocol.IdentityToken{Identity: [32]byte{1}, Token: "server-token", ConnectionID: [16]byte{2}}
+	received := make(chan protocol.DeclaredQueryWithParametersMsg, 1)
+	closed := make(chan struct{}, 1)
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+token {
+			t.Fatalf("Authorization = %q, want bearer token", got)
+		}
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, wantIdentity)
+
+		_, frame, err := ws.Read(r.Context())
+		if err != nil {
+			t.Errorf("server read client message: %v", err)
+			return
+		}
+		_, msg, err := protocol.DecodeClientMessage(frame)
+		if err != nil {
+			t.Errorf("DecodeClientMessage: %v", err)
+			return
+		}
+		query, ok := msg.(protocol.DeclaredQueryWithParametersMsg)
+		if !ok {
+			t.Errorf("client message = %T, want protocol.DeclaredQueryWithParametersMsg", msg)
+			return
+		}
+		received <- query
+		writeProtocolClientServerMessage(t, ws, protocol.OneOffQueryResponse{MessageID: query.MessageID})
+
+		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		_, _, err = ws.Read(readCtx)
+		if err != nil {
+			closed <- struct{}{}
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	identity, response, err := DialAndExecuteDeclaredQuery(ctx, Options{URL: srv.wsURL(), Token: token}, DeclaredQueryRequest{
+		Name:          "recent_messages",
+		Parameters:    []byte{9, 8, 7},
+		HasParameters: true,
+	})
+	if err != nil {
+		t.Fatalf("DialAndExecuteDeclaredQuery returned error: %v", err)
+	}
+	if identity != wantIdentity {
+		t.Fatalf("identity = %+v, want %+v", identity, wantIdentity)
+	}
+	if !bytes.Equal(response.MessageID, []byte{1, 0, 0, 0}) {
+		t.Fatalf("response message ID = %x", response.MessageID)
+	}
+
+	select {
+	case query := <-received:
+		if query.Name != "recent_messages" || !bytes.Equal(query.Params, []byte{9, 8, 7}) {
+			t.Fatalf("server query = %+v", query)
+		}
+	case <-ctx.Done():
+		t.Fatalf("server did not receive query: %v", ctx.Err())
+	}
+	select {
+	case <-closed:
+	case <-ctx.Done():
+		t.Fatalf("server did not observe client close: %v", ctx.Err())
+	}
+}
+
 func TestDialRejectsUnexpectedFirstMessage(t *testing.T) {
 	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		ws := acceptProtocolClientTestConn(t, w, r)

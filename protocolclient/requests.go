@@ -16,6 +16,24 @@ type DeclaredQueryRequest struct {
 	HasParameters bool
 }
 
+// DialAndExecuteDeclaredQuery connects, executes one declared query, and closes the connection.
+func DialAndExecuteDeclaredQuery(ctx context.Context, opts Options, request DeclaredQueryRequest) (protocol.IdentityToken, protocol.OneOffQueryResponse, error) {
+	client, identity, err := Dial(ctx, opts)
+	if err != nil {
+		return protocol.IdentityToken{}, protocol.OneOffQueryResponse{}, err
+	}
+
+	response, execErr := client.ExecuteDeclaredQuery(ctx, request)
+	closeErr := client.Close(ctx)
+	if execErr != nil {
+		return identity, response, execErr
+	}
+	if closeErr != nil {
+		return identity, response, closeErr
+	}
+	return identity, response, nil
+}
+
 // CallReducer sends a full-update reducer call and waits for its matching result.
 func (c *Client) CallReducer(ctx context.Context, name string, args []byte) (protocol.TransactionUpdate, error) {
 	requestID := c.NextRequestID()
