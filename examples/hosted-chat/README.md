@@ -92,7 +92,10 @@ npm run typecheck
 
 The TypeScript example connects to `/subscribe`, calls the generated
 `send_message` reducer helper and `send_system_message` procedure helper, and
-subscribes to the generated `live_messages` view helper with decoded rows.
+subscribes to the generated `live_messages` view helper with decoded rows. The
+procedure is intentionally shaped as a small service-adapter workflow: it runs
+outside the reducer executor, validates procedure arguments, and then calls the
+`send_message` reducer to make the durable state change.
 
 ## Release Gate
 
@@ -105,6 +108,6 @@ rtk ./scripts/hosted-chat-gate.sh
 The gate builds and tests the Go example, exports the contract, asserts
 contract-local surface counts, validates the contract artifact, checks
 contract-local health, starts a real server on an ephemeral local port, checks
-live `health` and `describe`, runs one CLI reducer call and declared query
-against it, regenerates the TypeScript bindings, and runs the frontend
-typecheck.
+live `health` and `describe`, runs one CLI reducer call, one CLI procedure
+call, and one declared query against it, regenerates the TypeScript bindings,
+and runs the frontend typecheck.

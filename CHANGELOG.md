@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Procedure protocol responses now use the runtime client sender path so
+  outbound backpressure triggers the same disconnect handling as other
+  running-app responses.
 - Added first-class procedure declarations, local and WebSocket procedure
   calls, contract assertions, TypeScript generated procedure helpers, and a
   hosted-chat procedure gate.

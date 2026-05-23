@@ -176,9 +176,22 @@ func (r *Runtime) HandleCallProcedure(ctx context.Context, conn *protocol.Conn, 
 		response.Error = &errText
 		response.Result = nil
 	}
-	if sendErr := protocol.SendToConn(conn, response); sendErr != nil {
-		// The protocol package owns detailed delivery logging; this path is
-		// best-effort and exits when the connection is already gone.
-		return
+	if sendErr := r.sendProtocolProcedureMessage(conn, response); sendErr != nil {
+		r.logProtocolProcedureSendError(sendErr)
 	}
+}
+
+func (r *Runtime) sendProtocolProcedureMessage(conn *protocol.Conn, msg protocol.ProcedureResponse) error {
+	if conn == nil {
+		return nil
+	}
+	sender, err := r.readyProtocolSender()
+	if err != nil {
+		return err
+	}
+	return sender.Send(conn.ID, msg)
+}
+
+func (r *Runtime) logProtocolProcedureSendError(err error) {
+	r.observability.LogProtocolProtocolError("call_procedure", "send_failed", err)
 }

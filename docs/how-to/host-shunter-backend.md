@@ -84,7 +84,7 @@ Inspect the generated contract before handing it to frontend code:
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json --format json
 rtk go run ./cmd/shunter contract validate --contract examples/hosted-chat/shunter.contract.json
-rtk go run ./cmd/shunter contract assert --contract examples/hosted-chat/shunter.contract.json --module hosted_chat --module-version v0.1.0 --contract-version 1 --tables 3 --reducers 1 --queries 1 --views 1
+rtk go run ./cmd/shunter contract assert --contract examples/hosted-chat/shunter.contract.json --module hosted_chat --module-version v0.1.0 --contract-version 1 --tables 3 --reducers 1 --procedures 1 --queries 1 --views 1
 rtk go run ./cmd/shunter health --contract examples/hosted-chat/shunter.contract.json
 ```
 
@@ -102,6 +102,12 @@ rtk go run ./cmd/shunter call \
   --contract examples/hosted-chat/shunter.contract.json \
   --allow-dev-anonymous \
   send_message '{"author":"Ada","body":"hello"}'
+
+rtk go run ./cmd/shunter procedure \
+  --url http://127.0.0.1:3000 \
+  --contract examples/hosted-chat/shunter.contract.json \
+  --allow-dev-anonymous \
+  send_system_message '{"body":"hello from a procedure"}'
 
 rtk go run ./cmd/shunter query \
   --url http://127.0.0.1:3000 \
@@ -132,6 +138,52 @@ The running-app CLI accepts root app URLs and `/subscribe` protocol URLs for
 live diagnostics, strips query strings and fragments, and rewrites them to the
 mounted diagnostics endpoints.
 
+## Procedures For Service Adapters
+
+Reducers remain the mutation boundary for durable app state. Use procedures
+for client-callable workflows that may need external I/O before deciding what
+state change to request: geocoding, email delivery, payment-provider calls,
+search indexing, object-storage validation, or similar app-owned services.
+
+Procedure handlers run outside the serialized reducer executor. They receive a
+`ProcedureContext` with the caller identity, connection ID, auth principal, and
+permission tags copied from the protocol or local call. When a procedure needs
+to mutate Shunter state, call `ctx.CallReducer`; the reducer runs on the
+executor only for that reducer transaction and sees the same caller context.
+
+```go
+mod.Procedure("send_system_message", sendSystemMessage,
+	shunter.WithProcedureArgs(shunter.ProductSchema{
+		Columns: []shunter.ProductColumn{{Name: "body", Type: "string"}},
+	}),
+)
+
+func sendSystemMessage(ctx *shunter.ProcedureContext, args []byte) ([]byte, error) {
+	body := decodeAndValidate(args)
+
+	// External I/O, if needed, belongs here before opening a reducer
+	// transaction.
+	reducerArgs := encodeSendMessageArgs("System", body)
+	res, err := ctx.CallReducer("send_message", reducerArgs)
+	if err != nil {
+		return nil, err
+	}
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return res.ReturnBSATN, nil
+}
+```
+
+Procedure permissions are checked before the handler runs. Reducer permissions
+are checked again when `ctx.CallReducer` submits the reducer, so grant both the
+procedure permission and any reducer permission needed for that workflow.
+
+A procedure failure returns to the caller as a procedure response error. It does
+not roll back reducer transactions that the procedure already committed; design
+multi-step service workflows so each reducer call is an intentional durable
+state transition.
+
 Typecheck the frontend-shaped client:
 
 ```bash
@@ -141,8 +193,8 @@ npm run typecheck
 ```
 
 The generated client imports `@shunter/client`, connects to the Shunter
-WebSocket endpoint, calls reducers with generated BSATN argument encoders, and
-subscribes to declared views with generated row decoders.
+WebSocket endpoint, calls reducers and procedures with generated BSATN argument
+encoders, and subscribes to declared views with generated row decoders.
 
 ## Release Gate
 
@@ -155,5 +207,6 @@ rtk ./scripts/hosted-chat-gate.sh
 It runs the Go example tests, builds the server, exports and describes the
 contract, asserts contract-local surface counts, validates the contract
 artifact, checks contract-local health, starts the example server on an
-ephemeral local port, runs one CLI reducer call and declared query against it,
-regenerates TypeScript, and typechecks the frontend example.
+ephemeral local port, runs one CLI reducer call, one CLI procedure call, and one
+declared query against it, regenerates TypeScript, and typechecks the frontend
+example.
