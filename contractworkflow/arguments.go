@@ -33,6 +33,13 @@ const (
 	ArgumentSurfaceDeclaredQuery ArgumentSurfaceKind = "declared_query"
 )
 
+// DeclaredQueryRequest describes a contract-validated declared-query request.
+type DeclaredQueryRequest struct {
+	Name          string
+	Parameters    []byte
+	HasParameters bool
+}
+
 // ProductValueFromJSON decodes a JSON object into schema-ordered product values.
 func ProductValueFromJSON(product schema.ProductSchemaExport, data []byte) (types.ProductValue, error) {
 	fields, err := decodeArgumentObject(data)
@@ -102,6 +109,27 @@ func EncodeOptionalQueryArguments(contract shunter.ModuleContract, name string, 
 	if !ok {
 		return nil, false, fmt.Errorf("%w: query %q", ErrSurfaceNotFound, strings.TrimSpace(name))
 	}
+	return encodeOptionalQueryArguments(query, data, hasArguments)
+}
+
+// PrepareDeclaredQueryRequest validates a declared query and prepares its encoded parameter request shape.
+func PrepareDeclaredQueryRequest(contract shunter.ModuleContract, name string, data []byte, hasArguments bool) (DeclaredQueryRequest, error) {
+	query, ok := FindQuery(contract, name)
+	if !ok {
+		return DeclaredQueryRequest{}, fmt.Errorf("%w: query %q", ErrSurfaceNotFound, strings.TrimSpace(name))
+	}
+	encoded, hasParameters, err := encodeOptionalQueryArguments(query, data, hasArguments)
+	if err != nil {
+		return DeclaredQueryRequest{}, err
+	}
+	return DeclaredQueryRequest{
+		Name:          query.Name,
+		Parameters:    encoded,
+		HasParameters: hasParameters,
+	}, nil
+}
+
+func encodeOptionalQueryArguments(query shunter.QueryDescription, data []byte, hasArguments bool) ([]byte, bool, error) {
 	if query.Parameters == nil || len(query.Parameters.Columns) == 0 {
 		if hasArguments {
 			fields, err := decodeArgumentObject(data)

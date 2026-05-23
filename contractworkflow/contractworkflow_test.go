@@ -803,6 +803,92 @@ func TestEncodeOptionalQueryArgumentsRejectsMissingSchemaAndInvalidInput(t *test
 	}
 }
 
+func TestPrepareDeclaredQueryRequestEncodesParameterizedQuery(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name: "recent_messages",
+		Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "topic", Type: "string"},
+			{Name: "limit", Type: "uint32"},
+		}},
+	}}
+
+	request, err := PrepareDeclaredQueryRequest(contract, " recent_messages ", []byte(`{"limit": 25, "topic": "general"}`), true)
+	if err != nil {
+		t.Fatalf("PrepareDeclaredQueryRequest returned error: %v", err)
+	}
+	if request.Name != "recent_messages" {
+		t.Fatalf("request name = %q, want canonical query name", request.Name)
+	}
+	if !request.HasParameters {
+		t.Fatal("request HasParameters = false, want true")
+	}
+
+	args, err := QueryArgumentSchema(contract, "recent_messages")
+	if err != nil {
+		t.Fatalf("QueryArgumentSchema returned error: %v", err)
+	}
+	decoded, err := bsatn.DecodeProductValueFromBytes(request.Parameters, productTableSchema(t, "recent_messages_args", args))
+	if err != nil {
+		t.Fatalf("DecodeProductValueFromBytes returned error: %v", err)
+	}
+	if len(decoded) != 2 || decoded[0].AsString() != "general" || decoded[1].AsUint32() != 25 {
+		t.Fatalf("decoded prepared query arguments = %+v", decoded)
+	}
+}
+
+func TestPrepareDeclaredQueryRequestPreservesNoParameterQueries(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{
+		{Name: "history"},
+		{
+			Name:       "all_messages",
+			Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{}},
+		},
+	}
+
+	for _, name := range []string{" history ", "all_messages"} {
+		t.Run(strings.TrimSpace(name), func(t *testing.T) {
+			request, err := PrepareDeclaredQueryRequest(contract, name, []byte(`{}`), true)
+			if err != nil {
+				t.Fatalf("PrepareDeclaredQueryRequest returned error: %v", err)
+			}
+			if request.Name != strings.TrimSpace(name) {
+				t.Fatalf("request name = %q, want %q", request.Name, strings.TrimSpace(name))
+			}
+			if request.HasParameters {
+				t.Fatal("request HasParameters = true, want false")
+			}
+			if request.Parameters != nil {
+				t.Fatalf("request Parameters = %x, want nil", request.Parameters)
+			}
+		})
+	}
+}
+
+func TestPrepareDeclaredQueryRequestPreservesStructuredErrors(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name: "recent_messages",
+		Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "limit", Type: "uint8"},
+		}},
+	}}
+
+	_, err := PrepareDeclaredQueryRequest(contract, "missing", nil, false)
+	if !errors.Is(err, ErrSurfaceNotFound) {
+		t.Fatalf("missing query error = %v, want ErrSurfaceNotFound", err)
+	}
+	_, err = PrepareDeclaredQueryRequest(contract, "recent_messages", nil, false)
+	if !errors.Is(err, ErrArgumentSchemaMissing) {
+		t.Fatalf("missing arguments error = %v, want ErrArgumentSchemaMissing", err)
+	}
+	_, err = PrepareDeclaredQueryRequest(contract, "recent_messages", []byte(`{"limit": 300}`), true)
+	if !errors.Is(err, ErrInvalidArgumentJSON) {
+		t.Fatalf("invalid arguments error = %v, want ErrInvalidArgumentJSON", err)
+	}
+}
+
 func TestEncodeNamedArgumentsPreservesStructuredErrors(t *testing.T) {
 	contract := workflowContractFixture()
 	contract.Schema.Reducers = []schema.ReducerExport{{Name: "send_message"}}

@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added `contractworkflow.PrepareDeclaredQueryRequest` for contract-validated
+  declared-query request preparation without coupling contract workflow code to
+  the protocol client package.
 - Added `contractworkflow.JSONQueryRows` helpers for contract-aware
   declared-query JSON rows with query and table metadata.
 - Changed contract-aware declared-query JSON row rendering to emit `int64`,
