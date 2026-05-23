@@ -2,6 +2,7 @@ package contractworkflow
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -1041,6 +1042,106 @@ func TestDecodeQueryResponseRejectsUnexpectedTableCounts(t *testing.T) {
 	})
 	if !errors.Is(err, ErrResultTableCount) {
 		t.Fatalf("DecodeQueryResponse multiple tables error = %v, want ErrResultTableCount", err)
+	}
+}
+
+func TestProductValueToJSONRowConvertsContractValues(t *testing.T) {
+	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+		{Name: "ok", Type: "bool"},
+		{Name: "count", Type: "uint64"},
+		{Name: "label", Type: "string"},
+		{Name: "blob", Type: "bytes"},
+		{Name: "wide_signed", Type: "int128"},
+		{Name: "wide_unsigned", Type: "uint128"},
+		{Name: "at", Type: "timestamp"},
+		{Name: "tags", Type: "arrayString"},
+		{Name: "request_id", Type: "uuid"},
+		{Name: "duration", Type: "duration"},
+		{Name: "payload", Type: "json"},
+		{Name: "maybe", Type: "string", Nullable: true},
+	}}
+	uuidValue, err := types.ParseUUID("123e4567-e89b-12d3-a456-426614174000")
+	if err != nil {
+		t.Fatalf("ParseUUID returned error: %v", err)
+	}
+	jsonValue, err := types.NewJSON([]byte(`{"z":1,"a":true}`))
+	if err != nil {
+		t.Fatalf("NewJSON returned error: %v", err)
+	}
+	row := types.ProductValue{
+		types.NewBool(true),
+		types.NewUint64(9),
+		types.NewString("hello"),
+		types.NewBytes([]byte("hi")),
+		types.NewInt128(-1, ^uint64(0)),
+		types.NewUint128(1, 0),
+		types.NewTimestamp(42),
+		types.NewArrayString([]string{"go", "ts"}),
+		uuidValue,
+		types.NewDuration(123),
+		jsonValue,
+		types.NewNull(types.KindString),
+	}
+
+	jsonRow, err := ProductValueToJSONRow(product, row)
+	if err != nil {
+		t.Fatalf("ProductValueToJSONRow returned error: %v", err)
+	}
+	out, err := json.Marshal(jsonRow)
+	if err != nil {
+		t.Fatalf("Marshal JSON row returned error: %v", err)
+	}
+	want := `{"at":42,"blob":"aGk=","count":9,"duration":123,"label":"hello","maybe":null,"ok":true,"payload":{"a":true,"z":1},"request_id":"123e4567-e89b-12d3-a456-426614174000","tags":["go","ts"],"wide_signed":"-1","wide_unsigned":"18446744073709551616"}`
+	if string(out) != want {
+		t.Fatalf("JSON row = %s, want %s", out, want)
+	}
+}
+
+func TestDecodedQueryRowsToJSONRowsUsesDecodedColumns(t *testing.T) {
+	decoded := DecodedQueryRows{
+		Name: "recent_messages",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "body", Type: types.KindString},
+			{Index: 1, Name: "urgent", Type: types.KindBool},
+		},
+		Rows: []types.ProductValue{
+			{types.NewString("hello"), types.NewBool(true)},
+		},
+	}
+
+	rows, err := DecodedQueryRowsToJSONRows(decoded)
+	if err != nil {
+		t.Fatalf("DecodedQueryRowsToJSONRows returned error: %v", err)
+	}
+	out, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatalf("Marshal JSON rows returned error: %v", err)
+	}
+	want := `[{"body":"hello","urgent":true}]`
+	if string(out) != want {
+		t.Fatalf("JSON rows = %s, want %s", out, want)
+	}
+}
+
+func TestProductValueToJSONRowPreservesStructuredShapeErrors(t *testing.T) {
+	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+		{Name: "id", Type: "uint64"},
+		{Name: "body", Type: "string", Nullable: true},
+	}}
+
+	_, err := ProductValueToJSONRow(product, types.ProductValue{types.NewUint64(1)})
+	if !errors.Is(err, ErrProductValueShape) {
+		t.Fatalf("ProductValueToJSONRow short row error = %v, want ErrProductValueShape", err)
+	}
+
+	_, err = ProductValueToJSONRow(product, types.ProductValue{types.NewString("wrong"), types.NewString("hello")})
+	if !errors.Is(err, ErrProductValueShape) {
+		t.Fatalf("ProductValueToJSONRow kind mismatch error = %v, want ErrProductValueShape", err)
+	}
+
+	_, err = ProductValueToJSONRow(product, types.ProductValue{types.NewUint64(1), types.NewNull(types.KindUint64)})
+	if !errors.Is(err, ErrProductValueShape) {
+		t.Fatalf("ProductValueToJSONRow null kind mismatch error = %v, want ErrProductValueShape", err)
 	}
 }
 

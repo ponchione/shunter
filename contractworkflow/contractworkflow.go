@@ -29,6 +29,7 @@ var (
 	ErrResultSchemaMissing   = errors.New("contract result schema missing")
 	ErrResultTableMismatch   = errors.New("contract result table mismatch")
 	ErrResultTableCount      = errors.New("contract result table count mismatch")
+	ErrProductValueShape     = errors.New("contract product value shape mismatch")
 
 	syncDir = atomicfile.SyncDir
 )

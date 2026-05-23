@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added `contractworkflow.ProductValueToJSONRow` and
+  `DecodedQueryRowsToJSONRows` for contract-aware JSON rendering of decoded
+  product rows.
 - Added `contractworkflow.DecodeQueryResponse` for contract-aware decoding of
   single-table declared-query protocol responses.
 - Added `contractworkflow.DecodeQueryRows` and `QueryRowSchema` for decoding
