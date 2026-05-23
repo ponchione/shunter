@@ -32,6 +32,10 @@ func run(stdout, stderr io.Writer, args []string) int {
 	case "version":
 		printVersion(stdout)
 		return 0
+	case "call":
+		return runCall(stdout, stderr, args[1:])
+	case "query":
+		return runQuery(stdout, stderr, args[1:])
 	case "describe":
 		return runDescribe(stdout, stderr, args[1:])
 	case "health":
@@ -309,6 +313,8 @@ func printRootHelp(w io.Writer) {
 
 Usage:
   shunter version
+  shunter call --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" reducer_name '{"field":"value"}' [--format text|json]
+  shunter query --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" query_name ['{"field":"value"}'] [--format text|json]
   shunter describe --contract shunter.contract.json [--section all|tables|reducers|queries|views|visibility] [--format text|json]
   shunter health --contract shunter.contract.json [--format text|json]
   shunter contract diff --previous old.json --current current.json [--format text|json]
@@ -320,8 +326,9 @@ Usage:
   shunter backup --data-dir ./data --out ./backup
   shunter restore --backup ./backup --data-dir ./data
 
-This generic CLI operates only on existing ModuleContract JSON files and offline
-DataDir directories; offline DataDir commands are backup and restore only.
+This generic CLI operates on running app servers, existing ModuleContract JSON
+files, and offline DataDir directories; offline DataDir commands are backup and
+restore only.
 It does not export an app module contract; export from an
 app-owned binary with Runtime.ExportContractJSON so the binary links the module.
 No dynamic module loading is provided.

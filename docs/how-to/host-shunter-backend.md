@@ -87,6 +87,26 @@ rtk go run ./cmd/shunter contract assert --contract examples/hosted-chat/shunter
 rtk go run ./cmd/shunter health --contract examples/hosted-chat/shunter.contract.json
 ```
 
+Call the running example server through the generic admin CLI:
+
+```bash
+rtk go run ./cmd/shunter call \
+  --url http://127.0.0.1:3000 \
+  --contract examples/hosted-chat/shunter.contract.json \
+  --allow-dev-anonymous \
+  send_message '{"author":"Ada","body":"hello"}'
+
+rtk go run ./cmd/shunter query \
+  --url http://127.0.0.1:3000 \
+  --contract examples/hosted-chat/shunter.contract.json \
+  --allow-dev-anonymous \
+  recent_messages
+```
+
+Use `--token`, `--token-file`, or `SHUNTER_TOKEN` for normal running-app admin
+commands. `--allow-dev-anonymous` is only for explicit local development
+against dev-auth apps.
+
 `shunter contract validate --contract` validates the local contract artifact
 for release gates and review scripts.
 
@@ -122,5 +142,6 @@ rtk ./scripts/hosted-chat-gate.sh
 
 It runs the Go example tests, builds the server, exports and describes the
 contract, asserts contract-local surface counts, validates the contract
-artifact, checks contract-local health, regenerates TypeScript, and typechecks
-the frontend example.
+artifact, checks contract-local health, starts the example server, runs one
+CLI reducer call and declared query against it, regenerates TypeScript, and
+typechecks the frontend example.

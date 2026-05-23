@@ -27,8 +27,9 @@ var (
 
 // Options configures a protocol WebSocket client connection.
 type Options struct {
-	URL   string
-	Token string
+	URL            string
+	Token          string
+	AllowAnonymous bool
 }
 
 // Client is a small Shunter protocol client for admin and maintenance tooling.
@@ -50,11 +51,14 @@ func Dial(ctx context.Context, opts Options) (*Client, protocol.IdentityToken, e
 		return nil, protocol.IdentityToken{}, ErrURLRequired
 	}
 	token := strings.TrimSpace(opts.Token)
-	if token == "" {
+	if token == "" && !opts.AllowAnonymous {
 		return nil, protocol.IdentityToken{}, ErrTokenRequired
 	}
 
-	header := http.Header{"Authorization": []string{"Bearer " + token}}
+	header := http.Header{}
+	if token != "" {
+		header.Set("Authorization", "Bearer "+token)
+	}
 	conn, _, err := websocket.Dial(ctx, target, &websocket.DialOptions{
 		HTTPHeader:   header,
 		Subprotocols: protocol.SupportedSubprotocols(),

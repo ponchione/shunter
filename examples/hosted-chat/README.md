@@ -49,6 +49,26 @@ rtk go run ./cmd/shunter contract assert --contract examples/hosted-chat/shunter
 rtk go run ./cmd/shunter health --contract examples/hosted-chat/shunter.contract.json
 ```
 
+With the backend running, call the reducer and read the declared query through
+the running-app CLI:
+
+```bash
+rtk go run ./cmd/shunter call \
+  --url http://127.0.0.1:3000 \
+  --contract examples/hosted-chat/shunter.contract.json \
+  --allow-dev-anonymous \
+  send_message '{"author":"Ada","body":"hello"}'
+
+rtk go run ./cmd/shunter query \
+  --url http://127.0.0.1:3000 \
+  --contract examples/hosted-chat/shunter.contract.json \
+  --allow-dev-anonymous \
+  recent_messages
+```
+
+Use `--token`, `--token-file`, or `SHUNTER_TOKEN` for non-development admin
+commands. `--allow-dev-anonymous` is only for explicit local dev-auth runs.
+
 Typecheck the frontend-shaped client:
 
 ```bash
@@ -71,5 +91,6 @@ rtk ./scripts/hosted-chat-gate.sh
 
 The gate builds and tests the Go example, exports the contract, asserts
 contract-local surface counts, validates the contract artifact, checks
-contract-local health, regenerates the TypeScript bindings, and runs the
+contract-local health, starts a real server, runs one CLI reducer call and
+declared query against it, regenerates the TypeScript bindings, and runs the
 frontend typecheck.

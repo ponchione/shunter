@@ -1,26 +1,37 @@
 # Running-App Admin CLI Shape
 
-Status: design note, not implemented
-Scope: future `shunter call` and `shunter query` commands against a running
-Shunter app.
+Status: implemented v1 CLI surface
+Scope: `shunter call` and `shunter query` commands against a running Shunter
+app.
 
-Shunter's generic CLI currently operates on local contract JSON files and
-offline `DataDir` directories. It does not dynamically load app modules and it
-does not provide running-app reducer or query commands yet.
+Shunter's generic CLI can target running app servers for declared reducers and
+declared queries. It still does not dynamically load app modules; the running
+server is the app-owned Go binary that links the module.
 
-Future running-app admin commands must be explicit about transport, auth, input
-encoding, and operator risk before implementation.
+Running-app admin commands are explicit about transport, auth, input encoding,
+and operator risk.
 
-## Intended Commands
+## Commands
 
-The likely first commands are:
+Call a reducer:
 
 ```bash
 shunter call --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" send_message '{"author":"Ada","body":"hello"}'
-shunter query --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" recent_messages '{}'
 ```
 
-These commands would target declared app surfaces:
+Run a declared query:
+
+```bash
+shunter query --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" recent_messages
+```
+
+Development anonymous auth must be explicit:
+
+```bash
+shunter query --url http://127.0.0.1:3000 --contract shunter.contract.json --allow-dev-anonymous recent_messages
+```
+
+These commands target declared app surfaces:
 
 - `call` invokes a named reducer exported in the contract.
 - `query` invokes a named declared query exported in the contract.
@@ -28,7 +39,7 @@ These commands would target declared app surfaces:
   `query` unless a future one-shot view read is deliberately added.
 
 The contract path stays required even when the app can expose its own contract.
-The CLI should use the local contract to validate names, permissions metadata,
+The CLI uses the local contract to validate names, permissions metadata,
 parameter schemas, and generated-style argument encoding before sending any
 request.
 Use local contract helpers such as `contractworkflow.FindReducer` and
@@ -38,8 +49,8 @@ semantically invalid local contract JSON fails before any transport work.
 
 ## Transport Decision
 
-Use the existing Shunter WebSocket protocol first unless a separate HTTP admin
-API is deliberately designed.
+The commands use the existing Shunter WebSocket protocol. `http://` and
+`https://` URLs are normalized to the `/subscribe` WebSocket endpoint.
 
 Reasons:
 
@@ -48,17 +59,13 @@ Reasons:
 - Adding generic HTTP management endpoints would require separate enablement,
   auth, request-size, CSRF, logging, and deployment documentation.
 
-The first implementation should avoid new server endpoints. If HTTP admin
-routes are later added, they must be opt-in and documented as a distinct
-management surface, not enabled implicitly by `shunter.Run`.
+There are no new server endpoints. If HTTP admin routes are later added, they
+must be opt-in and documented as a distinct management surface, not enabled
+implicitly by `shunter.Run`.
 
 ## Package Boundaries
 
-The first implementation should add a small Go protocol client package before
-adding CLI commands. Keep it separate from the server-side protocol lifecycle
-code so command behavior can be tested without starting the full CLI.
-
-Suggested split:
+The package split is:
 
 - `protocolclient`: owns WebSocket dialing, subprotocol negotiation, bearer
   token presentation, request IDs, bounded waits for responses, protocol
@@ -84,19 +91,17 @@ stay out of the client package.
 
 ## Timeout Behavior
 
-Running-app commands need a bounded end-to-end deadline, not separate unbounded
+Running-app commands use a bounded end-to-end deadline, not separate unbounded
 dial, write, and read waits.
 
-Minimum behavior:
-
-- Add `--timeout` with a conservative default.
-- Derive a context with deadline before dialing.
-- Apply the same deadline to WebSocket dial, token handshake, request write,
+- `--timeout` defaults to 10 seconds.
+- The command derives a context with deadline before dialing.
+- The same deadline applies to WebSocket dial, token handshake, request write,
   response wait, and close.
-- Return a non-zero exit status on timeout and include the target URL, command
+- Timeout returns a non-zero exit status and includes the target URL, command
   kind, and reducer or query name in the error.
-- Do not retry reducer calls automatically. If a query retry is added later, it
-  must be explicit and limited to transport failures before the request is
+- Reducer calls are not retried automatically. If a query retry is added later,
+  it must be explicit and limited to transport failures before the request is
   accepted.
 
 The client package should surface timeout errors distinctly enough for CLI tests
@@ -104,22 +109,21 @@ to assert them without parsing human text.
 
 ## Auth Requirements
 
-Running-app commands must require an explicit credential flag or environment
-variable. They must not silently rely on dev anonymous auth for operator writes.
-
-Minimum shape:
+Running-app commands require an explicit credential flag, environment variable,
+or the development-only `--allow-dev-anonymous` flag. They do not silently rely
+on dev anonymous auth for operator writes.
 
 - `--token <jwt>` for direct bearer token input.
 - `--token-file <path>` for local automation.
 - `SHUNTER_TOKEN` as the environment fallback.
+- `--allow-dev-anonymous` for explicit tokenless development connections only.
 
 When multiple sources are supplied, command-line flags should win over the
 environment. Errors should say that a token is required for running-app admin
-commands. Development conveniences can be added later only with an explicit
-`--allow-dev-anonymous` flag.
+commands.
 
-`cmd/shunter` should resolve the credential source and pass only the selected
-token to the client package. The client package should attach the token using
+`cmd/shunter` resolves the credential source and passes only the selected token
+to the client package. The client package attaches the token using
 the same protocol authentication path expected by normal clients and should not
 read environment variables itself.
 
@@ -128,16 +132,13 @@ read environment variables itself.
 JSON is the ergonomic CLI input format, but the wire payload must still follow
 the contract's reducer or query parameter schema.
 
-Implementation rules:
-
 - Reject unknown reducer or query names before connecting.
 - Reject missing contract product schemas for JSON argument mode.
 - Encode JSON objects to BSATN product rows by declared column name.
-- Preserve raw bytes mode as an explicit escape hatch, for example
-  `--args-hex` or `--args-file`.
+- Support `--args`, `--args-file`, and `--args-hex`; positional JSON arguments
+  are also accepted.
 - Decode rows through contract row schemas when present.
-- Emit JSON by default for machine readability, with text output as a review
-  convenience.
+- Emit text by default and JSON with `--format json`.
 
 The CLI should not infer reducer argument formats when the contract does not
 declare them. In that case, operators must use raw bytes mode or the app should
@@ -177,8 +178,7 @@ must use the same auth and timeout rules as `call`.
 
 ## Error Contract
 
-Future running-app commands should use the same broad exit-code shape as the
-existing CLI:
+Running-app commands use the same broad exit-code shape as the existing CLI:
 
 - Exit `0` for successful calls or queries.
 - Exit `1` for runtime failures after flags and local inputs are valid,
@@ -246,17 +246,15 @@ Do not include these in the first implementation:
 - App-owned custom reducer argument codecs.
 - Multi-module host discovery.
 
-## Implementation Checklist
+## Implemented Coverage
 
-Before implementing `call` or `query`:
-
-1. Add contract-driven JSON-to-product encoding tests.
-2. Add a protocol client path with strict timeout and auth handling.
-3. Add command tests for missing tokens, unknown names, schema-less JSON mode,
-   malformed JSON, reducer errors, and query row decoding.
-4. Add hosted-chat gate coverage against a real running example server.
-5. Document the command as a running-app client, separate from local
-   contract-only commands such as `describe` and `health --contract`.
+- Contract-driven JSON-to-product encoding tests live in `contractworkflow`.
+- `protocolclient` covers explicit token handling, anonymous opt-in, timeout
+  classification, reducer calls, and declared-query responses.
+- `cmd/shunter` tests cover token sources, missing tokens, unknown names,
+  malformed JSON, JSON output, file-backed args, and query row decoding.
+- The hosted-chat gate starts a real example server, runs one reducer call, and
+  runs one declared query.
 
 ## Test Strategy
 

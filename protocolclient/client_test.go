@@ -74,6 +74,34 @@ func TestDialRequiresExplicitTokenBeforeNetwork(t *testing.T) {
 	}
 }
 
+func TestDialAllowsExplicitAnonymousConnection(t *testing.T) {
+	wantIdentity := protocol.IdentityToken{
+		Identity:     [32]byte{1},
+		Token:        "minted-token",
+		ConnectionID: [16]byte{2},
+	}
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization = %q, want empty", got)
+		}
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, wantIdentity)
+		<-r.Context().Done()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	client, identity, err := Dial(ctx, Options{URL: srv.wsURL(), AllowAnonymous: true})
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer client.Close(context.Background())
+	if identity != wantIdentity {
+		t.Fatalf("identity = %+v, want %+v", identity, wantIdentity)
+	}
+}
+
 func TestDialRequiresExplicitURLBeforeNetwork(t *testing.T) {
 	_, _, err := Dial(context.Background(), Options{URL: " \t", Token: "operator-token"})
 	if !errors.Is(err, ErrURLRequired) {

@@ -5,14 +5,29 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 rtk go test ./examples/hosted-chat/...
-rtk go build ./examples/hosted-chat/cmd/hosted-chat
+build_bin="$(mktemp)"
+rtk go build -o "$build_bin" ./examples/hosted-chat/cmd/hosted-chat
+rm -f "$build_bin"
 rtk go run ./examples/hosted-chat/cmd/export-contract --out examples/hosted-chat/shunter.contract.json
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json
 describe_json="$(mktemp)"
 health_json="$(mktemp)"
 validate_json="$(mktemp)"
 assert_json="$(mktemp)"
-trap 'rm -f "$describe_json" "$health_json" "$validate_json" "$assert_json"' EXIT
+call_json="$(mktemp)"
+query_json="$(mktemp)"
+run_data="$(mktemp -d)"
+server_log="$(mktemp)"
+server_pid=""
+cleanup() {
+  if [[ -n "$server_pid" ]]; then
+    kill "$server_pid" >/dev/null 2>&1 || true
+    wait "$server_pid" >/dev/null 2>&1 || true
+  fi
+  rm -f "$describe_json" "$health_json" "$validate_json" "$assert_json" "$call_json" "$query_json" "$server_log"
+  rm -rf "$run_data"
+}
+trap cleanup EXIT
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json --format json > "$describe_json"
 rtk go run ./cmd/shunter contract assert \
   --contract examples/hosted-chat/shunter.contract.json \
@@ -37,6 +52,39 @@ rtk go run ./cmd/shunter health --contract examples/hosted-chat/shunter.contract
 rtk grep '"status": "ok"' "$health_json"
 rtk grep '"scope": "contract"' "$health_json"
 rtk grep '"running_server_checked": false' "$health_json"
+SHUNTER_DATA_DIR="$run_data" SHUNTER_LISTEN_ADDR=127.0.0.1:31080 \
+  rtk go run ./examples/hosted-chat/cmd/hosted-chat > "$server_log" 2>&1 &
+server_pid="$!"
+for _ in {1..40}; do
+  if rtk go run ./cmd/shunter query \
+    --url http://127.0.0.1:31080 \
+    --contract examples/hosted-chat/shunter.contract.json \
+    --allow-dev-anonymous \
+    --format json \
+    recent_messages > "$query_json" 2>/dev/null; then
+    break
+  fi
+  sleep 0.25
+done
+rtk go run ./cmd/shunter call \
+  --url http://127.0.0.1:31080 \
+  --contract examples/hosted-chat/shunter.contract.json \
+  --allow-dev-anonymous \
+  --format json \
+  send_message '{"author":"Ada","body":"hello from hosted-chat gate"}' > "$call_json"
+rtk grep '"status": "ok"' "$call_json"
+rtk grep '"command": "call"' "$call_json"
+rtk grep '"surface": "send_message"' "$call_json"
+rtk go run ./cmd/shunter query \
+  --url http://127.0.0.1:31080 \
+  --contract examples/hosted-chat/shunter.contract.json \
+  --allow-dev-anonymous \
+  --format json \
+  recent_messages > "$query_json"
+rtk grep '"status": "ok"' "$query_json"
+rtk grep '"command": "query"' "$query_json"
+rtk grep '"surface": "recent_messages"' "$query_json"
+rtk grep '"body": "hello from hosted-chat gate"' "$query_json"
 rtk go run ./cmd/shunter contract codegen \
   --contract examples/hosted-chat/shunter.contract.json \
   --language typescript \

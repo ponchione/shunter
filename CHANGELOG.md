@@ -4,6 +4,14 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added `shunter call` and `shunter query` for contract-validated reducer calls
+  and declared-query reads against running app servers over the Shunter
+  WebSocket protocol.
+- Added explicit `--allow-dev-anonymous` support for running-app CLI commands
+  and `protocolclient.Options.AllowAnonymous` for local dev-auth workflows
+  without silently weakening token-required admin defaults.
+- Extended the hosted-chat gate to start a real server, run one CLI reducer
+  call, and verify one declared-query response.
 - Added `contractworkflow.DecodeReducerResult` and
   `DecodeReducerResultJSONRow` for contract-aware decoding of local reducer
   return BSATN bytes.
