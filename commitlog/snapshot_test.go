@@ -609,6 +609,106 @@ func TestDecodeSchemaSnapshotRejectsTrailingBytes(t *testing.T) {
 	}
 }
 
+func TestDecodeSchemaSnapshotRejectsMalformedEventFlagMetadata(t *testing.T) {
+	reg := buildEventSnapshotRegistry(t)
+	base := encodeLegacySchemaSnapshotBytes(t, reg)
+	ids := reg.Tables()
+	entry := func(tableID schema.TableID, flag byte) []byte {
+		var buf bytes.Buffer
+		writeUint32(t, &buf, uint32(tableID))
+		buf.WriteByte(flag)
+		return buf.Bytes()
+	}
+	trailer := func(count uint32, entries ...[]byte) []byte {
+		var buf bytes.Buffer
+		buf.Write(schemaSnapshotEventFlagsMagic[:])
+		writeUint32(t, &buf, count)
+		for _, entry := range entries {
+			buf.Write(entry)
+		}
+		return buf.Bytes()
+	}
+	entriesForIDs := func(tableIDs []schema.TableID) [][]byte {
+		entries := make([][]byte, 0, len(tableIDs))
+		for _, id := range tableIDs {
+			entries = append(entries, entry(id, 0))
+		}
+		return entries
+	}
+	duplicateEntries := append([][]byte{entry(ids[0], 0), entry(ids[0], 1)}, entriesForIDs(ids[2:])...)
+	unknownEntries := append([][]byte{entry(ids[0], 0), entry(99, 0)}, entriesForIDs(ids[2:])...)
+	invalidBoolEntries := append([][]byte{entry(ids[0], 2)}, entriesForIDs(ids[1:])...)
+	validEntries := entriesForIDs(ids)
+
+	for _, tc := range []struct {
+		name       string
+		trailing   []byte
+		wantDetail string
+	}{
+		{
+			name:       "partial-magic",
+			trailing:   []byte{schemaSnapshotEventFlagsMagic[0], schemaSnapshotEventFlagsMagic[1]},
+			wantDetail: "incomplete schema snapshot event flag metadata",
+		},
+		{
+			name:       "invalid-magic",
+			trailing:   []byte("NOPE"),
+			wantDetail: "invalid schema snapshot trailing metadata",
+		},
+		{
+			name:       "partial-count",
+			trailing:   append(schemaSnapshotEventFlagsMagic[:], 0x01),
+			wantDetail: "incomplete schema snapshot event flag count",
+		},
+		{
+			name:       "wrong-count",
+			trailing:   trailer(1),
+			wantDetail: fmt.Sprintf("schema snapshot event flag count 1 does not match table count %d", len(ids)),
+		},
+		{
+			name:       "partial-table-id",
+			trailing:   append(trailer(uint32(len(ids))), 0x00, 0x00),
+			wantDetail: "incomplete schema snapshot event flag table ID",
+		},
+		{
+			name:       "partial-flag",
+			trailing:   trailer(uint32(len(ids)), []byte{0x00, 0x00, 0x00, 0x00}),
+			wantDetail: "incomplete schema snapshot event flag value",
+		},
+		{
+			name:       "duplicate-table-id",
+			trailing:   trailer(uint32(len(ids)), duplicateEntries...),
+			wantDetail: "duplicate schema snapshot event flag table ID",
+		},
+		{
+			name:       "unknown-table-id",
+			trailing:   trailer(uint32(len(ids)), unknownEntries...),
+			wantDetail: "schema snapshot event flag references unknown table 99",
+		},
+		{
+			name:       "invalid-bool",
+			trailing:   trailer(uint32(len(ids)), invalidBoolEntries...),
+			wantDetail: "invalid schema snapshot table event flag 2",
+		},
+		{
+			name:       "extra-trailing-byte",
+			trailing:   append(trailer(uint32(len(ids)), validEntries...), 0xff),
+			wantDetail: "trailing schema snapshot event flag bytes",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := append(append([]byte(nil), base...), tc.trailing...)
+			_, _, err := DecodeSchemaSnapshot(bytes.NewReader(data))
+			if !errors.Is(err, ErrSnapshot) {
+				t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot category", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Fatalf("DecodeSchemaSnapshot error = %v, want %q detail", err, tc.wantDetail)
+			}
+		})
+	}
+}
+
 func TestEncodeSchemaSnapshotRejectsShortWrite(t *testing.T) {
 	_, reg := testSchema()
 	err := EncodeSchemaSnapshot(shortWriteSink{}, reg)
@@ -2583,4 +2683,18 @@ func buildEventSnapshotRegistry(t testing.TB) schema.SchemaRegistry {
 		t.Fatal(err)
 	}
 	return engine.Registry()
+}
+
+func encodeLegacySchemaSnapshotBytes(t testing.TB, reg schema.SchemaRegistry) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := EncodeSchemaSnapshot(&buf, reg); err != nil {
+		t.Fatal(err)
+	}
+	ids := reg.Tables()
+	trailerLen := len(schemaSnapshotEventFlagsMagic) + 4 + len(ids)*5
+	if buf.Len() < trailerLen {
+		t.Fatalf("encoded schema snapshot length %d is shorter than event trailer length %d", buf.Len(), trailerLen)
+	}
+	return append([]byte(nil), buf.Bytes()[:buf.Len()-trailerLen]...)
 }

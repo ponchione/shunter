@@ -325,14 +325,14 @@ func readOptionalSchemaSnapshotEventFlags(r io.Reader, tables []schema.TableSche
 	reader := bytes.NewReader(trailing)
 	var magic [4]byte
 	if _, err := io.ReadFull(reader, magic[:]); err != nil {
-		return err
+		return fmt.Errorf("%w: incomplete schema snapshot event flag metadata: %w", ErrSnapshot, err)
 	}
 	if magic != schemaSnapshotEventFlagsMagic {
 		return fmt.Errorf("%w: invalid schema snapshot trailing metadata", ErrSnapshot)
 	}
 	var count uint32
 	if err := binary.Read(reader, binary.LittleEndian, &count); err != nil {
-		return err
+		return fmt.Errorf("%w: incomplete schema snapshot event flag count: %w", ErrSnapshot, err)
 	}
 	if int(count) != len(tables) {
 		return fmt.Errorf("%w: schema snapshot event flag count %d does not match table count %d", ErrSnapshot, count, len(tables))
@@ -345,11 +345,11 @@ func readOptionalSchemaSnapshotEventFlags(r io.Reader, tables []schema.TableSche
 	for range count {
 		var tableID uint32
 		if err := binary.Read(reader, binary.LittleEndian, &tableID); err != nil {
-			return err
+			return fmt.Errorf("%w: incomplete schema snapshot event flag table ID: %w", ErrSnapshot, err)
 		}
 		var flag [1]byte
 		if _, err := io.ReadFull(reader, flag[:]); err != nil {
-			return err
+			return fmt.Errorf("%w: incomplete schema snapshot event flag value: %w", ErrSnapshot, err)
 		}
 		isEvent, err := decodeSchemaSnapshotBool(flag[0], "table event")
 		if err != nil {
