@@ -983,6 +983,18 @@ func TestDialAndExecuteDeclaredQueryRequiresExplicitTokenBeforeNetwork(t *testin
 	}
 }
 
+func TestDialAndExecuteDeclaredQueryRequiresExplicitURLBeforeNetwork(t *testing.T) {
+	_, _, err := DialAndExecuteDeclaredQuery(context.Background(), Options{
+		URL:   " \t",
+		Token: "operator-token",
+	}, DeclaredQueryRequest{
+		Name: "recent_messages",
+	})
+	if !errors.Is(err, ErrURLRequired) {
+		t.Fatalf("DialAndExecuteDeclaredQuery error = %v, want ErrURLRequired", err)
+	}
+}
+
 func TestDialAndExecuteDeclaredQueryWithParametersRequiresV2BeforeRequest(t *testing.T) {
 	readDone := make(chan struct{}, 1)
 	received := make(chan struct{}, 1)
