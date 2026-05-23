@@ -375,6 +375,53 @@ func TestReducerArgumentSchemaRejectsUnknownAndSchemaLessReducers(t *testing.T) 
 	}
 }
 
+func TestReducerResultSchemaSelectsContractSchema(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{
+		{
+			Name: "send_message",
+			Result: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+				{Name: "message_id", Type: "uint64"},
+			}},
+		},
+		{
+			Name:   "ping",
+			Result: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{}},
+		},
+	}
+
+	result, err := ReducerResultSchema(contract, " send_message ")
+	if err != nil {
+		t.Fatalf("ReducerResultSchema returned error: %v", err)
+	}
+	if len(result.Columns) != 1 || result.Columns[0].Name != "message_id" || result.Columns[0].Type != "uint64" {
+		t.Fatalf("ReducerResultSchema result = %+v", result)
+	}
+
+	emptyResult, err := ReducerResultSchema(contract, "ping")
+	if err != nil {
+		t.Fatalf("ReducerResultSchema empty schema returned error: %v", err)
+	}
+	if emptyResult.Columns == nil || len(emptyResult.Columns) != 0 {
+		t.Fatalf("ReducerResultSchema empty result = %+v, want present empty columns", emptyResult)
+	}
+}
+
+func TestReducerResultSchemaRejectsUnknownAndSchemaLessReducers(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{{Name: "send_message"}}
+
+	_, err := ReducerResultSchema(contract, "missing")
+	if !errors.Is(err, ErrSurfaceNotFound) {
+		t.Fatalf("ReducerResultSchema missing error = %v, want ErrSurfaceNotFound", err)
+	}
+
+	_, err = ReducerResultSchema(contract, "send_message")
+	if !errors.Is(err, ErrResultSchemaMissing) {
+		t.Fatalf("ReducerResultSchema schema-less error = %v, want ErrResultSchemaMissing", err)
+	}
+}
+
 func TestQueryArgumentSchemaSelectsContractParameters(t *testing.T) {
 	contract := workflowContractFixture()
 	contract.Queries = []shunter.QueryDescription{

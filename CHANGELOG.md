@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added `contractworkflow.ReducerResultSchema` for reducer result metadata
+  lookup from local contracts.
 - Added `contractworkflow.PrepareReducerCallRequest` for contract-validated
   reducer request preparation without coupling contract workflow code to the
   protocol client package.

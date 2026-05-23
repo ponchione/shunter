@@ -223,6 +223,18 @@ func ReducerArgumentSchema(contract shunter.ModuleContract, name string) (schema
 	return *reducer.Args, nil
 }
 
+// ReducerResultSchema returns the exported result schema for reducer name.
+func ReducerResultSchema(contract shunter.ModuleContract, name string) (schema.ProductSchemaExport, error) {
+	reducer, ok := FindReducer(contract, name)
+	if !ok {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: reducer %q", ErrSurfaceNotFound, strings.TrimSpace(name))
+	}
+	if reducer.Result == nil {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: reducer %q", ErrResultSchemaMissing, reducer.Name)
+	}
+	return *reducer.Result, nil
+}
+
 // QueryArgumentSchema returns the exported parameter schema for declared query name.
 func QueryArgumentSchema(contract shunter.ModuleContract, name string) (schema.ProductSchemaExport, error) {
 	query, ok := FindQuery(contract, name)
