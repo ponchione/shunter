@@ -47,6 +47,7 @@ type IndexID uint32
 type TableSchema struct {
 	ID         TableID        `json:"id"`
 	Name       string         `json:"name"`
+	IsEvent    bool           `json:"is_event,omitempty"`
 	Columns    []ColumnSchema `json:"columns"`
 	Indexes    []IndexSchema  `json:"indexes"`
 	ReadPolicy ReadPolicy     `json:"read_policy"`

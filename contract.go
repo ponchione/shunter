@@ -470,6 +470,7 @@ func copyTableExport(in schema.TableExport) schema.TableExport {
 	out := schema.TableExport{
 		ID:         in.ID,
 		Name:       in.Name,
+		IsEvent:    in.IsEvent,
 		Columns:    make([]schema.ColumnExport, len(in.Columns)),
 		Indexes:    make([]schema.IndexExport, len(in.Indexes)),
 		ReadPolicy: normalizeSchemaReadPolicy(in.ReadPolicy),

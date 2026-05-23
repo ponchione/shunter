@@ -30,6 +30,7 @@ func NewBuilder() *Builder {
 // TableDefinition describes a table before validation and ID assignment.
 type TableDefinition struct {
 	Name       string
+	IsEvent    bool
 	Columns    []ColumnDefinition
 	Indexes    []IndexDefinition
 	ReadPolicy ReadPolicy
@@ -57,12 +58,22 @@ type TableOption func(*tableOptions)
 type tableOptions struct {
 	name       string
 	readPolicy *ReadPolicy
+	isEvent    bool
 }
 
 // WithTableName overrides the table name derived from the Go type name.
 func WithTableName(name string) TableOption {
 	return func(o *tableOptions) {
 		o.name = name
+	}
+}
+
+// WithEventTable marks a table as transient. Event table rows are visible in
+// the transaction and emitted through commit changesets, but they are not
+// retained in committed state.
+func WithEventTable() TableOption {
+	return func(o *tableOptions) {
+		o.isEvent = true
 	}
 }
 
@@ -104,6 +115,9 @@ func (b *Builder) TableDef(def TableDefinition, opts ...TableOption) *Builder {
 	}
 	if o.name != "" {
 		def.Name = o.name
+	}
+	if o.isEvent {
+		def.IsEvent = true
 	}
 	if o.readPolicy != nil {
 		def.ReadPolicy = *o.readPolicy

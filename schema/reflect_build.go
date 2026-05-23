@@ -85,6 +85,7 @@ func buildTableDefinition(typeName string, fields []fieldInfo, opts ...TableOpti
 
 	return TableDefinition{
 		Name:       tableName,
+		IsEvent:    o.isEvent,
 		Columns:    columns,
 		Indexes:    indexes,
 		ReadPolicy: readPolicy,

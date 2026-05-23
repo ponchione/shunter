@@ -24,6 +24,7 @@ type ProductColumnExport struct {
 type TableExport struct {
 	ID         TableID        `json:"id"`
 	Name       string         `json:"name"`
+	IsEvent    bool           `json:"is_event,omitempty"`
 	Columns    []ColumnExport `json:"columns"`
 	Indexes    []IndexExport  `json:"indexes"`
 	ReadPolicy ReadPolicy     `json:"read_policy"`
@@ -68,7 +69,7 @@ func (e *Engine) ExportSchema() *SchemaExport {
 		if !ok {
 			continue
 		}
-		te := TableExport{ID: ts.ID, Name: ts.Name, ReadPolicy: normalizeReadPolicy(ts.ReadPolicy)}
+		te := TableExport{ID: ts.ID, Name: ts.Name, IsEvent: ts.IsEvent, ReadPolicy: normalizeReadPolicy(ts.ReadPolicy)}
 		te.Columns = make([]ColumnExport, len(ts.Columns))
 		for i, col := range ts.Columns {
 			te.Columns[i] = ColumnExport{

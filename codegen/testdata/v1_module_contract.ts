@@ -182,6 +182,12 @@ export const tableReadPolicies = {
   sysScheduled: { access: "private", permissions: [] },
 } as const;
 
+export const tableKinds = {
+  messages: "persistent",
+  sysClients: "persistent",
+  sysScheduled: "persistent",
+} as const;
+
 export const visibilityFilters = {
   ownMessages: { sql: "SELECT * FROM messages WHERE sender = :sender", returnTable: "messages", returnTableId: 0, usesCallerIdentity: true },
 } as const;

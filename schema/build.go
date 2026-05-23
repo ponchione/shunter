@@ -61,6 +61,7 @@ func (b *Builder) buildEngine(opts EngineOptions) (*Engine, error) {
 		ts := TableSchema{
 			ID:         TableID(i),
 			Name:       td.Name,
+			IsEvent:    td.IsEvent,
 			ReadPolicy: copyReadPolicy(td.ReadPolicy),
 		}
 

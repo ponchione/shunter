@@ -396,6 +396,42 @@ func TestRegisterTableRejectsUniqueWithPlainIndex(t *testing.T) {
 	}
 }
 
+func TestBuildEventTableMetadata(t *testing.T) {
+	type Notification struct {
+		ID      uint64 `shunter:"primarykey"`
+		Message string
+	}
+	b := NewBuilder().SchemaVersion(1)
+	if err := RegisterTable[Notification](b, WithEventTable()); err != nil {
+		t.Fatal(err)
+	}
+	e, err := b.Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, ts, ok := e.Registry().TableByName("notification")
+	if !ok {
+		t.Fatal("notification table should exist")
+	}
+	if !ts.IsEvent {
+		t.Fatal("notification table should be marked as event")
+	}
+	export := e.ExportSchema()
+	var found bool
+	for _, table := range export.Tables {
+		if table.Name != "notification" {
+			continue
+		}
+		found = true
+		if !table.IsEvent {
+			t.Fatal("exported notification table should be marked as event")
+		}
+	}
+	if !found {
+		t.Fatal("notification table should be exported")
+	}
+}
+
 func TestBuildReflectionPathTimestampColumn(t *testing.T) {
 	type Event struct {
 		ID        uint64 `shunter:"primarykey"`

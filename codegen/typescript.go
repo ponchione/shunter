@@ -743,6 +743,16 @@ func writeTypeScriptTableReadPolicies(b *bytes.Buffer, tables []schema.TableExpo
 		)
 	}
 	b.WriteString("} as const;\n\n")
+
+	b.WriteString("export const tableKinds = {\n")
+	for i, table := range tables {
+		kind := "persistent"
+		if table.IsEvent {
+			kind = "event"
+		}
+		fmt.Fprintf(b, "  %s: %s,\n", identifiers[i].identifier, strconv.Quote(kind))
+	}
+	b.WriteString("} as const;\n\n")
 }
 
 func writeTypeScriptVisibilityFilters(b *bytes.Buffer, filters []shunter.VisibilityFilterDescription) {

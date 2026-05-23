@@ -207,6 +207,14 @@ export const tableReadPolicies = {
   class_2: { access: "private", permissions: [] },
 } as const;
 
+export const tableKinds = {
+  messages: "persistent",
+  _: "persistent",
+  _1Table: "persistent",
+  class_: "persistent",
+  class_2: "persistent",
+} as const;
+
 export const visibilityFilters = {
   ownMessages: { sql: "SELECT * FROM messages WHERE body = 'own'", returnTable: "messages", returnTableId: 0, usesCallerIdentity: false },
   ownMessages2: { sql: "SELECT * FROM messages WHERE body = 'archived'", returnTable: "messages", returnTableId: 0, usesCallerIdentity: false },
