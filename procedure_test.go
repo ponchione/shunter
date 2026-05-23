@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
@@ -268,6 +269,99 @@ func TestHandleCallProcedureReportsProcedureError(t *testing.T) {
 	}
 }
 
+func TestSendProtocolProcedureMessageNilConnNoops(t *testing.T) {
+	var rt *Runtime
+	if err := rt.sendProtocolProcedureMessage(nil, protocol.ProcedureResponse{}); err != nil {
+		t.Fatalf("sendProtocolProcedureMessage nil conn error = %v, want nil", err)
+	}
+}
+
+func TestSendProtocolProcedureMessageNilRuntimeReturnsNotReady(t *testing.T) {
+	var rt *Runtime
+	err := rt.sendProtocolProcedureMessage(newProcedureProtocolTestConn(), protocol.ProcedureResponse{})
+	if !errors.Is(err, ErrRuntimeNotReady) {
+		t.Fatalf("sendProtocolProcedureMessage nil runtime error = %v, want ErrRuntimeNotReady", err)
+	}
+}
+
+func TestSendProtocolProcedureMessageRequiresReadyRuntime(t *testing.T) {
+	rt := buildValidTestRuntime(t)
+
+	err := rt.sendProtocolProcedureMessage(newProcedureProtocolTestConn(), protocol.ProcedureResponse{})
+	if !errors.Is(err, ErrRuntimeNotReady) {
+		t.Fatalf("sendProtocolProcedureMessage before Start error = %v, want ErrRuntimeNotReady", err)
+	}
+}
+
+func TestSendProtocolProcedureMessageClosedRuntimeReturnsClosed(t *testing.T) {
+	rt := buildStartedRuntimeWithProcedureAndConfig(t, "notify", func(_ *ProcedureContext, _ []byte) ([]byte, error) {
+		return []byte("ok"), nil
+	}, Config{DataDir: t.TempDir(), EnableProtocol: true})
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	err := rt.sendProtocolProcedureMessage(newProcedureProtocolTestConn(), protocol.ProcedureResponse{})
+	if !errors.Is(err, ErrRuntimeClosed) {
+		t.Fatalf("sendProtocolProcedureMessage closed runtime error = %v, want ErrRuntimeClosed", err)
+	}
+}
+
+func TestSendProtocolProcedureMessageMissingProtocolSenderReturnsNotReady(t *testing.T) {
+	rt := buildStartedRuntimeWithProcedure(t, "notify", func(_ *ProcedureContext, _ []byte) ([]byte, error) {
+		return []byte("ok"), nil
+	})
+	defer rt.Close()
+
+	err := rt.sendProtocolProcedureMessage(newProcedureProtocolTestConn(), protocol.ProcedureResponse{})
+	if !errors.Is(err, ErrRuntimeNotReady) {
+		t.Fatalf("sendProtocolProcedureMessage missing sender error = %v, want ErrRuntimeNotReady", err)
+	}
+}
+
+func TestSendProtocolProcedureMessageOverflowUsesClientSenderDisconnect(t *testing.T) {
+	rt := buildStartedRuntimeWithProcedureAndConfig(t, "notify", func(_ *ProcedureContext, _ []byte) ([]byte, error) {
+		return []byte("ok"), nil
+	}, Config{DataDir: t.TempDir(), EnableProtocol: true})
+	defer rt.Close()
+
+	opts := protocol.DefaultProtocolOptions()
+	opts.OutgoingBufferMessages = 1
+	opts.DisconnectTimeout = 500 * time.Millisecond
+	conn := protocol.NewConn(protocol.GenerateConnectionID(), types.Identity{1}, "", false, nil, &opts)
+	mgr := protocol.NewConnManager()
+	if err := mgr.Add(conn); err != nil {
+		t.Fatalf("ConnManager.Add: %v", err)
+	}
+	inbox := &procedureProtocolInbox{}
+	rt.mu.Lock()
+	rt.protocolSender = protocol.NewClientSender(mgr, inbox)
+	rt.mu.Unlock()
+
+	conn.OutboundCh <- []byte{0xff}
+	err := rt.sendProtocolProcedureMessage(conn, protocol.ProcedureResponse{
+		MessageID: []byte("overflow"),
+		Result:    []byte("ok"),
+	})
+	if !errors.Is(err, protocol.ErrClientBufferFull) {
+		t.Fatalf("sendProtocolProcedureMessage overflow error = %v, want ErrClientBufferFull", err)
+	}
+	if got := len(conn.OutboundCh); got != 1 {
+		t.Fatalf("overflow procedure response was enqueued; OutboundCh len = %d, want 1", got)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		if got := mgr.Get(conn.ID); got == nil {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("connection still registered after overflow disconnect")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 func buildStartedRuntimeWithProcedure(t *testing.T, name string, handler ProcedureHandler) *Runtime {
 	t.Helper()
 	return buildStartedRuntimeWithProcedureAndConfig(t, name, handler, Config{DataDir: t.TempDir()})
@@ -293,4 +387,30 @@ func newProcedureProtocolTestConn() *protocol.Conn {
 	conn.AllowAllPermissions = true
 	conn.Principal = types.AuthPrincipal{Subject: "procedure-test"}
 	return conn
+}
+
+type procedureProtocolInbox struct{}
+
+func (procedureProtocolInbox) OnConnect(context.Context, types.ConnectionID, types.Identity, types.AuthPrincipal) error {
+	return nil
+}
+
+func (procedureProtocolInbox) OnDisconnect(context.Context, types.ConnectionID, types.Identity, types.AuthPrincipal) error {
+	return nil
+}
+
+func (procedureProtocolInbox) DisconnectClientSubscriptions(context.Context, types.ConnectionID) error {
+	return nil
+}
+
+func (procedureProtocolInbox) RegisterSubscriptionSet(context.Context, protocol.RegisterSubscriptionSetRequest) error {
+	return nil
+}
+
+func (procedureProtocolInbox) UnregisterSubscriptionSet(context.Context, protocol.UnregisterSubscriptionSetRequest) error {
+	return nil
+}
+
+func (procedureProtocolInbox) CallReducer(context.Context, protocol.CallReducerRequest) error {
+	return nil
 }

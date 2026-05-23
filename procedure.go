@@ -185,6 +185,9 @@ func (r *Runtime) sendProtocolProcedureMessage(conn *protocol.Conn, msg protocol
 	if conn == nil {
 		return nil
 	}
+	if r == nil {
+		return ErrRuntimeNotReady
+	}
 	sender, err := r.readyProtocolSender()
 	if err != nil {
 		return err
