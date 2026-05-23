@@ -447,8 +447,12 @@ Shunter status:
 - dev anonymous auth exists.
 
 Needed Shunter work:
-- JWKS/OIDC key discovery.
-- key rotation cache.
+- keep Supabase as the app auth authority; Shunter should not own signup,
+  login, sessions, user management, or token issuance.
+- support verification of Supabase-issued bearer tokens at the protocol
+  boundary.
+- Supabase JWKS/OIDC key discovery for verification only.
+- verification key rotation cache.
 - issuer and audience validation hardening.
 - richer `AuthPrincipal` if real apps need claims beyond the normalized
   identity/permissions surface.
@@ -461,8 +465,8 @@ Example config direction:
 cfg.AuthMode = shunter.AuthModeStrict
 cfg.AuthOIDCIssuers = []shunter.OIDCIssuer{
 	{
-		Issuer:   "https://issuer.example",
-		JWKSURL:  "https://issuer.example/.well-known/jwks.json",
+		Issuer:   "https://<project-ref>.supabase.co/auth/v1",
+		JWKSURL:  "https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json",
 		Audience: "my-app",
 	},
 }
