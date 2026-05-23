@@ -9,6 +9,13 @@ import (
 	"github.com/ponchione/shunter/protocol"
 )
 
+// DeclaredQueryRequest describes a declared-query execution request.
+type DeclaredQueryRequest struct {
+	Name          string
+	Parameters    []byte
+	HasParameters bool
+}
+
 // CallReducer sends a full-update reducer call and waits for its matching result.
 func (c *Client) CallReducer(ctx context.Context, name string, args []byte) (protocol.TransactionUpdate, error) {
 	requestID := c.NextRequestID()
@@ -59,6 +66,14 @@ func (c *Client) DeclaredQuery(ctx context.Context, name string) (protocol.OneOf
 		return protocol.OneOffQueryResponse{}, err
 	}
 	return c.readDeclaredQueryResponse(ctx, messageID)
+}
+
+// ExecuteDeclaredQuery sends a declared query, using v2 parameters only when requested.
+func (c *Client) ExecuteDeclaredQuery(ctx context.Context, request DeclaredQueryRequest) (protocol.OneOffQueryResponse, error) {
+	if request.HasParameters {
+		return c.DeclaredQueryWithParameters(ctx, request.Name, request.Parameters)
+	}
+	return c.DeclaredQuery(ctx, request.Name)
 }
 
 // DeclaredQueryWithParameters sends a v2 declared-query request with BSATN parameters.
