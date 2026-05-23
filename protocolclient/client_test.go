@@ -412,6 +412,57 @@ func TestDialAndCallReducerRequiresExplicitTokenBeforeNetwork(t *testing.T) {
 	}
 }
 
+func TestDialAndCallReducerRequiresExplicitURLBeforeNetwork(t *testing.T) {
+	_, _, err := DialAndCallReducer(context.Background(), Options{
+		URL:   " \t",
+		Token: "operator-token",
+	}, ReducerCallRequest{
+		Name: "send_message",
+	})
+	if !errors.Is(err, ErrURLRequired) {
+		t.Fatalf("DialAndCallReducer error = %v, want ErrURLRequired", err)
+	}
+}
+
+func TestDialAndCallReducerRejectsMissingSubprotocolBeforeRequest(t *testing.T) {
+	readDone := make(chan struct{}, 1)
+	received := make(chan struct{}, 1)
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConnWithSubprotocols(t, w, r, nil)
+		defer ws.CloseNow()
+
+		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if _, _, err := ws.Read(readCtx); err == nil {
+			received <- struct{}{}
+		}
+		readDone <- struct{}{}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _, err := DialAndCallReducer(ctx, Options{
+		URL:   srv.wsURL(),
+		Token: "operator-token",
+	}, ReducerCallRequest{
+		Name: "send_message",
+	})
+	if !errors.Is(err, ErrProtocolVersion) {
+		t.Fatalf("DialAndCallReducer missing subprotocol error = %v, want ErrProtocolVersion", err)
+	}
+
+	select {
+	case <-readDone:
+	case <-ctx.Done():
+		t.Fatalf("server did not finish request read: %v", ctx.Err())
+	}
+	select {
+	case <-received:
+		t.Fatal("server received reducer call despite missing subprotocol")
+	default:
+	}
+}
+
 func TestDialAndCallReducerClosesAfterReducerError(t *testing.T) {
 	wantIdentity := protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}}
 	closed := make(chan struct{}, 1)
