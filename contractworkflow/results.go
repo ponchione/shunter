@@ -76,3 +76,12 @@ func DecodeQueryResponseJSONRows(contract shunter.ModuleContract, name string, r
 	}
 	return DecodedQueryRowsToJSONRows(decoded)
 }
+
+// DecodeQueryResponseJSONResult decodes a declared-query response to JSON-ready rows with metadata.
+func DecodeQueryResponseJSONResult(contract shunter.ModuleContract, name string, response protocol.OneOffQueryResponse) (JSONQueryRows, error) {
+	decoded, err := DecodeQueryResponse(contract, name, response)
+	if err != nil {
+		return JSONQueryRows{}, err
+	}
+	return DecodedQueryRowsToJSONResult(decoded)
+}

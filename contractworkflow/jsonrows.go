@@ -13,6 +13,13 @@ import (
 // JSONRow is a product row converted to JSON-ready values keyed by column name.
 type JSONRow map[string]any
 
+// JSONQueryRows is a declared-query result converted to JSON-ready rows.
+type JSONQueryRows struct {
+	Name      string    `json:"name"`
+	TableName string    `json:"table_name"`
+	Rows      []JSONRow `json:"rows"`
+}
+
 // ProductValueToJSONRow converts a schema-aligned ProductValue to a JSON-ready object.
 func ProductValueToJSONRow(product schema.ProductSchemaExport, row types.ProductValue) (JSONRow, error) {
 	columns, err := productColumnsForBSATN(product)
@@ -33,6 +40,19 @@ func DecodedQueryRowsToJSONRows(decoded DecodedQueryRows) ([]JSONRow, error) {
 		rows[i] = converted
 	}
 	return rows, nil
+}
+
+// DecodedQueryRowsToJSONResult converts decoded declared-query rows with metadata.
+func DecodedQueryRowsToJSONResult(decoded DecodedQueryRows) (JSONQueryRows, error) {
+	rows, err := DecodedQueryRowsToJSONRows(decoded)
+	if err != nil {
+		return JSONQueryRows{}, err
+	}
+	return JSONQueryRows{
+		Name:      decoded.Name,
+		TableName: decoded.TableName,
+		Rows:      rows,
+	}, nil
 }
 
 func productValueToJSONRowForColumns(columns []schema.ColumnSchema, row types.ProductValue) (JSONRow, error) {
