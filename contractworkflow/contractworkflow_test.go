@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	shunter "github.com/ponchione/shunter"
+	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/codegen"
 	"github.com/ponchione/shunter/contractdiff"
 	"github.com/ponchione/shunter/schema"
@@ -518,6 +519,117 @@ func TestProductValueFromJSONRejectsUnsupportedContractTypes(t *testing.T) {
 	_, err := ProductValueFromJSON(product, []byte(`{"value": 1}`))
 	if !errors.Is(err, ErrUnsupportedArgumentType) {
 		t.Fatalf("ProductValueFromJSON unsupported type error = %v, want ErrUnsupportedArgumentType", err)
+	}
+}
+
+func TestEncodeProductValueArgumentsMatchesBSATNColumnEncoding(t *testing.T) {
+	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+		{Name: "id", Type: "uint64"},
+		{Name: "body", Type: "string"},
+		{Name: "maybe", Type: "string", Nullable: true},
+	}}
+	raw := []byte(`{"body": "hello", "maybe": null, "id": 7}`)
+
+	row, err := ProductValueFromJSON(product, raw)
+	if err != nil {
+		t.Fatalf("ProductValueFromJSON returned error: %v", err)
+	}
+	columns, err := productColumnsForBSATN(product)
+	if err != nil {
+		t.Fatalf("productColumnsForBSATN returned error: %v", err)
+	}
+	want, err := bsatn.AppendProductValueForColumns(nil, row, columns)
+	if err != nil {
+		t.Fatalf("AppendProductValueForColumns returned error: %v", err)
+	}
+
+	got, err := EncodeProductValueArguments(product, raw)
+	if err != nil {
+		t.Fatalf("EncodeProductValueArguments returned error: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("EncodeProductValueArguments bytes = %x, want %x", got, want)
+	}
+
+	decoded, err := bsatn.DecodeProductValueFromBytes(got, productTableSchema(t, "args", product))
+	if err != nil {
+		t.Fatalf("DecodeProductValueFromBytes returned error: %v", err)
+	}
+	if len(decoded) != 3 || decoded[0].AsUint64() != 7 || decoded[1].AsString() != "hello" || !decoded[2].IsNull() {
+		t.Fatalf("decoded arguments = %+v", decoded)
+	}
+}
+
+func TestEncodeProductValueArgumentsFromReducerArgumentSchema(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{{
+		Name: "send_message",
+		Args: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+			{Name: "body", Type: "string"},
+			{Name: "urgent", Type: "bool"},
+		}},
+	}}
+
+	args, err := ReducerArgumentSchema(contract, "send_message")
+	if err != nil {
+		t.Fatalf("ReducerArgumentSchema returned error: %v", err)
+	}
+	encoded, err := EncodeProductValueArguments(args, []byte(`{"urgent": true, "body": "hello"}`))
+	if err != nil {
+		t.Fatalf("EncodeProductValueArguments returned error: %v", err)
+	}
+	decoded, err := bsatn.DecodeProductValueFromBytes(encoded, productTableSchema(t, "send_message_args", args))
+	if err != nil {
+		t.Fatalf("DecodeProductValueFromBytes returned error: %v", err)
+	}
+	if len(decoded) != 2 || decoded[0].AsString() != "hello" || !decoded[1].AsBool() {
+		t.Fatalf("decoded reducer arguments = %+v", decoded)
+	}
+}
+
+func TestEncodeProductValueArgumentsFromQueryArgumentSchema(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name: "recent_messages",
+		Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "topic", Type: "string"},
+			{Name: "limit", Type: "uint32"},
+		}},
+	}}
+
+	args, err := QueryArgumentSchema(contract, "recent_messages")
+	if err != nil {
+		t.Fatalf("QueryArgumentSchema returned error: %v", err)
+	}
+	encoded, err := EncodeProductValueArguments(args, []byte(`{"limit": 25, "topic": "general"}`))
+	if err != nil {
+		t.Fatalf("EncodeProductValueArguments returned error: %v", err)
+	}
+	decoded, err := bsatn.DecodeProductValueFromBytes(encoded, productTableSchema(t, "recent_messages_args", args))
+	if err != nil {
+		t.Fatalf("DecodeProductValueFromBytes returned error: %v", err)
+	}
+	if len(decoded) != 2 || decoded[0].AsString() != "general" || decoded[1].AsUint32() != 25 {
+		t.Fatalf("decoded query arguments = %+v", decoded)
+	}
+}
+
+func TestEncodeProductValueArgumentsPreservesStructuredErrors(t *testing.T) {
+	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+		{Name: "id", Type: "uint8"},
+	}}
+
+	_, err := EncodeProductValueArguments(product, []byte(`{"id": 300}`))
+	if !errors.Is(err, ErrInvalidArgumentJSON) {
+		t.Fatalf("EncodeProductValueArguments invalid JSON error = %v, want ErrInvalidArgumentJSON", err)
+	}
+
+	unsupported := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+		{Name: "id", Type: "not-a-kind"},
+	}}
+	_, err = EncodeProductValueArguments(unsupported, []byte(`{"id": 1}`))
+	if !errors.Is(err, ErrUnsupportedArgumentType) {
+		t.Fatalf("EncodeProductValueArguments unsupported type error = %v, want ErrUnsupportedArgumentType", err)
 	}
 }
 
@@ -1231,6 +1343,15 @@ func writeContractFixture(t *testing.T, dir, name string, contract shunter.Modul
 		t.Fatalf("write contract fixture %s: %v", name, err)
 	}
 	return path
+}
+
+func productTableSchema(t *testing.T, name string, product schema.ProductSchemaExport) *schema.TableSchema {
+	t.Helper()
+	columns, err := productColumnsForBSATN(product)
+	if err != nil {
+		t.Fatalf("productColumnsForBSATN returned error: %v", err)
+	}
+	return &schema.TableSchema{Name: name, Columns: columns}
 }
 
 func readTextFile(t *testing.T, path string) string {

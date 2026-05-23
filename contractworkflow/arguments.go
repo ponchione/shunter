@@ -10,6 +10,7 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
@@ -49,6 +50,36 @@ func ProductValueFromJSON(product schema.ProductSchemaExport, data []byte) (type
 		out[i] = value
 	}
 	return out, nil
+}
+
+// EncodeProductValueArguments decodes JSON arguments and encodes them as BSATN.
+func EncodeProductValueArguments(product schema.ProductSchemaExport, data []byte) ([]byte, error) {
+	row, err := ProductValueFromJSON(product, data)
+	if err != nil {
+		return nil, err
+	}
+	columns, err := productColumnsForBSATN(product)
+	if err != nil {
+		return nil, err
+	}
+	return bsatn.AppendProductValueForColumns(nil, row, columns)
+}
+
+func productColumnsForBSATN(product schema.ProductSchemaExport) ([]schema.ColumnSchema, error) {
+	columns := make([]schema.ColumnSchema, len(product.Columns))
+	for i, column := range product.Columns {
+		kind, ok := argumentValueKind(column.Type)
+		if !ok {
+			return nil, fmt.Errorf("%w: field %q has type %q", ErrUnsupportedArgumentType, column.Name, column.Type)
+		}
+		columns[i] = schema.ColumnSchema{
+			Index:    i,
+			Name:     column.Name,
+			Type:     kind,
+			Nullable: column.Nullable,
+		}
+	}
+	return columns, nil
 }
 
 func decodeArgumentObject(data []byte) (map[string]json.RawMessage, error) {

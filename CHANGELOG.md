@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added `contractworkflow.EncodeProductValueArguments` for contract-schema JSON
+  argument conversion directly to schema-aware BSATN bytes.
 - Added command-specific examples to `shunter contract assert --help`.
 - Added `assertion_count` and `failure_count` to `contract assert --format json`
   output for aggregate release-gate checks.
