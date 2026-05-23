@@ -84,6 +84,7 @@ var deltaViewPool = sync.Pool{
 		return &DeltaView{
 			inserts: make(map[TableID][]types.ProductValue),
 			deletes: make(map[TableID][]types.ProductValue),
+			events:  make(map[TableID]bool),
 			deltaIdx: DeltaIndexes{
 				insertIdx: make(map[TableID]map[ColID]map[valueKey][]int),
 				deleteIdx: make(map[TableID]map[ColID]map[valueKey][]int),
@@ -189,6 +190,7 @@ func releaseDeltaView(dv *DeltaView) {
 		releaseProductValueSlice(rows)
 	}
 	clear(dv.deletes)
+	clear(dv.events)
 	for _, byCol := range dv.deltaIdx.insertIdx {
 		releaseTableDeltaIndex(byCol)
 	}

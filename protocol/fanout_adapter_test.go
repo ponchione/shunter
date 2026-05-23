@@ -251,6 +251,32 @@ func TestFanOutSenderAdapter_RowPayloadRoundTrip(t *testing.T) {
 	checkRows("deletes", updates[0].Deletes, got.Update[0].Deletes)
 }
 
+func TestFanOutSenderAdapter_EventTableInsertsEncodeLikeOrdinaryRows(t *testing.T) {
+	mock := &mockClientSender{}
+	adapter := NewFanOutSenderAdapter(mock)
+	row := types.ProductValue{types.NewString("event")}
+	updates := []subscription.SubscriptionUpdate{{
+		QueryID:   9,
+		TableName: "events",
+		Inserts:   []types.ProductValue{row, row},
+	}}
+	if err := adapter.SendTransactionUpdateLight(connID(1), 23, updates, nil); err != nil {
+		t.Fatal(err)
+	}
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.lightCalls) != 1 || len(mock.lightCalls[0].Update) != 1 {
+		t.Fatalf("lightCalls = %+v, want one encoded update", mock.lightCalls)
+	}
+	decoded, err := DecodeRowList(mock.lightCalls[0].Update[0].Inserts)
+	if err != nil {
+		t.Fatalf("DecodeRowList event inserts: %v", err)
+	}
+	if len(decoded) != 2 {
+		t.Fatalf("event insert rows = %d, want 2 duplicate rows", len(decoded))
+	}
+}
+
 func TestFanOutSenderAdapter_SendTransactionUpdateHeavyCommitted(t *testing.T) {
 	mock := &mockClientSender{}
 	adapter := NewFanOutSenderAdapter(mock)

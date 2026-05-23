@@ -118,7 +118,7 @@ func (m *Manager) sendFanOut(ctx context.Context, msg FanOutMessage) {
 // evaluate each candidate, and assemble the per-connection fanout.
 func (m *Manager) evaluate(ctx context.Context, txID types.TxID, changeset *store.Changeset, view store.CommittedReadView) (CommitFanout, map[types.ConnectionID][]SubscriptionError) {
 	activeCols := m.collectDeltaIndexColumns()
-	dv := NewDeltaView(view, changeset, activeCols)
+	dv := NewDeltaView(view, changeset, activeCols, m.collectEventTables(changeset))
 	defer dv.Release()
 	candidateScratch := acquireCandidateScratch()
 	defer releaseCandidateScratch(candidateScratch)
@@ -170,6 +170,28 @@ func (m *Manager) evaluate(ctx context.Context, txID types.TxID, changeset *stor
 	}
 	sortFanoutBySubscription(fanout)
 	return fanout, errs
+}
+
+func (m *Manager) collectEventTables(changeset *store.Changeset) map[TableID]bool {
+	if changeset == nil || len(changeset.Tables) == 0 {
+		return nil
+	}
+	lookup, ok := m.schema.(tableSchemaLookup)
+	if !ok {
+		return nil
+	}
+	var out map[TableID]bool
+	for table := range changeset.Tables {
+		ts, ok := lookup.Table(table)
+		if !ok || ts == nil || !ts.IsEvent {
+			continue
+		}
+		if out == nil {
+			out = make(map[TableID]bool)
+		}
+		out[table] = true
+	}
+	return out
 }
 
 func sortFanoutBySubscription(fanout CommitFanout) {
@@ -529,7 +551,7 @@ func evalCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin) (insert
 		if err != nil {
 			return nil, nil, err
 		}
-		leftAfter, err := tableRowsAfter(ctx, dv.CommittedView(), p.Left)
+		leftAfter, err := tableRowsAfter(ctx, dv, p.Left)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -543,7 +565,7 @@ func evalCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin) (insert
 	}
 	projectedTable := p.ProjectedTable()
 	otherTable := crossJoinOtherTable(p)
-	afterProjectedRows, err := tableRowsAfter(ctx, dv.CommittedView(), projectedTable)
+	afterProjectedRows, err := tableRowsAfter(ctx, dv, projectedTable)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -551,7 +573,7 @@ func evalCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin) (insert
 	if err != nil {
 		return nil, nil, err
 	}
-	afterOtherCount := rowCountAfter(dv.CommittedView(), otherTable)
+	afterOtherCount := rowCountAfter(dv, otherTable)
 	beforeOtherCount := rowCountBefore(dv, otherTable)
 	ins, del := diffProjectedRowsWithMultiplicity(beforeProjectedRows, beforeOtherCount, afterProjectedRows, afterOtherCount)
 	return ins, del, nil
@@ -567,7 +589,7 @@ func evalFilteredCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin)
 	var deleteFragments [][]types.ProductValue
 
 	if len(leftInserts) > 0 {
-		rightAfter, err := tableRowsAfter(ctx, dv.CommittedView(), p.Right)
+		rightAfter, err := tableRowsAfter(ctx, dv, p.Right)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -578,7 +600,7 @@ func evalFilteredCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin)
 		insertFragments = append(insertFragments, insertFromLeft)
 	}
 	if len(rightInserts) > 0 {
-		leftAfter, err := tableRowsAfter(ctx, dv.CommittedView(), p.Left)
+		leftAfter, err := tableRowsAfter(ctx, dv, p.Left)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -648,7 +670,22 @@ func crossJoinOtherTable(p CrossJoin) TableID {
 	return p.Left
 }
 
-func tableRowsAfter(ctx context.Context, view store.CommittedReadView, table TableID) ([]types.ProductValue, error) {
+func tableRowsAfter(ctx context.Context, dv *DeltaView, table TableID) ([]types.ProductValue, error) {
+	var rows []types.ProductValue
+	if dv != nil && dv.CommittedView() != nil {
+		var err error
+		rows, err = tableRowsFromView(ctx, dv.CommittedView(), table)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if dv != nil && dv.IsEventTable(table) {
+		rows = append(rows, dv.InsertedRows(table)...)
+	}
+	return rows, nil
+}
+
+func tableRowsFromView(ctx context.Context, view store.CommittedReadView, table TableID) ([]types.ProductValue, error) {
 	if view == nil {
 		return nil, nil
 	}
@@ -662,15 +699,19 @@ func tableRowsAfter(ctx context.Context, view store.CommittedReadView, table Tab
 	return rows, nil
 }
 
-func rowCountAfter(view store.CommittedReadView, table TableID) int {
-	if view == nil {
-		return 0
+func rowCountAfter(dv *DeltaView, table TableID) int {
+	var n int
+	if dv != nil && dv.CommittedView() != nil {
+		n = dv.CommittedView().RowCount(table)
 	}
-	return view.RowCount(table)
+	if dv != nil && dv.IsEventTable(table) {
+		n += len(dv.InsertedRows(table))
+	}
+	return n
 }
 
 func rowCountBefore(dv *DeltaView, table TableID) int {
-	n := rowCountAfter(dv.CommittedView(), table) - len(dv.InsertedRows(table)) + len(dv.DeletedRows(table))
+	n := rowCountAfter(dv, table) - len(dv.InsertedRows(table)) + len(dv.DeletedRows(table))
 	if n < 0 {
 		return 0
 	}
@@ -722,15 +763,10 @@ func diffProjectedRowBags(beforeRows, afterRows []types.ProductValue) (inserts, 
 }
 
 func projectedRowsBefore(ctx context.Context, dv *DeltaView, table TableID) ([]types.ProductValue, error) {
-	view := dv.CommittedView()
 	var current []types.ProductValue
-	if view != nil {
-		for _, row := range view.TableScan(table) {
-			if err := ctxErr(ctx); err != nil {
-				return nil, err
-			}
-			current = append(current, row)
-		}
+	current, err := tableRowsAfter(ctx, dv, table)
+	if err != nil {
+		return nil, err
 	}
 	remaining := subtractProjectedRowsByKey(current, dv.InsertedRows(table))
 	remaining = append(remaining, dv.DeletedRows(table)...)

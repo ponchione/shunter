@@ -21,7 +21,7 @@ func evalMultiJoinDelta(ctx context.Context, dv *DeltaView, p MultiJoin) (insert
 	if err != nil {
 		return nil, nil, err
 	}
-	afterRows, err := multiJoinRowsByRelationFromView(ctx, dv.CommittedView(), p)
+	afterRows, err := multiJoinRowsByRelationAfter(ctx, dv, p)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -100,7 +100,22 @@ func multiJoinRowsByRelationFromView(ctx context.Context, view store.CommittedRe
 		if err := ctxErr(ctx); err != nil {
 			return nil, err
 		}
-		rows, err := tableRowsAfter(ctx, view, rel.Table)
+		rows, err := tableRowsFromView(ctx, view, rel.Table)
+		if err != nil {
+			return nil, err
+		}
+		rowsByRelation[i] = rows
+	}
+	return rowsByRelation, nil
+}
+
+func multiJoinRowsByRelationAfter(ctx context.Context, dv *DeltaView, p MultiJoin) ([][]types.ProductValue, error) {
+	rowsByRelation := make([][]types.ProductValue, len(p.Relations))
+	for i, rel := range p.Relations {
+		if err := ctxErr(ctx); err != nil {
+			return nil, err
+		}
+		rows, err := tableRowsAfter(ctx, dv, rel.Table)
 		if err != nil {
 			return nil, err
 		}

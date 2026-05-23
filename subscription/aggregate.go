@@ -358,7 +358,7 @@ func (m *Manager) evalAggregateQuery(ctx context.Context, qs *queryState, dv *De
 	if err := m.checkMultiJoinDeltaLimits(ctx, qs.predicate, dv); err != nil {
 		return nil, err
 	}
-	after, err := aggregateCommittedValue(ctx, dv.CommittedView(), table, qs.predicate, qs.aggregate, m.resolver)
+	after, err := aggregateAfterValue(ctx, dv, table, qs.predicate, qs.aggregate, m.resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -440,6 +440,62 @@ func (m *Manager) evalAggregateQuery(ctx context.Context, qs *queryState, dv *De
 		Inserts:   []types.ProductValue{aggregateValueRow(after)},
 		Deletes:   []types.ProductValue{aggregateValueRow(before)},
 	}}, nil
+}
+
+func aggregateAfterValue(ctx context.Context, dv *DeltaView, table TableID, pred Predicate, aggregate *Aggregate, resolver IndexResolver) (types.Value, error) {
+	if dv == nil || !predicateTouchesEventTable(dv, pred) {
+		var view store.CommittedReadView
+		if dv != nil {
+			view = dv.CommittedView()
+		}
+		return aggregateCommittedValue(ctx, view, table, pred, aggregate, resolver)
+	}
+	if join, ok := pred.(Join); ok {
+		leftRows, err := tableRowsAfter(ctx, dv, join.Left)
+		if err != nil {
+			return types.Value{}, err
+		}
+		rightRows, err := tableRowsAfter(ctx, dv, join.Right)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return aggregateJoinRowsValue(leftRows, rightRows, join, aggregate)
+	}
+	if cross, ok := pred.(CrossJoin); ok {
+		leftRows, err := tableRowsAfter(ctx, dv, cross.Left)
+		if err != nil {
+			return types.Value{}, err
+		}
+		rightRows, err := tableRowsAfter(ctx, dv, cross.Right)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return aggregateCrossJoinRowsValue(leftRows, rightRows, cross, aggregate)
+	}
+	if multi, ok := pred.(MultiJoin); ok {
+		rowsByRelation, err := multiJoinRowsByRelationAfter(ctx, dv, multi)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return aggregateMultiJoinRowsValue(ctx, multi, rowsByRelation, aggregate)
+	}
+	rows, err := tableRowsAfter(ctx, dv, table)
+	if err != nil {
+		return types.Value{}, err
+	}
+	return aggregateRowsValue(rows, table, pred, aggregate)
+}
+
+func predicateTouchesEventTable(dv *DeltaView, pred Predicate) bool {
+	if dv == nil || pred == nil {
+		return false
+	}
+	for _, table := range pred.Tables() {
+		if dv.IsEventTable(table) {
+			return true
+		}
+	}
+	return false
 }
 
 func countAggregateBeforeValue(dv *DeltaView, table TableID, pred Predicate, aggregate *Aggregate, after types.Value) types.Value {

@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Fixed event-table subscription evaluation so transient inserts participate in
+  joins, aggregates, multi-table deltas, and fan-out delivery even though the
+  rows are not retained in committed snapshots.
 - Added initial event-table support: tables can be declared transient through
   schema metadata, exported in contracts, surfaced in generated TypeScript
   metadata, emitted through commit changesets, and excluded from committed

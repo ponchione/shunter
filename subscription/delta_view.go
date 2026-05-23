@@ -14,6 +14,7 @@ type DeltaView struct {
 	committed store.CommittedReadView
 	inserts   map[TableID][]types.ProductValue
 	deletes   map[TableID][]types.ProductValue
+	events    map[TableID]bool
 	deltaIdx  DeltaIndexes
 }
 
@@ -32,9 +33,17 @@ func NewDeltaView(
 	committed store.CommittedReadView,
 	changeset *store.Changeset,
 	deltaIndexColumns map[TableID][]ColID,
+	eventTables ...map[TableID]bool,
 ) *DeltaView {
 	dv := acquireDeltaView()
 	dv.committed = committed
+	if len(eventTables) > 0 {
+		for table, isEvent := range eventTables[0] {
+			if isEvent {
+				dv.events[table] = true
+			}
+		}
+	}
 	if changeset == nil {
 		return dv
 	}
@@ -180,3 +189,10 @@ func (dv *DeltaView) CommittedIndexSeek(table TableID, indexID IndexID, key stor
 // CommittedView exposes the underlying read view for advanced callers that
 // need row materialization (store.GetRow).
 func (dv *DeltaView) CommittedView() store.CommittedReadView { return dv.committed }
+
+func (dv *DeltaView) IsEventTable(table TableID) bool {
+	if dv == nil {
+		return false
+	}
+	return dv.events[table]
+}

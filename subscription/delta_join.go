@@ -117,6 +117,16 @@ func joinDriveCommittedRows(
 					out = append(out, joined)
 				}
 			}
+			if dv.IsEventTable(probeTable) {
+				for _, probeRow := range dv.InsertedRows(probeTable) {
+					if int(probeCol) >= len(probeRow) || !driveRow[driveCol].Equal(probeRow[probeCol]) {
+						continue
+					}
+					if joined := tryJoinFilterFromDrive(driveRow, driveTable, probeRow, probeTable, driveIsLeft, join); joined != nil {
+						out = append(out, joined)
+					}
+				}
+			}
 		}
 		return out
 	}
@@ -140,9 +150,9 @@ func joinDriveCommittedByDeltaIndex(
 ) []types.ProductValue {
 	matchesByDrive := make([][]types.ProductValue, len(driving))
 	pending := 0
-	for _, probeRow := range dv.committed.TableScan(probeTable) {
+	visitRowsAfter(dv, probeTable, func(probeRow types.ProductValue) {
 		if int(probeCol) >= len(probeRow) {
-			continue
+			return
 		}
 		positions := dv.deltaIndexPositions(driveTable, driveCol, probeRow[probeCol], driveInserted)
 		for _, pos := range positions {
@@ -158,7 +168,7 @@ func joinDriveCommittedByDeltaIndex(
 				pending++
 			}
 		}
-	}
+	})
 	if pending == 0 {
 		return nil
 	}
@@ -182,16 +192,32 @@ func joinDriveCommittedByNestedScan(
 		if int(driveCol) >= len(driveRow) {
 			continue
 		}
-		for _, probeRow := range dv.committed.TableScan(probeTable) {
+		visitRowsAfter(dv, probeTable, func(probeRow types.ProductValue) {
 			if int(probeCol) >= len(probeRow) || !driveRow[driveCol].Equal(probeRow[probeCol]) {
-				continue
+				return
 			}
 			if joined := tryJoinFilterFromDrive(driveRow, driveTable, probeRow, probeTable, driveIsLeft, join); joined != nil {
 				out = append(out, joined)
 			}
-		}
+		})
 	}
 	return out
+}
+
+func visitRowsAfter(dv *DeltaView, table TableID, visit func(types.ProductValue)) {
+	if dv == nil || visit == nil {
+		return
+	}
+	if dv.committed != nil {
+		for _, row := range dv.committed.TableScan(table) {
+			visit(row)
+		}
+	}
+	if dv.IsEventTable(table) {
+		for _, row := range dv.InsertedRows(table) {
+			visit(row)
+		}
+	}
 }
 
 func tryJoinFilterFromDrive(

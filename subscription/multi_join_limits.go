@@ -48,12 +48,11 @@ func (m *Manager) checkMultiJoinDeltaLimits(ctx context.Context, pred Predicate,
 	if m.MaxMultiJoinRowsPerRelation <= 0 || dv == nil || dv.CommittedView() == nil {
 		return nil
 	}
-	view := dv.CommittedView()
 	for i, rel := range multi.Relations {
 		if err := ctxErr(ctx); err != nil {
 			return err
 		}
-		afterRows := view.RowCount(rel.Table)
+		afterRows := rowCountAfter(dv, rel.Table)
 		if afterRows > m.MaxMultiJoinRowsPerRelation {
 			return fmt.Errorf("%w: relation=%d table=%d rows=%d max=%d phase=after",
 				ErrMultiJoinLimit, i, rel.Table, afterRows, m.MaxMultiJoinRowsPerRelation)
