@@ -10,6 +10,7 @@ import (
 	"math"
 	"strconv"
 
+	shunter "github.com/ponchione/shunter"
 	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
@@ -63,6 +64,24 @@ func EncodeProductValueArguments(product schema.ProductSchemaExport, data []byte
 		return nil, err
 	}
 	return bsatn.AppendProductValueForColumns(nil, row, columns)
+}
+
+// EncodeReducerArguments encodes JSON arguments for a named reducer contract surface.
+func EncodeReducerArguments(contract shunter.ModuleContract, name string, data []byte) ([]byte, error) {
+	product, err := ReducerArgumentSchema(contract, name)
+	if err != nil {
+		return nil, err
+	}
+	return EncodeProductValueArguments(product, data)
+}
+
+// EncodeQueryArguments encodes JSON arguments for a named declared-query contract surface.
+func EncodeQueryArguments(contract shunter.ModuleContract, name string, data []byte) ([]byte, error) {
+	product, err := QueryArgumentSchema(contract, name)
+	if err != nil {
+		return nil, err
+	}
+	return EncodeProductValueArguments(product, data)
 }
 
 func productColumnsForBSATN(product schema.ProductSchemaExport) ([]schema.ColumnSchema, error) {
