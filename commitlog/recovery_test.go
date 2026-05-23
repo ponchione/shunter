@@ -281,6 +281,43 @@ func TestOpenAndRecoverDetailedSnapshotReplayDoesNotRegressSequenceFromExplicitA
 	}
 }
 
+func TestRestoreSnapshotSkipsEventTableState(t *testing.T) {
+	reg := buildRecoveryEventAutoIncrementRegistry(t)
+	committed := buildRecoveryCommittedState(t, reg)
+
+	snapshot := &SnapshotData{
+		TxID: 5,
+		Tables: []SnapshotTableData{
+			{
+				TableID: 0,
+				Rows: []types.ProductValue{
+					{types.NewUint64(8), types.NewString("from-snapshot")},
+				},
+			},
+		},
+		Sequences: map[schema.TableID]uint64{0: 9},
+		NextIDs:   map[schema.TableID]uint64{0: 9},
+	}
+
+	if err := restoreSnapshot(committed, snapshot); err != nil {
+		t.Fatalf("restoreSnapshot event table: %v", err)
+	}
+
+	events, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("events table missing")
+	}
+	if events.RowCount() != 0 {
+		t.Fatalf("event row count after restore = %d, want 0", events.RowCount())
+	}
+	if events.NextID() != 1 {
+		t.Fatalf("event next row ID after restore = %d, want 1", events.NextID())
+	}
+	if seq, ok := events.SequenceValue(); !ok || seq != 1 {
+		t.Fatalf("event sequence after restore = (%d, %v), want (1, true)", seq, ok)
+	}
+}
+
 func TestOpenAndRecoverDetailedReplayExplicitAutoincrementValueRaisesRecoveredSequence(t *testing.T) {
 	root := t.TempDir()
 	reg := buildRecoveryAutoIncrementRegistry(t)
@@ -988,6 +1025,25 @@ func buildRecoveryAutoIncrementRegistry(t *testing.T) schema.SchemaRegistry {
 	b.SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
 		Name: "jobs",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint64, PrimaryKey: true, AutoIncrement: true},
+			{Name: "name", Type: schema.KindString},
+		},
+	})
+	engine, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return engine.Registry()
+}
+
+func buildRecoveryEventAutoIncrementRegistry(t *testing.T) schema.SchemaRegistry {
+	t.Helper()
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "events",
+		IsEvent: true,
 		Columns: []schema.ColumnDefinition{
 			{Name: "id", Type: schema.KindUint64, PrimaryKey: true, AutoIncrement: true},
 			{Name: "name", Type: schema.KindString},

@@ -181,6 +181,9 @@ func restoreSnapshot(committed *store.CommittedState, snapshot *SnapshotData) er
 		if !ok {
 			return fmt.Errorf("commitlog: snapshot references unknown table %d", tableData.TableID)
 		}
+		if table.Schema().IsEvent {
+			continue
+		}
 		for _, row := range tableData.Rows {
 			if err := table.InsertRow(table.AllocRowID(), row); err != nil {
 				return fmt.Errorf("commitlog: restore snapshot table %d: %w", tableData.TableID, err)
@@ -192,6 +195,9 @@ func restoreSnapshot(committed *store.CommittedState, snapshot *SnapshotData) er
 		table, ok := committed.Table(tableID)
 		if !ok {
 			return fmt.Errorf("commitlog: snapshot sequence references unknown table %d", tableID)
+		}
+		if table.Schema().IsEvent {
+			continue
 		}
 		if minNext, ok := nextSequenceValueForTable(table); ok && next < minNext {
 			return &SnapshotSequenceBoundsError{
@@ -206,6 +212,9 @@ func restoreSnapshot(committed *store.CommittedState, snapshot *SnapshotData) er
 		table, ok := committed.Table(tableID)
 		if !ok {
 			return fmt.Errorf("commitlog: snapshot next_id references unknown table %d", tableID)
+		}
+		if table.Schema().IsEvent {
+			continue
 		}
 		if next < uint64(table.NextID()) {
 			return &SnapshotAllocatorBoundsError{
@@ -227,6 +236,9 @@ func advanceRecoveredSequences(committed *store.CommittedState) error {
 		}
 		current, hasSequence := table.SequenceValue()
 		if !hasSequence {
+			continue
+		}
+		if table.Schema().IsEvent {
 			continue
 		}
 		minNext, ok := nextSequenceValueForTable(table)

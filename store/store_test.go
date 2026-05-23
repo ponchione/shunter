@@ -32,6 +32,13 @@ func eventPKSchema() *schema.TableSchema {
 	return &ts
 }
 
+func eventAutoPKSchema() *schema.TableSchema {
+	ts := *eventPKSchema()
+	ts.Columns = slices.Clone(ts.Columns)
+	ts.Columns[0].AutoIncrement = true
+	return &ts
+}
+
 func noPKSchema() *schema.TableSchema {
 	return &schema.TableSchema{
 		ID:   1,
@@ -214,6 +221,117 @@ func TestEventTableUniqueConstraintsApplyWithinTransaction(t *testing.T) {
 	}
 	if _, err := tx.Insert(tid, mkRow(1, "duplicate")); !errors.Is(err, ErrPrimaryKeyViolation) {
 		t.Fatalf("Insert duplicate event row error = %v, want ErrPrimaryKeyViolation", err)
+	}
+}
+
+func TestEventTableScanAndIndexSeekSeeTransactionRows(t *testing.T) {
+	cs := NewCommittedState()
+	const tid schema.TableID = 0
+	cs.RegisterTable(tid, NewTable(eventPKSchema()))
+
+	tx := NewTransaction(cs, nil)
+	firstID, err := tx.Insert(tid, mkRow(1, "first"))
+	if err != nil {
+		t.Fatalf("Insert first event row: %v", err)
+	}
+	secondID, err := tx.Insert(tid, mkRow(2, "second"))
+	if err != nil {
+		t.Fatalf("Insert second event row: %v", err)
+	}
+
+	scanned := map[types.RowID]string{}
+	for rid, row := range tx.ScanTable(tid) {
+		scanned[rid] = row[1].AsString()
+	}
+	if len(scanned) != 2 || scanned[firstID] != "first" || scanned[secondID] != "second" {
+		t.Fatalf("ScanTable event rows = %#v, want both tx-local rows", scanned)
+	}
+
+	var sought []types.RowID
+	for rid := range tx.SeekIndex(tid, 0, types.NewUint64(2)) {
+		sought = append(sought, rid)
+	}
+	if !slices.Equal(sought, []types.RowID{secondID}) {
+		t.Fatalf("SeekIndex event rows = %v, want [%d]", sought, secondID)
+	}
+}
+
+func TestEventTableDeleteAndUpdateOperateOnTransactionRows(t *testing.T) {
+	cs := NewCommittedState()
+	const tid schema.TableID = 0
+	cs.RegisterTable(tid, NewTable(eventPKSchema()))
+
+	tx := NewTransaction(cs, nil)
+	deletedID, err := tx.Insert(tid, mkRow(1, "delete"))
+	if err != nil {
+		t.Fatalf("Insert deleted event row: %v", err)
+	}
+	if err := tx.Delete(tid, deletedID); err != nil {
+		t.Fatalf("Delete tx-local event row: %v", err)
+	}
+	if _, ok := tx.GetRow(tid, deletedID); ok {
+		t.Fatal("deleted tx-local event row should not be visible")
+	}
+
+	updatedID, err := tx.Insert(tid, mkRow(2, "before"))
+	if err != nil {
+		t.Fatalf("Insert updated event row: %v", err)
+	}
+	newID, err := tx.Update(tid, updatedID, mkRow(3, "after"))
+	if err != nil {
+		t.Fatalf("Update tx-local event row: %v", err)
+	}
+	if _, ok := tx.GetRow(tid, updatedID); ok {
+		t.Fatal("old tx-local event row should not be visible after update")
+	}
+	if got, ok := tx.GetRow(tid, newID); !ok || got[1].AsString() != "after" {
+		t.Fatalf("updated event row = (%v, %v), want after", got, ok)
+	}
+
+	tx.Seal()
+	changeset, err := Commit(cs, tx)
+	if err != nil {
+		t.Fatalf("Commit event delete/update tx: %v", err)
+	}
+	tableChanges := changeset.TableChanges(tid)
+	if tableChanges == nil || len(tableChanges.Inserts) != 1 || tableChanges.Inserts[0][0].AsUint64() != 3 {
+		t.Fatalf("event update changeset = %#v, want one final insert", tableChanges)
+	}
+	table, _ := cs.Table(tid)
+	if table.RowCount() != 0 {
+		t.Fatalf("event table committed row count = %d, want 0", table.RowCount())
+	}
+}
+
+func TestEventTableAutoIncrementSequenceResetsAcrossTransactions(t *testing.T) {
+	cs := NewCommittedState()
+	const tid schema.TableID = 0
+	cs.RegisterTable(tid, NewTable(eventAutoPKSchema()))
+
+	for i := 0; i < 2; i++ {
+		tx := NewTransaction(cs, nil)
+		rowID, err := tx.Insert(tid, types.ProductValue{types.NewUint64(0), types.NewString("event")})
+		if err != nil {
+			t.Fatalf("Insert autoincrement event row in tx %d: %v", i+1, err)
+		}
+		row, ok := tx.GetRow(tid, rowID)
+		if !ok {
+			t.Fatalf("autoincrement event row missing in tx %d", i+1)
+		}
+		if got := row[0].AsUint64(); got != 1 {
+			t.Fatalf("autoincrement value in tx %d = %d, want 1", i+1, got)
+		}
+		tx.Seal()
+		if _, err := Commit(cs, tx); err != nil {
+			t.Fatalf("Commit autoincrement event tx %d: %v", i+1, err)
+		}
+		table, _ := cs.Table(tid)
+		if next, ok := table.SequenceValue(); !ok || next != 1 {
+			t.Fatalf("event sequence after tx %d = (%d, %v), want (1, true)", i+1, next, ok)
+		}
+		if table.NextID() != 1 {
+			t.Fatalf("event next row ID after tx %d = %d, want 1", i+1, table.NextID())
+		}
 	}
 }
 
