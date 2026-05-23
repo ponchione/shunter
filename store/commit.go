@@ -56,8 +56,10 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		tc := ensureTableChangeset(changeset, tableID, table.schema)
 		for _, rowID := range sortedCommitMapKeys(ins) {
 			row := ins[rowID]
-			if err := table.InsertRow(rowID, row); err != nil {
-				return nil, err
+			if !table.schema.IsEvent {
+				if err := table.InsertRow(rowID, row); err != nil {
+					return nil, err
+				}
 			}
 			tc.Inserts = append(tc.Inserts, row.Copy())
 		}
@@ -69,6 +71,9 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		if !ok {
 			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
+		if table.schema.IsEvent {
+			continue
+		}
 		table.SetNextID(next)
 	}
 
@@ -77,6 +82,9 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
+		}
+		if table.schema.IsEvent {
+			continue
 		}
 		table.SetSequenceValue(next)
 	}
@@ -150,6 +158,9 @@ func revalidateCommit(cs *CommittedState, txState *TxState) error {
 }
 
 func revalidateInsertRowID(tableID schema.TableID, table *Table, rowID types.RowID, txState *TxState) error {
+	if table.schema.IsEvent {
+		return nil
+	}
 	if txState.IsDeleted(tableID, rowID) {
 		return nil
 	}
@@ -200,6 +211,9 @@ func revalidateInsertAgainstPending(tableID schema.TableID, table *Table, row ty
 }
 
 func revalidateInsertAgainstCommitted(tableID schema.TableID, table *Table, row types.ProductValue, txState *TxState) error {
+	if table.schema.IsEvent {
+		return nil
+	}
 	for _, idx := range table.indexes {
 		if !idx.schema.Unique {
 			continue

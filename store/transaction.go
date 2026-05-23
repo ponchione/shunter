@@ -235,10 +235,12 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 		return 0, err
 	}
 
-	if rowID, undeleted, err := t.tryUndelete(tableID, table, row); err != nil {
-		return 0, err
-	} else if undeleted {
-		return rowID, nil
+	if !table.schema.IsEvent {
+		if rowID, undeleted, err := t.tryUndelete(tableID, table, row); err != nil {
+			return 0, err
+		} else if undeleted {
+			return rowID, nil
+		}
 	}
 
 	for idxOrdinal, idx := range table.indexes {
@@ -246,8 +248,10 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 			continue
 		}
 		key := idx.ExtractKey(row)
-		if err := t.checkCommittedUnique(tableID, table, idx, key); err != nil {
-			return 0, err
+		if !table.schema.IsEvent {
+			if err := t.checkCommittedUnique(tableID, table, idx, key); err != nil {
+				return 0, err
+			}
 		}
 		if err := t.checkTxUnique(tableID, table, idxOrdinal, idx, key); err != nil {
 			return 0, err
@@ -255,13 +259,15 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 	}
 
 	if table.rowHashIndex != nil {
-		h := row.Hash64()
-		for _, rid := range table.rowHashIndex[h] {
-			if t.tx.IsDeleted(tableID, rid) {
-				continue
-			}
-			if committedRow, ok := table.rowView(rid); ok && committedRow.Equal(row) {
-				return 0, ErrDuplicateRow
+		if !table.schema.IsEvent {
+			h := row.Hash64()
+			for _, rid := range table.rowHashIndex[h] {
+				if t.tx.IsDeleted(tableID, rid) {
+					continue
+				}
+				if committedRow, ok := table.rowView(rid); ok && committedRow.Equal(row) {
+					return 0, ErrDuplicateRow
+				}
 			}
 		}
 		if t.hasTxDuplicateRow(tableID, row) {

@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added initial event-table support: tables can be declared transient through
+  schema metadata, exported in contracts, surfaced in generated TypeScript
+  metadata, emitted through commit changesets, and excluded from committed
+  state/recovery persistence.
 - Added running-app `shunter query --sql` for contract-decoded, read-only
   one-off SQL queries over the Shunter WebSocket protocol.
 - Extended the hosted-chat release gate to prove Phase 1/2 closure through

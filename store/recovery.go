@@ -19,6 +19,9 @@ func ApplyChangeset(cs *CommittedState, changeset *Changeset) error {
 		if !ok {
 			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
+		if table.schema.IsEvent {
+			continue
+		}
 		stagedTable, err := cloneReplayTable(table)
 		if err != nil {
 			return err

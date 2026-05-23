@@ -26,6 +26,12 @@ func pkSchema() *schema.TableSchema {
 	}
 }
 
+func eventPKSchema() *schema.TableSchema {
+	ts := *pkSchema()
+	ts.IsEvent = true
+	return &ts
+}
+
 func noPKSchema() *schema.TableSchema {
 	return &schema.TableSchema{
 		ID:   1,
@@ -145,6 +151,93 @@ func TestIndexKeyCompareNullBeforeNonNull(t *testing.T) {
 	}
 	if got := valueKey.Compare(nullKey); got <= 0 {
 		t.Fatalf("non-null key compare = %d, want after null", got)
+	}
+}
+
+func TestCommitEventTableEmitsInsertWithoutRetainingRow(t *testing.T) {
+	cs := NewCommittedState()
+	const tid schema.TableID = 0
+	cs.RegisterTable(tid, NewTable(eventPKSchema()))
+
+	tx := NewTransaction(cs, nil)
+	row := mkRow(1, "joined")
+	rid, err := tx.Insert(tid, row)
+	if err != nil {
+		t.Fatalf("Insert event row: %v", err)
+	}
+	if got, ok := tx.GetRow(tid, rid); !ok || !got.Equal(row) {
+		t.Fatalf("transaction GetRow = (%v, %v), want inserted event row", got, ok)
+	}
+	tx.Seal()
+	changeset, err := Commit(cs, tx)
+	if err != nil {
+		t.Fatalf("Commit event row: %v", err)
+	}
+	tableChanges := changeset.TableChanges(tid)
+	if tableChanges == nil || len(tableChanges.Inserts) != 1 || !tableChanges.Inserts[0].Equal(row) {
+		t.Fatalf("event changeset inserts = %#v, want one inserted row", tableChanges)
+	}
+	table, _ := cs.Table(tid)
+	if table.RowCount() != 0 {
+		t.Fatalf("event table committed row count = %d, want 0", table.RowCount())
+	}
+	if table.NextID() != 1 {
+		t.Fatalf("event table next row ID = %d, want reset to 1", table.NextID())
+	}
+}
+
+func TestEventTableConstraintsResetAcrossTransactions(t *testing.T) {
+	cs := NewCommittedState()
+	const tid schema.TableID = 0
+	cs.RegisterTable(tid, NewTable(eventPKSchema()))
+
+	for i := 0; i < 2; i++ {
+		tx := NewTransaction(cs, nil)
+		if _, err := tx.Insert(tid, mkRow(1, "same")); err != nil {
+			t.Fatalf("Insert event row in tx %d: %v", i+1, err)
+		}
+		tx.Seal()
+		if _, err := Commit(cs, tx); err != nil {
+			t.Fatalf("Commit event tx %d: %v", i+1, err)
+		}
+	}
+}
+
+func TestEventTableUniqueConstraintsApplyWithinTransaction(t *testing.T) {
+	cs := NewCommittedState()
+	const tid schema.TableID = 0
+	cs.RegisterTable(tid, NewTable(eventPKSchema()))
+
+	tx := NewTransaction(cs, nil)
+	if _, err := tx.Insert(tid, mkRow(1, "first")); err != nil {
+		t.Fatalf("Insert first event row: %v", err)
+	}
+	if _, err := tx.Insert(tid, mkRow(1, "duplicate")); !errors.Is(err, ErrPrimaryKeyViolation) {
+		t.Fatalf("Insert duplicate event row error = %v, want ErrPrimaryKeyViolation", err)
+	}
+}
+
+func TestApplyChangesetSkipsEventTableRowsDuringRecovery(t *testing.T) {
+	cs := NewCommittedState()
+	const tid schema.TableID = 0
+	cs.RegisterTable(tid, NewTable(eventPKSchema()))
+
+	changeset := &Changeset{
+		TxID: 1,
+		Tables: map[schema.TableID]*TableChangeset{
+			tid: {
+				TableID: tid,
+				Schema:  eventPKSchema(),
+				Inserts: []types.ProductValue{mkRow(1, "replayed")},
+			},
+		},
+	}
+	if err := ApplyChangeset(cs, changeset); err != nil {
+		t.Fatalf("ApplyChangeset event rows: %v", err)
+	}
+	table, _ := cs.Table(tid)
+	if table.RowCount() != 0 {
+		t.Fatalf("replayed event table row count = %d, want 0", table.RowCount())
 	}
 }
 
