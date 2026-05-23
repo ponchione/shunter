@@ -302,6 +302,123 @@ func TestDescribeCommandReadsRunningAppDiagnostics(t *testing.T) {
 	}
 }
 
+func TestHealthCommandReportsFailedRunningAppDiagnostics(t *testing.T) {
+	srv := runningAppProtocolTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			t.Fatalf("request path = %q, want /healthz", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(shunter.RuntimeHealthInspection{
+			Status: shunter.HealthStatusFailed,
+			Runtime: shunter.RuntimeHealth{
+				State: shunter.RuntimeStateFailed,
+			},
+		})
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"health",
+		"--url", srv.httpURL() + "/subscribe?token=secret#fragment",
+		"--format", "json",
+	})
+	if code != 1 {
+		t.Fatalf("health exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("health stderr = %s, want empty", stderr.String())
+	}
+	var report struct {
+		Status    string `json:"status"`
+		TargetURL string `json:"target_url"`
+		Runtime   struct {
+			Status  string `json:"status"`
+			Runtime struct {
+				State string `json:"state"`
+			} `json:"runtime"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode health JSON: %v\n%s", err, stdout.String())
+	}
+	if report.Status != "failed" || report.Runtime.Status != "failed" || report.Runtime.Runtime.State != string(shunter.RuntimeStateFailed) {
+		t.Fatalf("health report = %+v", report)
+	}
+	if strings.Contains(report.TargetURL, "?") || strings.Contains(report.TargetURL, "#") || !strings.HasSuffix(report.TargetURL, "/healthz") {
+		t.Fatalf("target URL = %q, want stripped /healthz diagnostics URL", report.TargetURL)
+	}
+}
+
+func TestDescribeCommandClassifiesDiagnosticsHTTPStatus(t *testing.T) {
+	srv := runningAppProtocolTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/debug/shunter/runtime" {
+			t.Fatalf("request path = %q, want /debug/shunter/runtime", r.URL.Path)
+		}
+		http.NotFound(w, r)
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"describe",
+		"--url", srv.httpURL(),
+		"--format", "json",
+	})
+	if code != 1 {
+		t.Fatalf("describe exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %s, want empty", stdout.String())
+	}
+	assertRunningAppJSONErrorCode(t, stderr.Bytes(), "http_status")
+}
+
+func TestRunningAppURLNormalization(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "http-root", raw: "http://example.test", want: "ws://example.test/subscribe"},
+		{name: "https-root-with-query", raw: "https://example.test/?debug=true#frag", want: "wss://example.test/subscribe"},
+		{name: "ws-rooted-path", raw: "ws://example.test/app", want: "ws://example.test/app/subscribe"},
+		{name: "wss-rooted-subscribe", raw: "wss://example.test/app/subscribe?debug=true#frag", want: "wss://example.test/app/subscribe"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeRunningAppURL(tc.raw)
+			if err != nil {
+				t.Fatalf("normalizeRunningAppURL returned error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("normalizeRunningAppURL(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name     string
+		raw      string
+		endpoint string
+		want     string
+	}{
+		{name: "http-health-root", raw: "http://example.test", endpoint: "/healthz", want: "http://example.test/healthz"},
+		{name: "ws-subscribe-health", raw: "ws://example.test/subscribe?debug=true#frag", endpoint: "/healthz", want: "http://example.test/healthz"},
+		{name: "wss-rooted-subscribe-describe", raw: "wss://example.test/app/subscribe?debug=true#frag", endpoint: "/debug/shunter/runtime", want: "https://example.test/app/debug/shunter/runtime"},
+		{name: "rooted-path-health", raw: "http://example.test/app", endpoint: "/healthz", want: "http://example.test/app/healthz"},
+		{name: "rooted-health", raw: "http://example.test/app/healthz?debug=true", endpoint: "/healthz", want: "http://example.test/app/healthz"},
+	} {
+		t.Run("diagnostics/"+tc.name, func(t *testing.T) {
+			got, err := normalizeRunningAppDiagnosticsURL(tc.raw, tc.endpoint)
+			if err != nil {
+				t.Fatalf("normalizeRunningAppDiagnosticsURL returned error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("normalizeRunningAppDiagnosticsURL(%q, %q) = %q, want %q", tc.raw, tc.endpoint, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunningAppCommandsRejectLocalMisuseBeforeNetwork(t *testing.T) {
 	dir := t.TempDir()
 	contractPath := writeCLIContract(t, dir, "contract.json", runningAppContractFixture())

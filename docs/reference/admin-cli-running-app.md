@@ -67,6 +67,11 @@ semantically invalid local contract JSON fails before any transport work.
 `https://` URLs are normalized to the `/subscribe` WebSocket endpoint.
 `health --url` and `describe --url` use diagnostics HTTP endpoints mounted by
 the app.
+For both protocol and diagnostics commands, query strings and URL fragments are
+stripped before the request is made. A root URL targets the default endpoint;
+a URL ending in `/subscribe` is treated as the app's protocol URL and is
+rewritten to the corresponding diagnostics endpoint for `health --url` and
+`describe --url`.
 
 Reasons:
 
@@ -201,6 +206,8 @@ Running-app commands use the same broad exit-code shape as the existing CLI:
   including auth rejection, connection failure, timeout, protocol errors,
   reducer errors, query errors, malformed server responses, stale contract
   mismatches, and response decoding failures.
+- `health --url` prints the structured `/healthz` payload even when the
+  runtime reports `failed` through HTTP 503, then exits `1`.
 - Exit `2` for local command misuse, including missing required flags, invalid
   flag values, malformed JSON input, unknown reducer or query names, missing
   token sources, and schema-less JSON argument mode.

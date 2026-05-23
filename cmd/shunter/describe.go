@@ -80,7 +80,7 @@ func runDescribeURL(stdout, stderr io.Writer, rawURL string, timeout time.Durati
 		return 2
 	}
 	var description shunter.RuntimeDescription
-	if err := getRunningAppDiagnosticsJSON(target, timeout, &description); err != nil {
+	if err := getRunningAppDiagnosticsJSON(target, timeout, diagnosticsSuccessStatus, &description); err != nil {
 		writeRunningAppRuntimeError(stderr, format, runningAppError{
 			Command:   "describe",
 			TargetURL: target,

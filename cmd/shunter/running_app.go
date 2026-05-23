@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -440,9 +441,18 @@ func normalizeRunningAppURL(raw string) (string, error) {
 	if parsed.Host == "" {
 		return "", fmt.Errorf("URL host is required")
 	}
-	if parsed.Path == "" || parsed.Path == "/" {
+	switch cleanPath := path.Clean(parsed.Path); cleanPath {
+	case ".", "/":
 		parsed.Path = "/subscribe"
+	default:
+		if strings.HasSuffix(cleanPath, "/subscribe") {
+			parsed.Path = cleanPath
+		} else {
+			parsed.Path = path.Join(cleanPath, "/subscribe")
+		}
 	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
 	return parsed.String(), nil
 }
 
@@ -499,6 +509,8 @@ func classifyRunningAppErrorCode(err error) string {
 		return "query_error"
 	case errors.Is(err, protocolclient.ErrProtocolVersion), errors.Is(err, protocolclient.ErrUnexpectedMessage), errors.Is(err, protocolclient.ErrNonBinaryMessage), errors.Is(err, protocolclient.ErrResponseMismatch):
 		return "protocol_error"
+	case isDiagnosticsHTTPStatusError(err):
+		return "http_status"
 	case errors.Is(err, contractworkflow.ErrSurfaceNotFound):
 		return "unknown_surface"
 	case errors.Is(err, contractworkflow.ErrInvalidArgumentJSON), errors.Is(err, contractworkflow.ErrArgumentSchemaMissing), errors.Is(err, errRunningAppInvalidArguments):

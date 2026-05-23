@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -36,17 +37,22 @@ func normalizeRunningAppDiagnosticsURL(raw, endpoint string) (string, error) {
 	switch cleanPath := path.Clean(parsed.Path); cleanPath {
 	case ".", "/", endpoint:
 		parsed.Path = endpoint
-	case "/subscribe":
-		parsed.Path = endpoint
 	default:
-		parsed.Path = path.Join(cleanPath, endpoint)
+		if strings.HasSuffix(cleanPath, endpoint) {
+			parsed.Path = cleanPath
+		} else if strings.HasSuffix(cleanPath, "/subscribe") {
+			base := strings.TrimSuffix(cleanPath, "/subscribe")
+			parsed.Path = path.Join(base, endpoint)
+		} else {
+			parsed.Path = path.Join(cleanPath, endpoint)
+		}
 	}
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed.String(), nil
 }
 
-func getRunningAppDiagnosticsJSON(target string, timeout time.Duration, out any) error {
+func getRunningAppDiagnosticsJSON(target string, timeout time.Duration, allowStatus func(int) bool, out any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
@@ -58,12 +64,36 @@ func getRunningAppDiagnosticsJSON(target string, timeout time.Duration, out any)
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("diagnostics endpoint returned HTTP %d", resp.StatusCode)
+	if allowStatus == nil {
+		allowStatus = diagnosticsSuccessStatus
+	}
+	if !allowStatus(resp.StatusCode) {
+		return diagnosticsHTTPStatusError{StatusCode: resp.StatusCode}
 	}
 	decoder := json.NewDecoder(resp.Body)
 	if err := decoder.Decode(out); err != nil {
 		return fmt.Errorf("decode diagnostics JSON: %w", err)
 	}
 	return nil
+}
+
+func diagnosticsSuccessStatus(code int) bool {
+	return code >= 200 && code < 300
+}
+
+func healthDiagnosticsStatus(code int) bool {
+	return diagnosticsSuccessStatus(code) || code == http.StatusServiceUnavailable
+}
+
+type diagnosticsHTTPStatusError struct {
+	StatusCode int
+}
+
+func (e diagnosticsHTTPStatusError) Error() string {
+	return fmt.Sprintf("diagnostics endpoint returned HTTP %d", e.StatusCode)
+}
+
+func isDiagnosticsHTTPStatusError(err error) bool {
+	var statusErr diagnosticsHTTPStatusError
+	return errors.As(err, &statusErr)
 }

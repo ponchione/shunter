@@ -70,7 +70,7 @@ func runHealthURL(stdout, stderr io.Writer, rawURL string, timeout time.Duration
 		return 2
 	}
 	var inspection shunter.RuntimeHealthInspection
-	if err := getRunningAppDiagnosticsJSON(target, timeout, &inspection); err != nil {
+	if err := getRunningAppDiagnosticsJSON(target, timeout, healthDiagnosticsStatus, &inspection); err != nil {
 		writeRunningAppRuntimeError(stderr, format, runningAppError{
 			Command:   "health",
 			TargetURL: target,
@@ -86,6 +86,9 @@ func runHealthURL(stdout, stderr io.Writer, rawURL string, timeout time.Duration
 	}
 	if _, err := stdout.Write(out); err != nil {
 		writeCLIError(stderr, err)
+		return 1
+	}
+	if inspection.Status == shunter.HealthStatusFailed {
 		return 1
 	}
 	return 0

@@ -5,8 +5,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 ## Unreleased
 
 - Added running-app `shunter health --url` and `shunter describe --url`
-  diagnostics checks, and extended the hosted-chat gate to exercise them
-  against a live server.
+  diagnostics checks, including `/subscribe` URL rewriting, query/fragment
+  stripping, and structured failed-health output from `/healthz`; extended the
+  hosted-chat gate to exercise them against a live server.
 - Added `shunter call` and `shunter query` for contract-validated reducer calls
   and declared-query reads against running app servers over the Shunter
   WebSocket protocol.
