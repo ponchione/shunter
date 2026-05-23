@@ -58,3 +58,12 @@ func DecodeQueryRows(contract shunter.ModuleContract, name, tableName string, ro
 		Rows:      rows,
 	}, nil
 }
+
+// DecodeQueryResponse decodes a declared-query response through its contract row schema.
+func DecodeQueryResponse(contract shunter.ModuleContract, name string, response protocol.OneOffQueryResponse) (DecodedQueryRows, error) {
+	if len(response.Tables) != 1 {
+		return DecodedQueryRows{}, fmt.Errorf("%w: query %q has %d tables, want 1", ErrResultTableCount, strings.TrimSpace(name), len(response.Tables))
+	}
+	table := response.Tables[0]
+	return DecodeQueryRows(contract, name, table.TableName, table.Rows)
+}

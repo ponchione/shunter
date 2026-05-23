@@ -980,6 +980,70 @@ func TestDecodeQueryRowsPreservesStructuredErrors(t *testing.T) {
 	}
 }
 
+func TestDecodeQueryResponseUsesSingleResponseTable(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name: "recent_messages",
+		RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "body", Type: "string"},
+		}},
+		ResultShape: &shunter.ReadResultShape{Kind: shunter.ReadResultShapeProjection, Table: "messages"},
+	}}
+	rowSchema, err := QueryRowSchema(contract, "recent_messages")
+	if err != nil {
+		t.Fatalf("QueryRowSchema returned error: %v", err)
+	}
+	columns, err := productColumnsForBSATN(rowSchema)
+	if err != nil {
+		t.Fatalf("productColumnsForBSATN returned error: %v", err)
+	}
+	rowList, err := protocol.EncodeProductRowsForColumns([]types.ProductValue{
+		{types.NewString("hello")},
+	}, columns)
+	if err != nil {
+		t.Fatalf("EncodeProductRowsForColumns returned error: %v", err)
+	}
+
+	decoded, err := DecodeQueryResponse(contract, "recent_messages", protocol.OneOffQueryResponse{
+		Tables: []protocol.OneOffTable{{
+			TableName: "messages",
+			Rows:      rowList,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("DecodeQueryResponse returned error: %v", err)
+	}
+	if len(decoded.Rows) != 1 || decoded.Rows[0][0].AsString() != "hello" {
+		t.Fatalf("decoded response rows = %+v", decoded.Rows)
+	}
+}
+
+func TestDecodeQueryResponseRejectsUnexpectedTableCounts(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name: "recent_messages",
+		RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "id", Type: "uint64"},
+		}},
+		ResultShape: &shunter.ReadResultShape{Kind: shunter.ReadResultShapeTable, Table: "messages"},
+	}}
+
+	_, err := DecodeQueryResponse(contract, "recent_messages", protocol.OneOffQueryResponse{})
+	if !errors.Is(err, ErrResultTableCount) {
+		t.Fatalf("DecodeQueryResponse empty tables error = %v, want ErrResultTableCount", err)
+	}
+
+	_, err = DecodeQueryResponse(contract, "recent_messages", protocol.OneOffQueryResponse{
+		Tables: []protocol.OneOffTable{
+			{TableName: "messages", Rows: protocol.EncodeRowList(nil)},
+			{TableName: "messages", Rows: protocol.EncodeRowList(nil)},
+		},
+	})
+	if !errors.Is(err, ErrResultTableCount) {
+		t.Fatalf("DecodeQueryResponse multiple tables error = %v, want ErrResultTableCount", err)
+	}
+}
+
 func TestEncodeProductValueArgumentsPreservesStructuredErrors(t *testing.T) {
 	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
 		{Name: "id", Type: "uint8"},
