@@ -63,6 +63,10 @@ func Dial(ctx context.Context, opts Options) (*Client, protocol.IdentityToken, e
 	}
 
 	client := &Client{conn: conn, subproto: conn.Subprotocol()}
+	if _, ok := protocol.ProtocolVersionForSubprotocol(client.subproto); !ok {
+		conn.CloseNow()
+		return nil, protocol.IdentityToken{}, fmt.Errorf("%w: negotiated subprotocol %q", ErrProtocolVersion, client.subproto)
+	}
 	tag, msg, err := client.Read(ctx)
 	if err != nil {
 		conn.CloseNow()

@@ -89,6 +89,21 @@ func TestDialClassifiesIdentityReadTimeout(t *testing.T) {
 	}
 }
 
+func TestDialRejectsMissingSubprotocol(t *testing.T) {
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConnWithSubprotocols(t, w, r, nil)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _, err := Dial(ctx, Options{URL: srv.wsURL(), Token: "operator-token"})
+	if !errors.Is(err, ErrProtocolVersion) {
+		t.Fatalf("Dial missing subprotocol error = %v, want ErrProtocolVersion", err)
+	}
+}
+
 func TestClientSendAndReadUseProtocolCodecs(t *testing.T) {
 	const token = "operator-token"
 	serverDone := make(chan protocol.CallReducerMsg, 1)
