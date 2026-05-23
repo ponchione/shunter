@@ -20,8 +20,8 @@ rtk go run ./examples/hosted-chat/cmd/hosted-chat
 ```
 
 The server uses `shunter.ConfigFromEnv`, enables protocol serving and
-diagnostics HTTP, and calls `shunter.Run(context.Background(), app.Module(),
-cfg)`.
+diagnostics HTTP, and calls `shunter.Run` with a context canceled by interrupt
+or SIGTERM.
 
 ## Export And Generate
 
@@ -109,5 +109,6 @@ The gate builds and tests the Go example, exports the contract, asserts
 contract-local surface counts, validates the contract artifact, checks
 contract-local health, starts a real server on an ephemeral local port, checks
 live `health` and `describe`, runs one CLI reducer call, one CLI procedure
-call, and one declared query against it, regenerates the TypeScript bindings,
-and runs the frontend typecheck.
+call, and one declared query against it, stops the server, runs offline backup
+and restore, restarts from the restored `DataDir`, verifies recovered query
+results, regenerates the TypeScript bindings, and runs the frontend typecheck.

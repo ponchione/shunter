@@ -54,14 +54,20 @@ package main
 import (
 	"context"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/ponchione/shunter"
 	"example.com/myapp/app"
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	cfg := shunter.ConfigFromEnv()
-	if err := shunter.Run(context.Background(), app.Module(), cfg); err != nil {
+	if err := shunter.Run(ctx, app.Module(), cfg); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -719,6 +725,26 @@ await client.reducers.createPlace({
 ```
 
 ## Implementation Phases
+
+Phase 1 and Phase 2 are complete for the v1 static hosted-app architecture.
+The closure evidence is the hosted-chat release gate plus focused package
+tests:
+
+- `scripts/hosted-chat-gate.sh` builds and tests the canonical app, exports
+  and validates its contract, runs contract/codegen workflow checks, starts the
+  hosted server, exercises live `health`, live `describe`, `call`, `procedure`,
+  and `query`, stops the server, runs offline `backup` and `restore`, restarts
+  from the restored `DataDir`, verifies recovered query results, regenerates
+  TypeScript, and typechecks the frontend-shaped client.
+- `cmd/shunter` tests cover local contract commands, running-app command
+  validation, and offline backup/restore command behavior.
+- `run.go`, `config.go`, diagnostics, lifecycle, and hosted-chat tests cover
+  the convenience runtime entrypoint, environment configuration, mounted
+  diagnostics, shutdown, and recovery behavior.
+- Generic HTTP reducer/query management endpoints remain intentionally absent.
+  Running-app admin goes through the Shunter WebSocket protocol and diagnostics
+  HTTP endpoints; any future HTTP management routes must be opt-in and
+  documented as a separate surface.
 
 ### Phase 1: Hosted App Shape
 

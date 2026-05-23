@@ -15,12 +15,18 @@ package main
 import (
 	"context"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/ponchione/shunter"
 	"example.com/myapp/internal/app"
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	cfg := shunter.ConfigFromEnv()
 	cfg.EnableProtocol = true
 	cfg.Observability.Diagnostics.MountHTTP = true
@@ -28,7 +34,7 @@ func main() {
 		cfg.DataDir = "./data/myapp"
 	}
 
-	if err := shunter.Run(context.Background(), app.Module(), cfg); err != nil {
+	if err := shunter.Run(ctx, app.Module(), cfg); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -207,6 +213,8 @@ rtk ./scripts/hosted-chat-gate.sh
 It runs the Go example tests, builds the server, exports and describes the
 contract, asserts contract-local surface counts, validates the contract
 artifact, checks contract-local health, starts the example server on an
-ephemeral local port, runs one CLI reducer call, one CLI procedure call, and one
-declared query against it, regenerates TypeScript, and typechecks the frontend
-example.
+ephemeral local port, checks live `health` and `describe`, runs one CLI reducer
+call, one CLI procedure call, and one declared query against it, stops the
+server, runs offline backup and restore, restarts from the restored `DataDir`,
+verifies recovered query results, regenerates TypeScript, and typechecks the
+frontend example.

@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Extended the hosted-chat release gate to prove Phase 1/2 closure through
+  clean server stop, offline backup/restore, restart from restored state, and
+  recovered declared-query results.
+- The hosted-chat example now cancels `shunter.Run` on interrupt or SIGTERM so
+  the hosted runtime can shut down cleanly under normal process termination.
 - Procedure protocol responses now use the runtime client sender path so
   outbound backpressure triggers the same disconnect handling as other
   running-app responses.
