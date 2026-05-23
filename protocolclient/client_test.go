@@ -314,6 +314,161 @@ func TestClientCallReducerRejectsMismatchedResponse(t *testing.T) {
 	}
 }
 
+func TestDialAndCallReducerUsesExplicitTokenAndCloses(t *testing.T) {
+	const token = "operator-token"
+	wantIdentity := protocol.IdentityToken{Identity: [32]byte{1}, Token: "server-token", ConnectionID: [16]byte{2}}
+	received := make(chan protocol.CallReducerMsg, 1)
+	closed := make(chan struct{}, 1)
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+token {
+			t.Fatalf("Authorization = %q, want bearer token", got)
+		}
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, wantIdentity)
+
+		_, frame, err := ws.Read(r.Context())
+		if err != nil {
+			t.Errorf("server read client message: %v", err)
+			return
+		}
+		_, msg, err := protocol.DecodeClientMessage(frame)
+		if err != nil {
+			t.Errorf("DecodeClientMessage: %v", err)
+			return
+		}
+		call, ok := msg.(protocol.CallReducerMsg)
+		if !ok {
+			t.Errorf("client message = %T, want protocol.CallReducerMsg", msg)
+			return
+		}
+		received <- call
+		writeProtocolClientServerMessage(t, ws, protocol.TransactionUpdate{
+			Status:      protocol.StatusCommitted{},
+			ReducerCall: protocol.ReducerCallInfo{ReducerName: call.ReducerName, RequestID: call.RequestID},
+		})
+
+		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		_, _, err = ws.Read(readCtx)
+		if err != nil {
+			closed <- struct{}{}
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	identity, update, err := DialAndCallReducer(ctx, Options{URL: srv.wsURL(), Token: token}, ReducerCallRequest{
+		Name:      "send_message",
+		Arguments: []byte{1, 2, 3},
+	})
+	if err != nil {
+		t.Fatalf("DialAndCallReducer returned error: %v", err)
+	}
+	if identity != wantIdentity {
+		t.Fatalf("identity = %+v, want %+v", identity, wantIdentity)
+	}
+	if update.ReducerCall.ReducerName != "send_message" || update.ReducerCall.RequestID != 1 {
+		t.Fatalf("DialAndCallReducer update = %+v", update)
+	}
+
+	select {
+	case call := <-received:
+		if call.ReducerName != "send_message" || call.RequestID != 1 || call.Flags != protocol.CallReducerFlagsFullUpdate {
+			t.Fatalf("server call = %+v", call)
+		}
+		if !bytes.Equal(call.Args, []byte{1, 2, 3}) {
+			t.Fatalf("server call args = %x", call.Args)
+		}
+	case <-ctx.Done():
+		t.Fatalf("server did not receive call: %v", ctx.Err())
+	}
+	select {
+	case <-closed:
+	case <-ctx.Done():
+		t.Fatalf("server did not observe client close: %v", ctx.Err())
+	}
+}
+
+func TestDialAndCallReducerRequiresExplicitTokenBeforeNetwork(t *testing.T) {
+	called := make(chan struct{}, 1)
+	srv := protocolClientTestServer(t, func(http.ResponseWriter, *http.Request) {
+		called <- struct{}{}
+	})
+
+	_, _, err := DialAndCallReducer(context.Background(), Options{
+		URL:   srv.wsURL(),
+		Token: " \t",
+	}, ReducerCallRequest{
+		Name: "send_message",
+	})
+	if !errors.Is(err, ErrTokenRequired) {
+		t.Fatalf("DialAndCallReducer error = %v, want ErrTokenRequired", err)
+	}
+	select {
+	case <-called:
+		t.Fatal("server was called despite missing token")
+	default:
+	}
+}
+
+func TestDialAndCallReducerClosesAfterReducerError(t *testing.T) {
+	wantIdentity := protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}}
+	closed := make(chan struct{}, 1)
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, wantIdentity)
+
+		_, frame, err := ws.Read(r.Context())
+		if err != nil {
+			t.Errorf("server read client message: %v", err)
+			return
+		}
+		_, msg, err := protocol.DecodeClientMessage(frame)
+		if err != nil {
+			t.Errorf("DecodeClientMessage: %v", err)
+			return
+		}
+		call, ok := msg.(protocol.CallReducerMsg)
+		if !ok {
+			t.Errorf("client message = %T, want protocol.CallReducerMsg", msg)
+			return
+		}
+		writeProtocolClientServerMessage(t, ws, protocol.TransactionUpdate{
+			Status:      protocol.StatusFailed{Error: "boom"},
+			ReducerCall: protocol.ReducerCallInfo{ReducerName: call.ReducerName, RequestID: call.RequestID},
+		})
+
+		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		_, _, err = ws.Read(readCtx)
+		if err != nil {
+			closed <- struct{}{}
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	identity, update, err := DialAndCallReducer(ctx, Options{URL: srv.wsURL(), Token: "operator-token"}, ReducerCallRequest{
+		Name: "send_message",
+	})
+	if !errors.Is(err, ErrReducerFailed) {
+		t.Fatalf("DialAndCallReducer error = %v, want ErrReducerFailed", err)
+	}
+	if identity != wantIdentity {
+		t.Fatalf("identity = %+v, want %+v", identity, wantIdentity)
+	}
+	if failed, ok := update.Status.(protocol.StatusFailed); !ok || failed.Error != "boom" {
+		t.Fatalf("update status = %+v, want failed boom", update.Status)
+	}
+	select {
+	case <-closed:
+	case <-ctx.Done():
+		t.Fatalf("server did not observe client close after reducer error: %v", ctx.Err())
+	}
+}
+
 func TestClientDeclaredQueryWaitsForMatchingResponse(t *testing.T) {
 	received := make(chan protocol.DeclaredQueryMsg, 1)
 	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {

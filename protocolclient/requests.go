@@ -9,11 +9,35 @@ import (
 	"github.com/ponchione/shunter/protocol"
 )
 
+// ReducerCallRequest describes a reducer execution request.
+type ReducerCallRequest struct {
+	Name      string
+	Arguments []byte
+}
+
 // DeclaredQueryRequest describes a declared-query execution request.
 type DeclaredQueryRequest struct {
 	Name          string
 	Parameters    []byte
 	HasParameters bool
+}
+
+// DialAndCallReducer connects, calls one reducer, and closes the connection.
+func DialAndCallReducer(ctx context.Context, opts Options, request ReducerCallRequest) (protocol.IdentityToken, protocol.TransactionUpdate, error) {
+	client, identity, err := Dial(ctx, opts)
+	if err != nil {
+		return protocol.IdentityToken{}, protocol.TransactionUpdate{}, err
+	}
+
+	update, callErr := client.CallReducer(ctx, request.Name, request.Arguments)
+	closeErr := client.Close(ctx)
+	if callErr != nil {
+		return identity, update, callErr
+	}
+	if closeErr != nil {
+		return identity, update, closeErr
+	}
+	return identity, update, nil
 }
 
 // DialAndExecuteDeclaredQuery connects, executes one declared query, and closes the connection.
