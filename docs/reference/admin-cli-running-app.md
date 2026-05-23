@@ -1,8 +1,8 @@
 # Running-App Admin CLI Shape
 
 Status: implemented v1 CLI surface
-Scope: `shunter call` and `shunter query` commands against a running Shunter
-app.
+Scope: `shunter call`, `shunter query`, `shunter health --url`, and
+`shunter describe --url` commands against a running Shunter app.
 
 Shunter's generic CLI can target running app servers for declared reducers and
 declared queries. It still does not dynamically load app modules; the running
@@ -25,6 +25,18 @@ Run a declared query:
 shunter query --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" recent_messages
 ```
 
+Check live runtime health:
+
+```bash
+shunter health --url http://127.0.0.1:3000
+```
+
+Describe the live runtime diagnostics snapshot:
+
+```bash
+shunter describe --url http://127.0.0.1:3000
+```
+
 Development anonymous auth must be explicit:
 
 ```bash
@@ -35,13 +47,15 @@ These commands target declared app surfaces:
 
 - `call` invokes a named reducer exported in the contract.
 - `query` invokes a named declared query exported in the contract.
+- `health --url` checks the mounted runtime diagnostics `/healthz` endpoint.
+- `describe --url` reads the mounted runtime diagnostics debug snapshot.
 - Declared views remain subscription-oriented and should not be folded into
   `query` unless a future one-shot view read is deliberately added.
 
-The contract path stays required even when the app can expose its own contract.
-The CLI uses the local contract to validate names, permissions metadata,
-parameter schemas, and generated-style argument encoding before sending any
-request.
+The contract path stays required for `call` and `query` even when the app can
+expose its own contract. The CLI uses the local contract to validate names,
+permissions metadata, parameter schemas, and generated-style argument encoding
+before sending any request.
 Use local contract helpers such as `contractworkflow.FindReducer` and
 `contractworkflow.FindQuery` for name validation before dialing a running app.
 Load the artifact with `contractworkflow.LoadContractFile` so malformed or
@@ -49,8 +63,10 @@ semantically invalid local contract JSON fails before any transport work.
 
 ## Transport Decision
 
-The commands use the existing Shunter WebSocket protocol. `http://` and
+`call` and `query` use the existing Shunter WebSocket protocol. `http://` and
 `https://` URLs are normalized to the `/subscribe` WebSocket endpoint.
+`health --url` and `describe --url` use diagnostics HTTP endpoints mounted by
+the app.
 
 Reasons:
 
@@ -59,9 +75,9 @@ Reasons:
 - Adding generic HTTP management endpoints would require separate enablement,
   auth, request-size, CSRF, logging, and deployment documentation.
 
-There are no new server endpoints. If HTTP admin routes are later added, they
-must be opt-in and documented as a distinct management surface, not enabled
-implicitly by `shunter.Run`.
+There are no reducer/query HTTP admin endpoints. If those routes are later
+added, they must be opt-in and documented as a distinct management surface, not
+enabled implicitly by `shunter.Run`.
 
 ## Package Boundaries
 

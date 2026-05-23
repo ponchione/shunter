@@ -19,8 +19,9 @@ SHUNTER_LISTEN_ADDR=127.0.0.1:3000 \
 rtk go run ./examples/hosted-chat/cmd/hosted-chat
 ```
 
-The server uses `shunter.ConfigFromEnv`, enables protocol serving, and calls
-`shunter.Run(context.Background(), app.Module(), cfg)`.
+The server uses `shunter.ConfigFromEnv`, enables protocol serving and
+diagnostics HTTP, and calls `shunter.Run(context.Background(), app.Module(),
+cfg)`.
 
 ## Export And Generate
 
@@ -53,6 +54,12 @@ With the backend running, call the reducer and read the declared query through
 the running-app CLI:
 
 ```bash
+rtk go run ./cmd/shunter health \
+  --url http://127.0.0.1:3000
+
+rtk go run ./cmd/shunter describe \
+  --url http://127.0.0.1:3000
+
 rtk go run ./cmd/shunter call \
   --url http://127.0.0.1:3000 \
   --contract examples/hosted-chat/shunter.contract.json \
@@ -91,6 +98,7 @@ rtk ./scripts/hosted-chat-gate.sh
 
 The gate builds and tests the Go example, exports the contract, asserts
 contract-local surface counts, validates the contract artifact, checks
-contract-local health, starts a real server on an ephemeral local port, runs
-one CLI reducer call and declared query against it, regenerates the TypeScript
-bindings, and runs the frontend typecheck.
+contract-local health, starts a real server on an ephemeral local port, checks
+live `health` and `describe`, runs one CLI reducer call and declared query
+against it, regenerates the TypeScript bindings, and runs the frontend
+typecheck.

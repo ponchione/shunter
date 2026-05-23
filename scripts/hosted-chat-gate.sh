@@ -11,6 +11,8 @@ validate_json="$(mktemp)"
 assert_json="$(mktemp)"
 call_json="$(mktemp)"
 query_json="$(mktemp)"
+running_describe_json="$(mktemp)"
+running_health_json="$(mktemp)"
 run_data="$(mktemp -d)"
 server_log="$(mktemp)"
 server_pid=""
@@ -20,7 +22,7 @@ cleanup() {
     kill "$server_pid" >/dev/null 2>&1 || true
     wait "$server_pid" >/dev/null 2>&1 || true
   fi
-  rm -f "$build_bin" "$describe_json" "$health_json" "$validate_json" "$assert_json" "$call_json" "$query_json" "$server_log"
+  rm -f "$build_bin" "$describe_json" "$health_json" "$validate_json" "$assert_json" "$call_json" "$query_json" "$running_describe_json" "$running_health_json" "$server_log"
   rm -rf "$run_data"
 }
 trap cleanup EXIT
@@ -79,6 +81,18 @@ if [[ "$ready" != "1" ]]; then
   rtk read "$server_log" >&2 || true
   exit 1
 fi
+rtk go run ./cmd/shunter health \
+  --url "$server_url" \
+  --format json > "$running_health_json"
+rtk grep '"status": "ok"' "$running_health_json"
+rtk grep '"scope": "running_app"' "$running_health_json"
+rtk grep '"running_server_checked": true' "$running_health_json"
+rtk go run ./cmd/shunter describe \
+  --url "$server_url" \
+  --format json > "$running_describe_json"
+rtk grep '"status": "ok"' "$running_describe_json"
+rtk grep '"scope": "running_app"' "$running_describe_json"
+rtk grep '"Name": "hosted_chat"' "$running_describe_json"
 rtk go run ./cmd/shunter call \
   --url "$server_url" \
   --contract examples/hosted-chat/shunter.contract.json \

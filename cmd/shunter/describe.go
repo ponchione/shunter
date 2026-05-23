@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	shunter "github.com/ponchione/shunter"
 	"github.com/ponchione/shunter/contractworkflow"
@@ -14,15 +15,14 @@ import (
 func runDescribe(stdout, stderr io.Writer, args []string) int {
 	fs := newFlagSet(stderr, "shunter describe")
 	contractPath := fs.String("contract", "", "contract JSON path")
+	urlValue := fs.String("url", "", "running Shunter app URL")
+	timeout := fs.Duration("timeout", defaultRunningAppTimeout, "bounded running-app diagnostics timeout")
 	format := fs.String("format", contractworkflow.FormatText, "output format: text or json")
 	section := fs.String("section", describeSectionAll, "section to print: all, tables, reducers, queries, views, or visibility")
 	if code, stop := parseFlags(fs, args); stop {
 		return code
 	}
 	if code := requireNoArgs(stderr, fs); code != 0 {
-		return code
-	}
-	if code := requirePath(stderr, "contract", *contractPath); code != 0 {
 		return code
 	}
 	if err := contractworkflow.ValidateFormat(*format); err != nil {
@@ -33,13 +33,63 @@ func runDescribe(stdout, stderr io.Writer, args []string) int {
 		writeCLIError(stderr, err)
 		return 2
 	}
+	contract := strings.TrimSpace(*contractPath)
+	target := strings.TrimSpace(*urlValue)
+	if (contract == "") == (target == "") {
+		writeCLIErrorf(stderr, "provide exactly one of --contract or --url\n")
+		return 2
+	}
+	if target != "" {
+		if normalizeDescribeSection(*section) != describeSectionAll {
+			writeCLIErrorf(stderr, "--section is only supported with --contract\n")
+			return 2
+		}
+		if *timeout <= 0 {
+			writeCLIErrorf(stderr, "--timeout must be positive\n")
+			return 2
+		}
+		return runDescribeURL(stdout, stderr, target, *timeout, *format)
+	}
 
-	contract, err := readDescribeContract(*contractPath)
+	contractData, err := readDescribeContract(contract)
 	if err != nil {
 		writeCLIError(stderr, err)
 		return 1
 	}
-	out, err := formatDescribeContract(contract, *format, *section)
+	out, err := formatDescribeContract(contractData, *format, *section)
+	if err != nil {
+		writeCLIError(stderr, err)
+		return 2
+	}
+	if _, err := stdout.Write(out); err != nil {
+		writeCLIError(stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func runDescribeURL(stdout, stderr io.Writer, rawURL string, timeout time.Duration, format string) int {
+	target, err := normalizeRunningAppDiagnosticsURL(rawURL, "/debug/shunter/runtime")
+	if err != nil {
+		writeRunningAppUsageError(stderr, format, runningAppError{
+			Command:   "describe",
+			TargetURL: rawURL,
+			Code:      "invalid_url",
+			Message:   err.Error(),
+		})
+		return 2
+	}
+	var description shunter.RuntimeDescription
+	if err := getRunningAppDiagnosticsJSON(target, timeout, &description); err != nil {
+		writeRunningAppRuntimeError(stderr, format, runningAppError{
+			Command:   "describe",
+			TargetURL: target,
+			Code:      classifyRunningAppErrorCode(err),
+			Message:   err.Error(),
+		})
+		return 1
+	}
+	out, err := formatRunningDescribe(description, target, format)
 	if err != nil {
 		writeCLIError(stderr, err)
 		return 2
@@ -261,6 +311,55 @@ func productColumnCount(product *shunter.ProductSchema) int {
 		return 0
 	}
 	return len(product.Columns)
+}
+
+type runningDescribeReport struct {
+	Status               string                     `json:"status"`
+	Scope                string                     `json:"scope"`
+	Command              string                     `json:"command"`
+	TargetURL            string                     `json:"target_url"`
+	RunningServerChecked bool                       `json:"running_server_checked"`
+	Runtime              shunter.RuntimeDescription `json:"runtime"`
+}
+
+func formatRunningDescribe(description shunter.RuntimeDescription, target, format string) ([]byte, error) {
+	status := shunter.ClassifyRuntimeHealth(description.Health)
+	report := runningDescribeReport{
+		Status:               string(status),
+		Scope:                "running_app",
+		Command:              "describe",
+		TargetURL:            target,
+		RunningServerChecked: true,
+		Runtime:              description,
+	}
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "", contractworkflow.FormatText:
+		var b strings.Builder
+		fmt.Fprintf(&b, "Status: %s\n", report.Status)
+		fmt.Fprintf(&b, "Scope: %s\n", report.Scope)
+		fmt.Fprintf(&b, "Command: %s\n", report.Command)
+		fmt.Fprintf(&b, "Target: %s\n", report.TargetURL)
+		fmt.Fprintf(&b, "Running server checked: %t\n", report.RunningServerChecked)
+		fmt.Fprintf(&b, "Module: %s", description.Module.Name)
+		if description.Module.Version != "" {
+			fmt.Fprintf(&b, " %s", description.Module.Version)
+		}
+		fmt.Fprintf(&b, "\nRuntime state: %s\n", description.Health.State)
+		fmt.Fprintf(&b, "Ready: %t\n", description.Health.Ready)
+		fmt.Fprintf(&b, "Degraded: %t\n", description.Health.Degraded)
+		fmt.Fprintf(&b, "Queries: %d\n", len(description.Module.Queries))
+		fmt.Fprintf(&b, "Views: %d\n", len(description.Module.Views))
+		fmt.Fprintf(&b, "Visibility filters: %d\n", len(description.Module.VisibilityFilters))
+		return []byte(b.String()), nil
+	case contractworkflow.FormatJSON:
+		out, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		return append(out, '\n'), nil
+	default:
+		return nil, fmt.Errorf("%w %q", contractworkflow.ErrUnsupportedFormat, format)
+	}
 }
 
 func (s describeSummary) Text() string {

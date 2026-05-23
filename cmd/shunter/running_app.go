@@ -491,7 +491,7 @@ func classifyRunningAppErrorCode(err error) string {
 		return "missing_token"
 	case errors.Is(err, protocolclient.ErrURLRequired):
 		return "invalid_url"
-	case errors.Is(err, protocolclient.ErrTimeout):
+	case errors.Is(err, protocolclient.ErrTimeout), errors.Is(err, context.DeadlineExceeded):
 		return "timeout"
 	case errors.Is(err, protocolclient.ErrReducerFailed):
 		return "reducer_error"

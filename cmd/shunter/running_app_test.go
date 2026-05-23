@@ -187,6 +187,121 @@ func TestQueryCommandInvokesRunningAppDeclaredQueryAndDecodesRows(t *testing.T) 
 	}
 }
 
+func TestHealthCommandReadsRunningAppDiagnostics(t *testing.T) {
+	srv := runningAppProtocolTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			t.Fatalf("request path = %q, want /healthz", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(shunter.RuntimeHealthInspection{
+			Status: shunter.HealthStatusOK,
+			Runtime: shunter.RuntimeHealth{
+				State:    shunter.RuntimeStateReady,
+				Ready:    true,
+				Protocol: shunter.ProtocolHealth{Ready: true},
+			},
+		})
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"health",
+		"--url", srv.httpURL(),
+		"--format", "json",
+	})
+	if code != 0 {
+		t.Fatalf("health exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("health stderr = %s, want empty", stderr.String())
+	}
+	var report struct {
+		Status               string `json:"status"`
+		Scope                string `json:"scope"`
+		Command              string `json:"command"`
+		RunningServerChecked bool   `json:"running_server_checked"`
+		Runtime              struct {
+			Status  string `json:"status"`
+			Runtime struct {
+				State string `json:"state"`
+				Ready bool   `json:"ready"`
+			} `json:"runtime"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode health JSON: %v\n%s", err, stdout.String())
+	}
+	if report.Status != "ok" || report.Scope != "running_app" || report.Command != "health" || !report.RunningServerChecked {
+		t.Fatalf("health report = %+v", report)
+	}
+	if report.Runtime.Status != "ok" || report.Runtime.Runtime.State != string(shunter.RuntimeStateReady) || !report.Runtime.Runtime.Ready {
+		t.Fatalf("runtime health = %+v", report.Runtime)
+	}
+}
+
+func TestDescribeCommandReadsRunningAppDiagnostics(t *testing.T) {
+	srv := runningAppProtocolTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/debug/shunter/runtime" {
+			t.Fatalf("request path = %q, want /debug/shunter/runtime", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(shunter.RuntimeDescription{
+			Module: shunter.ModuleDescription{
+				Name:    "hosted_chat",
+				Version: "v0.1.0",
+				Queries: []shunter.QueryDescription{{
+					Name: "recent_messages",
+				}},
+			},
+			Health: shunter.RuntimeHealth{
+				State: shunter.RuntimeStateReady,
+				Ready: true,
+			},
+		})
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"describe",
+		"--url", srv.httpURL() + "/subscribe",
+		"--format", "json",
+	})
+	if code != 0 {
+		t.Fatalf("describe exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("describe stderr = %s, want empty", stderr.String())
+	}
+	var report struct {
+		Status               string `json:"status"`
+		Scope                string `json:"scope"`
+		Command              string `json:"command"`
+		RunningServerChecked bool   `json:"running_server_checked"`
+		Runtime              struct {
+			Module struct {
+				Name    string `json:"Name"`
+				Version string `json:"Version"`
+				Queries []struct {
+					Name string `json:"name"`
+				} `json:"Queries"`
+			} `json:"Module"`
+			Health struct {
+				State string `json:"state"`
+				Ready bool   `json:"ready"`
+			} `json:"Health"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode describe JSON: %v\n%s", err, stdout.String())
+	}
+	if report.Status != "ok" || report.Scope != "running_app" || report.Command != "describe" || !report.RunningServerChecked {
+		t.Fatalf("describe report = %+v", report)
+	}
+	if report.Runtime.Module.Name != "hosted_chat" || report.Runtime.Module.Version != "v0.1.0" || len(report.Runtime.Module.Queries) != 1 {
+		t.Fatalf("runtime description = %+v", report.Runtime)
+	}
+}
+
 func TestRunningAppCommandsRejectLocalMisuseBeforeNetwork(t *testing.T) {
 	dir := t.TempDir()
 	contractPath := writeCLIContract(t, dir, "contract.json", runningAppContractFixture())

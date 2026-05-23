@@ -22,7 +22,9 @@ func TestHelpDocumentsAppOwnedContractExport(t *testing.T) {
 	assertContains(t, out, "Runtime.ExportContractJSON")
 	assertContains(t, out, "app-owned binary")
 	assertContains(t, out, "shunter describe --contract shunter.contract.json")
+	assertContains(t, out, "shunter describe --url http://127.0.0.1:3000")
 	assertContains(t, out, "shunter health --contract shunter.contract.json")
+	assertContains(t, out, "shunter health --url http://127.0.0.1:3000")
 	assertContains(t, out, "shunter contract validate --contract shunter.contract.json")
 	assertContains(t, out, "shunter contract assert --contract shunter.contract.json")
 	assertContains(t, out, "--section all|tables|reducers|queries|views|visibility")
@@ -243,7 +245,7 @@ func TestDescribeCommandRejectsInvalidInputsBeforeFileIO(t *testing.T) {
 			name:       "missing-contract-flag",
 			args:       []string{"describe", "--format", "json"},
 			wantCode:   2,
-			wantStderr: "--contract is required",
+			wantStderr: "provide exactly one of --contract or --url",
 		},
 		{
 			name:       "unexpected-arg",
@@ -392,7 +394,7 @@ func TestHealthCommandRejectsInvalidInputsBeforeFileIO(t *testing.T) {
 			name:       "missing-contract-flag",
 			args:       []string{"health", "--format", "json"},
 			wantCode:   2,
-			wantStderr: "--contract is required",
+			wantStderr: "provide exactly one of --contract or --url",
 		},
 		{
 			name:       "unexpected-arg",

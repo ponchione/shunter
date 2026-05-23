@@ -23,6 +23,7 @@ import (
 func main() {
 	cfg := shunter.ConfigFromEnv()
 	cfg.EnableProtocol = true
+	cfg.Observability.Diagnostics.MountHTTP = true
 	if cfg.DataDir == "" {
 		cfg.DataDir = "./data/myapp"
 	}
@@ -90,6 +91,12 @@ rtk go run ./cmd/shunter health --contract examples/hosted-chat/shunter.contract
 Call the running example server through the generic admin CLI:
 
 ```bash
+rtk go run ./cmd/shunter health \
+  --url http://127.0.0.1:3000
+
+rtk go run ./cmd/shunter describe \
+  --url http://127.0.0.1:3000
+
 rtk go run ./cmd/shunter call \
   --url http://127.0.0.1:3000 \
   --contract examples/hosted-chat/shunter.contract.json \
@@ -119,6 +126,8 @@ full assertion list.
 
 `shunter health --contract` validates the local contract artifact only. It
 does not check a running Shunter server or protocol endpoint.
+Use `shunter health --url` and `shunter describe --url` for live server
+diagnostics; the running app must mount diagnostics HTTP endpoints.
 
 Typecheck the frontend-shaped client:
 
