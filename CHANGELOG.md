@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added typed `protocolclient` reducer-call and parameterized declared-query
+  request helpers for future running-app admin commands.
 - Added `contractworkflow.EncodeProductValueArguments` for contract-schema JSON
   argument conversion directly to schema-aware BSATN bytes.
 - Added command-specific examples to `shunter contract assert --help`.

@@ -14,10 +14,14 @@ import (
 )
 
 var (
-	ErrTokenRequired     = errors.New("protocol client token is required")
-	ErrTimeout           = errors.New("protocol client timeout")
-	ErrUnexpectedMessage = errors.New("protocol client unexpected message")
-	ErrNonBinaryMessage  = errors.New("protocol client non-binary message")
+	ErrTokenRequired       = errors.New("protocol client token is required")
+	ErrTimeout             = errors.New("protocol client timeout")
+	ErrUnexpectedMessage   = errors.New("protocol client unexpected message")
+	ErrNonBinaryMessage    = errors.New("protocol client non-binary message")
+	ErrResponseMismatch    = errors.New("protocol client response mismatch")
+	ErrReducerFailed       = errors.New("protocol client reducer failed")
+	ErrDeclaredQueryFailed = errors.New("protocol client declared query failed")
+	ErrProtocolVersion     = errors.New("protocol client unsupported protocol version")
 )
 
 // Options configures a protocol WebSocket client connection.
