@@ -67,3 +67,12 @@ func DecodeQueryResponse(contract shunter.ModuleContract, name string, response 
 	table := response.Tables[0]
 	return DecodeQueryRows(contract, name, table.TableName, table.Rows)
 }
+
+// DecodeQueryResponseJSONRows decodes a declared-query response to JSON-ready rows.
+func DecodeQueryResponseJSONRows(contract shunter.ModuleContract, name string, response protocol.OneOffQueryResponse) ([]JSONRow, error) {
+	decoded, err := DecodeQueryResponse(contract, name, response)
+	if err != nil {
+		return nil, err
+	}
+	return DecodedQueryRowsToJSONRows(decoded)
+}

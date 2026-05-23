@@ -1045,6 +1045,47 @@ func TestDecodeQueryResponseRejectsUnexpectedTableCounts(t *testing.T) {
 	}
 }
 
+func TestDecodeQueryResponseJSONRowsComposesResponseDecodeAndJSONRendering(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name: "recent_messages",
+		RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "id", Type: "uint64"},
+			{Name: "body", Type: "string"},
+		}},
+		ResultShape: &shunter.ReadResultShape{Kind: shunter.ReadResultShapeTable, Table: "messages"},
+	}}
+	rowSchema, err := QueryRowSchema(contract, "recent_messages")
+	if err != nil {
+		t.Fatalf("QueryRowSchema returned error: %v", err)
+	}
+	columns, err := productColumnsForBSATN(rowSchema)
+	if err != nil {
+		t.Fatalf("productColumnsForBSATN returned error: %v", err)
+	}
+	rowList, err := protocol.EncodeProductRowsForColumns([]types.ProductValue{
+		{types.NewUint64(7), types.NewString("hello")},
+	}, columns)
+	if err != nil {
+		t.Fatalf("EncodeProductRowsForColumns returned error: %v", err)
+	}
+
+	rows, err := DecodeQueryResponseJSONRows(contract, "recent_messages", protocol.OneOffQueryResponse{
+		Tables: []protocol.OneOffTable{{TableName: "messages", Rows: rowList}},
+	})
+	if err != nil {
+		t.Fatalf("DecodeQueryResponseJSONRows returned error: %v", err)
+	}
+	out, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatalf("Marshal JSON rows returned error: %v", err)
+	}
+	want := `[{"body":"hello","id":7}]`
+	if string(out) != want {
+		t.Fatalf("JSON rows = %s, want %s", out, want)
+	}
+}
+
 func TestProductValueToJSONRowConvertsContractValues(t *testing.T) {
 	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
 		{Name: "ok", Type: "bool"},
