@@ -1266,6 +1266,55 @@ func TestDialAndExecuteDeclaredQueryClosesAfterMismatchedResponse(t *testing.T) 
 	}
 }
 
+func TestDialAndExecuteDeclaredQueryClosesAfterUnexpectedResponse(t *testing.T) {
+	closed := make(chan struct{}, 1)
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+
+		_, frame, err := ws.Read(r.Context())
+		if err != nil {
+			t.Errorf("server read client message: %v", err)
+			return
+		}
+		_, msg, err := protocol.DecodeClientMessage(frame)
+		if err != nil {
+			t.Errorf("DecodeClientMessage: %v", err)
+			return
+		}
+		if _, ok := msg.(protocol.DeclaredQueryMsg); !ok {
+			t.Errorf("client message = %T, want protocol.DeclaredQueryMsg", msg)
+			return
+		}
+		writeProtocolClientServerMessage(t, ws, protocol.TransactionUpdate{
+			Status:      protocol.StatusCommitted{},
+			ReducerCall: protocol.ReducerCallInfo{ReducerName: "send_message", RequestID: 99},
+		})
+
+		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		_, _, err = ws.Read(readCtx)
+		if err != nil {
+			closed <- struct{}{}
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _, err := DialAndExecuteDeclaredQuery(ctx, Options{URL: srv.wsURL(), Token: "operator-token"}, DeclaredQueryRequest{
+		Name: "recent_messages",
+	})
+	if !errors.Is(err, ErrUnexpectedMessage) {
+		t.Fatalf("DialAndExecuteDeclaredQuery error = %v, want ErrUnexpectedMessage", err)
+	}
+	select {
+	case <-closed:
+	case <-ctx.Done():
+		t.Fatalf("server did not observe client close after unexpected response: %v", ctx.Err())
+	}
+}
+
 func TestDialRejectsUnexpectedFirstMessage(t *testing.T) {
 	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		ws := acceptProtocolClientTestConn(t, w, r)
