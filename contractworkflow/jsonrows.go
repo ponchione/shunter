@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"strconv"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
@@ -97,9 +98,9 @@ func valueToJSON(column schema.ColumnSchema, value types.Value) (any, error) {
 	case types.KindUint32:
 		return value.AsUint32(), nil
 	case types.KindInt64:
-		return value.AsInt64(), nil
+		return strconv.FormatInt(value.AsInt64(), 10), nil
 	case types.KindUint64:
-		return value.AsUint64(), nil
+		return strconv.FormatUint(value.AsUint64(), 10), nil
 	case types.KindFloat32:
 		return value.AsFloat32(), nil
 	case types.KindFloat64:
@@ -121,13 +122,13 @@ func valueToJSON(column schema.ColumnSchema, value types.Value) (any, error) {
 		w0, w1, w2, w3 := value.AsUint256()
 		return unsignedWideString(w0, w1, w2, w3), nil
 	case types.KindTimestamp:
-		return value.AsTimestamp(), nil
+		return strconv.FormatInt(value.AsTimestamp(), 10), nil
 	case types.KindArrayString:
 		return value.AsArrayString(), nil
 	case types.KindUUID:
 		return value.UUIDString(), nil
 	case types.KindDuration:
-		return value.AsDurationMicros(), nil
+		return strconv.FormatInt(value.AsDurationMicros(), 10), nil
 	case types.KindJSON:
 		return json.RawMessage(value.AsJSON()), nil
 	default:

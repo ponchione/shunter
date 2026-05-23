@@ -750,7 +750,7 @@ func TestEncodeOptionalQueryArgumentsEncodesParameterizedQuery(t *testing.T) {
 	}
 }
 
-func TestEncodeOptionalQueryArgumentsPreservesEmptyParameterizedQuery(t *testing.T) {
+func TestEncodeOptionalQueryArgumentsTreatsEmptySchemaAsNoParameterQuery(t *testing.T) {
 	contract := workflowContractFixture()
 	contract.Queries = []shunter.QueryDescription{{
 		Name:       "all_messages",
@@ -761,11 +761,11 @@ func TestEncodeOptionalQueryArgumentsPreservesEmptyParameterizedQuery(t *testing
 	if err != nil {
 		t.Fatalf("EncodeOptionalQueryArguments returned error: %v", err)
 	}
-	if !hasArguments {
-		t.Fatal("EncodeOptionalQueryArguments hasArguments = false, want true")
+	if hasArguments {
+		t.Fatal("EncodeOptionalQueryArguments hasArguments = true, want false")
 	}
-	if len(encoded) != 0 {
-		t.Fatalf("encoded empty optional query arguments = %x, want empty BSATN row", encoded)
+	if encoded != nil {
+		t.Fatalf("EncodeOptionalQueryArguments encoded = %x, want nil", encoded)
 	}
 }
 
@@ -786,8 +786,16 @@ func TestEncodeOptionalQueryArgumentsRejectsMissingSchemaAndInvalidInput(t *test
 		t.Fatalf("missing query error = %v, want ErrSurfaceNotFound", err)
 	}
 	_, _, err = EncodeOptionalQueryArguments(contract, "history", []byte(`{}`), true)
+	if err != nil {
+		t.Fatalf("schema-less empty query arguments error = %v, want nil", err)
+	}
+	_, _, err = EncodeOptionalQueryArguments(contract, "history", []byte(`{"limit": 1}`), true)
+	if !errors.Is(err, ErrInvalidArgumentJSON) {
+		t.Fatalf("schema-less non-empty query arguments error = %v, want ErrInvalidArgumentJSON", err)
+	}
+	_, _, err = EncodeOptionalQueryArguments(contract, "recent_messages", nil, false)
 	if !errors.Is(err, ErrArgumentSchemaMissing) {
-		t.Fatalf("schema-less query error = %v, want ErrArgumentSchemaMissing", err)
+		t.Fatalf("missing query arguments error = %v, want ErrArgumentSchemaMissing", err)
 	}
 	_, _, err = EncodeOptionalQueryArguments(contract, "recent_messages", []byte(`{"limit": 300}`), true)
 	if !errors.Is(err, ErrInvalidArgumentJSON) {
@@ -1171,7 +1179,7 @@ func TestDecodeQueryResponseJSONRowsComposesResponseDecodeAndJSONRendering(t *te
 	if err != nil {
 		t.Fatalf("Marshal JSON rows returned error: %v", err)
 	}
-	want := `[{"body":"hello","id":7}]`
+	want := `[{"body":"hello","id":"7"}]`
 	if string(out) != want {
 		t.Fatalf("JSON rows = %s, want %s", out, want)
 	}
@@ -1212,7 +1220,7 @@ func TestDecodeQueryResponseJSONResultPreservesQueryMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal JSON result returned error: %v", err)
 	}
-	want := `{"name":"recent_messages","table_name":"messages","rows":[{"body":"hello","id":7}]}`
+	want := `{"name":"recent_messages","table_name":"messages","rows":[{"body":"hello","id":"7"}]}`
 	if string(out) != want {
 		t.Fatalf("JSON result = %s, want %s", out, want)
 	}
@@ -1243,7 +1251,7 @@ func TestProductValueToJSONRowConvertsContractValues(t *testing.T) {
 	}
 	row := types.ProductValue{
 		types.NewBool(true),
-		types.NewUint64(9),
+		types.NewUint64(^uint64(0)),
 		types.NewString("hello"),
 		types.NewBytes([]byte("hi")),
 		types.NewInt128(-1, ^uint64(0)),
@@ -1264,7 +1272,7 @@ func TestProductValueToJSONRowConvertsContractValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal JSON row returned error: %v", err)
 	}
-	want := `{"at":42,"blob":"aGk=","count":9,"duration":123,"label":"hello","maybe":null,"ok":true,"payload":{"a":true,"z":1},"request_id":"123e4567-e89b-12d3-a456-426614174000","tags":["go","ts"],"wide_signed":"-1","wide_unsigned":"18446744073709551616"}`
+	want := `{"at":"42","blob":"aGk=","count":"18446744073709551615","duration":"123","label":"hello","maybe":null,"ok":true,"payload":{"a":true,"z":1},"request_id":"123e4567-e89b-12d3-a456-426614174000","tags":["go","ts"],"wide_signed":"-1","wide_unsigned":"18446744073709551616"}`
 	if string(out) != want {
 		t.Fatalf("JSON row = %s, want %s", out, want)
 	}

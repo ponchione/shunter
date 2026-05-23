@@ -102,11 +102,20 @@ func EncodeOptionalQueryArguments(contract shunter.ModuleContract, name string, 
 	if !ok {
 		return nil, false, fmt.Errorf("%w: query %q", ErrSurfaceNotFound, strings.TrimSpace(name))
 	}
-	if !hasArguments {
+	if query.Parameters == nil || len(query.Parameters.Columns) == 0 {
+		if hasArguments {
+			fields, err := decodeArgumentObject(data)
+			if err != nil {
+				return nil, false, err
+			}
+			if len(fields) != 0 {
+				return nil, false, fmt.Errorf("%w: query %q does not accept arguments", ErrInvalidArgumentJSON, query.Name)
+			}
+		}
 		return nil, false, nil
 	}
-	if query.Parameters == nil {
-		return nil, false, fmt.Errorf("%w: query %q", ErrArgumentSchemaMissing, query.Name)
+	if !hasArguments {
+		return nil, false, fmt.Errorf("%w: query %q requires %d argument(s)", ErrArgumentSchemaMissing, query.Name, len(query.Parameters.Columns))
 	}
 	encoded, err := EncodeProductValueArguments(*query.Parameters, data)
 	if err != nil {

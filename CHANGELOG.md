@@ -6,6 +6,13 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 - Added `contractworkflow.JSONQueryRows` helpers for contract-aware
   declared-query JSON rows with query and table metadata.
+- Changed contract-aware declared-query JSON row rendering to emit `int64`,
+  `uint64`, `timestamp`, and `duration` values as decimal strings, matching the
+  generated TypeScript `bigint` surface without losing JSON precision.
+- Changed `contractworkflow.EncodeOptionalQueryArguments` to mirror runtime
+  declared-read parameter semantics: empty parameter schemas are treated as
+  no-parameter queries, and non-empty parameter schemas require supplied JSON
+  arguments.
 - Added `contractworkflow.DecodeQueryResponseJSONRows` to compose
   declared-query response decoding with contract-aware JSON row rendering.
 - Added `contractworkflow.ProductValueToJSONRow` and
