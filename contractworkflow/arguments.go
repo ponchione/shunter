@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"strconv"
+	"strings"
 
 	shunter "github.com/ponchione/shunter"
 	"github.com/ponchione/shunter/bsatn"
@@ -93,6 +94,25 @@ func EncodeQueryArguments(contract shunter.ModuleContract, name string, data []b
 		return nil, err
 	}
 	return EncodeProductValueArguments(product, data)
+}
+
+// EncodeOptionalQueryArguments validates a declared query and encodes JSON parameters when present.
+func EncodeOptionalQueryArguments(contract shunter.ModuleContract, name string, data []byte, hasArguments bool) ([]byte, bool, error) {
+	query, ok := FindQuery(contract, name)
+	if !ok {
+		return nil, false, fmt.Errorf("%w: query %q", ErrSurfaceNotFound, strings.TrimSpace(name))
+	}
+	if !hasArguments {
+		return nil, false, nil
+	}
+	if query.Parameters == nil {
+		return nil, false, fmt.Errorf("%w: query %q", ErrArgumentSchemaMissing, query.Name)
+	}
+	encoded, err := EncodeProductValueArguments(*query.Parameters, data)
+	if err != nil {
+		return nil, false, err
+	}
+	return encoded, true, nil
 }
 
 // EncodeSurfaceArguments encodes JSON arguments for a named reducer or declared-query surface.

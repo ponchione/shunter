@@ -704,6 +704,97 @@ func TestEncodeQueryArgumentsUsesNamedContractSurface(t *testing.T) {
 	}
 }
 
+func TestEncodeOptionalQueryArgumentsPreservesNoParameterQuery(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{Name: "history"}}
+
+	encoded, hasArguments, err := EncodeOptionalQueryArguments(contract, " history ", nil, false)
+	if err != nil {
+		t.Fatalf("EncodeOptionalQueryArguments returned error: %v", err)
+	}
+	if hasArguments {
+		t.Fatal("EncodeOptionalQueryArguments hasArguments = true, want false")
+	}
+	if encoded != nil {
+		t.Fatalf("EncodeOptionalQueryArguments encoded = %x, want nil", encoded)
+	}
+}
+
+func TestEncodeOptionalQueryArgumentsEncodesParameterizedQuery(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name: "recent_messages",
+		Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "topic", Type: "string"},
+			{Name: "limit", Type: "uint32"},
+		}},
+	}}
+
+	encoded, hasArguments, err := EncodeOptionalQueryArguments(contract, " recent_messages ", []byte(`{"limit": 25, "topic": "general"}`), true)
+	if err != nil {
+		t.Fatalf("EncodeOptionalQueryArguments returned error: %v", err)
+	}
+	if !hasArguments {
+		t.Fatal("EncodeOptionalQueryArguments hasArguments = false, want true")
+	}
+	args, err := QueryArgumentSchema(contract, "recent_messages")
+	if err != nil {
+		t.Fatalf("QueryArgumentSchema returned error: %v", err)
+	}
+	decoded, err := bsatn.DecodeProductValueFromBytes(encoded, productTableSchema(t, "recent_messages_args", args))
+	if err != nil {
+		t.Fatalf("DecodeProductValueFromBytes returned error: %v", err)
+	}
+	if len(decoded) != 2 || decoded[0].AsString() != "general" || decoded[1].AsUint32() != 25 {
+		t.Fatalf("decoded optional query arguments = %+v", decoded)
+	}
+}
+
+func TestEncodeOptionalQueryArgumentsPreservesEmptyParameterizedQuery(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name:       "all_messages",
+		Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{}},
+	}}
+
+	encoded, hasArguments, err := EncodeOptionalQueryArguments(contract, "all_messages", []byte(`{}`), true)
+	if err != nil {
+		t.Fatalf("EncodeOptionalQueryArguments returned error: %v", err)
+	}
+	if !hasArguments {
+		t.Fatal("EncodeOptionalQueryArguments hasArguments = false, want true")
+	}
+	if len(encoded) != 0 {
+		t.Fatalf("encoded empty optional query arguments = %x, want empty BSATN row", encoded)
+	}
+}
+
+func TestEncodeOptionalQueryArgumentsRejectsMissingSchemaAndInvalidInput(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{
+		{Name: "history"},
+		{
+			Name: "recent_messages",
+			Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+				{Name: "limit", Type: "uint8"},
+			}},
+		},
+	}
+
+	_, _, err := EncodeOptionalQueryArguments(contract, "missing", nil, false)
+	if !errors.Is(err, ErrSurfaceNotFound) {
+		t.Fatalf("missing query error = %v, want ErrSurfaceNotFound", err)
+	}
+	_, _, err = EncodeOptionalQueryArguments(contract, "history", []byte(`{}`), true)
+	if !errors.Is(err, ErrArgumentSchemaMissing) {
+		t.Fatalf("schema-less query error = %v, want ErrArgumentSchemaMissing", err)
+	}
+	_, _, err = EncodeOptionalQueryArguments(contract, "recent_messages", []byte(`{"limit": 300}`), true)
+	if !errors.Is(err, ErrInvalidArgumentJSON) {
+		t.Fatalf("invalid query arguments error = %v, want ErrInvalidArgumentJSON", err)
+	}
+}
+
 func TestEncodeNamedArgumentsPreservesStructuredErrors(t *testing.T) {
 	contract := workflowContractFixture()
 	contract.Schema.Reducers = []schema.ReducerExport{{Name: "send_message"}}
