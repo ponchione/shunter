@@ -7,6 +7,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added first-class procedure declarations, local and WebSocket procedure
   calls, contract assertions, TypeScript generated procedure helpers, and a
   hosted-chat procedure gate.
+- Fixed the TypeScript client procedure caller to resolve with the procedure
+  result bytes instead of the full protocol response frame.
 - Added running-app `shunter health --url` and `shunter describe --url`
   diagnostics checks, including `/subscribe` URL rewriting, query/fragment
   stripping, and structured failed-health output from `/healthz`; extended the

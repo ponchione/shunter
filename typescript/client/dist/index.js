@@ -644,7 +644,7 @@ export function createShunterClient(options) {
             }));
             return;
         }
-        pending.resolve(response.rawFrame);
+        pending.resolve(response.result);
     };
     const cloneRawSubscriptionUpdate = (update) => ({
         queryId: update.queryId,
@@ -1598,7 +1598,7 @@ export function createShunterClient(options) {
             if (state.status !== "connected" || activeSocket === undefined) {
                 throw new ShunterClosedClientError("Cannot call a procedure before the Shunter client is connected.");
             }
-            assertDeclaredReadParametersSupported(state.metadata.subprotocol, state.metadata.protocol);
+            assertProcedureCallsSupported(state.metadata.subprotocol, state.metadata.protocol);
             const request = encodeProcedureCallRequest(name, args, {
                 ...options,
                 requestId: options.messageId === undefined
@@ -3156,6 +3156,16 @@ function assertDeclaredReadParametersSupported(selectedSubprotocol, expected) {
     }
     throw new ShunterProtocolMismatchError("The negotiated Shunter WebSocket subprotocol does not support parameterized declared reads.", {
         code: "declared_read_parameters_unsupported_subprotocol",
+        expected,
+        receivedSubprotocol: selectedSubprotocol,
+    });
+}
+function assertProcedureCallsSupported(selectedSubprotocol, expected) {
+    if (selectedSubprotocol === SHUNTER_SUBPROTOCOL_V2) {
+        return;
+    }
+    throw new ShunterProtocolMismatchError("The negotiated Shunter WebSocket subprotocol does not support procedure calls.", {
+        code: "procedure_calls_unsupported_subprotocol",
         expected,
         receivedSubprotocol: selectedSubprotocol,
     });

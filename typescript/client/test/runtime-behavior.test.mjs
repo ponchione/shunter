@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY,
   SHUNTER_CLIENT_MESSAGE_CALL_REDUCER,
+  SHUNTER_CLIENT_MESSAGE_CALL_PROCEDURE,
   SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY,
   SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY_WITH_PARAMETERS,
   SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_SINGLE,
@@ -10,6 +11,7 @@ import {
   SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_SINGLE,
   SHUNTER_CLIENT_MESSAGE_UNSUBSCRIBE_MULTI,
   SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE,
+  SHUNTER_SERVER_MESSAGE_PROCEDURE_RESPONSE,
   SHUNTER_SERVER_MESSAGE_SUBSCRIBE_SINGLE_APPLIED,
   SHUNTER_SERVER_MESSAGE_SUBSCRIBE_MULTI_APPLIED,
   SHUNTER_SERVER_MESSAGE_SUBSCRIPTION_ERROR,
@@ -42,6 +44,7 @@ import {
   decodeDeclaredQueryResult,
   decodeIdentityTokenFrame,
   decodeOneOffQueryResponseFrame,
+  decodeProcedureResponseFrame,
   decodeRawDeclaredQueryResult,
   decodeReducerCallResult,
   decodeRowList,
@@ -56,6 +59,7 @@ import {
   encodeBsatnProduct,
   encodeDeclaredQueryRequest,
   encodeDeclaredViewSubscriptionRequest,
+  encodeProcedureCallRequest,
   encodeReducerCallRequest,
   encodeSubscribeSingleRequest,
   encodeTableSubscriptionRequest,
@@ -353,6 +357,43 @@ function subscribeSingleAppliedFrameFor({
   return frame;
 }
 
+function procedureResponseFrameFor({
+  messageId,
+  result,
+  error,
+  durationMicros = 0x1112131415161718n,
+}) {
+  const errorBytes = error === undefined ? undefined : new TextEncoder().encode(error);
+  const frame = new Uint8Array(
+    1 +
+    4 + messageId.length +
+    1 + (errorBytes === undefined ? 0 : 4 + errorBytes.length) +
+    4 + result.length +
+    8,
+  );
+  let offset = 0;
+  frame[offset] = SHUNTER_SERVER_MESSAGE_PROCEDURE_RESPONSE;
+  offset += 1;
+  offset = writeUint32LE(frame, offset, messageId.length);
+  frame.set(messageId, offset);
+  offset += messageId.length;
+  if (errorBytes === undefined) {
+    frame[offset] = 0;
+    offset += 1;
+  } else {
+    frame[offset] = 1;
+    offset += 1;
+    offset = writeUint32LE(frame, offset, errorBytes.length);
+    frame.set(errorBytes, offset);
+    offset += errorBytes.length;
+  }
+  offset = writeUint32LE(frame, offset, result.length);
+  frame.set(result, offset);
+  offset += result.length;
+  new DataView(frame.buffer).setBigInt64(offset, durationMicros, true);
+  return frame;
+}
+
 function unsubscribeSingleAppliedFrameFor({ requestId, queryId }) {
   const frame = new Uint8Array(1 + 4 + 8 + 4 + 1);
   let offset = 0;
@@ -540,6 +581,20 @@ assert.deepEqual(
 assert.throws(
   () => encodeDeclaredQueryRequest("recent_users", { params: [0x01] }),
   ShunterValidationError,
+);
+
+const procedureArgs = new Uint8Array([0xaa, 0xbb]);
+const encodedProcedure = encodeProcedureCallRequest("ping", procedureArgs, {
+  messageId: new Uint8Array([0x09, 0x08]),
+});
+procedureArgs[0] = 0xff;
+assert.equal(encodedProcedure.name, "ping");
+assert.deepEqual(encodedProcedure.messageId, new Uint8Array([0x09, 0x08]));
+assert.deepEqual(encodedProcedure.args, new Uint8Array([0xaa, 0xbb]));
+assert.equal(encodedProcedure.frame[0], SHUNTER_CLIENT_MESSAGE_CALL_PROCEDURE);
+assert.deepEqual(
+  encodedProcedure.frame,
+  bytesFromHex("0b0200000009080400000070696e6702000000aabb"),
 );
 
 const encodedSubscribeSingle = encodeSubscribeSingleRequest("SELECT * FROM users", {
@@ -774,6 +829,25 @@ assert.throws(
   () => decodeRawDeclaredQueryResult("recent_users", oneOffErrorFrame),
   ShunterValidationError,
 );
+
+const procedureSuccessFrame = procedureResponseFrameFor({
+  messageId: new Uint8Array([0x03, 0x04]),
+  result: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
+});
+const procedureSuccess = decodeProcedureResponseFrame(procedureSuccessFrame);
+assert.equal(procedureSuccessFrame[0], SHUNTER_SERVER_MESSAGE_PROCEDURE_RESPONSE);
+assert.deepEqual(procedureSuccess.messageId, new Uint8Array([0x03, 0x04]));
+assert.equal(procedureSuccess.error, undefined);
+assert.deepEqual(procedureSuccess.result, new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
+assert.equal(procedureSuccess.totalHostExecutionDuration, 0x1112131415161718n);
+
+const procedureError = decodeProcedureResponseFrame(procedureResponseFrameFor({
+  messageId: new Uint8Array([0x05, 0x06]),
+  error: "procedure denied",
+  result: new Uint8Array(),
+}));
+assert.deepEqual(procedureError.messageId, new Uint8Array([0x05, 0x06]));
+assert.equal(procedureError.error, "procedure denied");
 
 const subscribeSingleAppliedFrame = bytesFromHex(
   "02040302010807060504030201141312110500000075736572730f000000020000000200000001020100000003",
@@ -1434,6 +1508,22 @@ assert.equal(metadata.identityToken, "minted-token");
 assert.deepEqual([...metadata.identity.slice(0, 3)], [1, 2, 3]);
 assert.deepEqual([...metadata.connectionId.slice(0, 3)], [0xa0, 0xa1, 0xa2]);
 assert.equal(client.state.status, "connected");
+
+const procedureCall = client.callProcedure("ping", new Uint8Array([0xaa]), {
+  requestId: 0x01020304,
+});
+assert.deepEqual(
+  sockets[0].sent.at(-1),
+  encodeProcedureCallRequest("ping", new Uint8Array([0xaa]), {
+    requestId: 0x01020304,
+  }).frame,
+);
+sockets[0].message(procedureResponseFrameFor({
+  messageId: new Uint8Array([0x04, 0x03, 0x02, 0x01]),
+  result: new Uint8Array([0xde, 0xad]),
+}).buffer);
+assert.deepEqual(await procedureCall, new Uint8Array([0xde, 0xad]));
+sockets[0].sent.length = 0;
 
 const concurrentConnectSockets = [];
 const concurrentConnectClient = createShunterClient({

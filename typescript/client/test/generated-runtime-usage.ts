@@ -111,6 +111,8 @@ import type {
   MessagesByTopicQueryRow,
   MessagesByTopicQueryRows,
   MessagesRow,
+  ProcedureCaller,
+  ProcedureName,
   RecentMessagesQueryRow,
   RecentMessagesQueryRows,
   ReducerCaller,
@@ -196,6 +198,7 @@ const client = createShunterClient({
 
 async function exerciseGeneratedBindings(): Promise<void> {
   const generatedClientReducerCaller: ReducerCaller = client.callReducer;
+  const generatedClientProcedureCaller: ProcedureCaller = client.callProcedure;
   const generatedClientDeclaredQueryRunner: DeclaredQueryRunner = client.runDeclaredQuery;
   const generatedClientDeclaredViewSubscriber: DeclaredViewSubscriber = client.subscribeDeclaredView;
   const generatedClientDeclaredViewHandleSubscriber: DeclaredViewHandleSubscriber<ExecutableViewName> =
@@ -539,10 +542,12 @@ async function exerciseGeneratedBindings(): Promise<void> {
     TableName,
     TableRows,
     ReducerName,
+    ProcedureName,
     ExecutableQueryName,
     ExecutableViewName
   > = {
     callReducer: generatedClientReducerCaller,
+    callProcedure: generatedClientProcedureCaller,
     runDeclaredQuery: generatedClientDeclaredQueryRunner,
     subscribeDeclaredView: generatedClientDeclaredViewSubscriber,
     subscribeTable: generatedClientTableSubscriber,
