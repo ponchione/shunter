@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added `contractworkflow.DecodeQueryRows` and `QueryRowSchema` for decoding
+  declared-query RowList payloads through local contract row metadata.
 - Added `contractworkflow.EncodeSurfaceArguments` for future running-app CLI
   code to select reducer or declared-query JSON argument encoding by contract
   surface kind.

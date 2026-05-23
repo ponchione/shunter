@@ -13,6 +13,7 @@ import (
 	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/codegen"
 	"github.com/ponchione/shunter/contractdiff"
+	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
@@ -417,6 +418,40 @@ func TestQueryArgumentSchemaRejectsUnknownAndSchemaLessQueries(t *testing.T) {
 	_, err = QueryArgumentSchema(contract, "history")
 	if !errors.Is(err, ErrArgumentSchemaMissing) {
 		t.Fatalf("QueryArgumentSchema schema-less error = %v, want ErrArgumentSchemaMissing", err)
+	}
+}
+
+func TestQueryRowSchemaSelectsContractResultRows(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name: "recent_messages",
+		RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "id", Type: "uint64"},
+			{Name: "body", Type: "string"},
+		}},
+	}}
+
+	rows, err := QueryRowSchema(contract, " recent_messages ")
+	if err != nil {
+		t.Fatalf("QueryRowSchema returned error: %v", err)
+	}
+	if len(rows.Columns) != 2 || rows.Columns[0].Name != "id" || rows.Columns[1].Name != "body" {
+		t.Fatalf("QueryRowSchema rows = %+v", rows)
+	}
+}
+
+func TestQueryRowSchemaRejectsUnknownAndSchemaLessQueries(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{Name: "history"}}
+
+	_, err := QueryRowSchema(contract, "missing")
+	if !errors.Is(err, ErrSurfaceNotFound) {
+		t.Fatalf("QueryRowSchema missing error = %v, want ErrSurfaceNotFound", err)
+	}
+
+	_, err = QueryRowSchema(contract, "history")
+	if !errors.Is(err, ErrResultSchemaMissing) {
+		t.Fatalf("QueryRowSchema schema-less error = %v, want ErrResultSchemaMissing", err)
 	}
 }
 
@@ -838,6 +873,110 @@ func TestEncodeSurfaceArgumentsRejectsUnsupportedKind(t *testing.T) {
 	_, err := EncodeSurfaceArguments(workflowContractFixture(), ArgumentSurfaceKind("view"), "history", []byte(`{}`))
 	if !errors.Is(err, ErrUnsupportedSurfaceKind) {
 		t.Fatalf("unsupported kind error = %v, want ErrUnsupportedSurfaceKind", err)
+	}
+}
+
+func TestDecodeQueryRowsUsesContractRowSchema(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name: "recent_messages",
+		RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "id", Type: "uint64"},
+			{Name: "body", Type: "string"},
+		}},
+		ResultShape: &shunter.ReadResultShape{Kind: shunter.ReadResultShapeTable, Table: "messages"},
+	}}
+	rowSchema, err := QueryRowSchema(contract, "recent_messages")
+	if err != nil {
+		t.Fatalf("QueryRowSchema returned error: %v", err)
+	}
+	columns, err := productColumnsForBSATN(rowSchema)
+	if err != nil {
+		t.Fatalf("productColumnsForBSATN returned error: %v", err)
+	}
+	rowList, err := protocol.EncodeProductRowsForColumns([]types.ProductValue{
+		{types.NewUint64(7), types.NewString("hello")},
+		{types.NewUint64(8), types.NewString("bye")},
+	}, columns)
+	if err != nil {
+		t.Fatalf("EncodeProductRowsForColumns returned error: %v", err)
+	}
+
+	decoded, err := DecodeQueryRows(contract, " recent_messages ", "messages", rowList)
+	if err != nil {
+		t.Fatalf("DecodeQueryRows returned error: %v", err)
+	}
+	if decoded.Name != "recent_messages" || decoded.TableName != "messages" {
+		t.Fatalf("decoded metadata = %+v", decoded)
+	}
+	if len(decoded.Columns) != 2 || decoded.Columns[0].Name != "id" || decoded.Columns[1].Name != "body" {
+		t.Fatalf("decoded columns = %+v", decoded.Columns)
+	}
+	if len(decoded.Rows) != 2 ||
+		decoded.Rows[0][0].AsUint64() != 7 ||
+		decoded.Rows[0][1].AsString() != "hello" ||
+		decoded.Rows[1][0].AsUint64() != 8 ||
+		decoded.Rows[1][1].AsString() != "bye" {
+		t.Fatalf("decoded rows = %+v", decoded.Rows)
+	}
+}
+
+func TestDecodeQueryRowsSupportsEmptyRowList(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name: "recent_messages",
+		RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "id", Type: "uint64"},
+		}},
+		ResultShape: &shunter.ReadResultShape{Kind: shunter.ReadResultShapeTable, Table: "messages"},
+	}}
+
+	decoded, err := DecodeQueryRows(contract, "recent_messages", "messages", protocol.EncodeRowList(nil))
+	if err != nil {
+		t.Fatalf("DecodeQueryRows returned error: %v", err)
+	}
+	if len(decoded.Rows) != 0 {
+		t.Fatalf("decoded empty RowList rows = %+v, want none", decoded.Rows)
+	}
+}
+
+func TestDecodeQueryRowsPreservesStructuredErrors(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name: "recent_messages",
+		RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "id", Type: "uint64"},
+		}},
+		ResultShape: &shunter.ReadResultShape{Kind: shunter.ReadResultShapeTable, Table: "messages"},
+	}}
+
+	_, err := DecodeQueryRows(contract, "missing", "messages", protocol.EncodeRowList(nil))
+	if !errors.Is(err, ErrSurfaceNotFound) {
+		t.Fatalf("DecodeQueryRows missing error = %v, want ErrSurfaceNotFound", err)
+	}
+
+	schemaLess := workflowContractFixture()
+	schemaLess.Queries = []shunter.QueryDescription{{Name: "history"}}
+	_, err = DecodeQueryRows(schemaLess, "history", "messages", protocol.EncodeRowList(nil))
+	if !errors.Is(err, ErrResultSchemaMissing) {
+		t.Fatalf("DecodeQueryRows schema-less error = %v, want ErrResultSchemaMissing", err)
+	}
+
+	_, err = DecodeQueryRows(contract, "recent_messages", "other", protocol.EncodeRowList(nil))
+	if !errors.Is(err, ErrResultTableMismatch) {
+		t.Fatalf("DecodeQueryRows table mismatch error = %v, want ErrResultTableMismatch", err)
+	}
+
+	_, err = DecodeQueryRows(contract, "recent_messages", "messages", []byte{1, 0, 0})
+	if !errors.Is(err, protocol.ErrMalformedMessage) {
+		t.Fatalf("DecodeQueryRows malformed RowList error = %v, want protocol.ErrMalformedMessage", err)
+	}
+
+	rowList := protocol.EncodeRowList([][]byte{{0xff}})
+	_, err = DecodeQueryRows(contract, "recent_messages", "messages", rowList)
+	var typeTagErr *bsatn.TypeTagMismatchError
+	if !errors.As(err, &typeTagErr) {
+		t.Fatalf("DecodeQueryRows malformed row error = %v, want bsatn.TypeTagMismatchError", err)
 	}
 }
 

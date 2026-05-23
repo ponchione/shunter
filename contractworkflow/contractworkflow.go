@@ -26,6 +26,8 @@ var (
 	ErrRuntimeRequired       = errors.New("contract workflow runtime is required")
 	ErrSurfaceNotFound       = errors.New("contract surface not found")
 	ErrArgumentSchemaMissing = errors.New("contract argument schema missing")
+	ErrResultSchemaMissing   = errors.New("contract result schema missing")
+	ErrResultTableMismatch   = errors.New("contract result table mismatch")
 
 	syncDir = atomicfile.SyncDir
 )
@@ -229,6 +231,18 @@ func QueryArgumentSchema(contract shunter.ModuleContract, name string) (schema.P
 		return schema.ProductSchemaExport{}, fmt.Errorf("%w: query %q", ErrArgumentSchemaMissing, query.Name)
 	}
 	return *query.Parameters, nil
+}
+
+// QueryRowSchema returns the exported result row schema for declared query name.
+func QueryRowSchema(contract shunter.ModuleContract, name string) (schema.ProductSchemaExport, error) {
+	query, ok := FindQuery(contract, name)
+	if !ok {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: query %q", ErrSurfaceNotFound, strings.TrimSpace(name))
+	}
+	if query.RowSchema == nil {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: query %q", ErrResultSchemaMissing, query.Name)
+	}
+	return *query.RowSchema, nil
 }
 
 // FormatDiff renders a contract diff report in text or JSON form.
