@@ -13,6 +13,7 @@ import (
 	"github.com/ponchione/shunter/codegen"
 	"github.com/ponchione/shunter/contractdiff"
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/types"
 )
 
 func TestCompareFilesReturnsDeterministicContractChanges(t *testing.T) {
@@ -415,6 +416,108 @@ func TestQueryArgumentSchemaRejectsUnknownAndSchemaLessQueries(t *testing.T) {
 	_, err = QueryArgumentSchema(contract, "history")
 	if !errors.Is(err, ErrArgumentSchemaMissing) {
 		t.Fatalf("QueryArgumentSchema schema-less error = %v, want ErrArgumentSchemaMissing", err)
+	}
+}
+
+func TestProductValueFromJSONDecodesSchemaOrderedValues(t *testing.T) {
+	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+		{Name: "id", Type: "uint64"},
+		{Name: "body", Type: "string"},
+		{Name: "published", Type: "bool"},
+		{Name: "score", Type: "float64"},
+		{Name: "tags", Type: "arrayString"},
+		{Name: "payload", Type: "json"},
+		{Name: "blob", Type: "bytes"},
+		{Name: "maybe", Type: "string", Nullable: true},
+		{Name: "created_at", Type: "timestamp"},
+		{Name: "request_id", Type: "uuid"},
+	}}
+
+	row, err := ProductValueFromJSON(product, []byte(`{
+		"request_id": "123e4567-e89b-12d3-a456-426614174000",
+		"created_at": 42,
+		"maybe": null,
+		"blob": "aGk=",
+		"payload": {"z": 1, "a": true},
+		"tags": ["go", "ts"],
+		"score": 9.5,
+		"published": true,
+		"body": "hello",
+		"id": 7
+	}`))
+	if err != nil {
+		t.Fatalf("ProductValueFromJSON returned error: %v", err)
+	}
+	if len(row) != len(product.Columns) {
+		t.Fatalf("ProductValueFromJSON row length = %d, want %d", len(row), len(product.Columns))
+	}
+	if row[0].Kind() != types.KindUint64 || row[0].AsUint64() != 7 {
+		t.Fatalf("id value = %+v", row[0])
+	}
+	if row[1].Kind() != types.KindString || row[1].AsString() != "hello" {
+		t.Fatalf("body value = %+v", row[1])
+	}
+	if row[2].Kind() != types.KindBool || !row[2].AsBool() {
+		t.Fatalf("published value = %+v", row[2])
+	}
+	if row[3].Kind() != types.KindFloat64 || row[3].AsFloat64() != 9.5 {
+		t.Fatalf("score value = %+v", row[3])
+	}
+	if got := row[4].AsArrayString(); len(got) != 2 || got[0] != "go" || got[1] != "ts" {
+		t.Fatalf("tags value = %+v", got)
+	}
+	if got := string(row[5].AsJSON()); got != `{"a":true,"z":1}` {
+		t.Fatalf("payload JSON = %s", got)
+	}
+	if got := string(row[6].AsBytes()); got != "hi" {
+		t.Fatalf("blob value = %q", got)
+	}
+	if !row[7].IsNull() || row[7].Kind() != types.KindString {
+		t.Fatalf("nullable value = %+v", row[7])
+	}
+	if row[8].Kind() != types.KindTimestamp || row[8].AsTimestamp() != 42 {
+		t.Fatalf("created_at value = %+v", row[8])
+	}
+	if row[9].Kind() != types.KindUUID || row[9].UUIDString() != "123e4567-e89b-12d3-a456-426614174000" {
+		t.Fatalf("request_id value = %+v", row[9])
+	}
+}
+
+func TestProductValueFromJSONRejectsInvalidArgumentObjects(t *testing.T) {
+	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+		{Name: "id", Type: "uint8"},
+		{Name: "body", Type: "string"},
+	}}
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "non-object", raw: `[]`},
+		{name: "unknown field", raw: `{"id": 1, "body": "hello", "extra": true}`},
+		{name: "missing required", raw: `{"id": 1}`},
+		{name: "duplicate field", raw: `{"id": 1, "id": 2, "body": "hello"}`},
+		{name: "type mismatch", raw: `{"id": 1, "body": 2}`},
+		{name: "integer range", raw: `{"id": 300, "body": "hello"}`},
+		{name: "null non-nullable", raw: `{"id": null, "body": "hello"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ProductValueFromJSON(product, []byte(tc.raw))
+			if !errors.Is(err, ErrInvalidArgumentJSON) {
+				t.Fatalf("ProductValueFromJSON error = %v, want ErrInvalidArgumentJSON", err)
+			}
+		})
+	}
+}
+
+func TestProductValueFromJSONRejectsUnsupportedContractTypes(t *testing.T) {
+	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+		{Name: "value", Type: "not-a-kind"},
+	}}
+
+	_, err := ProductValueFromJSON(product, []byte(`{"value": 1}`))
+	if !errors.Is(err, ErrUnsupportedArgumentType) {
+		t.Fatalf("ProductValueFromJSON unsupported type error = %v, want ErrUnsupportedArgumentType", err)
 	}
 }
 
