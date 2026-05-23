@@ -143,7 +143,7 @@ func (c *Client) Read(ctx context.Context) (uint8, any, error) {
 	}
 	tag, msg, err := protocol.DecodeServerMessage(frame)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, fmt.Errorf("%w: %w", ErrUnexpectedMessage, err)
 	}
 	return tag, msg, nil
 }

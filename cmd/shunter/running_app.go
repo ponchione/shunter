@@ -335,11 +335,11 @@ func (f runningAppFlags) token() (string, error) {
 		}
 		return token, nil
 	}
-	if f.allowDevAnonymousValue() {
-		return "", nil
-	}
 	if token := strings.TrimSpace(os.Getenv("SHUNTER_TOKEN")); token != "" {
 		return token, nil
+	}
+	if f.allowDevAnonymousValue() {
+		return "", nil
 	}
 	return "", errRunningAppMissingToken
 }

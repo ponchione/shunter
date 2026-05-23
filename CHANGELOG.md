@@ -7,6 +7,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added `shunter call` and `shunter query` for contract-validated reducer calls
   and declared-query reads against running app servers over the Shunter
   WebSocket protocol.
+- Fixed running-app CLI credential precedence so `SHUNTER_TOKEN` is still used
+  when `--allow-dev-anonymous` is present; the anonymous mode is only used when
+  no token source resolves.
 - Added explicit `--allow-dev-anonymous` support for running-app CLI commands
   and `protocolclient.Options.AllowAnonymous` for local dev-auth workflows
   without silently weakening token-required admin defaults.

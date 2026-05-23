@@ -1358,6 +1358,28 @@ func TestDialRejectsUnexpectedFirstMessage(t *testing.T) {
 	}
 }
 
+func TestDialClassifiesMalformedIdentityFrameAsUnexpectedMessage(t *testing.T) {
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := ws.Write(ctx, websocket.MessageBinary, []byte{protocol.TagIdentityToken}); err != nil {
+			t.Fatalf("server write malformed identity: %v", err)
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _, err := Dial(ctx, Options{URL: srv.wsURL(), Token: "operator-token"})
+	if !errors.Is(err, ErrUnexpectedMessage) {
+		t.Fatalf("Dial malformed frame error = %v, want ErrUnexpectedMessage", err)
+	}
+	if !errors.Is(err, protocol.ErrMalformedMessage) {
+		t.Fatalf("Dial malformed frame error = %v, want protocol.ErrMalformedMessage", err)
+	}
+}
+
 type protocolClientHTTPServer struct {
 	*httptest.Server
 }

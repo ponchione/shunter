@@ -118,9 +118,9 @@ on dev anonymous auth for operator writes.
 - `SHUNTER_TOKEN` as the environment fallback.
 - `--allow-dev-anonymous` for explicit tokenless development connections only.
 
-When multiple sources are supplied, command-line flags should win over the
-environment. Errors should say that a token is required for running-app admin
-commands.
+When multiple sources are supplied, command-line token sources win over the
+environment, and any resolved token wins over `--allow-dev-anonymous`. Errors
+should say that a token is required for running-app admin commands.
 
 `cmd/shunter` resolves the credential source and passes only the selected token
 to the client package. The client package attaches the token using
@@ -251,8 +251,10 @@ Do not include these in the first implementation:
 - Contract-driven JSON-to-product encoding tests live in `contractworkflow`.
 - `protocolclient` covers explicit token handling, anonymous opt-in, timeout
   classification, reducer calls, and declared-query responses.
-- `cmd/shunter` tests cover token sources, missing tokens, unknown names,
-  malformed JSON, JSON output, file-backed args, and query row decoding.
+- `cmd/shunter` tests cover token source precedence, development anonymous
+  opt-in, missing tokens, unknown names, malformed JSON, argument source
+  exclusivity, raw hex args, JSON output, file-backed args, runtime reducer and
+  query errors, malformed protocol responses, and query row decoding.
 - The hosted-chat gate starts a real example server, runs one reducer call, and
   runs one declared query.
 

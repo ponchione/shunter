@@ -142,6 +142,6 @@ rtk ./scripts/hosted-chat-gate.sh
 
 It runs the Go example tests, builds the server, exports and describes the
 contract, asserts contract-local surface counts, validates the contract
-artifact, checks contract-local health, starts the example server, runs one
-CLI reducer call and declared query against it, regenerates TypeScript, and
-typechecks the frontend example.
+artifact, checks contract-local health, starts the example server on an
+ephemeral local port, runs one CLI reducer call and declared query against it,
+regenerates TypeScript, and typechecks the frontend example.
