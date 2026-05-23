@@ -7,6 +7,10 @@ the app-author documentation in `docs/`.
 ## Contents
 
 - `dependency-considerations.md` - dependency policy and dependency decisions.
+- `hosted-app-phase1-agent-prompt.md` - next-agent implementation prompt for
+  Phase 1 hosted app shape work.
+- `hosted-backend-roadmap.md` - product direction and capability roadmap for
+  making Shunter a Go-first backend/database runtime.
 - `release-qualification.md` - durable release qualification evidence ledger
   and current minimum command set.
 - `shunter-design-decisions.md` - consolidated implementation-facing design
