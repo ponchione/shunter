@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Fixed event-table metadata preservation in contract-derived schema lookups and
+  startup snapshot compatibility checks.
 - Fixed event-table subscription evaluation so transient inserts participate in
   joins, aggregates, multi-table deltas, and fan-out delivery even though the
   rows are not retained in committed snapshots.

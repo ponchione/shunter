@@ -33,6 +33,8 @@ const (
 	maxSnapshotStringBytes       = 1 << 20
 )
 
+var schemaSnapshotEventFlagsMagic = [4]byte{'E', 'V', 'T', '1'}
+
 type ErrSnapshotHashMismatch = SnapshotHashMismatchError
 
 func ComputeSnapshotHash(data []byte) [32]byte {
@@ -120,6 +122,24 @@ func EncodeSchemaSnapshot(w io.Writer, reg schema.SchemaRegistry) error {
 					return err
 				}
 			}
+		}
+	}
+	if err := writeFull(w, schemaSnapshotEventFlagsMagic[:]); err != nil {
+		return err
+	}
+	if err := writeUint32Full(w, uint32(len(ids))); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		ts, ok := reg.Table(id)
+		if !ok {
+			return fmt.Errorf("missing schema table %d", id)
+		}
+		if err := writeUint32Full(w, uint32(ts.ID)); err != nil {
+			return err
+		}
+		if err := writeFull(w, []byte{boolByte(ts.IsEvent)}); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -288,10 +308,68 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 		}
 		tables = append(tables, schema.TableSchema{ID: schemaTableID, Name: name, Columns: cols, Indexes: indexes})
 	}
-	if err := requireNoTrailingBytes(r, "trailing schema snapshot bytes"); err != nil {
+	if err := readOptionalSchemaSnapshotEventFlags(r, tables); err != nil {
 		return nil, 0, err
 	}
 	return tables, version, nil
+}
+
+func readOptionalSchemaSnapshotEventFlags(r io.Reader, tables []schema.TableSchema) error {
+	trailing, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	if len(trailing) == 0 {
+		return nil
+	}
+	reader := bytes.NewReader(trailing)
+	var magic [4]byte
+	if _, err := io.ReadFull(reader, magic[:]); err != nil {
+		return err
+	}
+	if magic != schemaSnapshotEventFlagsMagic {
+		return fmt.Errorf("%w: invalid schema snapshot trailing metadata", ErrSnapshot)
+	}
+	var count uint32
+	if err := binary.Read(reader, binary.LittleEndian, &count); err != nil {
+		return err
+	}
+	if int(count) != len(tables) {
+		return fmt.Errorf("%w: schema snapshot event flag count %d does not match table count %d", ErrSnapshot, count, len(tables))
+	}
+	tableByID := make(map[schema.TableID]*schema.TableSchema, len(tables))
+	for i := range tables {
+		tableByID[tables[i].ID] = &tables[i]
+	}
+	seen := make(map[schema.TableID]struct{}, len(tables))
+	for range count {
+		var tableID uint32
+		if err := binary.Read(reader, binary.LittleEndian, &tableID); err != nil {
+			return err
+		}
+		var flag [1]byte
+		if _, err := io.ReadFull(reader, flag[:]); err != nil {
+			return err
+		}
+		isEvent, err := decodeSchemaSnapshotBool(flag[0], "table event")
+		if err != nil {
+			return err
+		}
+		id := schema.TableID(tableID)
+		table, ok := tableByID[id]
+		if !ok {
+			return fmt.Errorf("%w: schema snapshot event flag references unknown table %d", ErrSnapshot, tableID)
+		}
+		if _, exists := seen[id]; exists {
+			return fmt.Errorf("%w: duplicate schema snapshot event flag table ID %d", ErrSnapshot, tableID)
+		}
+		seen[id] = struct{}{}
+		table.IsEvent = isEvent
+	}
+	if err := requireNoTrailingBytes(reader, "trailing schema snapshot event flag bytes"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func validSchemaSnapshotValueKind(kind schema.ValueKind) bool {

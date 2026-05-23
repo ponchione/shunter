@@ -87,6 +87,9 @@ func compareTableSchema(registered, snapshot TableSchema, diffs *[]string) {
 	if registered.Name != snapshot.Name {
 		*diffs = append(*diffs, fmt.Sprintf("table %d name mismatch: registered=%q snapshot=%q", registered.ID, registered.Name, snapshot.Name))
 	}
+	if registered.IsEvent != snapshot.IsEvent {
+		*diffs = append(*diffs, fmt.Sprintf("table %q kind mismatch: registered_event=%t snapshot_event=%t", registered.Name, registered.IsEvent, snapshot.IsEvent))
+	}
 	if len(registered.Columns) != len(snapshot.Columns) {
 		*diffs = append(*diffs, fmt.Sprintf("table %q column count mismatch: registered=%d snapshot=%d", registered.Name, len(registered.Columns), len(snapshot.Columns)))
 	} else {

@@ -83,6 +83,24 @@ func TestCheckSchemaCompatibilityStructuralMismatch(t *testing.T) {
 	}
 }
 
+func TestCheckSchemaCompatibilityEventKindMismatch(t *testing.T) {
+	e := buildCompatibilityEngine(t)
+	snapshot := snapshotFromRegistry(t, e.Registry())
+	snapshot.Tables[0].IsEvent = !snapshot.Tables[0].IsEvent
+
+	err := CheckSchemaCompatibility(e.Registry(), snapshot)
+	if err == nil {
+		t.Fatal("event kind mismatch should fail")
+	}
+	var mismatch *SchemaMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("expected SchemaMismatchError, got %T", err)
+	}
+	if !strings.Contains(err.Error(), "kind mismatch") {
+		t.Fatalf("event kind mismatch detail missing from %q", err)
+	}
+}
+
 func TestCheckSchemaCompatibilityNilSnapshotIsCompatible(t *testing.T) {
 	e := buildCompatibilityEngine(t)
 	if err := CheckSchemaCompatibility(e.Registry(), nil); err != nil {

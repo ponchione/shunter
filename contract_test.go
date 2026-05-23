@@ -379,6 +379,51 @@ func TestRuntimeExportContractIncludesTableReadPolicyMetadata(t *testing.T) {
 	}
 }
 
+func TestContractSchemaLookupPreservesEventTableMetadata(t *testing.T) {
+	contract := ModuleContract{
+		ContractVersion: ModuleContractVersion,
+		Module:          ModuleContractIdentity{Name: "chat", Metadata: map[string]string{}},
+		Schema: schema.SchemaExport{
+			Tables: []schema.TableExport{{
+				ID:      7,
+				Name:    "notifications",
+				IsEvent: true,
+				Columns: []schema.ColumnExport{
+					{Index: 0, Name: "id", Type: "uint64"},
+				},
+				Indexes: []schema.IndexExport{
+					{ID: 0, Name: "pk", Columns: []string{"id"}, ColumnOrdinals: []int{0}, Unique: true, Primary: true},
+				},
+			}},
+			Reducers: []schema.ReducerExport{},
+		},
+		Procedures:        []ProcedureDescription{},
+		Queries:           []QueryDescription{},
+		Views:             []ViewDescription{},
+		VisibilityFilters: []VisibilityFilterDescription{},
+		Permissions:       emptyPermissionContract(),
+		ReadModel:         emptyReadModelContract(),
+		Migrations:        emptyMigrationContract(),
+		Codegen:           defaultCodegenContractMetadata(),
+	}
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract: %v", err)
+	}
+	lookup := newContractSchemaLookup(contract.Schema)
+	_, table, ok := lookup.TableByName("notifications")
+	if !ok {
+		t.Fatal("event table missing from contract schema lookup")
+	}
+	if !table.IsEvent {
+		t.Fatal("contract schema lookup dropped event table metadata")
+	}
+	table.IsEvent = false
+	_, again, ok := lookup.TableByName("notifications")
+	if !ok || !again.IsEvent {
+		t.Fatalf("contract schema lookup returned aliased event metadata: ok=%v table=%#v", ok, again)
+	}
+}
+
 func TestRuntimeExportContractWithAuthoredMetadataValidates(t *testing.T) {
 	mod := validChatModule().
 		Version("v1.2.3").

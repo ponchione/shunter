@@ -547,6 +547,48 @@ func TestSchemaSnapshotCodecRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSchemaSnapshotCodecRoundTripEventTableKind(t *testing.T) {
+	reg := buildEventSnapshotRegistry(t)
+	var buf bytes.Buffer
+	if err := EncodeSchemaSnapshot(&buf, reg); err != nil {
+		t.Fatal(err)
+	}
+	tables, _, err := DecodeSchemaSnapshot(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, table := range tables {
+		got[table.Name] = table.IsEvent
+	}
+	if got["players"] {
+		t.Fatalf("players IsEvent = true, want false")
+	}
+	if !got["notifications"] {
+		t.Fatalf("notifications IsEvent = false, want true")
+	}
+}
+
+func TestDecodeSchemaSnapshotLegacyFormatDefaultsTablesPersistent(t *testing.T) {
+	reg := buildEventSnapshotRegistry(t)
+	var buf bytes.Buffer
+	if err := EncodeSchemaSnapshot(&buf, reg); err != nil {
+		t.Fatal(err)
+	}
+	ids := reg.Tables()
+	legacy := buf.Bytes()[:buf.Len()-(len(schemaSnapshotEventFlagsMagic)+4+len(ids)*5)]
+
+	tables, _, err := DecodeSchemaSnapshot(bytes.NewReader(legacy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range tables {
+		if table.IsEvent {
+			t.Fatalf("legacy decoded table %q IsEvent = true, want false", table.Name)
+		}
+	}
+}
+
 func TestDecodeSchemaSnapshotRejectsTrailingBytes(t *testing.T) {
 	_, reg := testSchema()
 	var buf bytes.Buffer
@@ -562,7 +604,7 @@ func TestDecodeSchemaSnapshotRejectsTrailingBytes(t *testing.T) {
 	if !errors.Is(err, ErrSnapshot) {
 		t.Fatalf("trailing schema snapshot error = %v, want ErrSnapshot category", err)
 	}
-	if !strings.Contains(err.Error(), "trailing schema snapshot bytes") {
+	if !strings.Contains(err.Error(), "trailing schema snapshot") {
 		t.Fatalf("trailing schema snapshot error = %v, want explicit trailing-bytes detail", err)
 	}
 }
@@ -2515,4 +2557,30 @@ func writeUint64(t testing.TB, dst *bytes.Buffer, value uint64) {
 	if err := binary.Write(dst, binary.LittleEndian, value); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func buildEventSnapshotRegistry(t testing.TB) schema.SchemaRegistry {
+	t.Helper()
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "players",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint64, PrimaryKey: true},
+			{Name: "name", Type: schema.KindString},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "notifications",
+		IsEvent: true,
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint64, PrimaryKey: true},
+			{Name: "body", Type: schema.KindString},
+		},
+	})
+	engine, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return engine.Registry()
 }

@@ -245,6 +245,21 @@ func TestSelectSnapshotSchemaMismatchTableName(t *testing.T) {
 	assertSchemaMismatchDetail(t, err, "users")
 }
 
+func TestSelectSnapshotSchemaMismatchEventKind(t *testing.T) {
+	root := t.TempDir()
+	cs, reg := buildSnapshotCommittedState(t)
+	writeSelectionSnapshot(t, root, reg, cs, 5)
+	mismatchReg := cloneSelectionRegistry(reg, func(tables map[schema.TableID]schema.TableSchema) {
+		players := tables[0]
+		players.IsEvent = true
+		tables[0] = players
+	})
+
+	_, err := SelectSnapshot(root, 5, mismatchReg)
+	assertSchemaMismatchDetail(t, err, "kind")
+	assertSchemaMismatchDetail(t, err, "event")
+}
+
 func TestSelectSnapshotSchemaMismatchColumnNameAndIndex(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

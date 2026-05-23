@@ -215,6 +215,7 @@ func tableSchemaFromExport(table schema.TableExport) (schema.TableSchema, error)
 	out := schema.TableSchema{
 		ID:         table.ID,
 		Name:       table.Name,
+		IsEvent:    table.IsEvent,
 		ReadPolicy: table.ReadPolicy,
 		Columns:    make([]schema.ColumnSchema, len(table.Columns)),
 		Indexes:    make([]schema.IndexSchema, len(table.Indexes)),

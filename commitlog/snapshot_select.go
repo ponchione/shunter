@@ -142,6 +142,9 @@ func compareTableSchema(registered schema.TableSchema, snapshot schema.TableSche
 	if registered.Name != snapshot.Name {
 		add(fmt.Sprintf("table id %d name mismatch: snapshot=%q registry=%q", registered.ID, snapshot.Name, registered.Name), nil)
 	}
+	if registered.IsEvent != snapshot.IsEvent {
+		add(fmt.Sprintf("table %q kind mismatch: snapshot_event=%t registry_event=%t", registered.Name, snapshot.IsEvent, registered.IsEvent), nil)
+	}
 	if len(registered.Columns) != len(snapshot.Columns) {
 		add(fmt.Sprintf("table %q column count mismatch: snapshot=%d registry=%d", registered.Name, len(snapshot.Columns), len(registered.Columns)), nil)
 	}

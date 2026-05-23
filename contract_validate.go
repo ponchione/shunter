@@ -515,6 +515,7 @@ func newContractSchemaLookup(schemaExport schema.SchemaExport) contractSchemaLoo
 		ts := schema.TableSchema{
 			ID:         tableID,
 			Name:       table.Name,
+			IsEvent:    table.IsEvent,
 			Columns:    make([]schema.ColumnSchema, len(table.Columns)),
 			Indexes:    make([]schema.IndexSchema, 0, len(table.Indexes)),
 			ReadPolicy: copyContractReadPolicy(table.ReadPolicy),
@@ -620,6 +621,7 @@ func cloneContractTableSchema(in schema.TableSchema) schema.TableSchema {
 	out := schema.TableSchema{
 		ID:         in.ID,
 		Name:       in.Name,
+		IsEvent:    in.IsEvent,
 		Columns:    append([]schema.ColumnSchema(nil), in.Columns...),
 		Indexes:    make([]schema.IndexSchema, len(in.Indexes)),
 		ReadPolicy: copyContractReadPolicy(in.ReadPolicy),

@@ -1542,6 +1542,26 @@ func TestDecodeQueryResponseJSONResultPreservesQueryMetadata(t *testing.T) {
 	}
 }
 
+func TestTableSchemaFromExportPreservesEventTableMetadata(t *testing.T) {
+	table, err := tableSchemaFromExport(schema.TableExport{
+		ID:      4,
+		Name:    "events",
+		IsEvent: true,
+		Columns: []schema.ColumnExport{
+			{Index: 0, Name: "id", Type: "uint64"},
+		},
+		Indexes: []schema.IndexExport{
+			{ID: 0, Name: "pk", Columns: []string{"id"}, ColumnOrdinals: []int{0}, Unique: true, Primary: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("tableSchemaFromExport: %v", err)
+	}
+	if !table.IsEvent {
+		t.Fatal("tableSchemaFromExport dropped event table metadata")
+	}
+}
+
 func TestProductValueToJSONRowConvertsContractValues(t *testing.T) {
 	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
 		{Name: "ok", Type: "bool"},

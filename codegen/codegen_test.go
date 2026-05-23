@@ -1272,6 +1272,28 @@ func TestTypeScriptGeneratorEmitsTableReadPolicyMetadata(t *testing.T) {
 	assertContains(t, ts, `messages: { access: "permissioned", permissions: ["messages:read"] },`)
 }
 
+func TestTypeScriptGeneratorEmitsTableKindMetadata(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables = append(contract.Schema.Tables, schema.TableExport{
+		Name:    "notifications",
+		IsEvent: true,
+		Columns: []schema.ColumnExport{
+			{Name: "id", Type: "uint64"},
+		},
+		Indexes: []schema.IndexExport{{Name: "notifications_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export const tableKinds = {`)
+	assertContains(t, ts, `messages: "persistent",`)
+	assertContains(t, ts, `notifications: "event",`)
+}
+
 func TestTypeScriptGeneratorDisambiguatesTableReadPolicyMetadataIdentifiers(t *testing.T) {
 	contract := contractFixture()
 	contract.Schema.Tables = append(contract.Schema.Tables,
