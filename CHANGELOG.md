@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added `contractworkflow.DecodeReducerResult` and
+  `DecodeReducerResultJSONRow` for contract-aware decoding of local reducer
+  return BSATN bytes.
 - Added `contractworkflow.ReducerResultSchema` for reducer result metadata
   lookup from local contracts.
 - Added `contractworkflow.PrepareReducerCallRequest` for contract-validated

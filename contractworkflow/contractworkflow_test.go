@@ -1185,6 +1185,113 @@ func TestEncodeSurfaceArgumentsRejectsUnsupportedKind(t *testing.T) {
 	}
 }
 
+func TestDecodeReducerResultUsesContractResultSchema(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{{
+		Name: "send_message",
+		Result: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+			{Name: "message_id", Type: "uint64"},
+			{Name: "status", Type: "string"},
+		}},
+	}}
+	resultSchema, err := ReducerResultSchema(contract, "send_message")
+	if err != nil {
+		t.Fatalf("ReducerResultSchema returned error: %v", err)
+	}
+	columns, err := productColumnsForBSATN(resultSchema)
+	if err != nil {
+		t.Fatalf("productColumnsForBSATN returned error: %v", err)
+	}
+	result, err := bsatn.AppendProductValueForColumns(nil, types.ProductValue{
+		types.NewUint64(7),
+		types.NewString("queued"),
+	}, columns)
+	if err != nil {
+		t.Fatalf("AppendProductValueForColumns returned error: %v", err)
+	}
+
+	decoded, err := DecodeReducerResult(contract, " send_message ", result)
+	if err != nil {
+		t.Fatalf("DecodeReducerResult returned error: %v", err)
+	}
+	if decoded.Name != "send_message" {
+		t.Fatalf("decoded name = %q, want send_message", decoded.Name)
+	}
+	if len(decoded.Columns) != 2 || decoded.Columns[0].Name != "message_id" || decoded.Columns[1].Name != "status" {
+		t.Fatalf("decoded columns = %+v", decoded.Columns)
+	}
+	if len(decoded.Row) != 2 || decoded.Row[0].AsUint64() != 7 || decoded.Row[1].AsString() != "queued" {
+		t.Fatalf("decoded reducer result row = %+v", decoded.Row)
+	}
+}
+
+func TestDecodeReducerResultJSONRowComposesDecodeAndJSONRendering(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{{
+		Name: "send_message",
+		Result: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+			{Name: "message_id", Type: "uint64"},
+			{Name: "status", Type: "string"},
+		}},
+	}}
+	resultSchema, err := ReducerResultSchema(contract, "send_message")
+	if err != nil {
+		t.Fatalf("ReducerResultSchema returned error: %v", err)
+	}
+	columns, err := productColumnsForBSATN(resultSchema)
+	if err != nil {
+		t.Fatalf("productColumnsForBSATN returned error: %v", err)
+	}
+	result, err := bsatn.AppendProductValueForColumns(nil, types.ProductValue{
+		types.NewUint64(7),
+		types.NewString("queued"),
+	}, columns)
+	if err != nil {
+		t.Fatalf("AppendProductValueForColumns returned error: %v", err)
+	}
+
+	row, err := DecodeReducerResultJSONRow(contract, "send_message", result)
+	if err != nil {
+		t.Fatalf("DecodeReducerResultJSONRow returned error: %v", err)
+	}
+	out, err := json.Marshal(row)
+	if err != nil {
+		t.Fatalf("Marshal JSON row returned error: %v", err)
+	}
+	want := `{"message_id":"7","status":"queued"}`
+	if string(out) != want {
+		t.Fatalf("JSON reducer result = %s, want %s", out, want)
+	}
+}
+
+func TestDecodeReducerResultPreservesStructuredErrors(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{{
+		Name: "send_message",
+		Result: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+			{Name: "message_id", Type: "uint64"},
+		}},
+	}}
+
+	_, err := DecodeReducerResult(contract, "missing", nil)
+	if !errors.Is(err, ErrSurfaceNotFound) {
+		t.Fatalf("DecodeReducerResult missing error = %v, want ErrSurfaceNotFound", err)
+	}
+
+	schemaLess := workflowContractFixture()
+	schemaLess.Schema.Reducers = []schema.ReducerExport{{Name: "send_message"}}
+	_, err = DecodeReducerResult(schemaLess, "send_message", nil)
+	if !errors.Is(err, ErrResultSchemaMissing) {
+		t.Fatalf("DecodeReducerResult schema-less error = %v, want ErrResultSchemaMissing", err)
+	}
+
+	_, err = DecodeReducerResult(contract, "send_message", []byte{0xff})
+	var typeTagErr *bsatn.TypeTagMismatchError
+	if !errors.As(err, &typeTagErr) {
+		t.Fatalf("DecodeReducerResult malformed result error = %v, want bsatn.TypeTagMismatchError", err)
+	}
+}
+
 func TestDecodeQueryRowsUsesContractRowSchema(t *testing.T) {
 	contract := workflowContractFixture()
 	contract.Queries = []shunter.QueryDescription{{

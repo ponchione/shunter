@@ -19,6 +19,47 @@ type DecodedQueryRows struct {
 	Rows      []types.ProductValue
 }
 
+// DecodedReducerResult is a reducer return value decoded through contract metadata.
+type DecodedReducerResult struct {
+	Name    string
+	Columns []schema.ColumnSchema
+	Row     types.ProductValue
+}
+
+// DecodeReducerResult decodes reducer return BSATN through its contract result schema.
+func DecodeReducerResult(contract shunter.ModuleContract, name string, result []byte) (DecodedReducerResult, error) {
+	reducer, ok := FindReducer(contract, name)
+	if !ok {
+		return DecodedReducerResult{}, fmt.Errorf("%w: reducer %q", ErrSurfaceNotFound, strings.TrimSpace(name))
+	}
+	if reducer.Result == nil {
+		return DecodedReducerResult{}, fmt.Errorf("%w: reducer %q", ErrResultSchemaMissing, reducer.Name)
+	}
+	columns, err := productColumnsForBSATN(*reducer.Result)
+	if err != nil {
+		return DecodedReducerResult{}, err
+	}
+	tableSchema := &schema.TableSchema{Name: reducer.Name + "_result", Columns: columns}
+	row, err := bsatn.DecodeProductValueFromBytes(result, tableSchema)
+	if err != nil {
+		return DecodedReducerResult{}, fmt.Errorf("decode reducer %q result: %w", reducer.Name, err)
+	}
+	return DecodedReducerResult{
+		Name:    reducer.Name,
+		Columns: columns,
+		Row:     row,
+	}, nil
+}
+
+// DecodeReducerResultJSONRow decodes reducer return BSATN to a JSON-ready row.
+func DecodeReducerResultJSONRow(contract shunter.ModuleContract, name string, result []byte) (JSONRow, error) {
+	decoded, err := DecodeReducerResult(contract, name, result)
+	if err != nil {
+		return nil, err
+	}
+	return productValueToJSONRowForColumns(decoded.Columns, decoded.Row)
+}
+
 // DecodeQueryRows decodes a declared-query RowList through its contract row schema.
 func DecodeQueryRows(contract shunter.ModuleContract, name, tableName string, rowList []byte) (DecodedQueryRows, error) {
 	query, ok := FindQuery(contract, name)
