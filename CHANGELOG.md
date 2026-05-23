@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added `contractworkflow.EncodeSurfaceArguments` for future running-app CLI
+  code to select reducer or declared-query JSON argument encoding by contract
+  surface kind.
 - Added typed `protocolclient` reducer-call and parameterized declared-query
   request helpers for future running-app admin commands.
 - Added a typed `protocolclient.DeclaredQuery` helper for schema-less or

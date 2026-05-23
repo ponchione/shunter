@@ -692,6 +692,155 @@ func TestEncodeNamedArgumentsPreservesStructuredErrors(t *testing.T) {
 	}
 }
 
+func TestEncodeSurfaceArgumentsSupportsReducerEmptySchema(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{{
+		Name: "ping",
+		Args: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{}},
+	}}
+
+	encoded, err := EncodeSurfaceArguments(contract, ArgumentSurfaceReducer, " ping ", []byte(`{}`))
+	if err != nil {
+		t.Fatalf("EncodeSurfaceArguments returned error: %v", err)
+	}
+	if len(encoded) != 0 {
+		t.Fatalf("encoded empty reducer arguments = %x, want empty BSATN row", encoded)
+	}
+	args, err := ReducerArgumentSchema(contract, "ping")
+	if err != nil {
+		t.Fatalf("ReducerArgumentSchema returned error: %v", err)
+	}
+	decoded, err := bsatn.DecodeProductValueFromBytes(encoded, productTableSchema(t, "ping_args", args))
+	if err != nil {
+		t.Fatalf("DecodeProductValueFromBytes returned error: %v", err)
+	}
+	if len(decoded) != 0 {
+		t.Fatalf("decoded empty reducer arguments = %+v, want empty row", decoded)
+	}
+}
+
+func TestEncodeSurfaceArgumentsSupportsDeclaredQueryEmptySchema(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name:       "all_messages",
+		Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{}},
+	}}
+
+	encoded, err := EncodeSurfaceArguments(contract, ArgumentSurfaceDeclaredQuery, " all_messages ", []byte(`{}`))
+	if err != nil {
+		t.Fatalf("EncodeSurfaceArguments returned error: %v", err)
+	}
+	if len(encoded) != 0 {
+		t.Fatalf("encoded empty query arguments = %x, want empty BSATN row", encoded)
+	}
+	args, err := QueryArgumentSchema(contract, "all_messages")
+	if err != nil {
+		t.Fatalf("QueryArgumentSchema returned error: %v", err)
+	}
+	decoded, err := bsatn.DecodeProductValueFromBytes(encoded, productTableSchema(t, "all_messages_args", args))
+	if err != nil {
+		t.Fatalf("DecodeProductValueFromBytes returned error: %v", err)
+	}
+	if len(decoded) != 0 {
+		t.Fatalf("decoded empty query arguments = %+v, want empty row", decoded)
+	}
+}
+
+func TestEncodeSurfaceArgumentsRejectsSchemaLessSurfaces(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{{Name: "send_message"}}
+	contract.Queries = []shunter.QueryDescription{{Name: "history"}}
+
+	_, err := EncodeSurfaceArguments(contract, ArgumentSurfaceReducer, "send_message", []byte(`{}`))
+	if !errors.Is(err, ErrArgumentSchemaMissing) {
+		t.Fatalf("schema-less reducer error = %v, want ErrArgumentSchemaMissing", err)
+	}
+	_, err = EncodeSurfaceArguments(contract, ArgumentSurfaceDeclaredQuery, "history", []byte(`{}`))
+	if !errors.Is(err, ErrArgumentSchemaMissing) {
+		t.Fatalf("schema-less query error = %v, want ErrArgumentSchemaMissing", err)
+	}
+}
+
+func TestEncodeSurfaceArgumentsRejectsUnknownNames(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{{
+		Name: "send_message",
+		Args: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{}},
+	}}
+	contract.Queries = []shunter.QueryDescription{{
+		Name:       "history",
+		Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{}},
+	}}
+
+	_, err := EncodeSurfaceArguments(contract, ArgumentSurfaceReducer, "missing", []byte(`{}`))
+	if !errors.Is(err, ErrSurfaceNotFound) {
+		t.Fatalf("missing reducer error = %v, want ErrSurfaceNotFound", err)
+	}
+	_, err = EncodeSurfaceArguments(contract, ArgumentSurfaceDeclaredQuery, "missing", []byte(`{}`))
+	if !errors.Is(err, ErrSurfaceNotFound) {
+		t.Fatalf("missing query error = %v, want ErrSurfaceNotFound", err)
+	}
+}
+
+func TestEncodeSurfaceArgumentsRejectsMalformedJSON(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{{
+		Name: "send_message",
+		Args: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+			{Name: "body", Type: "string"},
+		}},
+	}}
+	contract.Queries = []shunter.QueryDescription{{
+		Name: "recent_messages",
+		Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "limit", Type: "uint32"},
+		}},
+	}}
+
+	_, err := EncodeSurfaceArguments(contract, ArgumentSurfaceReducer, "send_message", []byte(`{"body":`))
+	if !errors.Is(err, ErrInvalidArgumentJSON) {
+		t.Fatalf("malformed reducer JSON error = %v, want ErrInvalidArgumentJSON", err)
+	}
+	_, err = EncodeSurfaceArguments(contract, ArgumentSurfaceDeclaredQuery, "recent_messages", []byte(`{"limit":`))
+	if !errors.Is(err, ErrInvalidArgumentJSON) {
+		t.Fatalf("malformed query JSON error = %v, want ErrInvalidArgumentJSON", err)
+	}
+}
+
+func TestEncodeSurfaceArgumentsDeclaredQueryDecodeEquivalence(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Queries = []shunter.QueryDescription{{
+		Name: "recent_messages",
+		Parameters: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "topic", Type: "string"},
+			{Name: "limit", Type: "uint32"},
+		}},
+	}}
+
+	encoded, err := EncodeSurfaceArguments(contract, ArgumentSurfaceDeclaredQuery, "recent_messages", []byte(`{"limit": 25, "topic": "general"}`))
+	if err != nil {
+		t.Fatalf("EncodeSurfaceArguments returned error: %v", err)
+	}
+	args, err := QueryArgumentSchema(contract, "recent_messages")
+	if err != nil {
+		t.Fatalf("QueryArgumentSchema returned error: %v", err)
+	}
+	decoded, err := bsatn.DecodeProductValueFromBytes(encoded, productTableSchema(t, "recent_messages_args", args))
+	if err != nil {
+		t.Fatalf("DecodeProductValueFromBytes returned error: %v", err)
+	}
+	if len(decoded) != 2 || decoded[0].AsString() != "general" || decoded[1].AsUint32() != 25 {
+		t.Fatalf("decoded query arguments = %+v", decoded)
+	}
+}
+
+func TestEncodeSurfaceArgumentsRejectsUnsupportedKind(t *testing.T) {
+	_, err := EncodeSurfaceArguments(workflowContractFixture(), ArgumentSurfaceKind("view"), "history", []byte(`{}`))
+	if !errors.Is(err, ErrUnsupportedSurfaceKind) {
+		t.Fatalf("unsupported kind error = %v, want ErrUnsupportedSurfaceKind", err)
+	}
+}
+
 func TestEncodeProductValueArgumentsPreservesStructuredErrors(t *testing.T) {
 	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
 		{Name: "id", Type: "uint8"},

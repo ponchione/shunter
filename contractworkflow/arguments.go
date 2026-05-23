@@ -19,6 +19,17 @@ import (
 var (
 	ErrInvalidArgumentJSON     = errors.New("invalid argument JSON")
 	ErrUnsupportedArgumentType = errors.New("unsupported argument type")
+	ErrUnsupportedSurfaceKind  = errors.New("unsupported contract argument surface kind")
+)
+
+// ArgumentSurfaceKind identifies a contract surface that accepts BSATN product arguments.
+type ArgumentSurfaceKind string
+
+const (
+	// ArgumentSurfaceReducer selects a reducer Args schema.
+	ArgumentSurfaceReducer ArgumentSurfaceKind = "reducer"
+	// ArgumentSurfaceDeclaredQuery selects a declared-query Parameters schema.
+	ArgumentSurfaceDeclaredQuery ArgumentSurfaceKind = "declared_query"
 )
 
 // ProductValueFromJSON decodes a JSON object into schema-ordered product values.
@@ -82,6 +93,18 @@ func EncodeQueryArguments(contract shunter.ModuleContract, name string, data []b
 		return nil, err
 	}
 	return EncodeProductValueArguments(product, data)
+}
+
+// EncodeSurfaceArguments encodes JSON arguments for a named reducer or declared-query surface.
+func EncodeSurfaceArguments(contract shunter.ModuleContract, kind ArgumentSurfaceKind, name string, data []byte) ([]byte, error) {
+	switch kind {
+	case ArgumentSurfaceReducer:
+		return EncodeReducerArguments(contract, name, data)
+	case ArgumentSurfaceDeclaredQuery:
+		return EncodeQueryArguments(contract, name, data)
+	default:
+		return nil, fmt.Errorf("%w: %q", ErrUnsupportedSurfaceKind, kind)
+	}
 }
 
 func productColumnsForBSATN(product schema.ProductSchemaExport) ([]schema.ColumnSchema, error) {
