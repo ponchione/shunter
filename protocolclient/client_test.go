@@ -754,6 +754,71 @@ func TestDialAndExecuteDeclaredQueryUsesExplicitTokenAndCloses(t *testing.T) {
 	}
 }
 
+func TestDialAndExecuteDeclaredQueryRequiresExplicitTokenBeforeNetwork(t *testing.T) {
+	called := make(chan struct{}, 1)
+	srv := protocolClientTestServer(t, func(http.ResponseWriter, *http.Request) {
+		called <- struct{}{}
+	})
+
+	_, _, err := DialAndExecuteDeclaredQuery(context.Background(), Options{
+		URL:   srv.wsURL(),
+		Token: " \t",
+	}, DeclaredQueryRequest{
+		Name:          "recent_messages",
+		HasParameters: true,
+	})
+	if !errors.Is(err, ErrTokenRequired) {
+		t.Fatalf("DialAndExecuteDeclaredQuery error = %v, want ErrTokenRequired", err)
+	}
+	select {
+	case <-called:
+		t.Fatal("server was called despite missing token")
+	default:
+	}
+}
+
+func TestDialAndExecuteDeclaredQueryWithParametersRequiresV2BeforeRequest(t *testing.T) {
+	readDone := make(chan struct{}, 1)
+	received := make(chan struct{}, 1)
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConnWithSubprotocols(t, w, r, []string{protocol.SubprotocolV1})
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+
+		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if _, _, err := ws.Read(readCtx); err == nil {
+			received <- struct{}{}
+		}
+		readDone <- struct{}{}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _, err := DialAndExecuteDeclaredQuery(ctx, Options{
+		URL:   srv.wsURL(),
+		Token: "operator-token",
+	}, DeclaredQueryRequest{
+		Name:          "recent_messages",
+		Parameters:    []byte{1, 2, 3},
+		HasParameters: true,
+	})
+	if !errors.Is(err, ErrProtocolVersion) {
+		t.Fatalf("DialAndExecuteDeclaredQuery v1 error = %v, want ErrProtocolVersion", err)
+	}
+
+	select {
+	case <-readDone:
+	case <-ctx.Done():
+		t.Fatalf("server did not finish request read: %v", ctx.Err())
+	}
+	select {
+	case <-received:
+		t.Fatal("server received parameterized query despite v1 subprotocol")
+	default:
+	}
+}
+
 func TestDialAndExecuteDeclaredQueryClosesAfterQueryError(t *testing.T) {
 	wantIdentity := protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}}
 	closed := make(chan struct{}, 1)
