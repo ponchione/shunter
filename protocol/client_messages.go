@@ -59,6 +59,13 @@ type DeclaredQueryWithParametersMsg struct {
 	Params    []byte
 }
 
+// CallProcedureMsg invokes a module-owned procedure with raw BSATN arguments.
+type CallProcedureMsg struct {
+	MessageID []byte
+	Name      string
+	Args      []byte
+}
+
 // SubscribeMultiMsg subscribes multiple SQL query strings under one QueryID.
 type SubscribeMultiMsg struct {
 	RequestID    uint32
@@ -153,6 +160,17 @@ func EncodeClientMessage(m any) ([]byte, error) {
 		if err := writeBytes(&buf, msg.Params); err != nil {
 			return nil, err
 		}
+	case CallProcedureMsg:
+		buf.WriteByte(TagCallProcedure)
+		if err := writeBytes(&buf, msg.MessageID); err != nil {
+			return nil, err
+		}
+		if err := writeString(&buf, msg.Name); err != nil {
+			return nil, err
+		}
+		if err := writeBytes(&buf, msg.Args); err != nil {
+			return nil, err
+		}
 	case SubscribeMultiMsg:
 		buf.WriteByte(TagSubscribeMulti)
 		writeUint32(&buf, msg.RequestID)
@@ -245,6 +263,11 @@ func decodeClientMessagePartsForVersion(version ProtocolVersion, tag uint8, body
 			return nil, fmt.Errorf("%w: tag=%d unsupported for %s", ErrUnknownMessageTag, tag, version)
 		}
 		return decodeSubscribeDeclaredViewWithParameters(body)
+	case TagCallProcedure:
+		if version < ProtocolVersionV2 {
+			return nil, fmt.Errorf("%w: tag=%d unsupported for %s", ErrUnknownMessageTag, tag, version)
+		}
+		return decodeCallProcedure(body)
 	case TagUnsubscribeMulti:
 		return decodeUnsubscribeMulti(body)
 	default:
@@ -344,6 +367,22 @@ func decodeDeclaredQueryWithParameters(body []byte) (DeclaredQueryWithParameters
 		return m, err
 	}
 	if err := requireFullyConsumed(body, off, "DeclaredQueryWithParameters"); err != nil {
+		return m, err
+	}
+	return m, nil
+}
+
+func decodeCallProcedure(body []byte) (CallProcedureMsg, error) {
+	var m CallProcedureMsg
+	var off int
+	var err error
+	if m.MessageID, m.Name, off, err = readBytesAndString(body, 0); err != nil {
+		return m, err
+	}
+	if m.Args, off, err = readBytes(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "CallProcedure"); err != nil {
 		return m, err
 	}
 	return m, nil

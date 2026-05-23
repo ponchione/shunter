@@ -22,6 +22,12 @@ type DeclaredQueryRequest struct {
 	HasParameters bool
 }
 
+// ProcedureCallRequest describes a procedure execution request.
+type ProcedureCallRequest struct {
+	Name      string
+	Arguments []byte
+}
+
 // DialAndCallReducer connects, calls one reducer, and closes the connection.
 func DialAndCallReducer(ctx context.Context, opts Options, request ReducerCallRequest) (protocol.IdentityToken, protocol.TransactionUpdate, error) {
 	client, identity, err := Dial(ctx, opts)
@@ -51,6 +57,24 @@ func DialAndExecuteDeclaredQuery(ctx context.Context, opts Options, request Decl
 	closeErr := client.Close(ctx)
 	if execErr != nil {
 		return identity, response, execErr
+	}
+	if closeErr != nil {
+		return identity, response, closeErr
+	}
+	return identity, response, nil
+}
+
+// DialAndCallProcedure connects, calls one procedure, and closes the connection.
+func DialAndCallProcedure(ctx context.Context, opts Options, request ProcedureCallRequest) (protocol.IdentityToken, protocol.ProcedureResponse, error) {
+	client, identity, err := Dial(ctx, opts)
+	if err != nil {
+		return protocol.IdentityToken{}, protocol.ProcedureResponse{}, err
+	}
+
+	response, callErr := client.CallProcedure(ctx, request.Name, request.Arguments)
+	closeErr := client.Close(ctx)
+	if callErr != nil {
+		return identity, response, callErr
 	}
 	if closeErr != nil {
 		return identity, response, closeErr
@@ -153,6 +177,40 @@ func (c *Client) readDeclaredQueryResponse(ctx context.Context, messageID []byte
 	}
 	if response.Error != nil {
 		return response, fmt.Errorf("%w: %s", ErrDeclaredQueryFailed, *response.Error)
+	}
+	return response, nil
+}
+
+// CallProcedure sends a procedure request and waits for its matching result.
+func (c *Client) CallProcedure(ctx context.Context, name string, args []byte) (protocol.ProcedureResponse, error) {
+	if version, ok := protocol.ProtocolVersionForSubprotocol(c.Subprotocol()); !ok || version < protocol.ProtocolVersionV2 {
+		return protocol.ProcedureResponse{}, fmt.Errorf("%w: negotiated subprotocol %q", ErrProtocolVersion, c.Subprotocol())
+	}
+	requestID := c.NextRequestID()
+	messageID := messageIDFromRequestID(requestID)
+	if err := c.Send(ctx, protocol.CallProcedureMsg{
+		MessageID: messageID,
+		Name:      name,
+		Args:      args,
+	}); err != nil {
+		return protocol.ProcedureResponse{}, err
+	}
+	tag, msg, err := c.Read(ctx)
+	if err != nil {
+		return protocol.ProcedureResponse{}, err
+	}
+	if tag != protocol.TagProcedureResponse {
+		return protocol.ProcedureResponse{}, fmt.Errorf("%w: server tag = %d, want procedure response", ErrUnexpectedMessage, tag)
+	}
+	response, ok := msg.(protocol.ProcedureResponse)
+	if !ok {
+		return protocol.ProcedureResponse{}, fmt.Errorf("%w: server message = %T, want protocol.ProcedureResponse", ErrUnexpectedMessage, msg)
+	}
+	if !bytes.Equal(response.MessageID, messageID) {
+		return protocol.ProcedureResponse{}, fmt.Errorf("%w: procedure message ID %x, want %x", ErrResponseMismatch, response.MessageID, messageID)
+	}
+	if response.Error != nil {
+		return response, fmt.Errorf("%w: %s", ErrProcedureFailed, *response.Error)
 	}
 	return response, nil
 }

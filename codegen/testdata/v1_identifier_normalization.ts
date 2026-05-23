@@ -15,6 +15,7 @@ import type {
   EncodedReducerCallResultOptions as ShunterEncodedReducerCallResultOptions,
   GeneratedContractMetadata as ShunterGeneratedContractMetadata,
   ProtocolMetadata as ShunterProtocolMetadata,
+  ProcedureCaller as ShunterProcedureCaller,
   QueryRunner as ShunterQueryRunner,
   RawDeclaredQueryResult as ShunterRawDeclaredQueryResult,
   ReducerCaller as ShunterReducerCaller,
@@ -54,6 +55,7 @@ export const shunterContract = {
 } as const satisfies ShunterGeneratedContractMetadata<typeof shunterProtocol>;
 
 export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;
+export type ProcedureCaller = ShunterProcedureCaller<ProcedureName, Uint8Array, Uint8Array>;
 export type EncodedReducerCallOptions<Args = unknown> = ShunterEncodedReducerCallOptions<Args>;
 export type EncodedReducerCallResultOptions<Args = unknown, Result = Uint8Array> = ShunterEncodedReducerCallResultOptions<Args, Result>;
 export type ReducerCallResult<Name extends ReducerName = ReducerName, Result = Uint8Array> = ShunterReducerCallResult<Name, Result>;
@@ -275,6 +277,11 @@ export const lifecycleReducers = {
 } as const;
 
 export type LifecycleReducerName = (typeof lifecycleReducers)[keyof typeof lifecycleReducers];
+
+export const procedures = {
+} as const;
+
+export type ProcedureName = (typeof procedures)[keyof typeof procedures];
 
 export const queries = {
   recentMessages: "recent_messages",

@@ -29,6 +29,8 @@ type ArgumentSurfaceKind string
 const (
 	// ArgumentSurfaceReducer selects a reducer Args schema.
 	ArgumentSurfaceReducer ArgumentSurfaceKind = "reducer"
+	// ArgumentSurfaceProcedure selects a procedure Args schema.
+	ArgumentSurfaceProcedure ArgumentSurfaceKind = "procedure"
 	// ArgumentSurfaceDeclaredQuery selects a declared-query Parameters schema.
 	ArgumentSurfaceDeclaredQuery ArgumentSurfaceKind = "declared_query"
 )
@@ -44,6 +46,12 @@ type DeclaredQueryRequest struct {
 	Name          string
 	Parameters    []byte
 	HasParameters bool
+}
+
+// ProcedureCallRequest describes a contract-validated procedure call request.
+type ProcedureCallRequest struct {
+	Name      string
+	Arguments []byte
 }
 
 // ProductValueFromJSON decodes a JSON object into schema-ordered product values.
@@ -119,6 +127,34 @@ func PrepareReducerCallRequest(contract shunter.ModuleContract, name string, dat
 	}, nil
 }
 
+// EncodeProcedureArguments encodes JSON arguments for a named procedure contract surface.
+func EncodeProcedureArguments(contract shunter.ModuleContract, name string, data []byte) ([]byte, error) {
+	product, err := ProcedureArgumentSchema(contract, name)
+	if err != nil {
+		return nil, err
+	}
+	return EncodeProductValueArguments(product, data)
+}
+
+// PrepareProcedureCallRequest validates a procedure and prepares its encoded argument request shape.
+func PrepareProcedureCallRequest(contract shunter.ModuleContract, name string, data []byte) (ProcedureCallRequest, error) {
+	procedure, ok := FindProcedure(contract, name)
+	if !ok {
+		return ProcedureCallRequest{}, fmt.Errorf("%w: procedure %q", ErrSurfaceNotFound, strings.TrimSpace(name))
+	}
+	if procedure.Args == nil {
+		return ProcedureCallRequest{}, fmt.Errorf("%w: procedure %q", ErrArgumentSchemaMissing, procedure.Name)
+	}
+	encoded, err := EncodeProductValueArguments(*procedure.Args, data)
+	if err != nil {
+		return ProcedureCallRequest{}, err
+	}
+	return ProcedureCallRequest{
+		Name:      procedure.Name,
+		Arguments: encoded,
+	}, nil
+}
+
 // EncodeQueryArguments encodes JSON arguments for a named declared-query contract surface.
 func EncodeQueryArguments(contract shunter.ModuleContract, name string, data []byte) ([]byte, error) {
 	product, err := QueryArgumentSchema(contract, name)
@@ -182,6 +218,8 @@ func EncodeSurfaceArguments(contract shunter.ModuleContract, kind ArgumentSurfac
 	switch kind {
 	case ArgumentSurfaceReducer:
 		return EncodeReducerArguments(contract, name, data)
+	case ArgumentSurfaceProcedure:
+		return EncodeProcedureArguments(contract, name, data)
 	case ArgumentSurfaceDeclaredQuery:
 		return EncodeQueryArguments(contract, name, data)
 	default:

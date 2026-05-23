@@ -46,6 +46,8 @@ type Server struct {
 	// protocol messages. Raw SQL handlers remain wired through Schema/State
 	// and Executor; declared reads use this explicit name-based surface.
 	DeclaredReads DeclaredReadHandler
+	// Procedures handles named Procedure declarations.
+	Procedures ProcedureHandler
 	// VisibilityFilters are row-level filters expanded into raw external SQL
 	// predicates after table-read admission and before execution/registration.
 	VisibilityFilters []VisibilityFilter
@@ -329,6 +331,9 @@ func (s *Server) buildMessageHandlers() *MessageHandlers {
 		handlers.OnDeclaredQueryWithParameters = s.DeclaredReads.HandleDeclaredQueryWithParameters
 		handlers.OnSubscribeDeclaredView = s.DeclaredReads.HandleSubscribeDeclaredView
 		handlers.OnSubscribeDeclaredViewWithParameters = s.DeclaredReads.HandleSubscribeDeclaredViewWithParameters
+	}
+	if s.Procedures != nil {
+		handlers.OnCallProcedure = s.Procedures.HandleCallProcedure
 	}
 	return handlers
 }

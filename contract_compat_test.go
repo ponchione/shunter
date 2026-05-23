@@ -202,6 +202,7 @@ func TestV1CompatibilityModuleContractFixtureCoversStableArtifacts(t *testing.T)
 		"contract_version",
 		"module",
 		"schema",
+		"procedures",
 		"queries",
 		"views",
 		"visibility_filters",
@@ -238,6 +239,7 @@ func TestV1CompatibilityModuleContractFixtureCoversStableJSONFields(t *testing.T
 		"contract_version",
 		"module",
 		"schema",
+		"procedures",
 		"queries",
 		"views",
 		"visibility_filters",
@@ -285,7 +287,7 @@ func TestV1CompatibilityModuleContractFixtureCoversStableJSONFields(t *testing.T
 		"uses_caller_identity",
 	})
 
-	permissions := assertJSONObjectKeys(t, top["permissions"], "contract.permissions", []string{"reducers", "queries", "views"})
+	permissions := assertJSONObjectKeys(t, top["permissions"], "contract.permissions", []string{"reducers", "procedures", "queries", "views"})
 	for _, surface := range []string{"reducers", "queries", "views"} {
 		declarations := assertJSONArrayObjects(t, permissions[surface], "contract.permissions."+surface)
 		assertJSONObjectKeys(t, mustMarshalRawObject(t, declarations[0]), "contract.permissions."+surface+"[0]", []string{"name", "required"})
@@ -331,6 +333,7 @@ func TestParameterizedDeclaredReadContractCoversParameterJSONFields(t *testing.T
 		"contract_version",
 		"module",
 		"schema",
+		"procedures",
 		"queries",
 		"views",
 		"visibility_filters",

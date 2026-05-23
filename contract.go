@@ -24,6 +24,7 @@ type ModuleContract struct {
 	ContractVersion   uint32                        `json:"contract_version"`
 	Module            ModuleContractIdentity        `json:"module"`
 	Schema            schema.SchemaExport           `json:"schema"`
+	Procedures        []ProcedureDescription        `json:"procedures"`
 	Queries           []QueryDescription            `json:"queries"`
 	Views             []ViewDescription             `json:"views"`
 	VisibilityFilters []VisibilityFilterDescription `json:"visibility_filters"`
@@ -42,9 +43,10 @@ type ModuleContractIdentity struct {
 
 // PermissionContract records passive permission metadata for exported surfaces.
 type PermissionContract struct {
-	Reducers []PermissionContractDeclaration `json:"reducers"`
-	Queries  []PermissionContractDeclaration `json:"queries"`
-	Views    []PermissionContractDeclaration `json:"views"`
+	Reducers   []PermissionContractDeclaration `json:"reducers"`
+	Procedures []PermissionContractDeclaration `json:"procedures"`
+	Queries    []PermissionContractDeclaration `json:"queries"`
+	Views      []PermissionContractDeclaration `json:"views"`
 }
 
 // PermissionContractDeclaration describes required permission tags for one
@@ -96,6 +98,7 @@ func (r *Runtime) ExportContract() ModuleContract {
 	}
 
 	desc := r.Describe()
+	procedures := normalizeProcedureDescriptions(desc.Module.Procedures)
 	queries := copyQueryDescriptions(desc.Module.Queries)
 	views := copyViewDescriptions(desc.Module.Views)
 	schemaExport := copySchemaExport(r.ExportSchema())
@@ -111,10 +114,11 @@ func (r *Runtime) ExportContract() ModuleContract {
 			Metadata: copyStringMap(desc.Module.Metadata),
 		},
 		Schema:            schemaExport,
+		Procedures:        procedures,
 		Queries:           queries,
 		Views:             views,
 		VisibilityFilters: normalizeVisibilityFilterDescriptions(desc.Module.VisibilityFilters),
-		Permissions:       buildPermissionContract(reducers, queries, views),
+		Permissions:       buildPermissionContract(reducers, procedures, queries, views),
 		ReadModel:         buildReadModelContract(queries, views),
 		Migrations:        buildMigrationContract(schemaExport, desc.Module.Migration, desc.Module.TableMigrations, queries, views),
 		Codegen:           defaultCodegenContractMetadata(),
@@ -142,10 +146,12 @@ func normalizeModuleContract(c ModuleContract) ModuleContract {
 		c.Module.Metadata = map[string]string{}
 	}
 	c.Schema = normalizeSchemaExport(c.Schema)
+	c.Procedures = normalizeProcedureDescriptions(c.Procedures)
 	c.Queries = copyQueryDescriptions(c.Queries)
 	c.Views = copyViewDescriptions(c.Views)
 	c.VisibilityFilters = normalizeVisibilityFilterDescriptions(c.VisibilityFilters)
 	c.Permissions.Reducers = normalizePermissionContractDeclarations(c.Permissions.Reducers)
+	c.Permissions.Procedures = normalizePermissionContractDeclarations(c.Permissions.Procedures)
 	c.Permissions.Queries = normalizePermissionContractDeclarations(c.Permissions.Queries)
 	c.Permissions.Views = normalizePermissionContractDeclarations(c.Permissions.Views)
 	c.ReadModel.Declarations = normalizeReadModelContractDeclarations(c.ReadModel.Declarations)
@@ -189,6 +195,7 @@ func emptyModuleContract() ModuleContract {
 			Tables:   []schema.TableExport{},
 			Reducers: []schema.ReducerExport{},
 		},
+		Procedures:        []ProcedureDescription{},
 		Queries:           []QueryDescription{},
 		Views:             []ViewDescription{},
 		VisibilityFilters: []VisibilityFilterDescription{},
@@ -201,9 +208,10 @@ func emptyModuleContract() ModuleContract {
 
 func emptyPermissionContract() PermissionContract {
 	return PermissionContract{
-		Reducers: []PermissionContractDeclaration{},
-		Queries:  []PermissionContractDeclaration{},
-		Views:    []PermissionContractDeclaration{},
+		Reducers:   []PermissionContractDeclaration{},
+		Procedures: []PermissionContractDeclaration{},
+		Queries:    []PermissionContractDeclaration{},
+		Views:      []PermissionContractDeclaration{},
 	}
 }
 
@@ -213,7 +221,7 @@ func emptyReadModelContract() ReadModelContract {
 	}
 }
 
-func buildPermissionContract(reducers []ReducerDeclaration, queries []QueryDescription, views []ViewDescription) PermissionContract {
+func buildPermissionContract(reducers []ReducerDeclaration, procedures []ProcedureDescription, queries []QueryDescription, views []ViewDescription) PermissionContract {
 	out := emptyPermissionContract()
 	for _, reducer := range reducers {
 		if !hasPermissionMetadata(reducer.Permissions) {
@@ -222,6 +230,15 @@ func buildPermissionContract(reducers []ReducerDeclaration, queries []QueryDescr
 		out.Reducers = append(out.Reducers, PermissionContractDeclaration{
 			Name:     reducer.Name,
 			Required: normalizeStringSlice(reducer.Permissions.Required),
+		})
+	}
+	for _, procedure := range procedures {
+		if !hasPermissionMetadata(procedure.Permissions) {
+			continue
+		}
+		out.Procedures = append(out.Procedures, PermissionContractDeclaration{
+			Name:     procedure.Name,
+			Required: normalizeStringSlice(procedure.Permissions.Required),
 		})
 	}
 	for _, query := range queries {
@@ -494,6 +511,22 @@ func copyQueryDescriptions(in []QueryDescription) []QueryDescription {
 	out := make([]QueryDescription, len(in))
 	for i, query := range in {
 		out[i] = copyQueryDescription(query)
+	}
+	return out
+}
+
+func normalizeProcedureDescriptions(in []ProcedureDescription) []ProcedureDescription {
+	if len(in) == 0 {
+		return []ProcedureDescription{}
+	}
+	out := make([]ProcedureDescription, len(in))
+	for i, procedure := range in {
+		out[i] = ProcedureDescription{
+			Name:        procedure.Name,
+			Args:        copyProductSchemaPtr(procedure.Args),
+			Result:      copyProductSchemaPtr(procedure.Result),
+			Permissions: copyPermissionMetadata(procedure.Permissions),
+		}
 	}
 	return out
 }

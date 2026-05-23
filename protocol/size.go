@@ -104,6 +104,10 @@ func encodedClientMessageSize(m any) (int, error) {
 		s.bytes(msg.MessageID)
 		s.string(msg.Name)
 		s.bytes(msg.Params)
+	case CallProcedureMsg:
+		s.bytes(msg.MessageID)
+		s.string(msg.Name)
+		s.bytes(msg.Args)
 	case SubscribeMultiMsg:
 		s.add(sizeUint32 + sizeUint32)
 		s.count("SubscribeMulti query string count", len(msg.QueryStrings))
@@ -160,6 +164,11 @@ func encodedServerMessageSize(m any) (int, error) {
 		s.bytes(msg.MessageID)
 		s.optionalString(msg.Error)
 		s.oneOffTables(msg.Tables)
+		s.add(sizeInt64)
+	case ProcedureResponse:
+		s.bytes(msg.MessageID)
+		s.optionalString(msg.Error)
+		s.bytes(msg.Result)
 		s.add(sizeInt64)
 	case SubscribeMultiApplied:
 		s.add(sizeAppliedHeader)

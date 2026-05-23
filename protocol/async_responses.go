@@ -21,6 +21,15 @@ func (s connOnlySender) Send(connID types.ConnectionID, msg any) error {
 	return sendOnConn(s.conn, connID, msg, nil, nil)
 }
 
+// SendToConn enqueues one server message on conn using protocol framing and
+// the same non-blocking backpressure behavior as protocol-owned responses.
+func SendToConn(conn *Conn, msg any) error {
+	if conn == nil {
+		return ErrConnNotFound
+	}
+	return sendOnConn(conn, conn.ID, msg, nil, nil)
+}
+
 func (s connOnlySender) SendTransactionUpdate(connID types.ConnectionID, update *TransactionUpdate) error {
 	if update == nil {
 		return nil

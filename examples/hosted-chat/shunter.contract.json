@@ -166,6 +166,19 @@
       }
     ]
   },
+  "procedures": [
+    {
+      "name": "send_system_message",
+      "args": {
+        "columns": [
+          {
+            "name": "body",
+            "type": "string"
+          }
+        ]
+      }
+    }
+  ],
   "queries": [
     {
       "name": "recent_messages",
@@ -221,6 +234,7 @@
   "visibility_filters": [],
   "permissions": {
     "reducers": [],
+    "procedures": [],
     "queries": [],
     "views": []
   },

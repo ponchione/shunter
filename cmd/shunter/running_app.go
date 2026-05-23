@@ -236,6 +236,107 @@ func runQuery(stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 
+func runProcedure(stdout, stderr io.Writer, args []string) int {
+	fs := newFlagSet(stderr, "shunter procedure")
+	flags := newRunningAppFlags(fs)
+	if code, stop := parseFlags(fs, args); stop {
+		return code
+	}
+	if code := validateRunningAppCommon(stderr, flags); code != 0 {
+		return code
+	}
+	if fs.NArg() < 1 || fs.NArg() > 2 {
+		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
+			Command:   "procedure",
+			TargetURL: flags.urlValue(),
+			Code:      "invalid_arguments",
+			Message:   "procedure requires procedure name and optional JSON arguments",
+		})
+		return 2
+	}
+	name := strings.TrimSpace(fs.Arg(0))
+	rawArgs, err := flags.argumentBytes(fs.Args()[1:])
+	if err != nil {
+		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
+			Command:   "procedure",
+			TargetURL: flags.urlValue(),
+			Surface:   name,
+			Code:      classifyRunningAppErrorCode(err),
+			Message:   err.Error(),
+		})
+		return 2
+	}
+	contract, err := readContractFile(flags.contractValue(), "procedure contract")
+	if err != nil {
+		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
+			Command:   "procedure",
+			TargetURL: flags.urlValue(),
+			Surface:   name,
+			Code:      "contract_error",
+			Message:   err.Error(),
+		})
+		return 1
+	}
+	request, err := prepareProcedureCall(contract, name, rawArgs, flags.argsHexValue() != "")
+	if err != nil {
+		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
+			Command:   "procedure",
+			TargetURL: flags.urlValue(),
+			Surface:   name,
+			Code:      classifyRunningAppErrorCode(err),
+			Message:   err.Error(),
+		})
+		return 2
+	}
+	token, err := flags.token()
+	if err != nil {
+		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
+			Command:   "procedure",
+			TargetURL: flags.urlValue(),
+			Surface:   request.Name,
+			Code:      classifyRunningAppErrorCode(err),
+			Message:   err.Error(),
+		})
+		return 2
+	}
+	target, err := normalizeRunningAppURL(flags.urlValue())
+	if err != nil {
+		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
+			Command:   "procedure",
+			TargetURL: flags.urlValue(),
+			Surface:   request.Name,
+			Code:      "invalid_url",
+			Message:   err.Error(),
+		})
+		return 2
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), flags.timeoutValue())
+	defer cancel()
+	identity, response, err := protocolclient.DialAndCallProcedure(ctx, protocolclient.Options{
+		URL:            target,
+		Token:          token,
+		AllowAnonymous: flags.allowDevAnonymousValue(),
+	}, protocolclient.ProcedureCallRequest{
+		Name:      request.Name,
+		Arguments: request.Arguments,
+	})
+	if err != nil {
+		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
+			Command:   "procedure",
+			TargetURL: target,
+			Surface:   request.Name,
+			Code:      classifyRunningAppErrorCode(err),
+			Message:   err.Error(),
+		})
+		return 1
+	}
+	if err := writeProcedureSuccess(stdout, flags.formatValue(), contract, target, identity, response, request.Name); err != nil {
+		writeCLIError(stderr, err)
+		return 1
+	}
+	return 0
+}
+
 type runningAppFlags struct {
 	url               *string
 	contract          *string
@@ -406,6 +507,17 @@ func prepareReducerCall(contract shunter.ModuleContract, name string, data []byt
 	return contractworkflow.PrepareReducerCallRequest(contract, name, data)
 }
 
+func prepareProcedureCall(contract shunter.ModuleContract, name string, data []byte, rawHex bool) (contractworkflow.ProcedureCallRequest, error) {
+	procedure, ok := contractworkflow.FindProcedure(contract, name)
+	if !ok {
+		return contractworkflow.ProcedureCallRequest{}, fmt.Errorf("%w: procedure %q", contractworkflow.ErrSurfaceNotFound, strings.TrimSpace(name))
+	}
+	if rawHex {
+		return contractworkflow.ProcedureCallRequest{Name: procedure.Name, Arguments: data}, nil
+	}
+	return contractworkflow.PrepareProcedureCallRequest(contract, name, data)
+}
+
 func prepareDeclaredQuery(contract shunter.ModuleContract, name string, data []byte, hasData, rawHex bool) (contractworkflow.DeclaredQueryRequest, error) {
 	query, ok := contractworkflow.FindQuery(contract, name)
 	if !ok {
@@ -507,6 +619,8 @@ func classifyRunningAppErrorCode(err error) string {
 		return "reducer_error"
 	case errors.Is(err, protocolclient.ErrDeclaredQueryFailed):
 		return "query_error"
+	case errors.Is(err, protocolclient.ErrProcedureFailed):
+		return "procedure_error"
 	case errors.Is(err, protocolclient.ErrProtocolVersion), errors.Is(err, protocolclient.ErrUnexpectedMessage), errors.Is(err, protocolclient.ErrNonBinaryMessage), errors.Is(err, protocolclient.ErrResponseMismatch):
 		return "protocol_error"
 	case isDiagnosticsHTTPStatusError(err):
@@ -574,6 +688,39 @@ type querySuccess struct {
 	ConnectionID string                         `json:"connection_id"`
 	Result       contractworkflow.JSONQueryRows `json:"result"`
 	DurationUS   int64                          `json:"duration_micros"`
+}
+
+type procedureSuccess struct {
+	Status       string `json:"status"`
+	Scope        string `json:"scope"`
+	Command      string `json:"command"`
+	TargetURL    string `json:"target_url"`
+	Module       string `json:"module"`
+	Surface      string `json:"surface"`
+	Identity     string `json:"identity"`
+	ConnectionID string `json:"connection_id"`
+	ResultHex    string `json:"result_hex"`
+	DurationUS   int64  `json:"duration_micros"`
+}
+
+func writeProcedureSuccess(stdout io.Writer, format string, contract shunter.ModuleContract, target string, identity protocol.IdentityToken, response protocol.ProcedureResponse, name string) error {
+	out := procedureSuccess{
+		Status:       "ok",
+		Scope:        "running_app",
+		Command:      "procedure",
+		TargetURL:    target,
+		Module:       contract.Module.Name,
+		Surface:      name,
+		Identity:     hex.EncodeToString(identity.Identity[:]),
+		ConnectionID: hex.EncodeToString(identity.ConnectionID[:]),
+		ResultHex:    hex.EncodeToString(response.Result),
+		DurationUS:   response.TotalHostExecutionDuration,
+	}
+	if strings.EqualFold(strings.TrimSpace(format), contractworkflow.FormatJSON) {
+		return writeJSON(stdout, out)
+	}
+	fmt.Fprintf(stdout, "Status: ok\nScope: running_app\nCommand: procedure\nTarget: %s\nModule: %s\nProcedure: %s\nResult bytes: %d\n", out.TargetURL, out.Module, out.Surface, len(response.Result))
+	return nil
 }
 
 func writeQuerySuccess(stdout io.Writer, format string, contract shunter.ModuleContract, target string, identity protocol.IdentityToken, response protocol.OneOffQueryResponse, name string) error {

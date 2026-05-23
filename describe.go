@@ -8,11 +8,20 @@ type ModuleDescription struct {
 	Name              string
 	Version           string
 	Metadata          map[string]string
+	Procedures        []ProcedureDescription
 	Queries           []QueryDescription
 	Views             []ViewDescription
 	VisibilityFilters []VisibilityFilterDescription
 	Migration         MigrationMetadata
 	TableMigrations   map[string]MigrationMetadata
+}
+
+// ProcedureDescription is a detached declaration summary for a named procedure.
+type ProcedureDescription struct {
+	Name        string             `json:"name"`
+	Args        *ProductSchema     `json:"args,omitempty"`
+	Result      *ProductSchema     `json:"result,omitempty"`
+	Permissions PermissionMetadata `json:"-"`
 }
 
 // QueryDescription is a detached declaration summary for a named read query.
@@ -79,6 +88,7 @@ func (m *Module) Describe() ModuleDescription {
 		Name:              m.name,
 		Version:           m.version,
 		Metadata:          m.MetadataMap(),
+		Procedures:        describeProcedureDeclarations(m.procedures),
 		Queries:           describeQueryDeclarations(m.queries),
 		Views:             describeViewDeclarations(m.views),
 		VisibilityFilters: describeVisibilityFilterDeclarations(m.visibilityFilters),

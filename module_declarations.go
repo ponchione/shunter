@@ -28,6 +28,9 @@ const (
 	// ReadModelSurfaceView identifies read-model metadata attached to a view.
 	ReadModelSurfaceView = "view"
 
+	// PermissionSurfaceProcedure identifies permission metadata attached to a procedure.
+	PermissionSurfaceProcedure = "procedure"
+
 	// MigrationSurfaceTable identifies migration metadata attached to a table.
 	MigrationSurfaceTable = "table"
 
@@ -87,6 +90,50 @@ type ReducerDeclaration struct {
 	Permissions PermissionMetadata
 	Args        *ProductSchema
 	Result      *ProductSchema
+}
+
+// ProcedureHandler is the raw runtime signature for client-callable
+// procedures. Procedures may block on external I/O and are not executed on the
+// reducer executor.
+type ProcedureHandler func(ctx *ProcedureContext, argBSATN []byte) ([]byte, error)
+
+// ProcedureDeclaration records module-owned metadata and handler for a named procedure.
+type ProcedureDeclaration struct {
+	Name        string
+	Handler     ProcedureHandler `json:"-"`
+	Permissions PermissionMetadata
+	Args        *ProductSchema
+	Result      *ProductSchema
+}
+
+type procedureOptions struct {
+	permissions PermissionMetadata
+	args        *ProductSchema
+	result      *ProductSchema
+}
+
+// ProcedureOption configures procedure declaration metadata.
+type ProcedureOption func(*procedureOptions)
+
+// WithProcedurePermissions attaches passive permission metadata to a procedure.
+func WithProcedurePermissions(metadata PermissionMetadata) ProcedureOption {
+	return func(o *procedureOptions) {
+		o.permissions = copyPermissionMetadata(metadata)
+	}
+}
+
+// WithProcedureArgs attaches the procedure argument product schema exported for typed clients.
+func WithProcedureArgs(product ProductSchema) ProcedureOption {
+	return func(o *procedureOptions) {
+		o.args = copyProductSchemaPtr(&product)
+	}
+}
+
+// WithProcedureResult attaches the procedure result product schema exported for typed clients.
+func WithProcedureResult(product ProductSchema) ProcedureOption {
+	return func(o *procedureOptions) {
+		o.result = copyProductSchemaPtr(&product)
+	}
 }
 
 type reducerOptions struct {
@@ -211,7 +258,18 @@ func (m *Module) View(decl ViewDeclaration, opts ...ViewDeclarationOption) *Modu
 }
 
 func validateModuleDeclarations(m *Module) error {
-	names := make(map[string]struct{}, len(m.queries)+len(m.views))
+	names := make(map[string]struct{}, len(m.queries)+len(m.views)+len(m.procedures))
+	for _, procedure := range m.procedures {
+		name := strings.TrimSpace(procedure.Name)
+		if name == "" {
+			return fmt.Errorf("%w: procedure", ErrEmptyDeclarationName)
+		}
+		if _, ok := names[name]; ok {
+			return fmt.Errorf("%w: procedure %q", ErrDuplicateDeclarationName, procedure.Name)
+		}
+		names[name] = struct{}{}
+	}
+
 	for _, query := range m.queries {
 		name := strings.TrimSpace(query.Name)
 		if name == "" {
@@ -270,6 +328,11 @@ func validateModuleMetadata(m *Module, reg schema.SchemaRegistry) error {
 		validateAuthoredPermissionMetadata("permissions.reducer."+reducer.Name, reducer.Permissions, &errs)
 		validateProductSchema("reducers."+reducer.Name+".args", reducer.Args, &errs)
 		validateProductSchema("reducers."+reducer.Name+".result", reducer.Result, &errs)
+	}
+	for _, procedure := range m.procedures {
+		validateAuthoredPermissionMetadata("permissions.procedure."+procedure.Name, procedure.Permissions, &errs)
+		validateProductSchema("procedures."+procedure.Name+".args", procedure.Args, &errs)
+		validateProductSchema("procedures."+procedure.Name+".result", procedure.Result, &errs)
 	}
 	for _, query := range m.queries {
 		validateAuthoredPermissionMetadata("permissions.query."+query.Name, query.Permissions, &errs)
@@ -443,6 +506,22 @@ func describeViewDeclaration(view viewDeclaration) ViewDescription {
 	}
 }
 
+func describeProcedureDeclarations(in []ProcedureDeclaration) []ProcedureDescription {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ProcedureDescription, len(in))
+	for i, procedure := range in {
+		out[i] = ProcedureDescription{
+			Name:        procedure.Name,
+			Args:        copyProductSchemaPtr(procedure.Args),
+			Result:      copyProductSchemaPtr(procedure.Result),
+			Permissions: copyPermissionMetadata(procedure.Permissions),
+		}
+	}
+	return out
+}
+
 func copyReducerDeclarations(in []ReducerDeclaration) []ReducerDeclaration {
 	if len(in) == 0 {
 		return nil
@@ -457,6 +536,20 @@ func copyReducerDeclarations(in []ReducerDeclaration) []ReducerDeclaration {
 		}
 	}
 	return out
+}
+
+func copyProcedureDeclaration(in ProcedureDeclaration) ProcedureDeclaration {
+	return ProcedureDeclaration{
+		Name:        in.Name,
+		Handler:     in.Handler,
+		Permissions: copyPermissionMetadata(in.Permissions),
+		Args:        copyProductSchemaPtr(in.Args),
+		Result:      copyProductSchemaPtr(in.Result),
+	}
+}
+
+func copyProcedureDeclarations(in []ProcedureDeclaration) []ProcedureDeclaration {
+	return mapNonEmptySlice(in, copyProcedureDeclaration)
 }
 
 func copyProductSchemaPtr(in *ProductSchema) *ProductSchema {

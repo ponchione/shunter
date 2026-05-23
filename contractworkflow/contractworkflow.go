@@ -197,6 +197,20 @@ func FindReducer(contract shunter.ModuleContract, name string) (schema.ReducerEx
 	return schema.ReducerExport{}, false
 }
 
+// FindProcedure returns the procedure declaration named by name from contract.
+func FindProcedure(contract shunter.ModuleContract, name string) (shunter.ProcedureDescription, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return shunter.ProcedureDescription{}, false
+	}
+	for _, procedure := range contract.Procedures {
+		if procedure.Name == name {
+			return procedure, true
+		}
+	}
+	return shunter.ProcedureDescription{}, false
+}
+
 // FindQuery returns the declared query named by name from contract.
 func FindQuery(contract shunter.ModuleContract, name string) (shunter.QueryDescription, bool) {
 	name = strings.TrimSpace(name)
@@ -221,6 +235,30 @@ func ReducerArgumentSchema(contract shunter.ModuleContract, name string) (schema
 		return schema.ProductSchemaExport{}, fmt.Errorf("%w: reducer %q", ErrArgumentSchemaMissing, reducer.Name)
 	}
 	return *reducer.Args, nil
+}
+
+// ProcedureArgumentSchema returns the exported argument schema for procedure name.
+func ProcedureArgumentSchema(contract shunter.ModuleContract, name string) (schema.ProductSchemaExport, error) {
+	procedure, ok := FindProcedure(contract, name)
+	if !ok {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: procedure %q", ErrSurfaceNotFound, strings.TrimSpace(name))
+	}
+	if procedure.Args == nil {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: procedure %q", ErrArgumentSchemaMissing, procedure.Name)
+	}
+	return *procedure.Args, nil
+}
+
+// ProcedureResultSchema returns the exported result schema for procedure name.
+func ProcedureResultSchema(contract shunter.ModuleContract, name string) (schema.ProductSchemaExport, error) {
+	procedure, ok := FindProcedure(contract, name)
+	if !ok {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: procedure %q", ErrSurfaceNotFound, strings.TrimSpace(name))
+	}
+	if procedure.Result == nil {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: procedure %q", ErrResultSchemaMissing, procedure.Name)
+	}
+	return *procedure.Result, nil
 }
 
 // ReducerResultSchema returns the exported result schema for reducer name.

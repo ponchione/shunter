@@ -1,5 +1,6 @@
 import { createShunterClient } from "@shunter/client";
 import {
+  callSendSystemMessageProcedureTyped,
   callSendMessageTyped,
   shunterContract,
   subscribeLiveMessagesHandle,
@@ -30,6 +31,10 @@ const liveMessages = await subscribeLiveMessagesHandle(client.subscribeDeclaredV
 await callSendMessageTyped(client.callReducer, {
   author: "Ada",
   body: "hello from the TypeScript client",
+});
+
+await callSendSystemMessageProcedureTyped(client.callProcedure, {
+  body: "hello from the TypeScript procedure client",
 });
 
 await liveMessages.unsubscribe();

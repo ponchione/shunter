@@ -51,6 +51,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	}
 	writeTypeScriptContractMetadata(&b, contract)
 	b.WriteString("export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;\n")
+	b.WriteString("export type ProcedureCaller = ShunterProcedureCaller<ProcedureName, Uint8Array, Uint8Array>;\n")
 	b.WriteString("export type EncodedReducerCallOptions<Args = unknown> = ShunterEncodedReducerCallOptions<Args>;\n")
 	b.WriteString("export type EncodedReducerCallResultOptions<Args = unknown, Result = Uint8Array> = ShunterEncodedReducerCallResultOptions<Args, Result>;\n")
 	b.WriteString("export type ReducerCallResult<Name extends ReducerName = ReducerName, Result = Uint8Array> = ShunterReducerCallResult<Name, Result>;\n")
@@ -178,6 +179,48 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	lifecycleReducerIdentifiers := uniqueTypeScriptIdentifiers(lifecycleReducerNames, typeScriptLifecycleIdentifier)
 	writeTypeScriptConstMap(&b, "lifecycleReducers", lifecycleReducerIdentifiers)
 	b.WriteString("export type LifecycleReducerName = (typeof lifecycleReducers)[keyof typeof lifecycleReducers];\n\n")
+
+	procedureNames := make([]string, len(contract.Procedures))
+	for i, procedure := range contract.Procedures {
+		procedureNames[i] = procedure.Name
+	}
+	procedureIdentifiers := uniqueTypeScriptIdentifiers(procedureNames, typeScriptCamelIdentifier)
+	writeTypeScriptConstMap(&b, "procedures", procedureIdentifiers)
+	b.WriteString("export type ProcedureName = (typeof procedures)[keyof typeof procedures];\n\n")
+	proceduresByName := make(map[string]shunter.ProcedureDescription, len(contract.Procedures))
+	for _, procedure := range contract.Procedures {
+		proceduresByName[procedure.Name] = procedure
+	}
+	for _, procedure := range procedureIdentifiers {
+		procedureExport := proceduresByName[procedure.name]
+		var argsTypeName, argsEncoderName string
+		if procedureExport.Args != nil {
+			argsTypeName = uniqueTypeScriptIdentifier(upperFirst(procedure.identifier)+"Args", topLevelValueNames)
+			argsColumnsName := uniqueTypeScriptIdentifier(procedure.identifier+"ArgsColumns", topLevelValueNames)
+			argsEncoderName = uniqueTypeScriptIdentifier("encode"+upperFirst(procedure.identifier)+"Args", topLevelValueNames)
+			if err := writeTypeScriptProductCodec(&b, argsTypeName, argsColumnsName, argsEncoderName, "", *procedureExport.Args, true, false); err != nil {
+				return nil, err
+			}
+		}
+		if procedureExport.Result != nil {
+			resultTypeName := uniqueTypeScriptIdentifier(upperFirst(procedure.identifier)+"Result", topLevelValueNames)
+			resultColumnsName := uniqueTypeScriptIdentifier(procedure.identifier+"ResultColumns", topLevelValueNames)
+			resultDecoderName := uniqueTypeScriptIdentifier("decode"+upperFirst(procedure.identifier)+"Result", topLevelValueNames)
+			if err := writeTypeScriptProductCodec(&b, resultTypeName, resultColumnsName, "", resultDecoderName, *procedureExport.Result, false, true); err != nil {
+				return nil, err
+			}
+		}
+		functionName := uniqueTypeScriptIdentifier("call"+upperFirst(procedure.identifier)+"Procedure", topLevelValueNames)
+		fmt.Fprintf(&b, "export function %s(callProcedure: ProcedureCaller, args: Uint8Array): Promise<Uint8Array> {\n", functionName)
+		fmt.Fprintf(&b, "  return callProcedure(%s, args);\n", strconv.Quote(procedure.name))
+		b.WriteString("}\n\n")
+		if procedureExport.Args != nil {
+			typedFunctionName := uniqueTypeScriptIdentifier(functionName+"Typed", topLevelValueNames)
+			fmt.Fprintf(&b, "export function %s(callProcedure: ProcedureCaller, args: %s): Promise<Uint8Array> {\n", typedFunctionName, argsTypeName)
+			fmt.Fprintf(&b, "  return callProcedure(%s, %s(args));\n", strconv.Quote(procedure.name), argsEncoderName)
+			b.WriteString("}\n\n")
+		}
+	}
 
 	queryNames := make([]string, len(contract.Queries))
 	for i, query := range contract.Queries {
@@ -348,6 +391,7 @@ func typeScriptTopLevelValueNames() map[string]int {
 		"visibilityFilters",
 		"reducers",
 		"lifecycleReducers",
+		"procedures",
 		"queries",
 		"querySQL",
 		"views",
@@ -355,6 +399,7 @@ func typeScriptTopLevelValueNames() map[string]int {
 		"permissions",
 		"readModels",
 		"ReducerCaller",
+		"ProcedureCaller",
 		"EncodedReducerCallOptions",
 		"EncodedReducerCallResultOptions",
 		"ReducerCallResult",
@@ -385,6 +430,7 @@ func typeScriptTopLevelValueNames() map[string]int {
 		"ShunterSubprotocol",
 		"ReducerName",
 		"LifecycleReducerName",
+		"ProcedureName",
 		"QueryName",
 		"ExecutableQueryName",
 		"ViewName",
@@ -419,6 +465,7 @@ func writeTypeScriptRuntimeImports(b *bytes.Buffer, runtimeImport string) {
 	b.WriteString("  EncodedReducerCallResultOptions as ShunterEncodedReducerCallResultOptions,\n")
 	b.WriteString("  GeneratedContractMetadata as ShunterGeneratedContractMetadata,\n")
 	b.WriteString("  ProtocolMetadata as ShunterProtocolMetadata,\n")
+	b.WriteString("  ProcedureCaller as ShunterProcedureCaller,\n")
 	b.WriteString("  QueryRunner as ShunterQueryRunner,\n")
 	b.WriteString("  RawDeclaredQueryResult as ShunterRawDeclaredQueryResult,\n")
 	b.WriteString("  ReducerCaller as ShunterReducerCaller,\n")
@@ -450,6 +497,14 @@ func typeScriptRuntimeValueImportUsage(contract shunter.ModuleContract) typeScri
 			usage.encodeBsatnProduct = true
 		}
 		if reducer.Result != nil {
+			usage.decodeBsatnProduct = true
+		}
+	}
+	for _, procedure := range contract.Procedures {
+		if procedure.Args != nil {
+			usage.encodeBsatnProduct = true
+		}
+		if procedure.Result != nil {
 			usage.decodeBsatnProduct = true
 		}
 	}

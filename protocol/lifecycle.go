@@ -27,6 +27,11 @@ type ExecutorInbox interface {
 	CallReducer(ctx context.Context, req CallReducerRequest) error
 }
 
+// ProcedureHandler is the protocol/server seam for module-owned procedures.
+type ProcedureHandler interface {
+	HandleCallProcedure(ctx context.Context, conn *Conn, msg *CallProcedureMsg)
+}
+
 // SubscriptionSetVariant records which wire family produced a set-based
 // subscription request. The executor-side register/unregister commands are
 // shared across Single and Multi, but the protocol reply envelope must echo

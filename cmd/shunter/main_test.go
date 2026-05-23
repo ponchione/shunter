@@ -27,7 +27,7 @@ func TestHelpDocumentsAppOwnedContractExport(t *testing.T) {
 	assertContains(t, out, "shunter health --url http://127.0.0.1:3000")
 	assertContains(t, out, "shunter contract validate --contract shunter.contract.json")
 	assertContains(t, out, "shunter contract assert --contract shunter.contract.json")
-	assertContains(t, out, "--section all|tables|reducers|queries|views|visibility")
+	assertContains(t, out, "--section all|tables|reducers|procedures|queries|views|visibility")
 	assertContains(t, out, "shunter backup --data-dir ./data --out ./backup")
 	assertContains(t, out, "shunter restore --backup ./backup --data-dir ./data")
 	assertContains(t, out, "offline DataDir")
@@ -336,7 +336,7 @@ func TestHealthCommandReadsContractText(t *testing.T) {
 	assertContains(t, out, "Running server checked: false")
 	assertContains(t, out, "local contract artifact is valid")
 	assertContains(t, out, "Module: chat v1.0.0")
-	assertContains(t, out, "Counts: 1 tables, 2 columns, 1 indexes, 1 reducers, 1 queries, 0 views, 0 visibility filters")
+	assertContains(t, out, "Counts: 1 tables, 2 columns, 1 indexes, 1 reducers, 0 procedures, 1 queries, 0 views, 0 visibility filters")
 }
 
 func TestHealthCommandReadsContractJSON(t *testing.T) {
@@ -478,7 +478,7 @@ func TestContractValidateCommandReadsContractText(t *testing.T) {
 	assertContains(t, out, "Scope: contract")
 	assertContains(t, out, "module contract JSON is valid")
 	assertContains(t, out, "Module: chat v1.0.0")
-	assertContains(t, out, "Counts: 1 tables, 2 columns, 1 indexes, 1 reducers, 1 queries, 0 views, 0 visibility filters")
+	assertContains(t, out, "Counts: 1 tables, 2 columns, 1 indexes, 1 reducers, 0 procedures, 1 queries, 0 views, 0 visibility filters")
 }
 
 func TestContractValidateCommandReadsContractJSON(t *testing.T) {

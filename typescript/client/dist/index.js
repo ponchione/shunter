@@ -14,6 +14,7 @@ export const SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY = 7;
 export const SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW = 8;
 export const SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY_WITH_PARAMETERS = 9;
 export const SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW_WITH_PARAMETERS = 10;
+export const SHUNTER_CLIENT_MESSAGE_CALL_PROCEDURE = 11;
 export const SHUNTER_SERVER_MESSAGE_IDENTITY_TOKEN = 1;
 export const SHUNTER_SERVER_MESSAGE_SUBSCRIBE_SINGLE_APPLIED = 2;
 export const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_SINGLE_APPLIED = 3;
@@ -23,6 +24,7 @@ export const SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE = 5;
 export const SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE_LIGHT = 8;
 export const SHUNTER_SERVER_MESSAGE_SUBSCRIBE_MULTI_APPLIED = 9;
 export const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_MULTI_APPLIED = 10;
+export const SHUNTER_SERVER_MESSAGE_PROCEDURE_RESPONSE = 11;
 export const SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE = 0;
 export const SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY = 1;
 export const SHUNTER_MODULE_CONTRACT_FORMAT = "shunter.module_contract";
@@ -326,6 +328,7 @@ export function createShunterClient(options) {
     let nextRequestId = 1;
     let nextQueryId = 1;
     const pendingReducerCalls = new Map();
+    const pendingProcedureCalls = new Map();
     const pendingDeclaredQueries = new Map();
     const pendingSubscriptionsByRequest = new Map();
     const pendingSubscriptionsByQuery = new Map();
@@ -365,6 +368,13 @@ export function createShunterClient(options) {
             pending.reject(error);
         }
     };
+    const rejectPendingProcedureCalls = (error) => {
+        for (const [messageKey, pending] of pendingProcedureCalls) {
+            pending.cleanup?.();
+            pendingProcedureCalls.delete(messageKey);
+            pending.reject(error);
+        }
+    };
     const cleanupPendingSubscription = (pending) => {
         pending.cleanup?.();
         pendingSubscriptionsByRequest.delete(pending.requestId);
@@ -390,6 +400,7 @@ export function createShunterClient(options) {
     };
     const rejectInFlightOperations = (error) => {
         rejectPendingReducerCalls(error);
+        rejectPendingProcedureCalls(error);
         rejectPendingDeclaredQueries(error);
         rejectPendingSubscriptions(error);
         rejectPendingUnsubscribes(error);
@@ -558,6 +569,18 @@ export function createShunterClient(options) {
             code: "declared_query_message_ids_exhausted",
         });
     };
+    const allocateProcedureRequestId = () => {
+        const attempts = Math.min(maxUint32, pendingProcedureCalls.size + 1);
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+            const requestId = allocateRequestId();
+            if (!pendingProcedureCalls.has(bytesKey(requestIdMessageId(requestId)))) {
+                return requestId;
+            }
+        }
+        throw new ShunterValidationError("No procedure message IDs are available.", {
+            code: "procedure_message_ids_exhausted",
+        });
+    };
     const settleReducerResponse = (update) => {
         const { requestId, name } = update.reducerCall;
         const pending = pendingReducerCalls.get(requestId);
@@ -600,6 +623,23 @@ export function createShunterClient(options) {
         if (response.error !== undefined) {
             pending.reject(new ShunterValidationError(response.error || "Declared query failed.", {
                 code: "declared_query_failed",
+                details: { name: pending.name, response },
+            }));
+            return;
+        }
+        pending.resolve(response.rawFrame);
+    };
+    const settleProcedureResponse = (response) => {
+        const messageKey = bytesKey(response.messageId);
+        const pending = pendingProcedureCalls.get(messageKey);
+        if (pending === undefined) {
+            return;
+        }
+        pending.cleanup?.();
+        pendingProcedureCalls.delete(messageKey);
+        if (response.error !== undefined) {
+            pending.reject(new ShunterValidationError(response.error || "Procedure call failed.", {
+                code: "procedure_failed",
                 details: { name: pending.name, response },
             }));
             return;
@@ -1213,6 +1253,9 @@ export function createShunterClient(options) {
                 case SHUNTER_SERVER_MESSAGE_ONE_OFF_QUERY_RESPONSE:
                     settleDeclaredQueryResponse(decodeOneOffQueryResponseFrame(frame));
                     return;
+                case SHUNTER_SERVER_MESSAGE_PROCEDURE_RESPONSE:
+                    settleProcedureResponse(decodeProcedureResponseFrame(frame));
+                    return;
                 case SHUNTER_SERVER_MESSAGE_SUBSCRIBE_MULTI_APPLIED:
                     settleDeclaredViewSubscriptionApplied(decodeSubscribeMultiAppliedFrame(frame));
                     return;
@@ -1541,6 +1584,55 @@ export function createShunterClient(options) {
                     pendingReducerCalls.delete(request.requestId);
                     cleanup?.();
                     reject(toShunterError(error, "transport", "Reducer request send failed"));
+                }
+            });
+        },
+        async callProcedure(name, args, options = {}) {
+            if (disposed) {
+                throw new ShunterClosedClientError("Cannot call a procedure on a disposed Shunter client.");
+            }
+            if (options.signal?.aborted) {
+                throw new ShunterClosedClientError("Procedure call aborted before sending.");
+            }
+            const activeSocket = socket;
+            if (state.status !== "connected" || activeSocket === undefined) {
+                throw new ShunterClosedClientError("Cannot call a procedure before the Shunter client is connected.");
+            }
+            assertDeclaredReadParametersSupported(state.metadata.subprotocol, state.metadata.protocol);
+            const request = encodeProcedureCallRequest(name, args, {
+                ...options,
+                requestId: options.messageId === undefined
+                    ? options.requestId ?? allocateProcedureRequestId()
+                    : options.requestId,
+            });
+            const messageKey = bytesKey(request.messageId);
+            if (pendingProcedureCalls.has(messageKey)) {
+                throw new ShunterValidationError("Procedure message ID is already in flight.", {
+                    code: "procedure_message_id_in_use",
+                    details: { name, messageId: request.messageId },
+                });
+            }
+            return new Promise((resolve, reject) => {
+                let cleanup;
+                if (options.signal !== undefined) {
+                    const abort = () => {
+                        pendingProcedureCalls.delete(messageKey);
+                        cleanup?.();
+                        reject(new ShunterClosedClientError("Procedure call aborted before a response was received."));
+                    };
+                    options.signal.addEventListener("abort", abort, { once: true });
+                    cleanup = () => {
+                        options.signal?.removeEventListener("abort", abort);
+                    };
+                }
+                pendingProcedureCalls.set(messageKey, { name, cleanup, resolve, reject });
+                try {
+                    activeSocket.send(request.frame);
+                }
+                catch (error) {
+                    pendingProcedureCalls.delete(messageKey);
+                    cleanup?.();
+                    reject(toShunterError(error, "transport", "Procedure request send failed"));
                 }
             });
         },
@@ -1935,6 +2027,31 @@ export function decodeOneOffQueryResponseFrame(data) {
         messageId,
         ...(error === undefined ? {} : { error }),
         tables,
+        totalHostExecutionDuration,
+        rawFrame: new Uint8Array(frame),
+    };
+}
+export function decodeProcedureResponseFrame(data) {
+    const frame = frameBytes(data);
+    if (frame.length < 1 || frame[0] !== SHUNTER_SERVER_MESSAGE_PROCEDURE_RESPONSE) {
+        throw new ShunterProtocolError("Expected ProcedureResponse server message.");
+    }
+    let offset = 1;
+    const [messageId, messageOffset] = readBytes(frame, offset, "ProcedureResponse message_id");
+    offset = messageOffset;
+    const [error, errorOffset] = readOptionalStringValue(frame, offset, "ProcedureResponse error");
+    offset = errorOffset;
+    const [result, resultOffset] = readBytes(frame, offset, "ProcedureResponse result");
+    offset = resultOffset;
+    const [totalHostExecutionDuration, durationOffset] = readInt64LE(frame, offset, "ProcedureResponse total_host_execution_duration");
+    offset = durationOffset;
+    if (offset !== frame.length) {
+        throw new ShunterProtocolError("Malformed ProcedureResponse: trailing bytes.");
+    }
+    return {
+        messageId,
+        ...(error === undefined ? {} : { error }),
+        result,
         totalHostExecutionDuration,
         rawFrame: new Uint8Array(frame),
     };
@@ -2978,6 +3095,40 @@ export function encodeDeclaredQueryRequest(name, options = {}) {
         ...(requestId === undefined ? {} : { requestId }),
         messageId,
         ...(params === undefined ? {} : { params }),
+        frame,
+    };
+}
+export function encodeProcedureCallRequest(name, args, options = {}) {
+    const requestId = options.requestId;
+    if (requestId !== undefined) {
+        assertUint32(requestId, "Procedure request ID");
+    }
+    const messageId = options.messageId === undefined
+        ? requestIdMessageId(requestId ?? 0)
+        : new Uint8Array(options.messageId);
+    const procedureArgs = optionalUint8Array(args, "Procedure arguments") ?? new Uint8Array();
+    const procedureName = utf8Bytes(name, "Procedure name");
+    const frameLength = 1 +
+        4 + messageId.length +
+        4 + procedureName.length +
+        4 + procedureArgs.length;
+    const frame = new Uint8Array(frameLength);
+    let offset = 0;
+    frame[offset] = SHUNTER_CLIENT_MESSAGE_CALL_PROCEDURE;
+    offset += 1;
+    offset = writeUint32LE(frame, offset, messageId.length);
+    frame.set(messageId, offset);
+    offset += messageId.length;
+    offset = writeUint32LE(frame, offset, procedureName.length);
+    frame.set(procedureName, offset);
+    offset += procedureName.length;
+    offset = writeUint32LE(frame, offset, procedureArgs.length);
+    frame.set(procedureArgs, offset);
+    return {
+        name,
+        ...(requestId === undefined ? {} : { requestId }),
+        messageId,
+        args: procedureArgs,
         frame,
     };
 }

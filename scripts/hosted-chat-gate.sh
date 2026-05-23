@@ -10,6 +10,7 @@ health_json="$(mktemp)"
 validate_json="$(mktemp)"
 assert_json="$(mktemp)"
 call_json="$(mktemp)"
+procedure_json="$(mktemp)"
 query_json="$(mktemp)"
 running_describe_json="$(mktemp)"
 running_health_json="$(mktemp)"
@@ -22,7 +23,7 @@ cleanup() {
     kill "$server_pid" >/dev/null 2>&1 || true
     wait "$server_pid" >/dev/null 2>&1 || true
   fi
-  rm -f "$build_bin" "$describe_json" "$health_json" "$validate_json" "$assert_json" "$call_json" "$query_json" "$running_describe_json" "$running_health_json" "$server_log"
+  rm -f "$build_bin" "$describe_json" "$health_json" "$validate_json" "$assert_json" "$call_json" "$procedure_json" "$query_json" "$running_describe_json" "$running_health_json" "$server_log"
   rm -rf "$run_data"
 }
 trap cleanup EXIT
@@ -40,6 +41,7 @@ rtk go run ./cmd/shunter contract assert \
   --schema-version 1 \
   --tables 3 \
   --reducers 1 \
+  --procedures 1 \
   --queries 1 \
   --views 1 \
   --format json > "$assert_json"
@@ -102,6 +104,15 @@ rtk go run ./cmd/shunter call \
 rtk grep '"status": "ok"' "$call_json"
 rtk grep '"command": "call"' "$call_json"
 rtk grep '"surface": "send_message"' "$call_json"
+rtk go run ./cmd/shunter procedure \
+  --url "$server_url" \
+  --contract examples/hosted-chat/shunter.contract.json \
+  --allow-dev-anonymous \
+  --format json \
+  send_system_message '{"body":"hello from hosted-chat procedure"}' > "$procedure_json"
+rtk grep '"status": "ok"' "$procedure_json"
+rtk grep '"command": "procedure"' "$procedure_json"
+rtk grep '"surface": "send_system_message"' "$procedure_json"
 rtk go run ./cmd/shunter query \
   --url "$server_url" \
   --contract examples/hosted-chat/shunter.contract.json \
@@ -112,6 +123,7 @@ rtk grep '"status": "ok"' "$query_json"
 rtk grep '"command": "query"' "$query_json"
 rtk grep '"surface": "recent_messages"' "$query_json"
 rtk grep '"body": "hello from hosted-chat gate"' "$query_json"
+rtk grep '"body": "hello from hosted-chat procedure"' "$query_json"
 rtk go run ./cmd/shunter contract codegen \
   --contract examples/hosted-chat/shunter.contract.json \
   --language typescript \

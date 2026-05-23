@@ -139,11 +139,12 @@ func (r healthContractReport) Text() string {
 	fmt.Fprintf(&b, "\nContract version: %d\nSchema version: %d\n", r.Describe.ContractVersion, r.Describe.SchemaVersion)
 	fmt.Fprintf(
 		&b,
-		"Counts: %d tables, %d columns, %d indexes, %d reducers, %d queries, %d views, %d visibility filters\n",
+		"Counts: %d tables, %d columns, %d indexes, %d reducers, %d procedures, %d queries, %d views, %d visibility filters\n",
 		r.Describe.Counts.Tables,
 		r.Describe.Counts.Columns,
 		r.Describe.Counts.Indexes,
 		r.Describe.Counts.Reducers,
+		r.Describe.Counts.Procedures,
 		r.Describe.Counts.Queries,
 		r.Describe.Counts.Views,
 		r.Describe.Counts.VisibilityFilters,

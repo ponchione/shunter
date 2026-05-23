@@ -12,6 +12,7 @@ type Module struct {
 	metadata          map[string]string
 	builder           *schema.Builder
 	reducers          []ReducerDeclaration
+	procedures        []ProcedureDeclaration
 	queries           []queryDeclaration
 	views             []viewDeclaration
 	visibilityFilters []VisibilityFilterDeclaration
@@ -76,6 +77,27 @@ func (m *Module) Reducer(name string, h schema.ReducerHandler, opts ...ReducerOp
 		Result:      copyProductSchemaPtr(options.result),
 	})
 	m.builder.Reducer(name, h)
+	return m
+}
+
+// Procedure registers a named procedure and returns the receiver for fluent
+// module declarations. Procedures may perform external I/O; they are not run
+// on the serialized reducer executor. State changes should go through
+// ProcedureContext.CallReducer.
+func (m *Module) Procedure(name string, h ProcedureHandler, opts ...ProcedureOption) *Module {
+	var options procedureOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+	m.procedures = append(m.procedures, ProcedureDeclaration{
+		Name:        name,
+		Handler:     h,
+		Permissions: copyPermissionMetadata(options.permissions),
+		Args:        copyProductSchemaPtr(options.args),
+		Result:      copyProductSchemaPtr(options.result),
+	})
 	return m
 }
 

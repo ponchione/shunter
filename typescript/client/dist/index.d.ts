@@ -14,6 +14,7 @@ export declare const SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY: 7;
 export declare const SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW: 8;
 export declare const SHUNTER_CLIENT_MESSAGE_DECLARED_QUERY_WITH_PARAMETERS: 9;
 export declare const SHUNTER_CLIENT_MESSAGE_SUBSCRIBE_DECLARED_VIEW_WITH_PARAMETERS: 10;
+export declare const SHUNTER_CLIENT_MESSAGE_CALL_PROCEDURE: 11;
 export declare const SHUNTER_SERVER_MESSAGE_IDENTITY_TOKEN: 1;
 export declare const SHUNTER_SERVER_MESSAGE_SUBSCRIBE_SINGLE_APPLIED: 2;
 export declare const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_SINGLE_APPLIED: 3;
@@ -23,6 +24,7 @@ export declare const SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE: 5;
 export declare const SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE_LIGHT: 8;
 export declare const SHUNTER_SERVER_MESSAGE_SUBSCRIBE_MULTI_APPLIED: 9;
 export declare const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_MULTI_APPLIED: 10;
+export declare const SHUNTER_SERVER_MESSAGE_PROCEDURE_RESPONSE: 11;
 export declare const SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE: 0;
 export declare const SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY: 1;
 export declare const SHUNTER_MODULE_CONTRACT_FORMAT: "shunter.module_contract";
@@ -223,6 +225,7 @@ export interface ShunterClient<Protocol extends ProtocolMetadata = ProtocolMetad
     readonly state: ConnectionState<Protocol>;
     connect(): Promise<ConnectionMetadata<Protocol>>;
     callReducer: ReducerCaller<string, Uint8Array, Uint8Array>;
+    callProcedure: ProcedureCaller<string, Uint8Array, Uint8Array>;
     runDeclaredQuery: DeclaredQueryRunner<string, Uint8Array>;
     subscribeDeclaredView: DeclaredViewSubscriber<string> & DeclaredViewHandleSubscriber<string>;
     subscribeTable: RawTableSubscriber & RawTableHandleSubscriber & DecodedTableHandleSubscriber;
@@ -282,6 +285,13 @@ export interface OneOffQueryResponseMessage {
     readonly totalHostExecutionDuration: bigint;
     readonly rawFrame: Uint8Array;
 }
+export interface ProcedureResponseMessage {
+    readonly messageId: Uint8Array;
+    readonly error?: string;
+    readonly result: Uint8Array;
+    readonly totalHostExecutionDuration: bigint;
+    readonly rawFrame: Uint8Array;
+}
 export type RawDeclaredQueryTable = OneOffQueryTable;
 export interface RawDeclaredQueryResult<Name extends string = string> {
     readonly name: Name;
@@ -312,6 +322,7 @@ export interface DeclaredQueryDecodeOptions<RowsByName extends object = Record<s
     readonly decodeRow?: DeclaredQueryRowDecoder<RowsByName[keyof RowsByName & string]>;
 }
 export declare function decodeOneOffQueryResponseFrame(data: unknown): OneOffQueryResponseMessage;
+export declare function decodeProcedureResponseFrame(data: unknown): ProcedureResponseMessage;
 export declare function decodeRawDeclaredQueryResult<Name extends string>(name: Name, data: unknown): RawDeclaredQueryResult<Name>;
 export declare function decodeDeclaredQueryResult<Name extends string, RowsByName extends object = Record<string, unknown>>(name: Name, data: unknown, options: DeclaredQueryDecodeOptions<RowsByName>): DecodedDeclaredQueryResult<Name, RowsByName>;
 export interface RawRowList {
@@ -426,6 +437,19 @@ export interface DeclaredQueryOptions {
     readonly signal?: AbortSignal;
     readonly params?: Uint8Array;
 }
+export interface ProcedureCallOptions {
+    readonly requestId?: RequestID;
+    readonly messageId?: Uint8Array;
+    readonly signal?: AbortSignal;
+}
+export interface EncodedProcedureCallRequest<Name extends string = string> {
+    readonly name: Name;
+    readonly requestId?: RequestID;
+    readonly messageId: Uint8Array;
+    readonly args: Uint8Array;
+    readonly frame: Uint8Array;
+}
+export type ProcedureCaller<Name extends string = string, Args = Uint8Array, Result = Uint8Array> = (name: Name, args: Args, options?: ProcedureCallOptions) => Promise<Result>;
 export interface EncodedDeclaredQueryRequest<Name extends string = string> {
     readonly name: Name;
     readonly requestId?: RequestID;
@@ -441,6 +465,7 @@ export interface DeclaredQueryResult<Name extends string = string, Rows = Uint8A
 }
 export type DeclaredQueryRunner<Name extends string = string, Result = Uint8Array> = (name: Name, options?: DeclaredQueryOptions) => Promise<Result>;
 export declare function encodeDeclaredQueryRequest<Name extends string>(name: Name, options?: DeclaredQueryOptions): EncodedDeclaredQueryRequest<Name>;
+export declare function encodeProcedureCallRequest<Name extends string>(name: Name, args: Uint8Array, options?: ProcedureCallOptions): EncodedProcedureCallRequest<Name>;
 export interface SubscriptionClosed {
     readonly reason: "unsubscribed" | "closed" | "error";
     readonly error?: ShunterError;
@@ -568,8 +593,9 @@ export type DecodedTableHandleSubscriber = <Table extends string, Row>(table: Ta
 export type RawTableSubscriber = <Table extends string, Row = unknown>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe>;
 export type RawTableHandleSubscriber = <Table extends string>(table: Table, onRows: ((rows: Uint8Array[]) => void) | undefined, options: TableSubscriptionOptions<Uint8Array> & SubscriptionHandleReturnOptions) => Promise<SubscriptionHandle<Uint8Array>>;
 export type ViewSubscriber = (sql: string, options?: ViewSubscriptionOptions) => Promise<SubscriptionUnsubscribe>;
-export interface RuntimeBindings<TableName extends string = string, RowsByName extends Record<TableName, unknown> = Record<TableName, unknown>, ReducerName extends string = string, ExecutableQueryName extends string = string, ExecutableViewName extends string = string> {
+export interface RuntimeBindings<TableName extends string = string, RowsByName extends Record<TableName, unknown> = Record<TableName, unknown>, ReducerName extends string = string, ProcedureName extends string = string, ExecutableQueryName extends string = string, ExecutableViewName extends string = string> {
     readonly callReducer: ReducerCaller<ReducerName, Uint8Array, Uint8Array>;
+    readonly callProcedure: ProcedureCaller<ProcedureName, Uint8Array, Uint8Array>;
     readonly runDeclaredQuery: DeclaredQueryRunner<ExecutableQueryName, Uint8Array>;
     readonly subscribeDeclaredView: DeclaredViewSubscriber<ExecutableViewName>;
     readonly subscribeTable: TableSubscriber<TableName, RowsByName>;

@@ -46,7 +46,7 @@ Inspect the exported app surface with the generic CLI:
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json --section reducers --format json
 rtk go run ./cmd/shunter contract validate --contract examples/hosted-chat/shunter.contract.json
-rtk go run ./cmd/shunter contract assert --contract examples/hosted-chat/shunter.contract.json --module hosted_chat --module-version v0.1.0 --contract-version 1 --tables 3 --reducers 1 --queries 1 --views 1
+rtk go run ./cmd/shunter contract assert --contract examples/hosted-chat/shunter.contract.json --module hosted_chat --module-version v0.1.0 --contract-version 1 --tables 3 --reducers 1 --procedures 1 --queries 1 --views 1
 rtk go run ./cmd/shunter health --contract examples/hosted-chat/shunter.contract.json
 ```
 
@@ -65,6 +65,12 @@ rtk go run ./cmd/shunter call \
   --contract examples/hosted-chat/shunter.contract.json \
   --allow-dev-anonymous \
   send_message '{"author":"Ada","body":"hello"}'
+
+rtk go run ./cmd/shunter procedure \
+  --url http://127.0.0.1:3000 \
+  --contract examples/hosted-chat/shunter.contract.json \
+  --allow-dev-anonymous \
+  send_system_message '{"body":"hello from a procedure"}'
 
 rtk go run ./cmd/shunter query \
   --url http://127.0.0.1:3000 \
@@ -85,8 +91,8 @@ npm run typecheck
 ```
 
 The TypeScript example connects to `/subscribe`, calls the generated
-`send_message` reducer helper, and subscribes to the generated `live_messages`
-view helper with decoded rows.
+`send_message` reducer helper and `send_system_message` procedure helper, and
+subscribes to the generated `live_messages` view helper with decoded rows.
 
 ## Release Gate
 

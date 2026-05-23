@@ -79,6 +79,8 @@ func protocolKindFromTag(tag uint8) string {
 		return "subscribe_declared_view"
 	case TagSubscribeDeclaredViewWithParameters:
 		return "subscribe_declared_view"
+	case TagCallProcedure:
+		return "call_procedure"
 	default:
 		return "unknown"
 	}
@@ -106,6 +108,8 @@ func protocolKindFromMessage(msg any) string {
 		return "declared_query"
 	case DeclaredQueryWithParametersMsg:
 		return "declared_query"
+	case CallProcedureMsg:
+		return "call_procedure"
 	default:
 		return "unknown"
 	}

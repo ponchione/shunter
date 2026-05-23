@@ -15,6 +15,7 @@ import type {
   EncodedReducerCallResultOptions as ShunterEncodedReducerCallResultOptions,
   GeneratedContractMetadata as ShunterGeneratedContractMetadata,
   ProtocolMetadata as ShunterProtocolMetadata,
+  ProcedureCaller as ShunterProcedureCaller,
   QueryRunner as ShunterQueryRunner,
   RawDeclaredQueryResult as ShunterRawDeclaredQueryResult,
   ReducerCaller as ShunterReducerCaller,
@@ -56,6 +57,7 @@ export const shunterContract = {
 } as const satisfies ShunterGeneratedContractMetadata<typeof shunterProtocol>;
 
 export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;
+export type ProcedureCaller = ShunterProcedureCaller<ProcedureName, Uint8Array, Uint8Array>;
 export type EncodedReducerCallOptions<Args = unknown> = ShunterEncodedReducerCallOptions<Args>;
 export type EncodedReducerCallResultOptions<Args = unknown, Result = Uint8Array> = ShunterEncodedReducerCallResultOptions<Args, Result>;
 export type ReducerCallResult<Name extends ReducerName = ReducerName, Result = Uint8Array> = ShunterReducerCallResult<Name, Result>;
@@ -232,6 +234,34 @@ export const lifecycleReducers = {
 } as const;
 
 export type LifecycleReducerName = (typeof lifecycleReducers)[keyof typeof lifecycleReducers];
+
+export const procedures = {
+  sendSystemMessage: "send_system_message",
+} as const;
+
+export type ProcedureName = (typeof procedures)[keyof typeof procedures];
+
+export interface SendSystemMessageArgs {
+  body: string;
+}
+
+const sendSystemMessageArgsColumns = [
+  { name: "body", kind: "string" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function encodeSendSystemMessageArgs(value: SendSystemMessageArgs): Uint8Array {
+  return shunterEncodeBsatnProduct([
+    value.body,
+  ], sendSystemMessageArgsColumns);
+}
+
+export function callSendSystemMessageProcedure(callProcedure: ProcedureCaller, args: Uint8Array): Promise<Uint8Array> {
+  return callProcedure("send_system_message", args);
+}
+
+export function callSendSystemMessageProcedureTyped(callProcedure: ProcedureCaller, args: SendSystemMessageArgs): Promise<Uint8Array> {
+  return callProcedure("send_system_message", encodeSendSystemMessageArgs(args));
+}
 
 export const queries = {
   recentMessages: "recent_messages",

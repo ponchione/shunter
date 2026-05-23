@@ -34,6 +34,8 @@ func run(stdout, stderr io.Writer, args []string) int {
 		return 0
 	case "call":
 		return runCall(stdout, stderr, args[1:])
+	case "procedure":
+		return runProcedure(stdout, stderr, args[1:])
 	case "query":
 		return runQuery(stdout, stderr, args[1:])
 	case "describe":
@@ -314,8 +316,9 @@ func printRootHelp(w io.Writer) {
 Usage:
   shunter version
   shunter call --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" reducer_name '{"field":"value"}' [--format text|json]
+  shunter procedure --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" procedure_name '{"field":"value"}' [--format text|json]
   shunter query --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" query_name ['{"field":"value"}'] [--format text|json]
-  shunter describe --contract shunter.contract.json [--section all|tables|reducers|queries|views|visibility] [--format text|json]
+  shunter describe --contract shunter.contract.json [--section all|tables|reducers|procedures|queries|views|visibility] [--format text|json]
   shunter describe --url http://127.0.0.1:3000 [--format text|json]
   shunter health --contract shunter.contract.json [--format text|json]
   shunter health --url http://127.0.0.1:3000 [--format text|json]
@@ -323,7 +326,7 @@ Usage:
   shunter contract policy --previous old.json --current current.json [--strict] [--require-previous-version] [--format text|json]
   shunter contract plan --previous old.json --current current.json [--strict] [--require-previous-version] [--validate] [--format text|json]
   shunter contract validate --contract shunter.contract.json [--format text|json]
-  shunter contract assert --contract shunter.contract.json [--module name] [--module-version v] [--contract-version n] [--schema-version n] [--tables n] [--columns n] [--indexes n] [--reducers n] [--queries n] [--views n] [--visibility-filters n] [--format text|json]
+  shunter contract assert --contract shunter.contract.json [--module name] [--module-version v] [--contract-version n] [--schema-version n] [--tables n] [--columns n] [--indexes n] [--reducers n] [--procedures n] [--queries n] [--views n] [--visibility-filters n] [--format text|json]
   shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
   shunter backup --data-dir ./data --out ./backup
   shunter restore --backup ./backup --data-dir ./data
@@ -343,7 +346,7 @@ func printContractHelp(w io.Writer) {
   shunter contract policy --previous old.json --current current.json [--strict] [--require-previous-version] [--format text|json]
   shunter contract plan --previous old.json --current current.json [--strict] [--require-previous-version] [--validate] [--format text|json]
   shunter contract validate --contract shunter.contract.json [--format text|json]
-  shunter contract assert --contract shunter.contract.json [--module name] [--module-version v] [--contract-version n] [--schema-version n] [--tables n] [--columns n] [--indexes n] [--reducers n] [--queries n] [--views n] [--visibility-filters n] [--format text|json]
+  shunter contract assert --contract shunter.contract.json [--module name] [--module-version v] [--contract-version n] [--schema-version n] [--tables n] [--columns n] [--indexes n] [--reducers n] [--procedures n] [--queries n] [--views n] [--visibility-filters n] [--format text|json]
   shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
 
 Contract commands operate on canonical ModuleContract JSON files only.

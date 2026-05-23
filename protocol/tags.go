@@ -16,6 +16,7 @@ const (
 	// tags as unsupported for the negotiated protocol.
 	TagDeclaredQueryWithParameters         uint8 = 9
 	TagSubscribeDeclaredViewWithParameters uint8 = 10
+	TagCallProcedure                       uint8 = 11
 )
 
 // v1 reserved tag space. Zero is never a message tag. Tags 128–255 are
@@ -38,6 +39,7 @@ const (
 	TagTransactionUpdateLight   uint8 = 8
 	TagSubscribeMultiApplied    uint8 = 9  // single/multi variant variant split
 	TagUnsubscribeMultiApplied  uint8 = 10 // single/multi variant variant split
+	TagProcedureResponse        uint8 = 11
 )
 
 // IsReservedV1Tag reports whether tag is in the protocol-wide v1 reserved

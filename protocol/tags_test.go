@@ -86,7 +86,7 @@ func TestClientReservedAndUnassignedTagsRejected(t *testing.T) {
 		tag  uint8
 	}{
 		{"zero", TagReservedZero},
-		{"unassigned_low", TagSubscribeDeclaredViewWithParameters + 1},
+		{"unassigned_low", TagCallProcedure + 1},
 		{"extension_start", TagReservedExtensionStart},
 		{"extension_end", TagReservedExtensionEnd},
 	}
@@ -101,7 +101,7 @@ func TestClientReservedAndUnassignedTagsRejected(t *testing.T) {
 }
 
 func TestClientV2TagsRejectedByV1Decoder(t *testing.T) {
-	for _, tag := range []uint8{TagDeclaredQueryWithParameters, TagSubscribeDeclaredViewWithParameters} {
+	for _, tag := range []uint8{TagDeclaredQueryWithParameters, TagSubscribeDeclaredViewWithParameters, TagCallProcedure} {
 		_, _, err := DecodeClientMessageForVersion(ProtocolVersionV1, []byte{tag})
 		if !errors.Is(err, ErrUnknownMessageTag) {
 			t.Fatalf("DecodeClientMessageForVersion(v1, tag=%d) err = %v, want ErrUnknownMessageTag", tag, err)
@@ -116,7 +116,7 @@ func TestServerReservedAndUnassignedTagsRejected(t *testing.T) {
 	}{
 		{"zero", TagReservedZero},
 		{"reducer_call_result", TagReducerCallResult},
-		{"unassigned_low", TagUnsubscribeMultiApplied + 1},
+		{"unassigned_low", TagProcedureResponse + 1},
 		{"extension_start", TagReservedExtensionStart},
 		{"extension_end", TagReservedExtensionEnd},
 	}

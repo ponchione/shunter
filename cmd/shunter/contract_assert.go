@@ -23,6 +23,7 @@ func runContractAssert(stdout, stderr io.Writer, args []string) int {
 	columns := fs.Int("columns", -1, "expected column count")
 	indexes := fs.Int("indexes", -1, "expected index count")
 	reducers := fs.Int("reducers", -1, "expected reducer count")
+	procedures := fs.Int("procedures", -1, "expected procedure count")
 	queries := fs.Int("queries", -1, "expected query count")
 	views := fs.Int("views", -1, "expected view count")
 	visibilityFilters := fs.Int("visibility-filters", -1, "expected visibility filter count")
@@ -51,6 +52,7 @@ func runContractAssert(stdout, stderr io.Writer, args []string) int {
 		Columns:           *columns,
 		Indexes:           *indexes,
 		Reducers:          *reducers,
+		Procedures:        *procedures,
 		Queries:           *queries,
 		Views:             *views,
 		VisibilityFilters: *visibilityFilters,
@@ -95,6 +97,7 @@ type contractAssertions struct {
 	Columns           int
 	Indexes           int
 	Reducers          int
+	Procedures        int
 	Queries           int
 	Views             int
 	VisibilityFilters int
@@ -117,6 +120,7 @@ func (a contractAssertions) countAssertions() []contractAssertExpectedCount {
 		{name: "columns", expected: a.Columns},
 		{name: "indexes", expected: a.Indexes},
 		{name: "reducers", expected: a.Reducers},
+		{name: "procedures", expected: a.Procedures},
 		{name: "queries", expected: a.Queries},
 		{name: "views", expected: a.Views},
 		{name: "visibility-filters", expected: a.VisibilityFilters},
@@ -171,6 +175,7 @@ func buildContractAssertReport(contract shunter.ModuleContract, assertions contr
 		{Name: "columns", Expected: assertions.Columns, Actual: summary.Counts.Columns},
 		{Name: "indexes", Expected: assertions.Indexes, Actual: summary.Counts.Indexes},
 		{Name: "reducers", Expected: assertions.Reducers, Actual: summary.Counts.Reducers},
+		{Name: "procedures", Expected: assertions.Procedures, Actual: summary.Counts.Procedures},
 		{Name: "queries", Expected: assertions.Queries, Actual: summary.Counts.Queries},
 		{Name: "views", Expected: assertions.Views, Actual: summary.Counts.Views},
 		{Name: "visibility-filters", Expected: assertions.VisibilityFilters, Actual: summary.Counts.VisibilityFilters},
@@ -259,11 +264,12 @@ func (r contractAssertReport) Text() string {
 	}
 	fmt.Fprintf(
 		&b,
-		"\nCounts: %d tables, %d columns, %d indexes, %d reducers, %d queries, %d views, %d visibility filters\n",
+		"\nCounts: %d tables, %d columns, %d indexes, %d reducers, %d procedures, %d queries, %d views, %d visibility filters\n",
 		r.Counts.Tables,
 		r.Counts.Columns,
 		r.Counts.Indexes,
 		r.Counts.Reducers,
+		r.Counts.Procedures,
 		r.Counts.Queries,
 		r.Counts.Views,
 		r.Counts.VisibilityFilters,

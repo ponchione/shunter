@@ -44,11 +44,13 @@ func (c ModuleContract) Validate() error {
 
 	tableNames := validateContractTables(c.Schema.Tables, &errs)
 	reducerNames := validateContractReducers(c.Schema.Reducers, &errs)
+	procedureNames := validateContractProcedures(c.Procedures, &errs)
 	queryNames, viewNames := validateContractReadDeclarations(c.Queries, c.Views, &errs)
 	validateContractDeclarationSQL(c.Schema, c.Queries, c.Views, &errs)
 	validateVisibilityFilterContract(c.VisibilityFilters, newContractSchemaLookup(c.Schema), &errs)
 
 	validatePermissionContract("reducer", c.Permissions.Reducers, reducerNames, &errs)
+	validatePermissionContract("procedure", c.Permissions.Procedures, procedureNames, &errs)
 	validatePermissionContract("query", c.Permissions.Queries, queryNames, &errs)
 	validatePermissionContract("view", c.Permissions.Views, viewNames, &errs)
 	validateReadModelContract(c.ReadModel.Declarations, tableNames, queryNames, viewNames, &errs)
@@ -180,6 +182,17 @@ func validateContractReducers(reducers []schema.ReducerExport, errs *[]error) ma
 		if validateContractName("schema.reducers", reducer.Name, names, errs) {
 			validateProductSchema("schema.reducers."+reducer.Name+".args", reducer.Args, errs)
 			validateProductSchema("schema.reducers."+reducer.Name+".result", reducer.Result, errs)
+		}
+	}
+	return names
+}
+
+func validateContractProcedures(procedures []ProcedureDescription, errs *[]error) map[string]struct{} {
+	names := make(map[string]struct{}, len(procedures))
+	for _, procedure := range procedures {
+		if validateContractName("procedures", procedure.Name, names, errs) {
+			validateProductSchema("procedures."+procedure.Name+".args", procedure.Args, errs)
+			validateProductSchema("procedures."+procedure.Name+".result", procedure.Result, errs)
 		}
 	}
 	return names

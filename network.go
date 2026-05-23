@@ -305,6 +305,7 @@ func (r *Runtime) ensureProtocolGraphLocked() error {
 		Schema:            r.registry,
 		State:             committedStateAccess{state: r.state},
 		DeclaredReads:     r,
+		Procedures:        r,
 		VisibilityFilters: runtimeProtocolVisibilityFilters(r.module.visibilityFilters),
 		Observer:          r.observability,
 	}

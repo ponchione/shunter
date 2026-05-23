@@ -302,7 +302,8 @@ func isAssignedV1ServerTag(tag uint8) bool {
 		TagOneOffQueryResponse,
 		TagTransactionUpdateLight,
 		TagSubscribeMultiApplied,
-		TagUnsubscribeMultiApplied:
+		TagUnsubscribeMultiApplied,
+		TagProcedureResponse:
 		return true
 	default:
 		return false

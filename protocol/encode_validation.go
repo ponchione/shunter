@@ -22,6 +22,8 @@ func validateClientMessageForEncode(m any) error {
 		return requireValidWireString("DeclaredQuery.Name", msg.Name)
 	case DeclaredQueryWithParametersMsg:
 		return requireValidWireString("DeclaredQueryWithParameters.Name", msg.Name)
+	case CallProcedureMsg:
+		return requireValidWireString("CallProcedure.Name", msg.Name)
 	case SubscribeMultiMsg:
 		for i, query := range msg.QueryStrings {
 			if err := requireValidWireString(fmt.Sprintf("SubscribeMulti.QueryStrings[%d]", i), query); err != nil {
@@ -58,6 +60,10 @@ func validateServerMessageForEncode(m any) error {
 			}
 		}
 		return validateOneOffTablesForEncode(msg.Tables)
+	case ProcedureResponse:
+		if msg.Error != nil {
+			return requireValidWireString("ProcedureResponse.Error", *msg.Error)
+		}
 	case SubscribeMultiApplied:
 		return validateSubscriptionUpdatesForEncode("SubscribeMultiApplied.Update", msg.Update)
 	case UnsubscribeMultiApplied:

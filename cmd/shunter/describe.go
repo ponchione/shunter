@@ -113,6 +113,7 @@ const (
 	describeSectionAll        = "all"
 	describeSectionTables     = "tables"
 	describeSectionReducers   = "reducers"
+	describeSectionProcedures = "procedures"
 	describeSectionQueries    = "queries"
 	describeSectionViews      = "views"
 	describeSectionVisibility = "visibility"
@@ -120,7 +121,7 @@ const (
 
 func validateDescribeSection(section string) error {
 	switch normalizeDescribeSection(section) {
-	case describeSectionAll, describeSectionTables, describeSectionReducers, describeSectionQueries, describeSectionViews, describeSectionVisibility:
+	case describeSectionAll, describeSectionTables, describeSectionReducers, describeSectionProcedures, describeSectionQueries, describeSectionViews, describeSectionVisibility:
 		return nil
 	default:
 		return fmt.Errorf("unsupported describe section %q", section)
@@ -135,6 +136,8 @@ func normalizeDescribeSection(section string) string {
 		return describeSectionTables
 	case describeSectionReducers:
 		return describeSectionReducers
+	case describeSectionProcedures:
+		return describeSectionProcedures
 	case describeSectionQueries:
 		return describeSectionQueries
 	case describeSectionViews:
@@ -172,6 +175,7 @@ type describeSummary struct {
 	Counts            describeCounts             `json:"counts"`
 	Tables            []describeTable            `json:"tables"`
 	Reducers          []describeReducer          `json:"reducers"`
+	Procedures        []describeProcedure        `json:"procedures"`
 	Queries           []describeDeclaredRead     `json:"queries"`
 	Views             []describeDeclaredRead     `json:"views"`
 	VisibilityFilters []describeVisibilityFilter `json:"visibility_filters"`
@@ -187,6 +191,7 @@ type describeCounts struct {
 	Columns           int `json:"columns"`
 	Indexes           int `json:"indexes"`
 	Reducers          int `json:"reducers"`
+	Procedures        int `json:"procedures"`
 	Queries           int `json:"queries"`
 	Views             int `json:"views"`
 	VisibilityFilters int `json:"visibility_filters"`
@@ -204,6 +209,12 @@ type describeReducer struct {
 	Lifecycle bool   `json:"lifecycle,omitempty"`
 	Args      int    `json:"args,omitempty"`
 	Result    int    `json:"result,omitempty"`
+}
+
+type describeProcedure struct {
+	Name   string `json:"name"`
+	Args   int    `json:"args,omitempty"`
+	Result int    `json:"result,omitempty"`
 }
 
 type describeDeclaredRead struct {
@@ -232,6 +243,7 @@ func describeContractSummary(contract shunter.ModuleContract) describeSummary {
 		SchemaVersion:     contract.Schema.Version,
 		Tables:            make([]describeTable, 0, len(contract.Schema.Tables)),
 		Reducers:          make([]describeReducer, 0, len(contract.Schema.Reducers)),
+		Procedures:        make([]describeProcedure, 0, len(contract.Procedures)),
 		Queries:           make([]describeDeclaredRead, 0, len(contract.Queries)),
 		Views:             make([]describeDeclaredRead, 0, len(contract.Views)),
 		VisibilityFilters: make([]describeVisibilityFilter, 0, len(contract.VisibilityFilters)),
@@ -254,6 +266,13 @@ func describeContractSummary(contract shunter.ModuleContract) describeSummary {
 			Result:    productColumnCount(reducer.Result),
 		})
 	}
+	for _, procedure := range contract.Procedures {
+		out.Procedures = append(out.Procedures, describeProcedure{
+			Name:   procedure.Name,
+			Args:   productColumnCount(procedure.Args),
+			Result: productColumnCount(procedure.Result),
+		})
+	}
 	for _, query := range contract.Queries {
 		out.Queries = append(out.Queries, describeRead(query.Name, query.SQL, query.Parameters, query.RowSchema, query.ResultShape))
 	}
@@ -269,6 +288,7 @@ func describeContractSummary(contract shunter.ModuleContract) describeSummary {
 	}
 	out.Counts.Tables = len(out.Tables)
 	out.Counts.Reducers = len(out.Reducers)
+	out.Counts.Procedures = len(out.Procedures)
 	out.Counts.Queries = len(out.Queries)
 	out.Counts.Views = len(out.Views)
 	out.Counts.VisibilityFilters = len(out.VisibilityFilters)
@@ -396,6 +416,20 @@ func (s describeSummary) Text() string {
 			}
 		})
 	}
+	if s.shouldWriteSection(describeSectionProcedures) {
+		writeDescribeTextSection(&b, "Procedures", len(s.Procedures), func() {
+			for _, procedure := range s.Procedures {
+				fmt.Fprintf(&b, "  - %s", procedure.Name)
+				if procedure.Args > 0 {
+					fmt.Fprintf(&b, ", args %d", procedure.Args)
+				}
+				if procedure.Result > 0 {
+					fmt.Fprintf(&b, ", result %d", procedure.Result)
+				}
+				b.WriteByte('\n')
+			}
+		})
+	}
 	if s.shouldWriteSection(describeSectionQueries) {
 		writeDescribeTextReads(&b, "Queries", s.Queries)
 	}
@@ -426,27 +460,38 @@ func (s describeSummary) filteredSection() describeSummary {
 		return s
 	case describeSectionTables:
 		s.Reducers = nil
+		s.Procedures = nil
 		s.Queries = nil
 		s.Views = nil
 		s.VisibilityFilters = nil
 	case describeSectionReducers:
 		s.Tables = nil
+		s.Procedures = nil
+		s.Queries = nil
+		s.Views = nil
+		s.VisibilityFilters = nil
+	case describeSectionProcedures:
+		s.Tables = nil
+		s.Reducers = nil
 		s.Queries = nil
 		s.Views = nil
 		s.VisibilityFilters = nil
 	case describeSectionQueries:
 		s.Tables = nil
 		s.Reducers = nil
+		s.Procedures = nil
 		s.Views = nil
 		s.VisibilityFilters = nil
 	case describeSectionViews:
 		s.Tables = nil
 		s.Reducers = nil
+		s.Procedures = nil
 		s.Queries = nil
 		s.VisibilityFilters = nil
 	case describeSectionVisibility:
 		s.Tables = nil
 		s.Reducers = nil
+		s.Procedures = nil
 		s.Queries = nil
 		s.Views = nil
 	}

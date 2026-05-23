@@ -103,6 +103,7 @@ type reducerCallOptions struct {
 	caller         types.CallerContext
 	requestID      uint32
 	permissionsSet bool
+	allowAllSet    bool
 }
 
 var defaultLocalIdentity = types.Identity(sha256.Sum256([]byte("shunter local runtime caller")))
@@ -145,17 +146,20 @@ func WithPermissions(permissions ...string) ReducerCallOption {
 	}
 }
 
+// WithAllowAllPermissions controls local permission bypass for reducer calls.
+func WithAllowAllPermissions(allow bool) ReducerCallOption {
+	return func(opts *reducerCallOptions) {
+		opts.caller.AllowAllPermissions = allow
+		opts.allowAllSet = true
+	}
+}
+
 // CallReducer invokes a reducer through the runtime-owned executor and waits for its result.
 func (r *Runtime) CallReducer(ctx context.Context, reducerName string, args []byte, opts ...ReducerCallOption) (ReducerResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return ReducerResult{}, err
-	}
-
-	exec, err := r.readyExecutor()
-	if err != nil {
 		return ReducerResult{}, err
 	}
 
@@ -170,17 +174,34 @@ func (r *Runtime) CallReducer(ctx context.Context, reducerName string, args []by
 	if callOpts.caller.Identity.IsZero() {
 		callOpts.caller.Identity = defaultLocalIdentity
 	}
-	if !callOpts.permissionsSet && r.buildConfig.AuthMode == AuthModeDev {
+	if !callOpts.permissionsSet && !callOpts.allowAllSet && r.buildConfig.AuthMode == AuthModeDev {
 		callOpts.caller.AllowAllPermissions = true
 	}
+	return r.callReducerWithCallerAndRequest(ctx, reducerName, args, callOpts.caller, callOpts.requestID)
+}
 
+func (r *Runtime) callReducerWithCaller(ctx context.Context, reducerName string, args []byte, caller types.CallerContext) (ReducerResult, error) {
+	return r.callReducerWithCallerAndRequest(ctx, reducerName, args, caller, 0)
+}
+
+func (r *Runtime) callReducerWithCallerAndRequest(ctx context.Context, reducerName string, args []byte, caller types.CallerContext, requestID uint32) (ReducerResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return ReducerResult{}, err
+	}
+	exec, err := r.readyExecutor()
+	if err != nil {
+		return ReducerResult{}, err
+	}
 	responseCh := make(chan executor.ReducerResponse, 1)
 	cmd := executor.CallReducerCmd{
 		Request: executor.ReducerRequest{
 			ReducerName: reducerName,
 			Args:        append([]byte(nil), args...),
-			Caller:      callOpts.caller.Copy(),
-			RequestID:   callOpts.requestID,
+			Caller:      caller.Copy(),
+			RequestID:   requestID,
 			Source:      executor.CallSourceExternal,
 		},
 		ResponseCh: responseCh,

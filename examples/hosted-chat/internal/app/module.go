@@ -40,6 +40,11 @@ func Module() *shunter.Module {
 				{Name: "body", Type: "string"},
 			},
 		})).
+		Procedure("send_system_message", sendSystemMessage, shunter.WithProcedureArgs(shunter.ProductSchema{
+			Columns: []shunter.ProductColumn{
+				{Name: "body", Type: "string"},
+			},
+		})).
 		Query(shunter.QueryDeclaration{
 			Name: "recent_messages",
 			SQL:  "SELECT * FROM messages ORDER BY id DESC LIMIT 20",
@@ -48,6 +53,34 @@ func Module() *shunter.Module {
 			Name: "live_messages",
 			SQL:  "SELECT * FROM messages",
 		})
+}
+
+func sendSystemMessage(ctx *shunter.ProcedureContext, args []byte) ([]byte, error) {
+	argSchema := schema.TableSchema{
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "body", Type: types.KindString},
+		},
+	}
+	values, err := bsatn.DecodeProductValue(bytes.NewReader(args), &argSchema)
+	if err != nil {
+		return nil, fmt.Errorf("decode send_system_message args: %w", err)
+	}
+	body := strings.TrimSpace(values[0].AsString())
+	if body == "" {
+		return nil, fmt.Errorf("body is required")
+	}
+	reducerArgs, err := EncodeSendMessageArgs("System", body)
+	if err != nil {
+		return nil, err
+	}
+	res, err := ctx.CallReducer("send_message", reducerArgs)
+	if err != nil {
+		return nil, err
+	}
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return res.ReturnBSATN, nil
 }
 
 func sendMessage(ctx *schema.ReducerContext, args []byte) ([]byte, error) {

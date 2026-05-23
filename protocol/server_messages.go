@@ -128,6 +128,14 @@ type OneOffQueryResponse struct {
 	TotalHostExecutionDuration int64
 }
 
+// ProcedureResponse is the server reply to CallProcedure.
+type ProcedureResponse struct {
+	MessageID                  []byte
+	Error                      *string
+	Result                     []byte
+	TotalHostExecutionDuration int64
+}
+
 // OneOffTable mirrors reference `OneOffTable<F>` (v1.rs:669). Rows is an
 // encoded F::List payload produced by EncodeRowList.
 type OneOffTable struct {
@@ -221,6 +229,18 @@ func EncodeServerMessage(m any) ([]byte, error) {
 			return nil, err
 		}
 		writeInt64(&buf, msg.TotalHostExecutionDuration)
+	case ProcedureResponse:
+		buf.WriteByte(TagProcedureResponse)
+		if err := writeBytes(&buf, msg.MessageID); err != nil {
+			return nil, err
+		}
+		if err := writeOptionalString(&buf, msg.Error); err != nil {
+			return nil, err
+		}
+		if err := writeBytes(&buf, msg.Result); err != nil {
+			return nil, err
+		}
+		writeInt64(&buf, msg.TotalHostExecutionDuration)
 	case SubscribeMultiApplied:
 		buf.WriteByte(TagSubscribeMultiApplied)
 		writeAppliedHeader(&buf, msg.RequestID, msg.TotalHostExecutionDurationMicros, msg.QueryID)
@@ -268,6 +288,9 @@ func DecodeServerMessage(frame []byte) (uint8, any, error) {
 		return tag, msg, err
 	case TagOneOffQueryResponse:
 		msg, err := decodeOneOffQueryResponse(body)
+		return tag, msg, err
+	case TagProcedureResponse:
+		msg, err := decodeProcedureResponse(body)
 		return tag, msg, err
 	case TagSubscribeMultiApplied:
 		msg, err := decodeSubscribeMultiApplied(body)
@@ -442,6 +465,28 @@ func decodeOneOffQueryResponse(body []byte) (OneOffQueryResponse, error) {
 		return m, err
 	}
 	if err := requireFullyConsumed(body, off, "OneOffQueryResponse"); err != nil {
+		return m, err
+	}
+	return m, nil
+}
+
+func decodeProcedureResponse(body []byte) (ProcedureResponse, error) {
+	var m ProcedureResponse
+	var off int
+	var err error
+	if m.MessageID, off, err = readBytes(body, 0); err != nil {
+		return m, err
+	}
+	if m.Error, off, err = readOptionalString(body, off); err != nil {
+		return m, err
+	}
+	if m.Result, off, err = readBytes(body, off); err != nil {
+		return m, err
+	}
+	if m.TotalHostExecutionDuration, off, err = readInt64(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "ProcedureResponse"); err != nil {
 		return m, err
 	}
 	return m, nil

@@ -20,6 +20,7 @@ type MessageHandlers struct {
 	OnOneOffQuery                         func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg)
 	OnDeclaredQuery                       func(ctx context.Context, conn *Conn, msg *DeclaredQueryMsg)
 	OnDeclaredQueryWithParameters         func(ctx context.Context, conn *Conn, msg *DeclaredQueryWithParametersMsg)
+	OnCallProcedure                       func(ctx context.Context, conn *Conn, msg *CallProcedureMsg)
 	OnSubscribeDeclaredView               func(ctx context.Context, conn *Conn, msg *SubscribeDeclaredViewMsg)
 	OnSubscribeDeclaredViewWithParameters func(ctx context.Context, conn *Conn, msg *SubscribeDeclaredViewWithParametersMsg)
 }
@@ -147,6 +148,10 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 			}
 		case DeclaredQueryWithParametersMsg:
 			if h := handlers.OnDeclaredQueryWithParameters; h != nil {
+				run = func() { h(handlerCtx, c, &m) }
+			}
+		case CallProcedureMsg:
+			if h := handlers.OnCallProcedure; h != nil {
 				run = func() { h(handlerCtx, c, &m) }
 			}
 		case SubscribeDeclaredViewMsg:
