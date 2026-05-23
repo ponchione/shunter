@@ -128,11 +128,24 @@ func runCall(stdout, stderr io.Writer, args []string) int {
 func runQuery(stdout, stderr io.Writer, args []string) int {
 	fs := newFlagSet(stderr, "shunter query")
 	flags := newRunningAppFlags(fs)
+	sqlText := fs.String("sql", "", "raw read-only SQL query to execute instead of a declared query name")
 	if code, stop := parseFlags(fs, args); stop {
 		return code
 	}
 	if code := validateRunningAppCommon(stderr, flags); code != 0 {
 		return code
+	}
+	if strings.TrimSpace(*sqlText) != "" {
+		if fs.NArg() != 0 {
+			writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
+				Command:   "query",
+				TargetURL: flags.urlValue(),
+				Code:      "invalid_arguments",
+				Message:   "query --sql does not accept positional query name or arguments",
+			})
+			return 2
+		}
+		return runSQLQuery(stdout, stderr, flags, strings.TrimSpace(*sqlText))
 	}
 	if fs.NArg() < 1 || fs.NArg() > 2 {
 		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
@@ -228,6 +241,73 @@ func runQuery(stdout, stderr io.Writer, args []string) int {
 			Command:   "query",
 			TargetURL: target,
 			Surface:   request.Name,
+			Code:      classifyRunningAppErrorCode(err),
+			Message:   err.Error(),
+		})
+		return 1
+	}
+	return 0
+}
+
+func runSQLQuery(stdout, stderr io.Writer, flags runningAppFlags, sqlText string) int {
+	contract, err := readContractFile(flags.contractValue(), "query contract")
+	if err != nil {
+		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
+			Command:   "query",
+			TargetURL: flags.urlValue(),
+			Surface:   sqlText,
+			Code:      "contract_error",
+			Message:   err.Error(),
+		})
+		return 1
+	}
+	token, err := flags.token()
+	if err != nil {
+		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
+			Command:   "query",
+			TargetURL: flags.urlValue(),
+			Surface:   sqlText,
+			Code:      classifyRunningAppErrorCode(err),
+			Message:   err.Error(),
+		})
+		return 2
+	}
+	target, err := normalizeRunningAppURL(flags.urlValue())
+	if err != nil {
+		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
+			Command:   "query",
+			TargetURL: flags.urlValue(),
+			Surface:   sqlText,
+			Code:      "invalid_url",
+			Message:   err.Error(),
+		})
+		return 2
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), flags.timeoutValue())
+	defer cancel()
+	identity, response, err := protocolclient.DialAndExecuteSQLQuery(ctx, protocolclient.Options{
+		URL:            target,
+		Token:          token,
+		AllowAnonymous: flags.allowDevAnonymousValue(),
+	}, protocolclient.SQLQueryRequest{
+		QueryString: sqlText,
+	})
+	if err != nil {
+		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
+			Command:   "query",
+			TargetURL: target,
+			Surface:   sqlText,
+			Code:      classifyRunningAppErrorCode(err),
+			Message:   err.Error(),
+		})
+		return 1
+	}
+	if err := writeSQLQuerySuccess(stdout, flags.formatValue(), contract, target, identity, response, sqlText); err != nil {
+		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
+			Command:   "query",
+			TargetURL: target,
+			Surface:   sqlText,
 			Code:      classifyRunningAppErrorCode(err),
 			Message:   err.Error(),
 		})
@@ -617,7 +697,7 @@ func classifyRunningAppErrorCode(err error) string {
 		return "timeout"
 	case errors.Is(err, protocolclient.ErrReducerFailed):
 		return "reducer_error"
-	case errors.Is(err, protocolclient.ErrDeclaredQueryFailed):
+	case errors.Is(err, protocolclient.ErrDeclaredQueryFailed), errors.Is(err, protocolclient.ErrSQLQueryFailed):
 		return "query_error"
 	case errors.Is(err, protocolclient.ErrProcedureFailed):
 		return "procedure_error"
@@ -744,6 +824,30 @@ func writeQuerySuccess(stdout io.Writer, format string, contract shunter.ModuleC
 		return writeJSON(stdout, out)
 	}
 	fmt.Fprintf(stdout, "Status: ok\nScope: running_app\nCommand: query\nTarget: %s\nModule: %s\nQuery: %s\nRows: %d\n", out.TargetURL, out.Module, out.Surface, len(out.Result.Rows))
+	return nil
+}
+
+func writeSQLQuerySuccess(stdout io.Writer, format string, contract shunter.ModuleContract, target string, identity protocol.IdentityToken, response protocol.OneOffQueryResponse, sqlText string) error {
+	rows, err := contractworkflow.DecodeSQLQueryResponseJSONResult(contract, sqlText, response)
+	if err != nil {
+		return err
+	}
+	out := querySuccess{
+		Status:       "ok",
+		Scope:        "running_app",
+		Command:      "query",
+		TargetURL:    target,
+		Module:       contract.Module.Name,
+		Surface:      sqlText,
+		Identity:     hex.EncodeToString(identity.Identity[:]),
+		ConnectionID: hex.EncodeToString(identity.ConnectionID[:]),
+		Result:       rows,
+		DurationUS:   response.TotalHostExecutionDuration,
+	}
+	if strings.EqualFold(strings.TrimSpace(format), contractworkflow.FormatJSON) {
+		return writeJSON(stdout, out)
+	}
+	fmt.Fprintf(stdout, "Status: ok\nScope: running_app\nCommand: query\nTarget: %s\nModule: %s\nSQL: %s\nRows: %d\n", out.TargetURL, out.Module, out.Surface, len(out.Result.Rows))
 	return nil
 }
 

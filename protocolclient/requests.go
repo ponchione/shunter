@@ -22,6 +22,11 @@ type DeclaredQueryRequest struct {
 	HasParameters bool
 }
 
+// SQLQueryRequest describes a raw one-off SQL read request.
+type SQLQueryRequest struct {
+	QueryString string
+}
+
 // ProcedureCallRequest describes a procedure execution request.
 type ProcedureCallRequest struct {
 	Name      string
@@ -54,6 +59,24 @@ func DialAndExecuteDeclaredQuery(ctx context.Context, opts Options, request Decl
 	}
 
 	response, execErr := client.ExecuteDeclaredQuery(ctx, request)
+	closeErr := client.Close(ctx)
+	if execErr != nil {
+		return identity, response, execErr
+	}
+	if closeErr != nil {
+		return identity, response, closeErr
+	}
+	return identity, response, nil
+}
+
+// DialAndExecuteSQLQuery connects, executes one raw SQL read, and closes the connection.
+func DialAndExecuteSQLQuery(ctx context.Context, opts Options, request SQLQueryRequest) (protocol.IdentityToken, protocol.OneOffQueryResponse, error) {
+	client, identity, err := Dial(ctx, opts)
+	if err != nil {
+		return protocol.IdentityToken{}, protocol.OneOffQueryResponse{}, err
+	}
+
+	response, execErr := client.SQLQuery(ctx, request.QueryString)
 	closeErr := client.Close(ctx)
 	if execErr != nil {
 		return identity, response, execErr
@@ -134,6 +157,19 @@ func (c *Client) DeclaredQuery(ctx context.Context, name string) (protocol.OneOf
 	return c.readDeclaredQueryResponse(ctx, messageID)
 }
 
+// SQLQuery sends a raw one-off SQL read request.
+func (c *Client) SQLQuery(ctx context.Context, queryString string) (protocol.OneOffQueryResponse, error) {
+	requestID := c.NextRequestID()
+	messageID := messageIDFromRequestID(requestID)
+	if err := c.Send(ctx, protocol.OneOffQueryMsg{
+		MessageID:   messageID,
+		QueryString: queryString,
+	}); err != nil {
+		return protocol.OneOffQueryResponse{}, err
+	}
+	return c.readOneOffQueryResponse(ctx, messageID, ErrSQLQueryFailed, "SQL query")
+}
+
 // ExecuteDeclaredQuery sends a declared query, using v2 parameters only when requested.
 func (c *Client) ExecuteDeclaredQuery(ctx context.Context, request DeclaredQueryRequest) (protocol.OneOffQueryResponse, error) {
 	if request.HasParameters {
@@ -161,6 +197,10 @@ func (c *Client) DeclaredQueryWithParameters(ctx context.Context, name string, p
 }
 
 func (c *Client) readDeclaredQueryResponse(ctx context.Context, messageID []byte) (protocol.OneOffQueryResponse, error) {
+	return c.readOneOffQueryResponse(ctx, messageID, ErrDeclaredQueryFailed, "declared query")
+}
+
+func (c *Client) readOneOffQueryResponse(ctx context.Context, messageID []byte, failedErr error, label string) (protocol.OneOffQueryResponse, error) {
 	tag, msg, err := c.Read(ctx)
 	if err != nil {
 		return protocol.OneOffQueryResponse{}, err
@@ -173,10 +213,10 @@ func (c *Client) readDeclaredQueryResponse(ctx context.Context, messageID []byte
 		return protocol.OneOffQueryResponse{}, fmt.Errorf("%w: server message = %T, want protocol.OneOffQueryResponse", ErrUnexpectedMessage, msg)
 	}
 	if !bytes.Equal(response.MessageID, messageID) {
-		return protocol.OneOffQueryResponse{}, fmt.Errorf("%w: declared query message ID %x, want %x", ErrResponseMismatch, response.MessageID, messageID)
+		return protocol.OneOffQueryResponse{}, fmt.Errorf("%w: %s message ID %x, want %x", ErrResponseMismatch, label, response.MessageID, messageID)
 	}
 	if response.Error != nil {
-		return response, fmt.Errorf("%w: %s", ErrDeclaredQueryFailed, *response.Error)
+		return response, fmt.Errorf("%w: %s", failedErr, *response.Error)
 	}
 	return response, nil
 }

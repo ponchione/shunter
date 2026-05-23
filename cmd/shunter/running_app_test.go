@@ -187,6 +187,97 @@ func TestQueryCommandInvokesRunningAppDeclaredQueryAndDecodesRows(t *testing.T) 
 	}
 }
 
+func TestQueryCommandInvokesRunningAppSQLAndDecodesRows(t *testing.T) {
+	dir := t.TempDir()
+	contractPath := writeCLIContract(t, dir, "contract.json", runningAppContractFixture())
+	received := make(chan protocol.OneOffQueryMsg, 1)
+	rows, err := protocol.EncodeProductRowsForColumns([]types.ProductValue{{
+		types.NewString("from SQL"),
+	}}, []schema.ColumnSchema{
+		{Index: 2, Name: "text", Type: types.KindString},
+	})
+	if err != nil {
+		t.Fatalf("EncodeProductRowsForColumns: %v", err)
+	}
+	srv := runningAppProtocolTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		assertRunningAppAuth(t, r, "operator-token")
+		ws := acceptRunningAppProtocolConn(t, w, r)
+		defer ws.CloseNow()
+		writeRunningAppServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{5}, ConnectionID: [16]byte{6}})
+		_, frame, err := ws.Read(r.Context())
+		if err != nil {
+			t.Errorf("server read SQL query: %v", err)
+			return
+		}
+		_, msg, err := protocol.DecodeClientMessage(frame)
+		if err != nil {
+			t.Errorf("DecodeClientMessage: %v", err)
+			return
+		}
+		query, ok := msg.(protocol.OneOffQueryMsg)
+		if !ok {
+			t.Errorf("client message = %T, want protocol.OneOffQueryMsg", msg)
+			return
+		}
+		received <- query
+		writeRunningAppServerMessage(t, ws, protocol.OneOffQueryResponse{
+			MessageID: query.MessageID,
+			Tables:    []protocol.OneOffTable{{TableName: "messages", Rows: rows}},
+		})
+		readRunningAppClientClose(t, r, ws)
+	})
+
+	var stdout, stderr bytes.Buffer
+	const sqlText = "SELECT body AS text FROM messages ORDER BY id DESC LIMIT 1"
+	code := run(&stdout, &stderr, []string{
+		"query",
+		"--url", srv.httpURL(),
+		"--contract", contractPath,
+		"--token", "operator-token",
+		"--format", "json",
+		"--sql", sqlText,
+	})
+	if code != 0 {
+		t.Fatalf("query SQL exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("query SQL stderr = %s, want empty", stderr.String())
+	}
+	var report struct {
+		Status  string `json:"status"`
+		Command string `json:"command"`
+		Surface string `json:"surface"`
+		Result  struct {
+			Name      string `json:"name"`
+			TableName string `json:"table_name"`
+			Rows      []struct {
+				Text string `json:"text"`
+			} `json:"rows"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode query SQL JSON: %v\n%s", err, stdout.String())
+	}
+	if report.Status != "ok" || report.Command != "query" || report.Surface != sqlText {
+		t.Fatalf("query SQL report = %+v", report)
+	}
+	if report.Result.Name != sqlText || report.Result.TableName != "messages" || len(report.Result.Rows) != 1 {
+		t.Fatalf("query SQL result = %+v", report.Result)
+	}
+	if report.Result.Rows[0].Text != "from SQL" {
+		t.Fatalf("query SQL row = %+v", report.Result.Rows[0])
+	}
+
+	select {
+	case query := <-received:
+		if query.QueryString != sqlText || !bytes.Equal(query.MessageID, []byte{1, 0, 0, 0}) {
+			t.Fatalf("SQL query = %+v", query)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not receive SQL query")
+	}
+}
+
 func TestHealthCommandReadsRunningAppDiagnostics(t *testing.T) {
 	srv := runningAppProtocolTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/healthz" {

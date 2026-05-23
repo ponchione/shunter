@@ -120,6 +120,12 @@ rtk go run ./cmd/shunter query \
   --contract examples/hosted-chat/shunter.contract.json \
   --allow-dev-anonymous \
   recent_messages
+
+rtk go run ./cmd/shunter query \
+  --url http://127.0.0.1:3000 \
+  --contract examples/hosted-chat/shunter.contract.json \
+  --allow-dev-anonymous \
+  --sql "SELECT * FROM messages ORDER BY id DESC LIMIT 10"
 ```
 
 Use `--token`, `--token-file`, or `SHUNTER_TOKEN` for normal running-app admin
@@ -214,7 +220,7 @@ It runs the Go example tests, builds the server, exports and describes the
 contract, asserts contract-local surface counts, validates the contract
 artifact, checks contract-local health, starts the example server on an
 ephemeral local port, checks live `health` and `describe`, runs one CLI reducer
-call, one CLI procedure call, and one declared query against it, stops the
-server, runs offline backup and restore, restarts from the restored `DataDir`,
-verifies recovered query results, regenerates TypeScript, and typechecks the
-frontend example.
+call, one CLI procedure call, one declared query, and one raw SQL read against
+it, stops the server, runs offline backup and restore, restarts from the
+restored `DataDir`, verifies recovered query results, regenerates TypeScript,
+and typechecks the frontend example.

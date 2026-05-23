@@ -318,6 +318,7 @@ Usage:
   shunter call --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" reducer_name '{"field":"value"}' [--format text|json]
   shunter procedure --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" procedure_name '{"field":"value"}' [--format text|json]
   shunter query --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" query_name ['{"field":"value"}'] [--format text|json]
+  shunter query --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" --sql "SELECT * FROM table" [--format text|json]
   shunter describe --contract shunter.contract.json [--section all|tables|reducers|procedures|queries|views|visibility] [--format text|json]
   shunter describe --url http://127.0.0.1:3000 [--format text|json]
   shunter health --contract shunter.contract.json [--format text|json]

@@ -22,6 +22,7 @@ var (
 	ErrResponseMismatch    = errors.New("protocol client response mismatch")
 	ErrReducerFailed       = errors.New("protocol client reducer failed")
 	ErrDeclaredQueryFailed = errors.New("protocol client declared query failed")
+	ErrSQLQueryFailed      = errors.New("protocol client SQL query failed")
 	ErrProcedureFailed     = errors.New("protocol client procedure failed")
 	ErrProtocolVersion     = errors.New("protocol client unsupported protocol version")
 )

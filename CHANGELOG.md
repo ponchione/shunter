@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added running-app `shunter query --sql` for contract-decoded, read-only
+  one-off SQL queries over the Shunter WebSocket protocol.
 - Extended the hosted-chat release gate to prove Phase 1/2 closure through
   clean server stop, offline backup/restore, restart from restored state, and
   recovered declared-query results.
