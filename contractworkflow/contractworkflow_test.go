@@ -704,6 +704,82 @@ func TestEncodeQueryArgumentsUsesNamedContractSurface(t *testing.T) {
 	}
 }
 
+func TestPrepareReducerCallRequestEncodesArguments(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{{
+		Name: "send_message",
+		Args: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+			{Name: "body", Type: "string"},
+			{Name: "urgent", Type: "bool"},
+		}},
+	}}
+
+	request, err := PrepareReducerCallRequest(contract, " send_message ", []byte(`{"urgent": true, "body": "hello"}`))
+	if err != nil {
+		t.Fatalf("PrepareReducerCallRequest returned error: %v", err)
+	}
+	if request.Name != "send_message" {
+		t.Fatalf("request name = %q, want canonical reducer name", request.Name)
+	}
+
+	args, err := ReducerArgumentSchema(contract, "send_message")
+	if err != nil {
+		t.Fatalf("ReducerArgumentSchema returned error: %v", err)
+	}
+	decoded, err := bsatn.DecodeProductValueFromBytes(request.Arguments, productTableSchema(t, "send_message_args", args))
+	if err != nil {
+		t.Fatalf("DecodeProductValueFromBytes returned error: %v", err)
+	}
+	if len(decoded) != 2 || decoded[0].AsString() != "hello" || !decoded[1].AsBool() {
+		t.Fatalf("decoded prepared reducer arguments = %+v", decoded)
+	}
+}
+
+func TestPrepareReducerCallRequestPreservesEmptyArgumentSchema(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{{
+		Name: "ping",
+		Args: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{}},
+	}}
+
+	request, err := PrepareReducerCallRequest(contract, "ping", []byte(`{}`))
+	if err != nil {
+		t.Fatalf("PrepareReducerCallRequest returned error: %v", err)
+	}
+	if request.Name != "ping" {
+		t.Fatalf("request name = %q, want ping", request.Name)
+	}
+	if len(request.Arguments) != 0 {
+		t.Fatalf("request arguments = %x, want empty BSATN product", request.Arguments)
+	}
+}
+
+func TestPrepareReducerCallRequestPreservesStructuredErrors(t *testing.T) {
+	contract := workflowContractFixture()
+	contract.Schema.Reducers = []schema.ReducerExport{
+		{Name: "schema_less"},
+		{
+			Name: "send_message",
+			Args: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+				{Name: "priority", Type: "uint8"},
+			}},
+		},
+	}
+
+	_, err := PrepareReducerCallRequest(contract, "missing", []byte(`{}`))
+	if !errors.Is(err, ErrSurfaceNotFound) {
+		t.Fatalf("missing reducer error = %v, want ErrSurfaceNotFound", err)
+	}
+	_, err = PrepareReducerCallRequest(contract, "schema_less", []byte(`{}`))
+	if !errors.Is(err, ErrArgumentSchemaMissing) {
+		t.Fatalf("schema-less reducer error = %v, want ErrArgumentSchemaMissing", err)
+	}
+	_, err = PrepareReducerCallRequest(contract, "send_message", []byte(`{"priority": 300}`))
+	if !errors.Is(err, ErrInvalidArgumentJSON) {
+		t.Fatalf("invalid reducer arguments error = %v, want ErrInvalidArgumentJSON", err)
+	}
+}
+
 func TestEncodeOptionalQueryArgumentsPreservesNoParameterQuery(t *testing.T) {
 	contract := workflowContractFixture()
 	contract.Queries = []shunter.QueryDescription{{Name: "history"}}

@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added `contractworkflow.PrepareReducerCallRequest` for contract-validated
+  reducer request preparation without coupling contract workflow code to the
+  protocol client package.
 - Added `protocolclient.DialAndCallReducer` for one-shot reducer calls with
   explicit bearer-token transport and automatic connection close.
 - Added `contractworkflow.PrepareDeclaredQueryRequest` for contract-validated

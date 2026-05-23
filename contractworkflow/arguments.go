@@ -33,6 +33,12 @@ const (
 	ArgumentSurfaceDeclaredQuery ArgumentSurfaceKind = "declared_query"
 )
 
+// ReducerCallRequest describes a contract-validated reducer call request.
+type ReducerCallRequest struct {
+	Name      string
+	Arguments []byte
+}
+
 // DeclaredQueryRequest describes a contract-validated declared-query request.
 type DeclaredQueryRequest struct {
 	Name          string
@@ -92,6 +98,25 @@ func EncodeReducerArguments(contract shunter.ModuleContract, name string, data [
 		return nil, err
 	}
 	return EncodeProductValueArguments(product, data)
+}
+
+// PrepareReducerCallRequest validates a reducer and prepares its encoded argument request shape.
+func PrepareReducerCallRequest(contract shunter.ModuleContract, name string, data []byte) (ReducerCallRequest, error) {
+	reducer, ok := FindReducer(contract, name)
+	if !ok {
+		return ReducerCallRequest{}, fmt.Errorf("%w: reducer %q", ErrSurfaceNotFound, strings.TrimSpace(name))
+	}
+	if reducer.Args == nil {
+		return ReducerCallRequest{}, fmt.Errorf("%w: reducer %q", ErrArgumentSchemaMissing, reducer.Name)
+	}
+	encoded, err := EncodeProductValueArguments(*reducer.Args, data)
+	if err != nil {
+		return ReducerCallRequest{}, err
+	}
+	return ReducerCallRequest{
+		Name:      reducer.Name,
+		Arguments: encoded,
+	}, nil
 }
 
 // EncodeQueryArguments encodes JSON arguments for a named declared-query contract surface.
