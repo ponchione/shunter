@@ -520,6 +520,56 @@ func TestDialAndCallReducerClosesAfterReducerError(t *testing.T) {
 	}
 }
 
+func TestDialAndCallReducerClosesAfterMismatchedResponse(t *testing.T) {
+	closed := make(chan struct{}, 1)
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+
+		_, frame, err := ws.Read(r.Context())
+		if err != nil {
+			t.Errorf("server read client message: %v", err)
+			return
+		}
+		_, msg, err := protocol.DecodeClientMessage(frame)
+		if err != nil {
+			t.Errorf("DecodeClientMessage: %v", err)
+			return
+		}
+		call, ok := msg.(protocol.CallReducerMsg)
+		if !ok {
+			t.Errorf("client message = %T, want protocol.CallReducerMsg", msg)
+			return
+		}
+		writeProtocolClientServerMessage(t, ws, protocol.TransactionUpdate{
+			Status:      protocol.StatusCommitted{},
+			ReducerCall: protocol.ReducerCallInfo{ReducerName: "other_reducer", RequestID: call.RequestID},
+		})
+
+		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		_, _, err = ws.Read(readCtx)
+		if err != nil {
+			closed <- struct{}{}
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _, err := DialAndCallReducer(ctx, Options{URL: srv.wsURL(), Token: "operator-token"}, ReducerCallRequest{
+		Name: "send_message",
+	})
+	if !errors.Is(err, ErrResponseMismatch) {
+		t.Fatalf("DialAndCallReducer error = %v, want ErrResponseMismatch", err)
+	}
+	select {
+	case <-closed:
+	case <-ctx.Done():
+		t.Fatalf("server did not observe client close after response mismatch: %v", ctx.Err())
+	}
+}
+
 func TestClientDeclaredQueryWaitsForMatchingResponse(t *testing.T) {
 	received := make(chan protocol.DeclaredQueryMsg, 1)
 	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
