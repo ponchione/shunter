@@ -292,6 +292,89 @@ func TestClientCallReducerRejectsMismatchedResponse(t *testing.T) {
 	}
 }
 
+func TestClientDeclaredQueryWaitsForMatchingResponse(t *testing.T) {
+	received := make(chan protocol.DeclaredQueryMsg, 1)
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+
+		_, frame, err := ws.Read(r.Context())
+		if err != nil {
+			t.Errorf("server read client message: %v", err)
+			return
+		}
+		_, msg, err := protocol.DecodeClientMessage(frame)
+		if err != nil {
+			t.Errorf("DecodeClientMessage: %v", err)
+			return
+		}
+		query, ok := msg.(protocol.DeclaredQueryMsg)
+		if !ok {
+			t.Errorf("client message = %T, want protocol.DeclaredQueryMsg", msg)
+			return
+		}
+		received <- query
+		writeProtocolClientServerMessage(t, ws, protocol.OneOffQueryResponse{MessageID: query.MessageID})
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	client, _, err := Dial(ctx, Options{URL: srv.wsURL(), Token: "operator-token"})
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer client.Close(context.Background())
+
+	response, err := client.DeclaredQuery(ctx, "recent_messages")
+	if err != nil {
+		t.Fatalf("DeclaredQuery returned error: %v", err)
+	}
+	if !bytes.Equal(response.MessageID, []byte{1, 0, 0, 0}) {
+		t.Fatalf("response message ID = %x", response.MessageID)
+	}
+
+	select {
+	case query := <-received:
+		if query.Name != "recent_messages" || !bytes.Equal(query.MessageID, []byte{1, 0, 0, 0}) {
+			t.Fatalf("server query = %+v", query)
+		}
+	case <-ctx.Done():
+		t.Fatalf("server did not receive query: %v", ctx.Err())
+	}
+}
+
+func TestClientDeclaredQueryRejectsMismatchedResponse(t *testing.T) {
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+		_, frame, err := ws.Read(r.Context())
+		if err != nil {
+			t.Errorf("server read client message: %v", err)
+			return
+		}
+		if _, _, err := protocol.DecodeClientMessage(frame); err != nil {
+			t.Errorf("DecodeClientMessage: %v", err)
+			return
+		}
+		writeProtocolClientServerMessage(t, ws, protocol.OneOffQueryResponse{MessageID: []byte{99}})
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	client, _, err := Dial(ctx, Options{URL: srv.wsURL(), Token: "operator-token"})
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer client.Close(context.Background())
+
+	_, err = client.DeclaredQuery(ctx, "recent_messages")
+	if !errors.Is(err, ErrResponseMismatch) {
+		t.Fatalf("DeclaredQuery mismatch error = %v, want ErrResponseMismatch", err)
+	}
+}
+
 func TestClientDeclaredQueryWithParametersWaitsForMatchingResponse(t *testing.T) {
 	received := make(chan protocol.DeclaredQueryWithParametersMsg, 1)
 	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {

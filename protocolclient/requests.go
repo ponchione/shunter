@@ -48,6 +48,19 @@ func (c *Client) CallReducer(ctx context.Context, name string, args []byte) (pro
 	return update, nil
 }
 
+// DeclaredQuery sends a declared-query request without parameters.
+func (c *Client) DeclaredQuery(ctx context.Context, name string) (protocol.OneOffQueryResponse, error) {
+	requestID := c.NextRequestID()
+	messageID := messageIDFromRequestID(requestID)
+	if err := c.Send(ctx, protocol.DeclaredQueryMsg{
+		MessageID: messageID,
+		Name:      name,
+	}); err != nil {
+		return protocol.OneOffQueryResponse{}, err
+	}
+	return c.readDeclaredQueryResponse(ctx, messageID)
+}
+
 // DeclaredQueryWithParameters sends a v2 declared-query request with BSATN parameters.
 func (c *Client) DeclaredQueryWithParameters(ctx context.Context, name string, params []byte) (protocol.OneOffQueryResponse, error) {
 	if version, ok := protocol.ProtocolVersionForSubprotocol(c.Subprotocol()); !ok || version < protocol.ProtocolVersionV2 {
@@ -63,7 +76,10 @@ func (c *Client) DeclaredQueryWithParameters(ctx context.Context, name string, p
 	}); err != nil {
 		return protocol.OneOffQueryResponse{}, err
 	}
+	return c.readDeclaredQueryResponse(ctx, messageID)
+}
 
+func (c *Client) readDeclaredQueryResponse(ctx context.Context, messageID []byte) (protocol.OneOffQueryResponse, error) {
 	tag, msg, err := c.Read(ctx)
 	if err != nil {
 		return protocol.OneOffQueryResponse{}, err

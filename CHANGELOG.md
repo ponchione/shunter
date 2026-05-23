@@ -6,6 +6,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 - Added typed `protocolclient` reducer-call and parameterized declared-query
   request helpers for future running-app admin commands.
+- Added a typed `protocolclient.DeclaredQuery` helper for schema-less or
+  no-parameter declared-query requests.
 - Added `contractworkflow.EncodeReducerArguments` and `EncodeQueryArguments`
   for named contract-surface JSON argument encoding.
 - Added `contractworkflow.EncodeProductValueArguments` for contract-schema JSON
