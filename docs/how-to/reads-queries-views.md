@@ -213,9 +213,11 @@ Current read compatibility by surface:
   projections over the emitted relation, and `COUNT`/`SUM` aggregates including
   join, cross-join, and multi-way aggregate views. `COUNT(DISTINCT column)` is
   supported. Aggregate aliases must use `AS`. `ORDER BY`, `LIMIT`, and
-  `OFFSET` are supported only for single-table, non-aggregate live views and
-  shape the initial snapshot only. Declared live views may use the same
-  declared app placeholders and parameter binding as declared queries.
+  `OFFSET` are supported only for single-table, non-aggregate live views.
+  Shunter maintains that single-table window after commits by emitting
+  delete/insert row deltas when rows enter or leave the window. Declared live
+  views may use the same declared app placeholders and parameter binding as
+  declared queries.
 - Local runtime reads use `Runtime.Read` for callback-scoped committed-state
   access. `Runtime.CallQuery` and `Runtime.SubscribeView` are the local
   declared-read APIs.
@@ -227,12 +229,18 @@ client-side parameter payloads.
 If a read is important to the app contract, prefer a declared query or declared
 view over ad hoc raw SQL.
 
-For declared live views with `ORDER BY`, `LIMIT`, or `OFFSET`, only the
-initial snapshot follows those clauses. These clauses are currently limited to
-single-table, non-aggregate live views. Post-commit delivery is not maintained
-as a top-N/windowed view: non-aggregate views emit ordinary row deltas over
-matching rows, and aggregate views emit replacement aggregate rows when the
-aggregate changes.
+Declared live views with `ORDER BY`, `LIMIT`, or `OFFSET` maintain that window
+after commits for persistent single-table, non-aggregate views. When a commit
+changes the window membership, Shunter emits ordinary row-delta deletes for
+rows leaving the window and inserts for rows entering it. Equal `ORDER BY` keys,
+and `LIMIT`/`OFFSET` without `ORDER BY`, use Shunter's deterministic row-payload
+tie-break order; prefer explicit ordering for user-visible top-N views. Current
+window maintenance recomputes the candidate table window after commits rather
+than using an incremental index-backed top-N algorithm, so large table windows
+should be treated as a performance-sensitive path. Event-table insert streams
+remain transient and do not retain or maintain window membership. Joins and
+aggregate live views do not accept `ORDER BY`, `LIMIT`, or `OFFSET`; aggregate
+views emit replacement aggregate rows when the aggregate changes.
 
 ## Permissions
 

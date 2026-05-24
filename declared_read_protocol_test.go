@@ -566,7 +566,7 @@ func TestProtocolDeclaredViewOrderBySendsOrderedInitialRowsAndRowDeltas(t *testi
 	}
 }
 
-func TestProtocolDeclaredViewLimitSendsLimitedInitialRowsAndRowDeltas(t *testing.T) {
+func TestProtocolDeclaredViewLimitMaintainsWindowDeltas(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
 		Reducer("delete_message_by_id", deleteMessageByIDReducer).
@@ -596,20 +596,22 @@ func TestProtocolDeclaredViewLimitSendsLimitedInitialRowsAndRowDeltas(t *testing
 		t.Fatalf("limited protocol initial ids = %v, want %v; rows=%#v", got, want, initial)
 	}
 
-	insertMessageWithBody(t, rt, 5, "alpha")
+	insertMessageWithBody(t, rt, 5, "delta")
 	inserts, deletes := requireDeclaredReadDeltaValues(t, client, 46, "messages", projectedColumns)
-	if len(inserts) != 1 || inserts[0][0].AsUint64() != 5 || inserts[0][1].AsString() != "alpha" || len(deletes) != 0 {
-		t.Fatalf("limited protocol insert delta inserts/deletes = %#v/%#v, want row 5/alpha insert", inserts, deletes)
+	if len(inserts) != 1 || inserts[0][0].AsUint64() != 5 || inserts[0][1].AsString() != "delta" ||
+		len(deletes) != 1 || deletes[0][0].AsUint64() != 2 || deletes[0][1].AsString() != "charlie" {
+		t.Fatalf("limited protocol insert delta inserts/deletes = %#v/%#v, want row 5/delta enter and row 2 leave", inserts, deletes)
 	}
 
 	deleteMessageByID(t, rt, 1)
 	inserts, deletes = requireDeclaredReadDeltaValues(t, client, 46, "messages", projectedColumns)
-	if len(inserts) != 0 || len(deletes) != 1 || deletes[0][0].AsUint64() != 1 || deletes[0][1].AsString() != "charlie" {
-		t.Fatalf("limited protocol delete delta inserts/deletes = %#v/%#v, want row 1/charlie delete", inserts, deletes)
+	if len(inserts) != 1 || inserts[0][0].AsUint64() != 2 || inserts[0][1].AsString() != "charlie" ||
+		len(deletes) != 1 || deletes[0][0].AsUint64() != 1 || deletes[0][1].AsString() != "charlie" {
+		t.Fatalf("limited protocol delete delta inserts/deletes = %#v/%#v, want row 2 enter and row 1 leave", inserts, deletes)
 	}
 }
 
-func TestProtocolDeclaredViewOffsetSendsOffsetInitialRowsAndRowDeltas(t *testing.T) {
+func TestProtocolDeclaredViewOffsetMaintainsWindowDeltas(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
 		Reducer("delete_message_by_id", deleteMessageByIDReducer).
@@ -639,16 +641,18 @@ func TestProtocolDeclaredViewOffsetSendsOffsetInitialRowsAndRowDeltas(t *testing
 		t.Fatalf("offset protocol initial ids = %v, want %v; rows=%#v", got, want, initial)
 	}
 
-	insertMessageWithBody(t, rt, 5, "alpha")
+	insertMessageWithBody(t, rt, 5, "delta")
 	inserts, deletes := requireDeclaredReadDeltaValues(t, client, 47, "messages", projectedColumns)
-	if len(inserts) != 1 || inserts[0][0].AsUint64() != 5 || inserts[0][1].AsString() != "alpha" || len(deletes) != 0 {
-		t.Fatalf("offset protocol insert delta inserts/deletes = %#v/%#v, want row 5/alpha insert", inserts, deletes)
+	if len(inserts) != 1 || inserts[0][0].AsUint64() != 1 || inserts[0][1].AsString() != "charlie" ||
+		len(deletes) != 1 || deletes[0][0].AsUint64() != 3 || deletes[0][1].AsString() != "bravo" {
+		t.Fatalf("offset protocol insert delta inserts/deletes = %#v/%#v, want row 1 enter and row 3 leave", inserts, deletes)
 	}
 
 	deleteMessageByID(t, rt, 2)
 	inserts, deletes = requireDeclaredReadDeltaValues(t, client, 47, "messages", projectedColumns)
-	if len(inserts) != 0 || len(deletes) != 1 || deletes[0][0].AsUint64() != 2 || deletes[0][1].AsString() != "charlie" {
-		t.Fatalf("offset protocol delete delta inserts/deletes = %#v/%#v, want row 2/charlie delete", inserts, deletes)
+	if len(inserts) != 1 || inserts[0][0].AsUint64() != 3 || inserts[0][1].AsString() != "bravo" ||
+		len(deletes) != 1 || deletes[0][0].AsUint64() != 2 || deletes[0][1].AsString() != "charlie" {
+		t.Fatalf("offset protocol delete delta inserts/deletes = %#v/%#v, want row 3 enter and row 2 leave", inserts, deletes)
 	}
 }
 

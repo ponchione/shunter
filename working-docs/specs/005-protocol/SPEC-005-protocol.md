@@ -358,8 +358,12 @@ Read surfaces gate the parsed features:
   protocol messages reject undeclared app parameters. `:sender` is reserved for
   caller identity and is not an app parameter.
   Executable declared live views further gate `ORDER BY`, `LIMIT`, and
-  `OFFSET` to single-table, non-aggregate subscriptions; those clauses shape
-  only the initial snapshot, not maintained live membership.
+  `OFFSET` to single-table, non-aggregate subscriptions; Shunter maintains
+  persistent single-table windows after commits with row-delta deletes and
+  inserts for rows leaving or entering the window. Equal `ORDER BY` keys, and
+  `LIMIT`/`OFFSET` without `ORDER BY`, use Shunter's deterministic row-payload
+  tie-break order. Event-table insert streams remain transient and do not
+  retain maintained window membership.
 
 SQL identifier lookup is byte-exact after quoted-identifier unescaping. Table names, column names, aliases, and qualifiers must match the declared schema or relation alias exactly; quoting preserves the written spelling and does not enable case-folded lookup. Once a relation alias is introduced, the base table name is no longer an in-scope qualifier for SQL WHERE or projection references.
 
@@ -1046,7 +1050,7 @@ Subscribe and OneOffQuery handlers need to resolve table names to IDs and valida
   differ by surface: raw subscriptions stay table-shaped, while one-off and
   declared reads admit projections, aggregates, ordering, limits, offsets, and
   the wider join surface. Declared live views further restrict `ORDER BY`,
-  `LIMIT`, and `OFFSET` to single-table, non-aggregate initial snapshots.
+  `LIMIT`, and `OFFSET` to maintained single-table, non-aggregate windows.
 - **Close-code policy:** Shunter's documented close behavior includes `1000`, `1002`, `1008`, and `1011` with Shunter-specific reason strings for protocol/policy failures (§11.1). It does not try to mirror the reference runtime's full close-code/reason matrix.
 - **Energy model:** v1 has no energy subsystem. There is no `energy_quanta_used` field and no `UpdateStatus::OutOfEnergy` arm. reference-style hosted billing/metering is not a Shunter product goal.
 - **ConnectionID reuse semantics:** reusing `connection_id` on reconnect is only a client hint for future resume features; it has no server-side resume semantics in v1 (§2.3, §11.3).

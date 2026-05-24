@@ -176,7 +176,7 @@ type initialRowWindow struct {
 }
 
 func (w initialRowWindow) streamable() bool {
-	return len(w.orderBy) == 0
+	return len(w.orderBy) == 0 && w.limit == nil && w.offset == nil
 }
 
 func (w initialRowWindow) streamOutputLimit(collector *initialRowCollector) int {
@@ -215,7 +215,7 @@ func (w initialRowWindow) orderedKeepLimit(collector *initialRowCollector) int {
 
 func (w initialRowWindow) apply(rows []types.ProductValue) ([]types.ProductValue, error) {
 	var err error
-	rows, err = orderInitialRows(rows, w.orderBy)
+	rows, err = orderWindowRows(rows, w.orderBy, !w.streamable())
 	if err != nil {
 		return nil, err
 	}

@@ -173,18 +173,23 @@ Review later:
 - Resubscription behavior.
 - Contract/export representation.
 
-10. [ ] Maintained top-N/windowed live views.
+10. [ ] Maintained top-N/windowed live views beyond the single-table v1 subset.
 
 Owner: `subscription`, `protocol`, declared-read/view surfaces
 
 Deferred decision:
-- Current `ORDER BY`, `LIMIT`, and `OFFSET` behavior is initial-snapshot only.
+- Single-table, non-aggregate declared live views maintain `ORDER BY`, `LIMIT`,
+  and `OFFSET` window membership after commits.
+- The single-table v1 implementation recomputes candidate windows after
+  commits rather than using incremental/index-backed top-N maintenance.
+- Broader maintained windows remain deferred.
 
 Review later:
-- Maintained ordered/windowed live-result semantics.
+- Maintained ordered/windowed live-result semantics for joins and aggregates.
 - Delta representation.
 - Admission limits.
 - Index requirements.
+- Incremental/index-backed maintenance.
 - Interaction with joins and aggregates.
 
 11. [ ] Incremental plans and default limit policy for high-cardinality
@@ -212,7 +217,8 @@ Deferred decision:
 - Local strict-mode JWT verification now supports configured HS256, RS256, and
   ES256 verification keys with optional `kid` matching.
 - Strict-mode JWKS verification now supports configured issuer/JWKS URL pairs
-  with on-demand fetch, cache reuse, and unknown-`kid` refresh.
+  with on-demand fetch, cache reuse, HTTPS-by-default URL validation, and keyed
+  unknown-`kid` refresh.
 - Defer OIDC discovery-document lookup and background remote refresh.
 
 Review later:

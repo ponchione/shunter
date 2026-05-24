@@ -122,6 +122,323 @@ func TestRegisterProjectionPreservesInitialAndDeltaShape(t *testing.T) {
 	requireProductRowsEqual(t, update.Deletes, []types.ProductValue{{types.NewString("bob")}})
 }
 
+func TestEvalOrderedLimitedViewMaintainsTopNOnInsert(t *testing.T) {
+	s := testSchema()
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("one")},
+			{types.NewUint64(2), types.NewString("two")},
+			{types.NewUint64(3), types.NewString("three")},
+		},
+	})
+	connID := types.ConnectionID{1}
+	inbox := make(chan FanOutMessage, 1)
+	limit := uint64(2)
+	orderBy := []OrderByColumn{{
+		Table:  1,
+		Column: 0,
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Desc:   true,
+	}}
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:         connID,
+		QueryID:        20,
+		Predicates:     []Predicate{AllRows{Table: 1}},
+		OrderByColumns: [][]OrderByColumn{orderBy},
+		Limits:         []*uint64{&limit},
+	}, before)
+	if err != nil {
+		t.Fatalf("RegisterSet ordered limit = %v", err)
+	}
+	requireProductRowsEqual(t, res.Update[0].Inserts, []types.ProductValue{
+		{types.NewUint64(3), types.NewString("three")},
+		{types.NewUint64(2), types.NewString("two")},
+	})
+
+	inserted := types.ProductValue{types.NewUint64(4), types.NewString("four")}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("one")},
+			{types.NewUint64(2), types.NewString("two")},
+			{types.NewUint64(3), types.NewString("three")},
+			inserted,
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), simpleChangeset(1, []types.ProductValue{inserted}, nil), after, PostCommitMeta{})
+	update := requireSingleFanoutUpdate(t, <-inbox, connID)
+	requireProductRowsEqual(t, update.Inserts, []types.ProductValue{inserted})
+	requireProductRowsEqual(t, update.Deletes, []types.ProductValue{
+		{types.NewUint64(2), types.NewString("two")},
+	})
+}
+
+func TestEvalOrderedLimitedViewMaintainsTopNOnDelete(t *testing.T) {
+	s := testSchema()
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("one")},
+			{types.NewUint64(2), types.NewString("two")},
+			{types.NewUint64(3), types.NewString("three")},
+		},
+	})
+	connID := types.ConnectionID{2}
+	inbox := make(chan FanOutMessage, 1)
+	limit := uint64(2)
+	orderBy := []OrderByColumn{{
+		Table:  1,
+		Column: 0,
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Desc:   true,
+	}}
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:         connID,
+		QueryID:        21,
+		Predicates:     []Predicate{AllRows{Table: 1}},
+		OrderByColumns: [][]OrderByColumn{orderBy},
+		Limits:         []*uint64{&limit},
+	}, before); err != nil {
+		t.Fatalf("RegisterSet ordered limit = %v", err)
+	}
+
+	deleted := types.ProductValue{types.NewUint64(3), types.NewString("three")}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("one")},
+			{types.NewUint64(2), types.NewString("two")},
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), simpleChangeset(1, nil, []types.ProductValue{deleted}), after, PostCommitMeta{})
+	update := requireSingleFanoutUpdate(t, <-inbox, connID)
+	requireProductRowsEqual(t, update.Inserts, []types.ProductValue{
+		{types.NewUint64(1), types.NewString("one")},
+	})
+	requireProductRowsEqual(t, update.Deletes, []types.ProductValue{deleted})
+}
+
+func TestEvalOrderedLimitedViewSuppressesUnchangedWindow(t *testing.T) {
+	s := testSchema()
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("one")},
+			{types.NewUint64(2), types.NewString("two")},
+			{types.NewUint64(3), types.NewString("three")},
+		},
+	})
+	connID := types.ConnectionID{3}
+	inbox := make(chan FanOutMessage, 1)
+	limit := uint64(2)
+	orderBy := []OrderByColumn{{
+		Table:  1,
+		Column: 0,
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Desc:   true,
+	}}
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:         connID,
+		QueryID:        22,
+		Predicates:     []Predicate{AllRows{Table: 1}},
+		OrderByColumns: [][]OrderByColumn{orderBy},
+		Limits:         []*uint64{&limit},
+	}, before); err != nil {
+		t.Fatalf("RegisterSet ordered limit = %v", err)
+	}
+
+	inserted := types.ProductValue{types.NewUint64(0), types.NewString("zero")}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			inserted,
+			{types.NewUint64(1), types.NewString("one")},
+			{types.NewUint64(2), types.NewString("two")},
+			{types.NewUint64(3), types.NewString("three")},
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), simpleChangeset(1, []types.ProductValue{inserted}, nil), after, PostCommitMeta{})
+	if got := (<-inbox).Fanout[connID]; len(got) != 0 {
+		t.Fatalf("unchanged top-N fanout = %+v, want no updates", got)
+	}
+}
+
+func TestEvalOrderedLimitedViewMaintainsTopNOnOutsideRowPromotion(t *testing.T) {
+	s := testSchema()
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("one")},
+			{types.NewUint64(2), types.NewString("two")},
+			{types.NewUint64(3), types.NewString("three")},
+		},
+	})
+	connID := types.ConnectionID{4}
+	inbox := make(chan FanOutMessage, 1)
+	limit := uint64(2)
+	orderBy := []OrderByColumn{{
+		Table:  1,
+		Column: 0,
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Desc:   true,
+	}}
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:         connID,
+		QueryID:        23,
+		Predicates:     []Predicate{AllRows{Table: 1}},
+		OrderByColumns: [][]OrderByColumn{orderBy},
+		Limits:         []*uint64{&limit},
+	}, before); err != nil {
+		t.Fatalf("RegisterSet ordered limit = %v", err)
+	}
+
+	oldRow := types.ProductValue{types.NewUint64(1), types.NewString("one")}
+	newRow := types.ProductValue{types.NewUint64(5), types.NewString("one")}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(2), types.NewString("two")},
+			{types.NewUint64(3), types.NewString("three")},
+			newRow,
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), simpleChangeset(1, []types.ProductValue{newRow}, []types.ProductValue{oldRow}), after, PostCommitMeta{})
+	update := requireSingleFanoutUpdate(t, <-inbox, connID)
+	requireProductRowsEqual(t, update.Inserts, []types.ProductValue{newRow})
+	requireProductRowsEqual(t, update.Deletes, []types.ProductValue{
+		{types.NewUint64(2), types.NewString("two")},
+	})
+}
+
+func TestEvalUnorderedLimitedViewMaintainsBoundaryOnDelete(t *testing.T) {
+	s := testSchema()
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("one")},
+			{types.NewUint64(2), types.NewString("two")},
+			{types.NewUint64(3), types.NewString("three")},
+		},
+	})
+	connID := types.ConnectionID{5}
+	inbox := make(chan FanOutMessage, 1)
+	limit := uint64(2)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    24,
+		Predicates: []Predicate{AllRows{Table: 1}},
+		Limits:     []*uint64{&limit},
+	}, before)
+	if err != nil {
+		t.Fatalf("RegisterSet unordered limit = %v", err)
+	}
+	requireProductRowsEqual(t, res.Update[0].Inserts, []types.ProductValue{
+		{types.NewUint64(1), types.NewString("one")},
+		{types.NewUint64(2), types.NewString("two")},
+	})
+
+	deleted := types.ProductValue{types.NewUint64(1), types.NewString("one")}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(2), types.NewString("two")},
+			{types.NewUint64(3), types.NewString("three")},
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), simpleChangeset(1, nil, []types.ProductValue{deleted}), after, PostCommitMeta{})
+	update := requireSingleFanoutUpdate(t, <-inbox, connID)
+	requireProductRowsEqual(t, update.Inserts, []types.ProductValue{
+		{types.NewUint64(3), types.NewString("three")},
+	})
+	requireProductRowsEqual(t, update.Deletes, []types.ProductValue{deleted})
+}
+
+func TestEvalUnorderedOffsetViewMaintainsBoundaryOnDelete(t *testing.T) {
+	s := testSchema()
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("one")},
+			{types.NewUint64(2), types.NewString("two")},
+			{types.NewUint64(3), types.NewString("three")},
+		},
+	})
+	connID := types.ConnectionID{6}
+	inbox := make(chan FanOutMessage, 1)
+	limit := uint64(1)
+	offset := uint64(1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    25,
+		Predicates: []Predicate{AllRows{Table: 1}},
+		Limits:     []*uint64{&limit},
+		Offsets:    []*uint64{&offset},
+	}, before)
+	if err != nil {
+		t.Fatalf("RegisterSet unordered offset = %v", err)
+	}
+	requireProductRowsEqual(t, res.Update[0].Inserts, []types.ProductValue{
+		{types.NewUint64(2), types.NewString("two")},
+	})
+
+	deleted := types.ProductValue{types.NewUint64(1), types.NewString("one")}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(2), types.NewString("two")},
+			{types.NewUint64(3), types.NewString("three")},
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), simpleChangeset(1, nil, []types.ProductValue{deleted}), after, PostCommitMeta{})
+	update := requireSingleFanoutUpdate(t, <-inbox, connID)
+	requireProductRowsEqual(t, update.Inserts, []types.ProductValue{
+		{types.NewUint64(3), types.NewString("three")},
+	})
+	requireProductRowsEqual(t, update.Deletes, []types.ProductValue{
+		{types.NewUint64(2), types.NewString("two")},
+	})
+}
+
+func TestEvalOrderedLimitedViewMaintainsBoundaryOnOrderTieDelete(t *testing.T) {
+	s := testSchema()
+	before := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("same")},
+			{types.NewUint64(2), types.NewString("same")},
+		},
+	})
+	connID := types.ConnectionID{7}
+	inbox := make(chan FanOutMessage, 1)
+	limit := uint64(1)
+	orderBy := []OrderByColumn{{
+		Table:  1,
+		Column: 1,
+		Schema: schema.ColumnSchema{Index: 1, Name: "body", Type: types.KindString},
+	}}
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:         connID,
+		QueryID:        26,
+		Predicates:     []Predicate{AllRows{Table: 1}},
+		OrderByColumns: [][]OrderByColumn{orderBy},
+		Limits:         []*uint64{&limit},
+	}, before)
+	if err != nil {
+		t.Fatalf("RegisterSet ordered tie limit = %v", err)
+	}
+	requireProductRowsEqual(t, res.Update[0].Inserts, []types.ProductValue{
+		{types.NewUint64(1), types.NewString("same")},
+	})
+
+	deleted := types.ProductValue{types.NewUint64(1), types.NewString("same")}
+	after := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(2), types.NewString("same")},
+		},
+	})
+	mgr.EvalAndBroadcast(types.TxID(1), simpleChangeset(1, nil, []types.ProductValue{deleted}), after, PostCommitMeta{})
+	update := requireSingleFanoutUpdate(t, <-inbox, connID)
+	requireProductRowsEqual(t, update.Inserts, []types.ProductValue{
+		{types.NewUint64(2), types.NewString("same")},
+	})
+	requireProductRowsEqual(t, update.Deletes, []types.ProductValue{deleted})
+}
+
 func TestRegisterProjectionSuppressesUnmatchedDelta(t *testing.T) {
 	s := testSchema()
 	before := buildMockCommitted(s, map[TableID][]types.ProductValue{

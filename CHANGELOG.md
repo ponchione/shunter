@@ -4,9 +4,14 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Declared single-table, non-aggregate live views with `ORDER BY`, `LIMIT`, or
+  `OFFSET` now maintain window membership after commits, emitting delete/insert
+  row deltas when rows leave or enter the live window. Equal `ORDER BY` keys
+  and unordered `LIMIT`/`OFFSET` windows use Shunter's deterministic row-payload
+  tie-break order.
 - Added strict-auth JWKS/OIDC issuer verification for RS256 and ES256 tokens,
-  including on-demand key fetch, cached key reuse, unknown-`kid` refresh, root
-  config/env wiring, and app-author docs.
+  including on-demand key fetch, cached key reuse, keyed unknown-`kid` refresh,
+  HTTPS-by-default URL validation, root config/env wiring, and app-author docs.
 - Added the root `Module.EventTable` declaration helper, documented app-facing
   event-table reducer usage, and wired hosted-chat to emit transient
   `message_events`.

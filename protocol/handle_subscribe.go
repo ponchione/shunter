@@ -194,8 +194,8 @@ func (query compiledSQLQuery) resultColumns(fallback []schema.ColumnSchema) []sc
 	return slices.Clone(fallback)
 }
 
-// SubscriptionOrderBy returns optional initial-snapshot ordering metadata for
-// declared live views. It does not imply positional delta semantics.
+// SubscriptionOrderBy returns optional ordering metadata for declared
+// single-table live windows. It does not imply positional delta semantics.
 func (q CompiledSQLQuery) SubscriptionOrderBy() []subscription.OrderByColumn {
 	if len(q.query.OrderBy) == 0 {
 		return nil
@@ -213,8 +213,8 @@ func (q CompiledSQLQuery) SubscriptionOrderBy() []subscription.OrderByColumn {
 	return out
 }
 
-// SubscriptionLimit returns optional initial-snapshot LIMIT metadata for
-// declared live views. Post-commit delivery remains ordinary row deltas.
+// SubscriptionLimit returns optional LIMIT metadata for declared single-table
+// live windows.
 func (q CompiledSQLQuery) SubscriptionLimit() *uint64 {
 	if q.query.Limit == nil {
 		return nil
@@ -223,8 +223,8 @@ func (q CompiledSQLQuery) SubscriptionLimit() *uint64 {
 	return &limit
 }
 
-// SubscriptionOffset returns optional initial-snapshot OFFSET metadata for
-// declared live views. Post-commit delivery remains ordinary row deltas.
+// SubscriptionOffset returns optional OFFSET metadata for declared single-table
+// live windows.
 func (q CompiledSQLQuery) SubscriptionOffset() *uint64 {
 	if q.query.Offset == nil {
 		return nil

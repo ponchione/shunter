@@ -381,11 +381,14 @@ Reference purpose:
 
 Shunter status:
 - Declared queries and declared views exist.
-- Single-table `ORDER BY`, `LIMIT`, and `OFFSET` currently shape initial
-  snapshots only for non-aggregate live views.
+- Persistent single-table `ORDER BY`, `LIMIT`, and `OFFSET` non-aggregate live
+  views maintain window membership after commits.
+- The current single-table implementation recomputes candidate windows after
+  commits; incremental/index-backed maintenance remains future work.
 
 Needed Shunter work:
-- maintained ordered/windowed live views for common frontend use cases:
+- broaden maintained ordered/windowed live views beyond the single-table subset
+  for common frontend use cases:
   - top N leaderboard
   - newest activity feed
   - nearest or highest-priority tasks
@@ -396,6 +399,7 @@ Needed Shunter work:
   - row changes order but remains in window: update or delete+insert according
     to current wire shape
 - admission limits and index requirements.
+- incremental/index-backed maintenance for large windows.
 - TypeScript SDK local cache behavior for ordered/windowed views.
 
 Example:

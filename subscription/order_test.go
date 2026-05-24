@@ -31,7 +31,7 @@ func TestBoundedOrderedInitialRowsKeepsOnlyTopWindow(t *testing.T) {
 	}
 }
 
-func TestBoundedOrderedInitialRowsPreservesScanOrderForTies(t *testing.T) {
+func TestBoundedOrderedInitialRowsUsesRowPayloadTieBreak(t *testing.T) {
 	orderBy := []OrderByColumn{{
 		Schema: schema.ColumnSchema{Index: 0, Name: "rank", Type: types.KindUint64},
 		Table:  1,
@@ -39,9 +39,9 @@ func TestBoundedOrderedInitialRowsPreservesScanOrderForTies(t *testing.T) {
 	}}
 	bounded := newBoundedOrderedInitialRows(orderBy, 2)
 	rows := []types.ProductValue{
-		{types.NewUint64(1), types.NewString("first")},
-		{types.NewUint64(1), types.NewString("second")},
-		{types.NewUint64(1), types.NewString("third")},
+		{types.NewUint64(1), types.NewString("c")},
+		{types.NewUint64(1), types.NewString("a")},
+		{types.NewUint64(1), types.NewString("b")},
 	}
 	for _, row := range rows {
 		if err := bounded.add(row); err != nil {
@@ -52,8 +52,8 @@ func TestBoundedOrderedInitialRowsPreservesScanOrderForTies(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("bounded rows = %d, want 2", len(got))
 	}
-	if got[0][1].AsString() != "first" || got[1][1].AsString() != "second" {
-		t.Fatalf("tie order = %v, want first then second", got)
+	if got[0][1].AsString() != "a" || got[1][1].AsString() != "b" {
+		t.Fatalf("tie order = %v, want a then b", got)
 	}
 }
 

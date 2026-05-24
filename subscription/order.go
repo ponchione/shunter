@@ -8,9 +8,9 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// OrderByColumn describes one source-column ordering term for an initial live
-// snapshot. Post-commit delivery remains ordinary row deltas; this metadata is
-// part of query identity and initial materialization only.
+// OrderByColumn describes one source-column ordering term for a live
+// single-table window. It is part of query identity, initial materialization,
+// and maintained window-membership delta evaluation.
 type OrderByColumn struct {
 	Schema schema.ColumnSchema
 	Table  TableID
@@ -44,8 +44,9 @@ func validateOrderByColumns(pred Predicate, orderBy []OrderByColumn, aggregate *
 }
 
 type orderedInitialRow struct {
-	row types.ProductValue
-	key []types.Value
+	row    types.ProductValue
+	key    []types.Value
+	rowKey string
 }
 
 type boundedOrderedInitialRows struct {
@@ -54,8 +55,8 @@ type boundedOrderedInitialRows struct {
 	rows    []orderedInitialRow
 }
 
-func orderInitialRows(rows []types.ProductValue, orderBy []OrderByColumn) ([]types.ProductValue, error) {
-	if len(rows) == 0 || len(orderBy) == 0 {
+func orderWindowRows(rows []types.ProductValue, orderBy []OrderByColumn, deterministic bool) ([]types.ProductValue, error) {
+	if len(rows) == 0 || !deterministic {
 		return rows, nil
 	}
 	ordered := make([]orderedInitialRow, 0, len(rows))
@@ -64,7 +65,7 @@ func orderInitialRows(rows []types.ProductValue, orderBy []OrderByColumn) ([]typ
 		if err != nil {
 			return nil, err
 		}
-		ordered = append(ordered, orderedInitialRow{row: row, key: keys})
+		ordered = append(ordered, orderedInitialRow{row: row, key: keys, rowKey: encodeRowKey(row)})
 	}
 	slices.SortStableFunc(ordered, func(a, b orderedInitialRow) int {
 		return compareOrderedInitialRows(a, b, orderBy)
@@ -91,7 +92,7 @@ func (b *boundedOrderedInitialRows) add(row types.ProductValue) error {
 	if err != nil {
 		return err
 	}
-	item := orderedInitialRow{row: row, key: key}
+	item := orderedInitialRow{row: row, key: key, rowKey: encodeRowKey(row)}
 	pos := upperBoundOrderedInitialRows(b.rows, item, b.orderBy)
 	if len(b.rows) == b.keep && pos == b.keep {
 		return nil
@@ -113,6 +114,9 @@ func (b *boundedOrderedInitialRows) productRows() []types.ProductValue {
 }
 
 func initialRowOrderKey(row types.ProductValue, orderBy []OrderByColumn) ([]types.Value, error) {
+	if len(orderBy) == 0 {
+		return nil, nil
+	}
 	keys := make([]types.Value, len(orderBy))
 	for i, term := range orderBy {
 		idx := int(term.Column)
@@ -134,6 +138,12 @@ func compareOrderedInitialRows(a, b orderedInitialRow, orderBy []OrderByColumn) 
 			return -cmp
 		}
 		return cmp
+	}
+	if a.rowKey < b.rowKey {
+		return -1
+	}
+	if a.rowKey > b.rowKey {
+		return 1
 	}
 	return 0
 }

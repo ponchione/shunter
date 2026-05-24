@@ -467,6 +467,16 @@ func (m *Manager) evalQuery(ctx context.Context, qs *queryState, dv *DeltaView) 
 	default:
 		var updates []SubscriptionUpdate
 		for _, t := range qs.predicate.Tables() {
+			if m.maintainsWindowedSingleTableDelta(qs, dv, t) {
+				update, ok, err := m.evalWindowedSingleTableDelta(ctx, qs, dv, t)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					updates = append(updates, update)
+				}
+				continue
+			}
 			ins, del := EvalSingleTableDelta(dv, qs.predicate, t)
 			ins, del = projectDeltaRows(ins, del, qs.projection, true)
 			if update, ok := m.makeDeltaUpdate(t, qs.projection, ins, del); ok {
@@ -475,6 +485,90 @@ func (m *Manager) evalQuery(ctx context.Context, qs *queryState, dv *DeltaView) 
 		}
 		return updates, nil
 	}
+}
+
+func (m *Manager) maintainsWindowedSingleTableDelta(qs *queryState, dv *DeltaView, table TableID) bool {
+	if qs == nil || dv == nil || qs.aggregate != nil || dv.IsEventTable(table) {
+		return false
+	}
+	return len(qs.orderBy) > 0 || qs.limit != nil || qs.offset != nil
+}
+
+func (m *Manager) evalWindowedSingleTableDelta(ctx context.Context, qs *queryState, dv *DeltaView, table TableID) (SubscriptionUpdate, bool, error) {
+	before, err := m.windowedRowsBefore(ctx, qs, dv, table)
+	if err != nil {
+		return SubscriptionUpdate{}, false, err
+	}
+	after, err := m.windowedRowsAfter(ctx, qs, dv, table)
+	if err != nil {
+		return SubscriptionUpdate{}, false, err
+	}
+	inserts, deletes := ReconcileJoinDelta([][]types.ProductValue{after}, [][]types.ProductValue{before})
+	inserts, deletes = projectDeltaRows(inserts, deletes, qs.projection, len(qs.projection) > 0)
+	update, ok := m.makeDeltaUpdate(table, qs.projection, inserts, deletes)
+	return update, ok, nil
+}
+
+func (m *Manager) windowedRowsAfter(ctx context.Context, qs *queryState, dv *DeltaView, table TableID) ([]types.ProductValue, error) {
+	rows, err := collectWindowRows(ctx, dv.CommittedView(), qs.predicate, table, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return applyLiveWindow(rows, qs)
+}
+
+func (m *Manager) windowedRowsBefore(ctx context.Context, qs *queryState, dv *DeltaView, table TableID) ([]types.ProductValue, error) {
+	var insertCounts map[string]int
+	insertedRows := dv.InsertedRows(table)
+	if len(insertedRows) > 0 {
+		insertCounts = make(map[string]int, len(insertedRows))
+	}
+	for _, row := range insertedRows {
+		insertCounts[encodeRowKey(row)]++
+	}
+	rows, err := collectWindowRows(ctx, dv.CommittedView(), qs.predicate, table, insertCounts, dv.DeletedRows(table))
+	if err != nil {
+		return nil, err
+	}
+	return applyLiveWindow(rows, qs)
+}
+
+func collectWindowRows(ctx context.Context, view store.CommittedReadView, pred Predicate, table TableID, skipCounts map[string]int, appendDeleted []types.ProductValue) ([]types.ProductValue, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var rows []types.ProductValue
+	if view != nil {
+		for _, row := range view.TableScan(table) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if skipCounts != nil {
+				key := encodeRowKey(row)
+				if skipCounts[key] > 0 {
+					skipCounts[key]--
+					continue
+				}
+			}
+			if MatchRow(pred, table, row) {
+				rows = append(rows, row)
+			}
+		}
+	}
+	for _, row := range appendDeleted {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if MatchRow(pred, table, row) {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
+}
+
+func applyLiveWindow(rows []types.ProductValue, qs *queryState) ([]types.ProductValue, error) {
+	window := initialRowWindow{orderBy: qs.orderBy, limit: qs.limit, offset: qs.offset}
+	return window.apply(rows)
 }
 
 func (m *Manager) deltaUpdate(table TableID, projection []ProjectionColumn, inserts, deletes []types.ProductValue) []SubscriptionUpdate {

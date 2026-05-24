@@ -102,10 +102,14 @@ shapes differ by read surface:
   `COUNT`/`SUM` aggregate views, including join and multi-way aggregate views.
   `COUNT(DISTINCT column)` is supported. Aggregate aliases must use `AS`.
   `ORDER BY`, `LIMIT`, and `OFFSET` are supported only for single-table,
-  non-aggregate live views and shape the initial snapshot only; Shunter does
-  not maintain top-N/windowed live view membership after commits.
-  Non-aggregate post-commit delivery remains row deltas over matching rows, and
-  aggregate views emit replacement aggregate rows when the aggregate changes.
+  non-aggregate live views. Shunter maintains persistent single-table windows
+  after commits by emitting row-delta deletes for rows leaving the window and
+  inserts for rows entering it. Equal `ORDER BY` keys, and `LIMIT`/`OFFSET`
+  without `ORDER BY`, use Shunter's deterministic row-payload tie-break order.
+  Current maintenance recomputes the candidate table window after commits rather
+  than using an incremental index-backed top-N algorithm. Event-table insert
+  streams remain transient and do not retain or maintain window membership.
+  Aggregate views emit replacement aggregate rows when the aggregate changes.
   Declared app placeholders follow the same parameter rules as declared
   queries.
 - Runtime config may cap admitted live multi-way views with

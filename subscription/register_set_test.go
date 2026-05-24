@@ -505,7 +505,7 @@ func TestRegisterSetLimitAffectsSameConnectionQueryIdentity(t *testing.T) {
 	}
 }
 
-func TestRegisterSetLimitStopsStreamingInitialScan(t *testing.T) {
+func TestRegisterSetLimitScansFullInputForDeterministicWindow(t *testing.T) {
 	mgr, base := newRegisterSetTestManagerWithRows(t)
 	view := &countingTableScanView{mockCommitted: base}
 	limitOne := uint64(1)
@@ -522,8 +522,8 @@ func TestRegisterSetLimitStopsStreamingInitialScan(t *testing.T) {
 	if len(res.Update) != 1 || len(res.Update[0].Inserts) != 1 {
 		t.Fatalf("limited update = %+v, want one initial row", res.Update)
 	}
-	if view.scanned != 1 {
-		t.Fatalf("TableScan yielded %d rows, want 1 for streaming LIMIT 1", view.scanned)
+	if view.scanned != 2 {
+		t.Fatalf("TableScan yielded %d rows, want full input for deterministic LIMIT 1", view.scanned)
 	}
 }
 
