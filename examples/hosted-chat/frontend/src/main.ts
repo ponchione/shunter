@@ -122,7 +122,17 @@ if (unsubscribeMessageEvents !== undefined) {
 }
 if (liveMessages !== undefined) {
   try {
-    await runCleanupStep("live messages subscription", () => liveMessages.unsubscribe());
+    const handle = liveMessages;
+    await runCleanupStep("live messages subscription", async () => {
+      await handle.unsubscribe();
+      const closed = await handle.closed;
+      if (closed.reason === "error") {
+        throw closed.error;
+      }
+      if (closed.reason !== "unsubscribed") {
+        throw new Error(`live messages subscription cleanup closed with reason ${closed.reason}`);
+      }
+    });
   } catch (error) {
     cleanupErrors.push(error);
   }
