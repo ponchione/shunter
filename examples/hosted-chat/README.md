@@ -96,11 +96,14 @@ npm install
 npm run typecheck
 ```
 
-The TypeScript example connects to `/subscribe`, calls the generated
-`send_message` reducer helper and `send_system_message` procedure helper, and
-subscribes to the generated `live_messages` view helper with decoded rows. The
-procedure is intentionally shaped as a small service-adapter workflow: it runs
-outside the reducer executor, validates procedure arguments, and then calls the
+The TypeScript example asserts generated contract compatibility, connects to
+`/subscribe`, uses an optional browser token-provider path when
+`hosted-chat-token` is present in `localStorage`, enables bounded reconnect,
+subscribes to transient `message_events` inserts, keeps a decoded
+`live_messages` managed handle, and calls the generated `send_message` reducer
+helper and `send_system_message` procedure helper. The procedure is
+intentionally shaped as a small service-adapter workflow: it runs outside the
+reducer executor, validates procedure arguments, and then calls the
 `send_message` reducer to make the durable state change.
 
 ## Release Gate

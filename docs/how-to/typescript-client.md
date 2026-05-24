@@ -119,6 +119,32 @@ await client.connect();
 
 The default browser path uses global `WebSocket`.
 
+For browser apps that can run in development without strict auth, install a
+token provider only when the browser session already has a token. This keeps
+local anonymous development from sending an empty bearer value while still
+letting reconnect fetch a fresh token for each strict-auth attempt.
+
+```ts
+const hasToken = (globalThis.localStorage?.getItem("my-app-token") ?? "") !== "";
+
+const client = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  contract: shunterContract,
+  ...(hasToken
+    ? {
+        token: () => {
+          const token = globalThis.localStorage?.getItem("my-app-token");
+          if (!token) {
+            throw new Error("my-app-token is not configured");
+          }
+          return token;
+        },
+      }
+    : {}),
+});
+```
+
 Generated protocol metadata defaults to `v2.bsatn.shunter` while still listing
 `v1.bsatn.shunter` as supported. Parameterized declared reads require a
 negotiated v2 connection; no-parameter declared reads remain compatible with

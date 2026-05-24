@@ -659,8 +659,11 @@ export function createShunterClient(options) {
             : { deleteRowBytes: update.deleteRowBytes.map((row) => new Uint8Array(row)) }),
     });
     const cloneRowBytes = (rows) => rows.map((row) => new Uint8Array(row));
-    const decodeSubscriptionRows = (rows, decodeRow, label) => {
+    const decodeSubscriptionRows = (rows, decodeRow, label, options = {}) => {
         if (rows === undefined) {
+            if (options.allowAbsent === true) {
+                return [];
+            }
             throw new ShunterProtocolError(`${label} rows were not encoded as a RowList.`);
         }
         return rows.map((row, rowIndex) => {
@@ -718,13 +721,16 @@ export function createShunterClient(options) {
             active.handle.replaceRows([]);
             return;
         }
-        if (update.insertRowBytes === undefined || update.deleteRowBytes === undefined) {
+        if (update.insertRowBytes === undefined) {
             if (active.decodeRow !== undefined || active.onUpdate !== undefined) {
-                throw new ShunterProtocolError(`${label} rows were not encoded as a RowList.`);
+                throw new ShunterProtocolError(`${label} insert rows were not encoded as a RowList.`);
             }
             return;
         }
-        for (const rowBytes of update.deleteRowBytes) {
+        if (update.deleteRowBytes === undefined && active.decodeRow === undefined) {
+            return;
+        }
+        for (const rowBytes of update.deleteRowBytes ?? []) {
             deleteCachedRow(active.rowCache, rowBytes);
         }
         if (active.decodeRow === undefined) {
@@ -782,7 +788,9 @@ export function createShunterClient(options) {
                 let deletes;
                 try {
                     inserts = decodeSubscriptionRows(update.insertRowBytes, active.decodeRow, `${label} insert`);
-                    deletes = decodeSubscriptionRows(update.deleteRowBytes, active.decodeRow, `${label} delete`);
+                    deletes = decodeSubscriptionRows(update.deleteRowBytes, active.decodeRow, `${label} delete`, {
+                        allowAbsent: true,
+                    });
                     active.onUpdate?.({
                         queryId: update.queryId,
                         tableName: update.tableName,

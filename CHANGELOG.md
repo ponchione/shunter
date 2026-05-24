@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- TypeScript managed declared-view handles now accept subscription initial
+  updates that omit delete row lists, treating absent deletes as empty while
+  preserving raw-handle behavior.
 - Declared single-table, non-aggregate live views with `ORDER BY`, `LIMIT`, or
   `OFFSET` now maintain window membership after commits, emitting delete/insert
   row deltas when rows leave or enter the live window. Equal `ORDER BY` keys

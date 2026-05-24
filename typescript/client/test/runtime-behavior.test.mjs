@@ -357,6 +357,54 @@ function subscribeSingleAppliedFrameFor({
   return frame;
 }
 
+function rowListFrameFor(rows) {
+  const rowLengths = rows.reduce((total, row) => total + 4 + row.length, 0);
+  const frame = new Uint8Array(4 + rowLengths);
+  let offset = writeUint32LE(frame, 0, rows.length);
+  for (const row of rows) {
+    offset = writeUint32LE(frame, offset, row.length);
+    frame.set(row, offset);
+    offset += row.length;
+  }
+  return frame;
+}
+
+function transactionUpdateLightFrameFor({ requestId, updates }) {
+  const encodedUpdates = updates.map((update) => {
+    const tableNameBytes = new TextEncoder().encode(update.tableName);
+    const inserts = rowListFrameFor(update.inserts ?? []);
+    const deletes = rowListFrameFor(update.deletes ?? []);
+    const frame = new Uint8Array(
+      4 +
+      4 + tableNameBytes.length +
+      4 + inserts.length +
+      4 + deletes.length,
+    );
+    let offset = writeUint32LE(frame, 0, update.queryId);
+    offset = writeUint32LE(frame, offset, tableNameBytes.length);
+    frame.set(tableNameBytes, offset);
+    offset += tableNameBytes.length;
+    offset = writeUint32LE(frame, offset, inserts.length);
+    frame.set(inserts, offset);
+    offset += inserts.length;
+    offset = writeUint32LE(frame, offset, deletes.length);
+    frame.set(deletes, offset);
+    return frame;
+  });
+  const updateLength = encodedUpdates.reduce((total, update) => total + update.length, 0);
+  const frame = new Uint8Array(1 + 4 + 4 + updateLength);
+  let offset = 0;
+  frame[offset] = SHUNTER_SERVER_MESSAGE_TRANSACTION_UPDATE_LIGHT;
+  offset += 1;
+  offset = writeUint32LE(frame, offset, requestId);
+  offset = writeUint32LE(frame, offset, encodedUpdates.length);
+  for (const update of encodedUpdates) {
+    frame.set(update, offset);
+    offset += update.length;
+  }
+  return frame;
+}
+
 function procedureResponseFrameFor({
   messageId,
   result,
@@ -2281,6 +2329,50 @@ await unsubscribeDeclaredViewHandle;
 assert.deepEqual(await declaredViewHandle.closed, { reason: "unsubscribed" });
 assert.deepEqual(declaredViewHandle.state, { status: "closed" });
 
+const decodedViewHandleSockets = [];
+const decodedViewHandleInitialRows = [];
+const decodedViewHandleUpdates = [];
+const decodedViewHandleClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/query",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    decodedViewHandleSockets.push(socket);
+    return socket;
+  },
+});
+const decodedViewHandleConnecting = decodedViewHandleClient.connect();
+await nextTurn();
+decodedViewHandleSockets[0].open();
+decodedViewHandleSockets[0].message(identityTokenFrame().buffer);
+await decodedViewHandleConnecting;
+const decodedViewHandleSubscription = decodedViewHandleClient.subscribeDeclaredView("live_users", {
+  requestId: 0x41424344,
+  queryId: 0x61626364,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+  onInitialRows: (rows) => decodedViewHandleInitialRows.push(rows),
+  onUpdate: (update) => decodedViewHandleUpdates.push(update),
+});
+decodedViewHandleSockets[0].message(subscribeAppliedFrame);
+const decodedViewHandle = await decodedViewHandleSubscription;
+assert.deepEqual(decodedViewHandleInitialRows, [["1-2", "3"]]);
+assert.deepEqual(decodedViewHandle.state, { status: "active", rows: ["1-2", "3"] });
+decodedViewHandleSockets[0].message(transactionUpdateLightFrameFor({
+  requestId: 0x22232425,
+  updates: [{
+    queryId: 0x01020304,
+    tableName: "users",
+    inserts: [new Uint8Array([4, 5])],
+    deletes: [new Uint8Array([1, 2])],
+  }],
+}));
+assert.deepEqual(decodedViewHandle.state, { status: "active", rows: ["3", "4-5"] });
+assert.equal(decodedViewHandleUpdates.length, 2);
+assert.deepEqual(decodedViewHandleUpdates[1].inserts, ["4-5"]);
+assert.deepEqual(decodedViewHandleUpdates[1].deletes, ["1-2"]);
+await decodedViewHandleClient.close();
+
 const declaredViewSingleAppliedSockets = [];
 const declaredViewSingleAppliedClient = createShunterClient({
   url: "ws://127.0.0.1:3000/query",
@@ -2397,6 +2489,56 @@ sockets[0].message(unsubscribeDecodedTableHandleAppliedFrame);
 await unsubscribeDecodedTableHandle;
 assert.deepEqual(await decodedTableHandle.closed, { reason: "unsubscribed" });
 assert.deepEqual(decodedTableHandle.state, { status: "closed" });
+
+const eventTableHandleSockets = [];
+const eventTableInserts = [];
+const eventTableUpdates = [];
+const eventTableClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    eventTableHandleSockets.push(socket);
+    return socket;
+  },
+});
+const eventTableConnecting = eventTableClient.connect();
+await nextTurn();
+eventTableHandleSockets[0].open();
+eventTableHandleSockets[0].message(identityTokenFrame().buffer);
+await eventTableConnecting;
+const eventTableHandleSubscription = eventTableClient.subscribeTable("message_events", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  eventTable: true,
+  decodeRow: (row) => [...row].join("-"),
+  onInsert: (event) => eventTableInserts.push(event),
+  onUpdate: (update) => eventTableUpdates.push(update),
+});
+eventTableHandleSockets[0].message(subscribeSingleAppliedFrameFor({
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  tableName: "message_events",
+  rows: rowListFrameFor([]),
+}));
+const eventTableHandle = await eventTableHandleSubscription;
+assert.deepEqual(eventTableHandle.state, { status: "active", rows: [] });
+eventTableHandleSockets[0].message(transactionUpdateLightFrameFor({
+  requestId: 0x33343536,
+  updates: [{
+    queryId: 0x11121314,
+    tableName: "message_events",
+    inserts: [new Uint8Array([6, 7])],
+  }],
+}));
+assert.deepEqual(eventTableHandle.state, { status: "active", rows: [] });
+assert.equal(eventTableUpdates.length, 1);
+assert.deepEqual(eventTableUpdates[0].inserts, ["6-7"]);
+assert.deepEqual(eventTableUpdates[0].deletes, []);
+assert.equal(eventTableInserts.length, 1);
+assert.equal(eventTableInserts[0].row, "6-7");
+await eventTableClient.close();
 
 const unsubscribeSendFailureSockets = [];
 const unsubscribeSendFailureClient = createShunterClient({
