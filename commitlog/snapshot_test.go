@@ -1312,6 +1312,41 @@ func TestSnapshotOmitsSequenceEntriesForTablesWithoutAutoincrement(t *testing.T)
 	}
 }
 
+func TestSnapshotOmitsEventTableState(t *testing.T) {
+	cs, reg := buildEventAutoIncrementSnapshotCommittedState(t)
+	events, ok := cs.Table(1)
+	if !ok {
+		t.Fatal("events table missing")
+	}
+	if err := events.InsertRow(events.AllocRowID(), types.ProductValue{types.NewUint64(8), types.NewString("transient")}); err != nil {
+		t.Fatal(err)
+	}
+	events.SetSequenceValue(9)
+
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+	createSnapshotAt(t, writer, cs, 79)
+
+	data, err := ReadSnapshot(filepath.Join(baseDir, "snapshots", "79"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshotSchemaTableIsEvent(data.Schema, 1) {
+		t.Fatal("snapshot schema should preserve event table metadata")
+	}
+	if _, ok := data.NextIDs[1]; ok {
+		t.Fatalf("event table next_id persisted in snapshot: %+v", data.NextIDs)
+	}
+	if _, ok := data.Sequences[1]; ok {
+		t.Fatalf("event table sequence persisted in snapshot: %+v", data.Sequences)
+	}
+	for _, table := range data.Tables {
+		if table.TableID == 1 {
+			t.Fatalf("event table rows persisted in snapshot: %+v", table.Rows)
+		}
+	}
+}
+
 func TestListSnapshotsSkipsLockAndSortsNewestFirst(t *testing.T) {
 	baseDir := t.TempDir()
 	for _, txID := range []uint64{10, 20} {
@@ -2683,6 +2718,42 @@ func buildEventSnapshotRegistry(t testing.TB) schema.SchemaRegistry {
 		t.Fatal(err)
 	}
 	return engine.Registry()
+}
+
+func buildEventAutoIncrementSnapshotCommittedState(t testing.TB) (*store.CommittedState, schema.SchemaRegistry) {
+	t.Helper()
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "players",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint64, PrimaryKey: true},
+			{Name: "name", Type: schema.KindString},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "events",
+		IsEvent: true,
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint64, PrimaryKey: true, AutoIncrement: true},
+			{Name: "body", Type: schema.KindString},
+		},
+	})
+	engine, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := engine.Registry()
+	return buildEmptySnapshotCommittedState(t, reg), reg
+}
+
+func snapshotSchemaTableIsEvent(tables []schema.TableSchema, tableID schema.TableID) bool {
+	for _, table := range tables {
+		if table.ID == tableID {
+			return table.IsEvent
+		}
+	}
+	return false
 }
 
 func encodeLegacySchemaSnapshotBytes(t testing.TB, reg schema.SchemaRegistry) []byte {

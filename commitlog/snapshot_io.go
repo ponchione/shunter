@@ -794,12 +794,18 @@ func captureCommittedSnapshotBodyLocked(body *snapshotBodyCapture, committed *st
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	for _, tableID := range ids {
 		table, _ := committed.TableLocked(tableID)
+		if table.Schema().IsEvent {
+			continue
+		}
 		if seq, ok := table.SequenceValue(); ok {
 			body.sequences = append(body.sequences, snapshotSequenceCapture{tableID: tableID, value: seq})
 		}
 	}
 	for _, tableID := range ids {
 		table, _ := committed.TableLocked(tableID)
+		if table.Schema().IsEvent {
+			continue
+		}
 		body.nextIDs = append(body.nextIDs, snapshotNextIDCapture{
 			tableID: tableID,
 			value:   uint64(table.NextID()),
@@ -807,6 +813,9 @@ func captureCommittedSnapshotBodyLocked(body *snapshotBodyCapture, committed *st
 	}
 	for _, tableID := range ids {
 		table, _ := committed.TableLocked(tableID)
+		if table.Schema().IsEvent {
+			continue
+		}
 		rows, err := deterministicRows(table)
 		if err != nil {
 			return err
@@ -866,7 +875,7 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 	if err := validateSnapshotCompleteness(schemaByID, sequences, nextIDs, snapshotTables); err != nil {
 		return nil, snapshotReadError(err)
 	}
-	if err := validateSnapshotAllocatorBounds(nextIDs, snapshotTables); err != nil {
+	if err := validateSnapshotAllocatorBounds(nextIDs, snapshotTables, schemaByID); err != nil {
 		return nil, snapshotReadError(err)
 	}
 	if err := validateSnapshotSequenceBounds(sequences, schemaByID, snapshotTables); err != nil {
@@ -1047,6 +1056,9 @@ func validateSnapshotCompleteness(schemaByID map[schema.TableID]*schema.TableSch
 		tableSections[table.TableID] = struct{}{}
 	}
 	for tableID, tableSchema := range schemaByID {
+		if tableSchema.IsEvent {
+			continue
+		}
 		if _, ok := nextIDs[tableID]; !ok {
 			return fmt.Errorf("%w: snapshot missing next_id for table %d", ErrSnapshot, tableID)
 		}
@@ -1062,8 +1074,11 @@ func validateSnapshotCompleteness(schemaByID map[schema.TableID]*schema.TableSch
 	return nil
 }
 
-func validateSnapshotAllocatorBounds(nextIDs map[schema.TableID]uint64, tables []SnapshotTableData) error {
+func validateSnapshotAllocatorBounds(nextIDs map[schema.TableID]uint64, tables []SnapshotTableData, schemaByID map[schema.TableID]*schema.TableSchema) error {
 	for _, table := range tables {
+		if tableSchema := schemaByID[table.TableID]; tableSchema != nil && tableSchema.IsEvent {
+			continue
+		}
 		minNext := uint64(len(table.Rows)) + 1
 		if nextIDs[table.TableID] < minNext {
 			return &SnapshotAllocatorBoundsError{
@@ -1078,6 +1093,9 @@ func validateSnapshotAllocatorBounds(nextIDs map[schema.TableID]uint64, tables [
 
 func validateSnapshotSequenceBounds(sequences map[schema.TableID]uint64, schemaByID map[schema.TableID]*schema.TableSchema, tables []SnapshotTableData) error {
 	for _, table := range tables {
+		if tableSchema := schemaByID[table.TableID]; tableSchema != nil && tableSchema.IsEvent {
+			continue
+		}
 		next, ok := sequences[table.TableID]
 		if !ok {
 			continue
