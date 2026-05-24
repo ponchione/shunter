@@ -1,0 +1,129 @@
+Go test: 2 passed in 3 packages
+Go build: Success
+Module: hosted_chat v0.1.0
+Contract version: 1
+Schema version: 1
+Tables (4):
+  - messages: 3 columns, 1 indexes, read private
+  - message_events: 2 columns, 0 indexes, read private
+  - sys_clients: 3 columns, 1 indexes, read private
+  - sys_scheduled: 5 columns, 1 indexes, read private
+Reducers (1):
+  - send_message, args 2
+Procedures (1):
+  - send_system_message, args 1
+Queries (1):
+  - recent_messages executable, table messages, row columns 3
+Views (1):
+  - live_messages executable, table messages, row columns 3
+Visibility filters (0):
+1 matches in 1 files:
+
+2:0:"passed",
+1 matches in 1 files:
+
+51:0:"tables",
+1 matches in 1 files:
+
+8:0:"reducers",
+1 matches in 1 files:
+
+22:0:"send_message",
+1 matches in 1 files:
+
+2:0:"valid",
+1 matches in 1 files:
+
+3:0:"contract",
+1 matches in 1 files:
+
+2:0:"ok",
+1 matches in 1 files:
+
+3:0:"contract",
+1 matches in 1 files:
+
+4:0:false,
+2 matches in 2 files:
+
+2:0:"ok",
+8:0:"ok",
+1 matches in 1 files:
+
+3:0:"running_app",
+1 matches in 1 files:
+
+6:0:true,
+1 matches in 1 files:
+
+2:0:"ok",
+1 matches in 1 files:
+
+3:0:"running_app",
+1 matches in 1 files:
+
+9:0:"hosted_chat",
+1 matches in 1 files:
+
+2:0:"ok",
+1 matches in 1 files:
+
+4:0:"call",
+1 matches in 1 files:
+
+7:0:"send_message",
+1 matches in 1 files:
+
+2:0:"ok",
+1 matches in 1 files:
+
+4:0:"procedure",
+1 matches in 1 files:
+
+7:0:"send_system_message",
+1 matches in 1 files:
+
+2:0:"ok",
+1 matches in 1 files:
+
+4:0:"query",
+1 matches in 1 files:
+
+7:0:"recent_messages",
+1 matches in 1 files:
+
+21:0:"hello from hosted-chat gate",
+1 matches in 1 files:
+
+16:0:"hello from hosted-chat procedure",
+1 matches in 1 files:
+
+2:0:"ok",
+1 matches in 1 files:
+
+4:0:"query",
+1 matches in 1 files:
+
+7:0:"SELECT * FROM messages ORDER BY id DESC LIMIT 10",
+1 matches in 1 files:
+
+21:0:"hello from hosted-chat gate",
+1 matches in 1 files:
+
+16:0:"hello from hosted-chat procedure",
+backed up /tmp/tmp.peb22fNQQv to /tmp/tmp.BHDdihAT9c
+restored /tmp/tmp.BHDdihAT9c to /tmp/tmp.9ULPYKUYmh
+1 matches in 1 files:
+
+2:0:"ok",
+1 matches in 1 files:
+
+21:0:"hello from hosted-chat gate",
+1 matches in 1 files:
+
+16:0:"hello from hosted-chat procedure",
+wrote examples/hosted-chat/frontend/src/generated/hosted_chat.ts
+up to date, audited 4 packages in 339ms
+found 0 vulnerabilities
+> typecheck
+> npm exec --yes --package typescript -- tsc -p tsconfig.json --noEmit

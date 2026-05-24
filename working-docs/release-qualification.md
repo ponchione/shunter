@@ -76,6 +76,46 @@ Decision:
 
 ## Records
 
+### v1.1.1-dev local qualification - 2026-05-24
+
+- Status: passed
+- Operator: ponchione
+- Date/time: 2026-05-24T23:40:04Z
+- Environment: Linux gerns-win11 6.6.114.1-microsoft-standard-WSL2,
+  linux/amd64, Go go1.26.3
+- Shunter ref: `e32f933e39baf57ce3dcd537c75012c288f90ecf`
+- Shunter worktree state: clean before evidence capture; dirty afterward with
+  this qualification record and evidence logs
+- `opsboard-canary` ref: skipped by instruction; no local checkout available
+- `opsboard-canary` worktree state: skipped by instruction; no local checkout
+  available
+
+Commands:
+
+| Scope | Working directory | Command | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| Shunter | `/home/ponchione/source/shunter` | `rtk go test ./...` | pass | `working-docs/release-evidence/v1.1.1-local/shunter-go-test.log` |
+| Shunter | `/home/ponchione/source/shunter` | `rtk go vet ./...` | pass | `working-docs/release-evidence/v1.1.1-local/shunter-go-vet.log` |
+| Shunter | `/home/ponchione/source/shunter` | `rtk go tool staticcheck ./...` | pass | `working-docs/release-evidence/v1.1.1-local/shunter-staticcheck.log` |
+| TypeScript | `/home/ponchione/source/shunter` | `rtk npm --prefix typescript/client test` | pass | `working-docs/release-evidence/v1.1.1-local/typescript-client-test.log` |
+| TypeScript | `/home/ponchione/source/shunter` | `rtk npm --prefix typescript/client run build` | pass | `working-docs/release-evidence/v1.1.1-local/typescript-client-build.log` |
+| TypeScript | `/home/ponchione/source/shunter` | `rtk npm --prefix typescript/client run pack:dry-run` | pass | `working-docs/release-evidence/v1.1.1-local/typescript-client-pack-dry-run.log` |
+| TypeScript | `/home/ponchione/source/shunter` | `rtk npm --prefix typescript/client run smoke:package` | pass | `working-docs/release-evidence/v1.1.1-local/typescript-client-smoke-package.log` |
+| Hosted example | `/home/ponchione/source/shunter` | `rtk bash scripts/hosted-chat-gate.sh` | pass | `working-docs/release-evidence/v1.1.1-local/hosted-chat-gate.log` |
+| Canary | `/home/ponchione/source/opsboard-canary` | `rtk make canary-quick` | skipped | no checkout available; skipped by instruction |
+| Canary | `/home/ponchione/source/opsboard-canary` | `rtk make canary-full` | skipped | no checkout available; skipped by instruction |
+
+Residual risks:
+
+- External `opsboard-canary` quick/full gates were not run because no local
+  checkout is available and this qualification explicitly ignored canary.
+- This is a local `v1.1.1-dev` qualification record, not a tagged release
+  qualification.
+
+Decision:
+
+- Accepted as local qualification for the current `v1.1.1-dev` source line.
+
 ### v1.1.0 - 2026-05-13
 
 - Status: passed
