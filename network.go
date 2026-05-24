@@ -27,8 +27,8 @@ const (
 )
 
 var (
-	// ErrAuthSigningKeyRequired reports that strict protocol auth lacks local verification material.
-	ErrAuthSigningKeyRequired = errors.New("shunter: auth signing or verification key required")
+	// ErrAuthSigningKeyRequired reports that strict protocol auth lacks verification material.
+	ErrAuthSigningKeyRequired = errors.New("shunter: auth signing key, verification key, or OIDC issuer required")
 	// ErrAnonymousTokenTTLInvalid reports invalid anonymous token TTL configuration.
 	ErrAnonymousTokenTTLInvalid = errors.New("shunter: anonymous token TTL must not be negative")
 	// ErrRuntimeNotReady reports that protocol traffic reached a non-ready runtime.

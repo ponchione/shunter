@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -80,13 +81,30 @@ func validateJWKSURL(raw string) error {
 	if err != nil {
 		return fmt.Errorf("jwks url: %w", err)
 	}
-	if u.Scheme != "https" && u.Scheme != "http" {
-		return fmt.Errorf("jwks url must use http or https")
-	}
 	if u.Host == "" {
 		return fmt.Errorf("jwks url host is required")
 	}
+	if u.Scheme == "https" {
+		return nil
+	}
+	if u.Scheme != "http" {
+		return fmt.Errorf("jwks url must use https")
+	}
+	if !isLoopbackJWKSHost(u.Hostname()) {
+		return fmt.Errorf("jwks url must use https unless the host is loopback")
+	}
 	return nil
+}
+
+func isLoopbackJWKSHost(host string) bool {
+	switch strings.ToLower(strings.TrimSpace(host)) {
+	case "localhost":
+		return true
+	case "":
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func resolveJWKSVerificationKeys(config *JWTConfig, alg JWTAlgorithm, keyID, tokenIssuer string, forceRefresh bool) ([]resolvedJWTVerificationKey, error) {
@@ -110,14 +128,14 @@ func resolveJWKSVerificationKeys(config *JWTConfig, alg JWTAlgorithm, keyID, tok
 			lastErr = err
 			continue
 		}
-		matches := matchingResolvedJWTVerificationKeys(keys, alg, keyID)
+		matches := matchingJWKSVerificationKeys(keys, alg, keyID)
 		if len(matches) == 0 && forceRefresh && keyID != "" {
 			keys, err = keysForJWKS(source, true)
 			if err != nil {
 				lastErr = err
 				continue
 			}
-			matches = matchingResolvedJWTVerificationKeys(keys, alg, keyID)
+			matches = matchingJWKSVerificationKeys(keys, alg, keyID)
 		}
 		out = append(out, matches...)
 	}
@@ -127,10 +145,16 @@ func resolveJWKSVerificationKeys(config *JWTConfig, alg JWTAlgorithm, keyID, tok
 	return out, nil
 }
 
-func matchingResolvedJWTVerificationKeys(keys []resolvedJWTVerificationKey, alg JWTAlgorithm, keyID string) []resolvedJWTVerificationKey {
+func matchingJWKSVerificationKeys(keys []resolvedJWTVerificationKey, alg JWTAlgorithm, keyID string) []resolvedJWTVerificationKey {
 	var out []resolvedJWTVerificationKey
 	for _, key := range keys {
-		if key.algorithm == alg && (keyID == "" || key.keyID == keyID || key.keyID == "") {
+		if key.algorithm != alg {
+			continue
+		}
+		if keyID != "" && key.keyID != keyID {
+			continue
+		}
+		if keyID == "" || key.keyID == keyID {
 			out = append(out, key)
 		}
 	}
@@ -148,7 +172,7 @@ func jwksSourceAllowsAlgorithm(source JWKSConfig, alg JWTAlgorithm) bool {
 }
 
 func keysForJWKS(source JWKSConfig, forceRefresh bool) ([]resolvedJWTVerificationKey, error) {
-	cacheAny, _ := jwksCaches.LoadOrStore(strings.TrimSpace(source.JWKSURL), &jwksCache{})
+	cacheAny, _ := jwksCaches.LoadOrStore(jwksCacheKey(source), &jwksCache{})
 	cache := cacheAny.(*jwksCache)
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
@@ -171,6 +195,22 @@ func keysForJWKS(source JWKSConfig, forceRefresh bool) ([]resolvedJWTVerificatio
 	cache.keys = keys
 	cache.expiresAt = now.Add(ttl)
 	return cloneResolvedJWTVerificationKeys(keys), nil
+}
+
+func jwksCacheKey(source JWKSConfig) string {
+	algs := append([]JWTAlgorithm(nil), source.Algorithms...)
+	slices.Sort(algs)
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(source.Issuer))
+	b.WriteString("\x00")
+	b.WriteString(strings.TrimSpace(source.JWKSURL))
+	b.WriteString("\x00")
+	for _, alg := range algs {
+		b.WriteString(string(alg))
+		b.WriteString("\x00")
+	}
+	b.WriteString(source.CacheTTL.String())
+	return b.String()
 }
 
 func fetchJWKS(source JWKSConfig) ([]resolvedJWTVerificationKey, error) {
@@ -264,7 +304,7 @@ func rsaPublicKeyFromJWK(raw jwkDocumentKey) (*rsa.PublicKey, error) {
 	}
 	n := new(big.Int).SetBytes(nBytes)
 	e := new(big.Int).SetBytes(eBytes)
-	if n.Sign() <= 0 || !e.IsInt64() || e.Int64() <= 1 {
+	if n.BitLen() < 2048 || n.BitLen() > 8192 || !e.IsInt64() || e.Int64() <= 1 || e.Bit(0) == 0 || e.BitLen() > 31 {
 		return nil, fmt.Errorf("invalid RSA jwk")
 	}
 	return &rsa.PublicKey{N: n, E: int(e.Int64())}, nil

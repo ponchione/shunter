@@ -93,7 +93,9 @@ cfg := shunter.Config{
 ```
 
 `AuthOIDCIssuers` fetches RS256 and ES256 JWKS keys on demand, caches successful
-key sets, and refreshes when a presented token uses an unknown `kid`. Keep
+key sets, and refreshes when a presented token uses a `kid` that is not present
+in the cached keyed remote set. Remote JWKS URLs must use HTTPS, except
+loopback HTTP URLs used by local tests and development tooling. Keep
 `AuthIssuers` and `AuthAudiences` configured; JWKS configuration supplies
 signature keys, not claim policy.
 

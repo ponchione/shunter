@@ -47,7 +47,8 @@ Behavior:
 - `AuthVerificationKeys` validates local HS256, RS256, or ES256 keys. RS256 and
   ES256 keys are PEM-encoded public keys or certificates.
 - `AuthOIDCIssuers` validates RS256 or ES256 tokens against remote JWKS
-  documents for configured trusted issuers.
+  documents for configured trusted issuers. Remote JWKS URLs must use HTTPS,
+  except loopback HTTP URLs used by local tests and development tooling.
 - A verification key's `KeyID` matches the token header `kid` for overlapping
   rotation. If a token supplies `kid`, keyed matches are preferred; unkeyed
   keys remain a fallback for legacy HS256 configurations.
@@ -62,9 +63,10 @@ Behavior:
 - Local reducer and declared-read calls do not receive the dev-mode allow-all
   permission bypass by default.
 
-JWKS keys are fetched on demand, cached, and refreshed when a token presents an
-unknown `kid`. Current strict mode does not include OIDC discovery-document
-lookup, background remote key refresh, or app-provided claim mappers.
+JWKS keys are fetched on demand, cached, and refreshed when a token presents a
+`kid` that is not present in the cached keyed remote set. Current strict mode
+does not include OIDC discovery-document lookup, background remote key refresh,
+or app-provided claim mappers.
 
 ## Principal And Identity
 
@@ -122,7 +124,7 @@ For remote key rotation, configure `AuthOIDCIssuers` with each trusted issuer
 and JWKS URL. Shunter fetches those JWKS documents when validating matching
 RS256 or ES256 tokens, caches successful key sets for the configured TTL, and
 refreshes a source immediately when a token's `kid` is not present in the
-cached set. Cached keys remain usable until their TTL expires.
+cached keyed set. Cached keys remain usable until their TTL expires.
 
 Local `AuthVerificationKeys` remain useful when deployments want key material
 fully controlled by app configuration. `AuthSigningKey` remains the legacy

@@ -84,6 +84,29 @@ func TestValidateJWTJWKSRefreshesForUnknownKeyID(t *testing.T) {
 	}
 }
 
+func TestValidateJWTJWKSDoesNotFallbackToUnkeyedKeyWhenTokenHasKeyID(t *testing.T) {
+	privateKey, jwk := generateRS256JWK(t, "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJWKS(t, w, jwk)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &JWTConfig{
+		JWKS: []JWKSConfig{{
+			Issuer:   "issuer",
+			JWKSURL:  srv.URL,
+			CacheTTL: time.Hour,
+		}},
+		Issuers:  []string{"issuer"},
+		AuthMode: AuthModeStrict,
+	}
+
+	_, err := ValidateJWT(mintRS256Token(t, privateKey, "unexpected", "issuer"), cfg)
+	if !errors.Is(err, ErrJWTUnsupportedAlg) {
+		t.Fatalf("ValidateJWT error = %v, want ErrJWTUnsupportedAlg for keyed token against unkeyed JWKS key", err)
+	}
+}
+
 func TestValidateJWTJWKSIssuerMustMatchSource(t *testing.T) {
 	privateKey, jwk := generateRS256JWK(t, "rsa-1")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -101,6 +124,55 @@ func TestValidateJWTJWKSIssuerMustMatchSource(t *testing.T) {
 	_, err := ValidateJWT(mintRS256Token(t, privateKey, "rsa-1", "attacker-issuer"), cfg)
 	if !errors.Is(err, ErrJWTUnsupportedAlg) {
 		t.Fatalf("ValidateJWT error = %v, want ErrJWTUnsupportedAlg for issuer-bound jwks miss", err)
+	}
+}
+
+func TestValidateJWTJWKSCacheIsScopedBySourceAlgorithmPolicy(t *testing.T) {
+	rsaPrivateKey, rsaJWK := generateRS256JWK(t, "rsa-1")
+	esPrivateKey, esJWK := generateES256JWK(t, "ec-1")
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		writeJWKS(t, w, rsaJWK, esJWK)
+	}))
+	t.Cleanup(srv.Close)
+
+	rsCfg := &JWTConfig{
+		JWKS: []JWKSConfig{{
+			Issuer:     "issuer",
+			JWKSURL:    srv.URL,
+			Algorithms: []JWTAlgorithm{JWTAlgorithmRS256},
+			CacheTTL:   time.Hour,
+		}},
+		Issuers: []string{"issuer"},
+	}
+	if _, err := ValidateJWT(mintRS256Token(t, rsaPrivateKey, "rsa-1", "issuer"), rsCfg); err != nil {
+		t.Fatalf("RS256 token did not validate: %v", err)
+	}
+
+	esTok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+		"sub": "alice",
+		"iss": "issuer",
+		"iat": time.Now().Unix(),
+	})
+	esToken, err := esTok.SignedString(esPrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	esCfg := &JWTConfig{
+		JWKS: []JWKSConfig{{
+			Issuer:     "issuer",
+			JWKSURL:    srv.URL,
+			Algorithms: []JWTAlgorithm{JWTAlgorithmES256},
+			CacheTTL:   time.Hour,
+		}},
+		Issuers: []string{"issuer"},
+	}
+	if _, err := ValidateJWT(esToken, esCfg); err != nil {
+		t.Fatalf("ES256 token did not validate with same JWKS URL and different algorithm policy: %v", err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("jwks requests = %d, want separate fetches for distinct source policies", got)
 	}
 }
 
@@ -154,6 +226,10 @@ func TestValidateJWTJWKSConfigValidation(t *testing.T) {
 			cfg:  &JWTConfig{JWKS: []JWKSConfig{{Issuer: "issuer", JWKSURL: "https:///jwks.json"}}},
 		},
 		{
+			name: "external http url",
+			cfg:  &JWTConfig{JWKS: []JWKSConfig{{Issuer: "issuer", JWKSURL: "http://issuer.example/jwks.json"}}},
+		},
+		{
 			name: "unsupported algorithm",
 			cfg:  &JWTConfig{JWKS: []JWKSConfig{{Issuer: "issuer", JWKSURL: "https://issuer.example/jwks.json", Algorithms: []JWTAlgorithm{JWTAlgorithmHS256}}}},
 		},
@@ -166,6 +242,49 @@ func TestValidateJWTJWKSConfigValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := ValidateJWTConfig(tt.cfg); !errors.Is(err, ErrJWTInvalid) {
 				t.Fatalf("ValidateJWTConfig error = %v, want ErrJWTInvalid", err)
+			}
+		})
+	}
+}
+
+func TestResolveJWKRejectsInvalidRSAKeyBounds(t *testing.T) {
+	validPrivateKey, validJWK := generateRS256JWK(t, "rsa-1")
+	validJWK.N = base64.RawURLEncoding.EncodeToString(validPrivateKey.PublicKey.N.Bytes())
+
+	tests := []struct {
+		name string
+		jwk  jwkDocumentKey
+	}{
+		{
+			name: "small modulus",
+			jwk: func() jwkDocumentKey {
+				jwk := validJWK
+				jwk.N = base64.RawURLEncoding.EncodeToString(big.NewInt(17).Bytes())
+				return jwk
+			}(),
+		},
+		{
+			name: "oversized modulus",
+			jwk: func() jwkDocumentKey {
+				jwk := validJWK
+				oversized := new(big.Int).Lsh(big.NewInt(1), 8192)
+				jwk.N = base64.RawURLEncoding.EncodeToString(oversized.Bytes())
+				return jwk
+			}(),
+		},
+		{
+			name: "even exponent",
+			jwk: func() jwkDocumentKey {
+				jwk := validJWK
+				jwk.E = base64.RawURLEncoding.EncodeToString(big.NewInt(2).Bytes())
+				return jwk
+			}(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := resolveJWK(tt.jwk); err == nil {
+				t.Fatal("resolveJWK succeeded; want invalid RSA jwk error")
 			}
 		})
 	}
