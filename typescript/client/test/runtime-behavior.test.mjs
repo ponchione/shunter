@@ -2668,6 +2668,74 @@ assert.deepEqual(unsubscribeServerErrorHandle.state, {
 });
 await unsubscribeServerErrorClient.close();
 
+const closeDuringHandleUnsubscribeSockets = [];
+const closeDuringHandleUnsubscribeClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    closeDuringHandleUnsubscribeSockets.push(socket);
+    return socket;
+  },
+});
+const closeDuringHandleUnsubscribeConnecting = closeDuringHandleUnsubscribeClient.connect();
+await nextTurn();
+closeDuringHandleUnsubscribeSockets[0].open();
+closeDuringHandleUnsubscribeSockets[0].message(identityTokenFrame().buffer);
+await closeDuringHandleUnsubscribeConnecting;
+const closeDuringHandleUnsubscribeSubscription = closeDuringHandleUnsubscribeClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+closeDuringHandleUnsubscribeSockets[0].message(subscribeSingleAppliedFrame);
+const closeDuringHandleUnsubscribeHandle = await closeDuringHandleUnsubscribeSubscription;
+const closeDuringHandleUnsubscribe = closeDuringHandleUnsubscribeHandle.unsubscribe();
+assert.deepEqual(
+  closeDuringHandleUnsubscribeSockets[0].sent[1],
+  encodeUnsubscribeSingleRequest(0x11121314, { requestId: 1 }).frame,
+);
+await closeDuringHandleUnsubscribeClient.close(4000, "caller closed during unsubscribe");
+await closeDuringHandleUnsubscribe;
+const closeDuringHandleUnsubscribeClosed = await closeDuringHandleUnsubscribeHandle.closed;
+assert.equal(closeDuringHandleUnsubscribeClosed.reason, "error");
+assert(closeDuringHandleUnsubscribeClosed.error instanceof ShunterClosedClientError);
+assert.deepEqual(closeDuringHandleUnsubscribeHandle.state, {
+  status: "closed",
+  error: closeDuringHandleUnsubscribeClosed.error,
+});
+
+const closeDuringRawUnsubscribeSockets = [];
+const closeDuringRawUnsubscribeClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    closeDuringRawUnsubscribeSockets.push(socket);
+    return socket;
+  },
+});
+const closeDuringRawUnsubscribeConnecting = closeDuringRawUnsubscribeClient.connect();
+await nextTurn();
+closeDuringRawUnsubscribeSockets[0].open();
+closeDuringRawUnsubscribeSockets[0].message(identityTokenFrame().buffer);
+await closeDuringRawUnsubscribeConnecting;
+const closeDuringRawUnsubscribeSubscription = closeDuringRawUnsubscribeClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  decodeRow: (row) => [...row].join("-"),
+});
+closeDuringRawUnsubscribeSockets[0].message(subscribeSingleAppliedFrame);
+const closeDuringRawUnsubscribe = await closeDuringRawUnsubscribeSubscription;
+const closeDuringRawUnsubscribeResult = closeDuringRawUnsubscribe();
+assert.deepEqual(
+  closeDuringRawUnsubscribeSockets[0].sent[1],
+  encodeUnsubscribeSingleRequest(0x11121314, { requestId: 1 }).frame,
+);
+await closeDuringRawUnsubscribeClient.close(4000, "caller closed during unsubscribe");
+await assert.rejects(closeDuringRawUnsubscribeResult, ShunterClosedClientError);
+
 await client.close();
 await client.close();
 assert.equal(sockets[0].closeCalls.length, 1);

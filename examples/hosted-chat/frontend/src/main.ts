@@ -13,6 +13,7 @@ import {
 } from "./generated/hosted_chat";
 
 const shunterUrl = "ws://127.0.0.1:3000/subscribe";
+const cleanupTimeoutMs = 5000;
 const states: ConnectionState<typeof shunterContract.protocol>[] = [];
 
 function readAuthToken(): string {
@@ -50,6 +51,29 @@ let unsubscribeMessageEvents: Awaited<ReturnType<typeof subscribeMessageEventsIn
 let liveMessages: Awaited<ReturnType<typeof subscribeLiveMessagesHandle>> | undefined;
 let runError: unknown;
 const cleanupErrors: unknown[] = [];
+
+async function runCleanupStep(label: string, cleanup: () => void | Promise<void>): Promise<void> {
+  let timeout: ReturnType<typeof globalThis.setTimeout> | undefined;
+  const operation = Promise.resolve().then(cleanup);
+  operation.catch(() => {
+    // The race below reports the first cleanup failure. This consumes any later
+    // rejection when a timeout wins first.
+  });
+  try {
+    await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeout = globalThis.setTimeout(() => {
+          reject(new Error(`${label} cleanup did not finish within ${cleanupTimeoutMs}ms`));
+        }, cleanupTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) {
+      globalThis.clearTimeout(timeout);
+    }
+  }
+}
 
 try {
   const metadata = await client.connect();
@@ -91,20 +115,20 @@ try {
 
 if (unsubscribeMessageEvents !== undefined) {
   try {
-    await unsubscribeMessageEvents();
+    await runCleanupStep("message event subscription", unsubscribeMessageEvents);
   } catch (error) {
     cleanupErrors.push(error);
   }
 }
 if (liveMessages !== undefined) {
   try {
-    await liveMessages.unsubscribe();
+    await runCleanupStep("live messages subscription", () => liveMessages.unsubscribe());
   } catch (error) {
     cleanupErrors.push(error);
   }
 }
 try {
-  await client.close();
+  await runCleanupStep("client", () => client.close());
 } catch (error) {
   cleanupErrors.push(error);
 }

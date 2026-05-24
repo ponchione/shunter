@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Hardened the hosted-chat TypeScript frontend cleanup path so subscription
+  unsubscribe and client close steps fail with bounded diagnostics instead of
+  hanging the example gate indefinitely.
 - TypeScript managed declared-view handles now accept subscription initial
   updates that omit delete row lists, treating absent deletes as empty while
   preserving raw-handle behavior.
