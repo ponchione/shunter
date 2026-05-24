@@ -373,7 +373,7 @@ function transactionUpdateLightFrameFor({ requestId, updates }) {
   const encodedUpdates = updates.map((update) => {
     const tableNameBytes = new TextEncoder().encode(update.tableName);
     const inserts = rowListFrameFor(update.inserts ?? []);
-    const deletes = rowListFrameFor(update.deletes ?? []);
+    const deletes = update.deleteFrame ?? rowListFrameFor(update.deletes ?? []);
     const frame = new Uint8Array(
       4 +
       4 + tableNameBytes.length +
@@ -2530,6 +2530,7 @@ eventTableHandleSockets[0].message(transactionUpdateLightFrameFor({
     queryId: 0x11121314,
     tableName: "message_events",
     inserts: [new Uint8Array([6, 7])],
+    deleteFrame: new Uint8Array([0xff]),
   }],
 }));
 assert.deepEqual(eventTableHandle.state, { status: "active", rows: [] });

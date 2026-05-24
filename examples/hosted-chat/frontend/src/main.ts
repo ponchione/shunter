@@ -46,41 +46,73 @@ const client = createShunterClient({
   },
 });
 
-const metadata = await client.connect();
-const negotiatedSubprotocol = metadata.subprotocol as ShunterSubprotocol;
-console.log(`connected with ${negotiatedSubprotocol}`);
+let unsubscribeMessageEvents: Awaited<ReturnType<typeof subscribeMessageEventsInserts>> | undefined;
+let liveMessages: Awaited<ReturnType<typeof subscribeLiveMessagesHandle>> | undefined;
+let runError: unknown;
+const cleanupErrors: unknown[] = [];
 
-const unsubscribeMessageEvents = await subscribeMessageEventsInserts(
-  client.subscribeTable,
-  (event) => {
-    console.log(`event ${event.row.author}: ${event.row.body}`);
-  },
-);
+try {
+  const metadata = await client.connect();
+  const negotiatedSubprotocol = metadata.subprotocol as ShunterSubprotocol;
+  console.log(`connected with ${negotiatedSubprotocol}`);
 
-const liveMessages = await subscribeLiveMessagesHandle(client.subscribeDeclaredView, {
-  returnHandle: true,
-  onInitialRows(rows) {
-    for (const row of rows) {
-      console.log(`${row.author}: ${row.body}`);
-    }
-  },
-  onUpdate(update) {
-    for (const row of update.inserts) {
-      console.log(`${row.author}: ${row.body}`);
-    }
-  },
-});
+  unsubscribeMessageEvents = await subscribeMessageEventsInserts(
+    client.subscribeTable,
+    (event) => {
+      console.log(`event ${event.row.author}: ${event.row.body}`);
+    },
+  );
 
-await callSendMessageTyped(client.callReducer, {
-  author: "Ada",
-  body: "hello from the TypeScript client",
-});
+  liveMessages = await subscribeLiveMessagesHandle(client.subscribeDeclaredView, {
+    returnHandle: true,
+    onInitialRows(rows) {
+      for (const row of rows) {
+        console.log(`${row.author}: ${row.body}`);
+      }
+    },
+    onUpdate(update) {
+      for (const row of update.inserts) {
+        console.log(`${row.author}: ${row.body}`);
+      }
+    },
+  });
 
-await callSendSystemMessageProcedureTyped(client.callProcedure, {
-  body: "hello from the TypeScript procedure client",
-});
+  await callSendMessageTyped(client.callReducer, {
+    author: "Ada",
+    body: "hello from the TypeScript client",
+  });
 
-await unsubscribeMessageEvents();
-await liveMessages.unsubscribe();
-await client.close();
+  await callSendSystemMessageProcedureTyped(client.callProcedure, {
+    body: "hello from the TypeScript procedure client",
+  });
+} catch (error) {
+  runError = error;
+}
+
+if (unsubscribeMessageEvents !== undefined) {
+  try {
+    await unsubscribeMessageEvents();
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+}
+if (liveMessages !== undefined) {
+  try {
+    await liveMessages.unsubscribe();
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+}
+try {
+  await client.close();
+} catch (error) {
+  cleanupErrors.push(error);
+}
 console.log(`observed ${states.length} connection states`);
+
+if (runError !== undefined) {
+  throw runError;
+}
+if (cleanupErrors.length > 0) {
+  throw cleanupErrors[0];
+}
