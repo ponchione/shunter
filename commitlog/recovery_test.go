@@ -354,6 +354,51 @@ func TestOpenAndRecoverLegacySnapshotSkipsEventTableState(t *testing.T) {
 	}
 }
 
+func TestOpenAndRecoverLegacySnapshotIgnoresEventCounterBounds(t *testing.T) {
+	root := t.TempDir()
+	_, reg := buildEventAutoIncrementSnapshotCommittedState(t)
+	writeLegacyEventStateSnapshot(t, filepath.Join(root, "snapshots", "5"), reg, 5)
+	rewriteSnapshotNextID(t, root, 5, 1, 1)
+	rewriteSnapshotSequence(t, root, 5, 1, 1)
+
+	recovered, maxTxID, _, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 5 {
+		t.Fatalf("maxTxID = %d, want 5", maxTxID)
+	}
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 5 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 5)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if len(report.SkippedSnapshots) != 0 {
+		t.Fatalf("skipped snapshots = %+v, want none", report.SkippedSnapshots)
+	}
+
+	players, ok := recovered.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	assertRecoveryRows(t, players, map[uint64]string{7: "persistent"})
+	if players.NextID() != 3 {
+		t.Fatalf("players next row ID after restore = %d, want 3", players.NextID())
+	}
+
+	events, ok := recovered.Table(1)
+	if !ok {
+		t.Fatal("events table missing")
+	}
+	if events.RowCount() != 0 {
+		t.Fatalf("event row count after restore = %d, want 0", events.RowCount())
+	}
+	if events.NextID() != 1 {
+		t.Fatalf("event next row ID after restore = %d, want 1", events.NextID())
+	}
+	if seq, ok := events.SequenceValue(); !ok || seq != 1 {
+		t.Fatalf("event sequence after restore = (%d, %v), want (1, true)", seq, ok)
+	}
+}
+
 func TestOpenAndRecoverSnapshotPlusMixedTailSkipsEventRows(t *testing.T) {
 	root := t.TempDir()
 	committed, reg := buildEventAutoIncrementSnapshotCommittedState(t)
