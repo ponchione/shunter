@@ -318,6 +318,42 @@ func TestRestoreSnapshotSkipsEventTableState(t *testing.T) {
 	}
 }
 
+func TestOpenAndRecoverLegacySnapshotSkipsEventTableState(t *testing.T) {
+	root := t.TempDir()
+	_, reg := buildEventAutoIncrementSnapshotCommittedState(t)
+	writeLegacyEventStateSnapshot(t, filepath.Join(root, "snapshots", "5"), reg, 5)
+
+	recovered, maxTxID, err := OpenAndRecover(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 5 {
+		t.Fatalf("maxTxID = %d, want 5", maxTxID)
+	}
+	players, ok := recovered.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	assertRecoveryRows(t, players, map[uint64]string{7: "persistent"})
+	if players.NextID() != 3 {
+		t.Fatalf("players next row ID after restore = %d, want 3", players.NextID())
+	}
+
+	events, ok := recovered.Table(1)
+	if !ok {
+		t.Fatal("events table missing")
+	}
+	if events.RowCount() != 0 {
+		t.Fatalf("event row count after restore = %d, want 0", events.RowCount())
+	}
+	if events.NextID() != 1 {
+		t.Fatalf("event next row ID after restore = %d, want 1", events.NextID())
+	}
+	if seq, ok := events.SequenceValue(); !ok || seq != 1 {
+		t.Fatalf("event sequence after restore = (%d, %v), want (1, true)", seq, ok)
+	}
+}
+
 func TestOpenAndRecoverDetailedReplayExplicitAutoincrementValueRaisesRecoveredSequence(t *testing.T) {
 	root := t.TempDir()
 	reg := buildRecoveryAutoIncrementRegistry(t)

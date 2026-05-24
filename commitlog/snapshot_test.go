@@ -1347,6 +1347,31 @@ func TestSnapshotOmitsEventTableState(t *testing.T) {
 	}
 }
 
+func TestReadSnapshotAcceptsLegacyEventTableState(t *testing.T) {
+	_, reg := buildEventAutoIncrementSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	snapshotDir := filepath.Join(baseDir, "snapshots", "81")
+	writeLegacyEventStateSnapshot(t, snapshotDir, reg, 81)
+
+	data, err := ReadSnapshot(snapshotDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshotSchemaTableIsEvent(data.Schema, 1) {
+		t.Fatal("snapshot schema should preserve event table metadata")
+	}
+	if got := data.NextIDs[1]; got != 10 {
+		t.Fatalf("legacy event table next_id = %d, want 10", got)
+	}
+	if got := data.Sequences[1]; got != 9 {
+		t.Fatalf("legacy event table sequence = %d, want 9", got)
+	}
+	eventRows := snapshotTableRows(data.Tables, 1)
+	if len(eventRows) != 1 || eventRows[0][0].AsUint64() != 8 || eventRows[0][1].AsString() != "legacy-event" {
+		t.Fatalf("legacy event table rows = %+v, want one legacy event row", eventRows)
+	}
+}
+
 func TestListSnapshotsSkipsLockAndSortsNewestFirst(t *testing.T) {
 	baseDir := t.TempDir()
 	for _, txID := range []uint64{10, 20} {
@@ -2754,6 +2779,61 @@ func snapshotSchemaTableIsEvent(tables []schema.TableSchema, tableID schema.Tabl
 		}
 	}
 	return false
+}
+
+func snapshotTableRows(tables []SnapshotTableData, tableID schema.TableID) []types.ProductValue {
+	for _, table := range tables {
+		if table.TableID == tableID {
+			return table.Rows
+		}
+	}
+	return nil
+}
+
+func writeLegacyEventStateSnapshot(t testing.TB, snapshotDir string, reg schema.SchemaRegistry, txID types.TxID) {
+	t.Helper()
+	var schemaBuf bytes.Buffer
+	if err := EncodeSchemaSnapshot(&schemaBuf, reg); err != nil {
+		t.Fatal(err)
+	}
+	body := snapshotBodyCapture{
+		schema: schemaBuf.Bytes(),
+	}
+	for _, tableID := range reg.Tables() {
+		ts, ok := reg.Table(tableID)
+		if !ok {
+			t.Fatalf("registry missing table %d", tableID)
+		}
+		if snapshotSchemaHasAutoIncrement(ts) {
+			value := uint64(1)
+			if ts.IsEvent {
+				value = 9
+			}
+			body.sequences = append(body.sequences, snapshotSequenceCapture{tableID: tableID, value: value})
+		}
+		nextID := uint64(1)
+		if ts.Name == "players" {
+			nextID = 3
+		}
+		if ts.IsEvent {
+			nextID = 10
+		}
+		body.nextIDs = append(body.nextIDs, snapshotNextIDCapture{tableID: tableID, value: nextID})
+
+		var rows []types.ProductValue
+		switch {
+		case ts.Name == "players":
+			rows = []types.ProductValue{{types.NewUint64(7), types.NewString("persistent")}}
+		case ts.IsEvent:
+			rows = []types.ProductValue{{types.NewUint64(8), types.NewString("legacy-event")}}
+		}
+		body.tables = append(body.tables, snapshotTableCapture{tableID: tableID, rows: rows})
+	}
+	var bodyBuf bytes.Buffer
+	if err := writeSnapshotBodyCapture(&bodyBuf, reg, txID, body); err != nil {
+		t.Fatal(err)
+	}
+	writeSnapshotBytes(t, snapshotDir, txID, reg.Version(), bodyBuf.Bytes())
 }
 
 func encodeLegacySchemaSnapshotBytes(t testing.TB, reg schema.SchemaRegistry) []byte {
