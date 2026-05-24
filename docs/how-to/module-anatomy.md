@@ -99,6 +99,27 @@ Add secondary indexes for access paths that matter:
 Composite index order matters. Put the equality or join column that best
 narrows the search first.
 
+## Event Tables
+
+Use `EventTable` for transient rows that should be delivered to live
+subscriptions but not retained as committed state.
+
+```go
+mod.EventTable(schema.TableDefinition{
+	Name: "notifications",
+	Columns: []schema.ColumnDefinition{
+		{Name: "recipient", Type: types.KindString},
+		{Name: "message", Type: types.KindString},
+	},
+})
+```
+
+Reducers insert event rows with the normal reducer database `Insert` call
+using the event table's table ID. Event inserts participate in the committing
+transaction's subscription fanout, then disappear; they are not present in
+later local reads, recovery, or snapshots. Do not use event tables for state a
+new or reconnecting client must reconstruct.
+
 ## Reducers
 
 Reducer registration binds a public reducer name to a Go handler.

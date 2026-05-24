@@ -11,7 +11,10 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-const messagesTableID schema.TableID = 0
+const (
+	messagesTableID      schema.TableID = 0
+	messageEventsTableID schema.TableID = 1
+)
 
 var sendMessageArgsSchema = schema.TableSchema{
 	Columns: []schema.ColumnSchema{
@@ -30,6 +33,13 @@ func Module() *shunter.Module {
 			Name: "messages",
 			Columns: []schema.ColumnDefinition{
 				{Name: "id", Type: types.KindUint64, PrimaryKey: true, AutoIncrement: true},
+				{Name: "author", Type: types.KindString},
+				{Name: "body", Type: types.KindString},
+			},
+		}).
+		EventTable(schema.TableDefinition{
+			Name: "message_events",
+			Columns: []schema.ColumnDefinition{
 				{Name: "author", Type: types.KindString},
 				{Name: "body", Type: types.KindString},
 			},
@@ -99,6 +109,14 @@ func sendMessage(ctx *schema.ReducerContext, args []byte) ([]byte, error) {
 
 	_, err = ctx.DB.Insert(uint32(messagesTableID), types.ProductValue{
 		types.NewUint64(0),
+		types.NewString(author),
+		types.NewString(body),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = ctx.DB.Insert(uint32(messageEventsTableID), types.ProductValue{
 		types.NewString(author),
 		types.NewString(body),
 	})

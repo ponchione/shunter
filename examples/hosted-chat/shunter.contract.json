@@ -52,6 +52,30 @@
       },
       {
         "id": 1,
+        "name": "message_events",
+        "is_event": true,
+        "columns": [
+          {
+            "index": 0,
+            "name": "author",
+            "type": "string",
+            "auto_increment": false
+          },
+          {
+            "index": 1,
+            "name": "body",
+            "type": "string",
+            "auto_increment": false
+          }
+        ],
+        "indexes": [],
+        "read_policy": {
+          "access": "private",
+          "permissions": []
+        }
+      },
+      {
+        "id": 2,
         "name": "sys_clients",
         "columns": [
           {
@@ -93,7 +117,7 @@
         }
       },
       {
-        "id": 2,
+        "id": 3,
         "name": "sys_scheduled",
         "columns": [
           {

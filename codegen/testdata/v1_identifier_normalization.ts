@@ -24,6 +24,7 @@ import type {
   SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,
   SubscriptionHandle as ShunterSubscriptionHandle,
   SubscriptionHandleReturnOptions as ShunterSubscriptionHandleReturnOptions,
+  SubscriptionRowEvent as ShunterSubscriptionRowEvent,
   TableRowDecoder as ShunterTableRowDecoder,
   TableRowDecoders as ShunterTableRowDecoders,
   TableSubscriber as ShunterTableSubscriber,
@@ -75,6 +76,7 @@ export type DeclaredViewSubscriptionOptions<Row = unknown> = Omit<ShunterDeclare
 export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;
 export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;
 export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;
+export type SubscriptionRowEvent<Row = unknown> = ShunterSubscriptionRowEvent<Row>;
 export type TableRow<Name extends TableName> = TableRows[Name];
 export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;
 export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;
@@ -222,27 +224,27 @@ export const visibilityFilters = {
 } as const;
 
 export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>, onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : options;
+  const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : { ...options };
   return subscribeTable("messages", onRows, subscribeOptions);
 }
 
 export function subscribe_(subscribeTable: TableSubscriber<_Row>, onRows?: (rows: _Row[]) => void, options: TableSubscriptionOptions<_Row> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<_Row> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["!!!"] } : options;
+  const subscribeOptions: TableSubscriptionOptions<_Row> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["!!!"] } : { ...options };
   return subscribeTable("!!!", onRows, subscribeOptions);
 }
 
 export function subscribe_1Table(subscribeTable: TableSubscriber<_1TableRow>, onRows?: (rows: _1TableRow[]) => void, options: TableSubscriptionOptions<_1TableRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<_1TableRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["1-table"] } : options;
+  const subscribeOptions: TableSubscriptionOptions<_1TableRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["1-table"] } : { ...options };
   return subscribeTable("1-table", onRows, subscribeOptions);
 }
 
 export function subscribeClass(subscribeTable: TableSubscriber<ClassRow>, onRows?: (rows: ClassRow[]) => void, options: TableSubscriptionOptions<ClassRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<ClassRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["class"] } : options;
+  const subscribeOptions: TableSubscriptionOptions<ClassRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["class"] } : { ...options };
   return subscribeTable("class", onRows, subscribeOptions);
 }
 
 export function subscribeClass2(subscribeTable: TableSubscriber<Class2Row>, onRows?: (rows: Class2Row[]) => void, options: TableSubscriptionOptions<Class2Row> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<Class2Row> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["class!"] } : options;
+  const subscribeOptions: TableSubscriptionOptions<Class2Row> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["class!"] } : { ...options };
   return subscribeTable("class!", onRows, subscribeOptions);
 }
 

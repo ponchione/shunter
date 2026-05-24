@@ -234,6 +234,21 @@ await unsubscribeByTopic();
 await liveHandle.unsubscribe();
 ```
 
+Generated event-table helpers use the `subscribe<Name>Inserts` shape. They pass
+`eventTable: true` to the runtime so managed handles do not accumulate
+transient rows as cache state.
+
+```ts
+const unsubscribeEvents = await subscribeNotificationsInserts(
+  client.subscribeTable,
+  ({ row }) => {
+    console.log(row.message);
+  },
+);
+
+await unsubscribeEvents();
+```
+
 Managed handles track `subscribing`, `active`, `unsubscribing`, and `closed`
 states. Unsubscribe paths wait for the matching server acknowledgement or a
 matching subscription error.

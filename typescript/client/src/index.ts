@@ -580,8 +580,11 @@ interface PendingSubscription {
   readonly onRows?: (rows: readonly unknown[]) => void;
   readonly onInitialRows?: (rows: readonly unknown[]) => void;
   readonly onUpdate?: (update: SubscriptionUpdate<unknown>) => void;
+  readonly onInsert?: (event: SubscriptionRowEvent<unknown>) => void;
+  readonly onDelete?: (event: SubscriptionRowEvent<unknown>) => void;
   readonly decodeRow?: RowDecoder<unknown>;
   readonly handle?: ManagedSubscriptionHandle<unknown>;
+  readonly eventTable?: boolean;
   readonly cleanup?: () => void;
   resolve(value: SubscriptionUnsubscribe | SubscriptionHandle<unknown>): void;
   reject(error: ShunterError): void;
@@ -599,9 +602,12 @@ interface ActiveSubscription {
   readonly onRows?: (rows: readonly unknown[]) => void;
   readonly onInitialRows?: (rows: readonly unknown[]) => void;
   readonly onUpdate?: (update: SubscriptionUpdate<unknown>) => void;
+  readonly onInsert?: (event: SubscriptionRowEvent<unknown>) => void;
+  readonly onDelete?: (event: SubscriptionRowEvent<unknown>) => void;
   readonly decodeRow?: RowDecoder<unknown>;
   readonly handle?: ManagedSubscriptionHandle<unknown>;
   readonly rowCache?: Map<string, unknown[]>;
+  readonly eventTable?: boolean;
 }
 
 interface PendingUnsubscribe {
@@ -1104,6 +1110,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     if (active.rowCache === undefined || active.handle === undefined) {
       return;
     }
+    if (active.eventTable) {
+      active.handle.replaceRows([]);
+      return;
+    }
     if (update.insertRowBytes === undefined || update.deleteRowBytes === undefined) {
       if (active.decodeRow !== undefined || active.onUpdate !== undefined) {
         throw new ShunterProtocolError(`${label} rows were not encoded as a RowList.`);
@@ -1169,18 +1179,37 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           return toShunterError(error, "validation", `${label} raw subscription update callback failed`);
         }
       }
-      if (active.onUpdate !== undefined && active.decodeRow !== undefined) {
+      if (
+        (active.onUpdate !== undefined || active.onInsert !== undefined || active.onDelete !== undefined) &&
+        active.decodeRow !== undefined
+      ) {
         let inserts: readonly unknown[] | undefined;
         let deletes: readonly unknown[] | undefined;
         try {
           inserts = decodeSubscriptionRows(update.insertRowBytes, active.decodeRow, `${label} insert`);
           deletes = decodeSubscriptionRows(update.deleteRowBytes, active.decodeRow, `${label} delete`);
-          active.onUpdate({
+          active.onUpdate?.({
             queryId: update.queryId,
             tableName: update.tableName,
             inserts,
             deletes,
           });
+          for (let rowIndex = 0; rowIndex < inserts.length; rowIndex += 1) {
+            active.onInsert?.({
+              queryId: update.queryId,
+              tableName: update.tableName,
+              row: inserts[rowIndex],
+              rowIndex,
+            });
+          }
+          for (let rowIndex = 0; rowIndex < deletes.length; rowIndex += 1) {
+            active.onDelete?.({
+              queryId: update.queryId,
+              tableName: update.tableName,
+              row: deletes[rowIndex],
+              rowIndex,
+            });
+          }
           applyCachedUpdate(active, update, inserts, label);
         } catch (error) {
           return toShunterError(error, "validation", `${label} subscription update callback failed`);
@@ -1454,8 +1483,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         onRows: active.onRows,
         onInitialRows: active.onInitialRows,
         onUpdate: active.onUpdate,
+        onInsert: active.onInsert,
+        onDelete: active.onDelete,
         decodeRow: active.decodeRow,
         handle: active.handle,
+        eventTable: active.eventTable,
         resolve: () => {},
         reject: (error) => {
           removeActiveSubscription(active.queryId);
@@ -1509,9 +1541,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       onRows: pending.onRows,
       onInitialRows: pending.onInitialRows,
       onUpdate: pending.onUpdate,
+      onInsert: pending.onInsert,
+      onDelete: pending.onDelete,
       decodeRow: pending.decodeRow,
       handle: pending.handle,
       rowCache: pending.handle === undefined ? undefined : new Map<string, unknown[]>(),
+      eventTable: pending.eventTable,
     };
     registerActiveSubscription(active);
     if (pending.onRawRows !== undefined) {
@@ -1594,9 +1629,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       unsubscribeMode: "multi",
       onRawUpdate: pending.onRawUpdate,
       onUpdate: pending.onUpdate,
+      onInsert: pending.onInsert,
+      onDelete: pending.onDelete,
       decodeRow: pending.decodeRow,
       handle: pending.handle,
       rowCache: pending.handle === undefined ? undefined : new Map(),
+      eventTable: pending.eventTable,
     }, response.updates.map((update) => update.queryId));
     pending.handle?.replaceRows([]);
     if (pending.onInitialRows !== undefined && pending.decodeRow !== undefined) {
@@ -2229,6 +2267,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           params: request.params,
           onInitialRows: options.onInitialRows as ((rows: readonly unknown[]) => void) | undefined,
           onUpdate: options.onUpdate as ((update: SubscriptionUpdate<unknown>) => void) | undefined,
+          onInsert: options.onInsert as ((event: SubscriptionRowEvent<unknown>) => void) | undefined,
+          onDelete: options.onDelete as ((event: SubscriptionRowEvent<unknown>) => void) | undefined,
           onRawUpdate: options.onRawUpdate,
           decodeRow: options.decodeRow as RowDecoder<unknown> | undefined,
           handle,
@@ -2306,8 +2346,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           onRows: onRows as ((rows: readonly unknown[]) => void) | undefined,
           onInitialRows: options.onInitialRows as ((rows: readonly unknown[]) => void) | undefined,
           onUpdate: options.onUpdate as ((update: SubscriptionUpdate<unknown>) => void) | undefined,
+          onInsert: options.onInsert as ((event: SubscriptionRowEvent<unknown>) => void) | undefined,
+          onDelete: options.onDelete as ((event: SubscriptionRowEvent<unknown>) => void) | undefined,
           decodeRow: options.decodeRow as RowDecoder<unknown> | undefined,
           handle,
+          eventTable: options.eventTable,
           cleanup,
           resolve: resolve as (value: SubscriptionUnsubscribe | SubscriptionHandle<unknown>) => void,
           reject,
@@ -4248,6 +4291,13 @@ export interface SubscriptionUpdate<Row = unknown> {
   readonly deletes: readonly Row[];
 }
 
+export interface SubscriptionRowEvent<Row = unknown> {
+  readonly queryId: QueryID;
+  readonly tableName: string;
+  readonly row: Row;
+  readonly rowIndex: number;
+}
+
 export type RowDecoder<Row = unknown> = (row: Uint8Array) => Row;
 export type TableRowDecoder<Row = unknown> = RowDecoder<Row>;
 export type TableRowDecoders<RowsByName extends object = Record<string, unknown>> = {
@@ -4359,6 +4409,8 @@ export interface DeclaredViewSubscriptionOptions<Row = unknown> {
 	readonly decodeRow?: RowDecoder<Row>;
 	readonly onInitialRows?: (rows: readonly Row[]) => void;
 	readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
+	readonly onInsert?: (event: SubscriptionRowEvent<Row>) => void;
+	readonly onDelete?: (event: SubscriptionRowEvent<Row>) => void;
 	readonly onRawUpdate?: RawSubscriptionUpdateCallback;
 	readonly params?: Uint8Array;
 }
@@ -4542,6 +4594,9 @@ export interface TableSubscriptionOptions<Row = unknown> {
   readonly onRawRows?: (message: SubscribeSingleAppliedMessage) => void;
   readonly onRawUpdate?: RawSubscriptionUpdateCallback;
   readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
+  readonly onInsert?: (event: SubscriptionRowEvent<Row>) => void;
+  readonly onDelete?: (event: SubscriptionRowEvent<Row>) => void;
+  readonly eventTable?: boolean;
 }
 
 export interface ViewSubscriptionOptions<Row = unknown> {
@@ -4553,6 +4608,8 @@ export interface ViewSubscriptionOptions<Row = unknown> {
   readonly onInitialRows?: (rows: readonly Row[]) => void;
   readonly onRawUpdate?: RawSubscriptionUpdateCallback;
   readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
+  readonly onInsert?: (event: SubscriptionRowEvent<Row>) => void;
+  readonly onDelete?: (event: SubscriptionRowEvent<Row>) => void;
 }
 
 export type TableSubscriber<

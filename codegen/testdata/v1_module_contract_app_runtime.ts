@@ -24,6 +24,7 @@ import type {
   SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,
   SubscriptionHandle as ShunterSubscriptionHandle,
   SubscriptionHandleReturnOptions as ShunterSubscriptionHandleReturnOptions,
+  SubscriptionRowEvent as ShunterSubscriptionRowEvent,
   TableRowDecoder as ShunterTableRowDecoder,
   TableRowDecoders as ShunterTableRowDecoders,
   TableSubscriber as ShunterTableSubscriber,
@@ -77,6 +78,7 @@ export type DeclaredViewSubscriptionOptions<Row = unknown> = Omit<ShunterDeclare
 export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;
 export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;
 export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;
+export type SubscriptionRowEvent<Row = unknown> = ShunterSubscriptionRowEvent<Row>;
 export type TableRow<Name extends TableName> = TableRows[Name];
 export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;
 export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;
@@ -193,17 +195,17 @@ export const visibilityFilters = {
 } as const;
 
 export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>, onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : options;
+  const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : { ...options };
   return subscribeTable("messages", onRows, subscribeOptions);
 }
 
 export function subscribeSysClients(subscribeTable: TableSubscriber<SysClientsRow>, onRows?: (rows: SysClientsRow[]) => void, options: TableSubscriptionOptions<SysClientsRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<SysClientsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_clients"] } : options;
+  const subscribeOptions: TableSubscriptionOptions<SysClientsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_clients"] } : { ...options };
   return subscribeTable("sys_clients", onRows, subscribeOptions);
 }
 
 export function subscribeSysScheduled(subscribeTable: TableSubscriber<SysScheduledRow>, onRows?: (rows: SysScheduledRow[]) => void, options: TableSubscriptionOptions<SysScheduledRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<SysScheduledRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_scheduled"] } : options;
+  const subscribeOptions: TableSubscriptionOptions<SysScheduledRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_scheduled"] } : { ...options };
   return subscribeTable("sys_scheduled", onRows, subscribeOptions);
 }
 

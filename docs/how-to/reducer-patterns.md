@@ -42,6 +42,23 @@ if err != nil {
 For auto-increment primary keys, pass the zero value in the primary-key column
 and let the store assign the committed key.
 
+Event tables use the same insert API. The table declaration controls
+transience, not a separate reducer method.
+
+```go
+_, err := ctx.DB.Insert(uint32(notificationsTableID), types.ProductValue{
+	types.NewString(recipient),
+	types.NewString(message),
+})
+if err != nil {
+	return nil, err
+}
+```
+
+Inserted event rows are visible to the transaction and emitted to matching
+subscriptions for that commit. They are not retained in committed state, so
+reducers should not expect to read them in later transactions.
+
 ## Read Before Write
 
 Reducers can read through the same transaction-scoped database.

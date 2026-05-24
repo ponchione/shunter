@@ -24,6 +24,7 @@ import type {
   SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,
   SubscriptionHandle as ShunterSubscriptionHandle,
   SubscriptionHandleReturnOptions as ShunterSubscriptionHandleReturnOptions,
+  SubscriptionRowEvent as ShunterSubscriptionRowEvent,
   TableRowDecoder as ShunterTableRowDecoder,
   TableRowDecoders as ShunterTableRowDecoders,
   TableSubscriber as ShunterTableSubscriber,
@@ -77,6 +78,7 @@ export type DeclaredViewSubscriptionOptions<Row = unknown> = Omit<ShunterDeclare
 export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;
 export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;
 export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;
+export type SubscriptionRowEvent<Row = unknown> = ShunterSubscriptionRowEvent<Row>;
 export type TableRow<Name extends TableName> = TableRows[Name];
 export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;
 export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;
@@ -86,6 +88,11 @@ export type UUID = string;
 
 export interface MessagesRow {
   id: bigint;
+  author: string;
+  body: string;
+}
+
+export interface MessageEventsRow {
   author: string;
   body: string;
 }
@@ -106,6 +113,7 @@ export interface SysScheduledRow {
 
 export const tables = {
   messages: "messages",
+  messageEvents: "message_events",
   sysClients: "sys_clients",
   sysScheduled: "sys_scheduled",
 } as const;
@@ -114,6 +122,7 @@ export type TableName = (typeof tables)[keyof typeof tables];
 
 export type TableRows = {
   "messages": MessagesRow;
+  "message_events": MessageEventsRow;
   "sys_clients": SysClientsRow;
   "sys_scheduled": SysScheduledRow;
 };
@@ -129,6 +138,18 @@ export function decodeMessagesRow(row: Uint8Array): MessagesRow {
     id: values[0] as bigint,
     author: values[1] as string,
     body: values[2] as string,
+  }));
+}
+
+const messageEventsColumns = [
+  { name: "author", kind: "string" },
+  { name: "body", kind: "string" },
+] as const satisfies readonly ShunterBsatnColumn[];
+
+export function decodeMessageEventsRow(row: Uint8Array): MessageEventsRow {
+  return shunterDecodeBsatnProduct(row, messageEventsColumns, (values) => ({
+    author: values[0] as string,
+    body: values[1] as string,
   }));
 }
 
@@ -166,31 +187,50 @@ export function decodeSysScheduledRow(row: Uint8Array): SysScheduledRow {
 
 export const tableRowDecoders = {
   "messages": decodeMessagesRow,
+  "message_events": decodeMessageEventsRow,
   "sys_clients": decodeSysClientsRow,
   "sys_scheduled": decodeSysScheduledRow,
 } as const satisfies TableRowDecoders;
 
 export const tableReadPolicies = {
   messages: { access: "private", permissions: [] },
+  messageEvents: { access: "private", permissions: [] },
   sysClients: { access: "private", permissions: [] },
   sysScheduled: { access: "private", permissions: [] },
+} as const;
+
+export const tableKinds = {
+  messages: "persistent",
+  messageEvents: "event",
+  sysClients: "persistent",
+  sysScheduled: "persistent",
 } as const;
 
 export const visibilityFilters = {
 } as const;
 
 export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>, onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : options;
+  const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : { ...options };
   return subscribeTable("messages", onRows, subscribeOptions);
 }
 
+export function subscribeMessageEvents(subscribeTable: TableSubscriber<MessageEventsRow>, onRows?: (rows: MessageEventsRow[]) => void, options: TableSubscriptionOptions<MessageEventsRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscriptionOptions<MessageEventsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["message_events"], eventTable: true } : { ...options, eventTable: true };
+  return subscribeTable("message_events", onRows, subscribeOptions);
+}
+
+export function subscribeMessageEventsInserts(subscribeTable: TableSubscriber<MessageEventsRow>, onInsert: (event: SubscriptionRowEvent<MessageEventsRow>) => void, options: TableSubscriptionOptions<MessageEventsRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscriptionOptions<MessageEventsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["message_events"], eventTable: true, onInsert } : { ...options, eventTable: true, onInsert };
+  return subscribeTable("message_events", undefined, subscribeOptions);
+}
+
 export function subscribeSysClients(subscribeTable: TableSubscriber<SysClientsRow>, onRows?: (rows: SysClientsRow[]) => void, options: TableSubscriptionOptions<SysClientsRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<SysClientsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_clients"] } : options;
+  const subscribeOptions: TableSubscriptionOptions<SysClientsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_clients"] } : { ...options };
   return subscribeTable("sys_clients", onRows, subscribeOptions);
 }
 
 export function subscribeSysScheduled(subscribeTable: TableSubscriber<SysScheduledRow>, onRows?: (rows: SysScheduledRow[]) => void, options: TableSubscriptionOptions<SysScheduledRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<SysScheduledRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_scheduled"] } : options;
+  const subscribeOptions: TableSubscriptionOptions<SysScheduledRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_scheduled"] } : { ...options };
   return subscribeTable("sys_scheduled", onRows, subscribeOptions);
 }
 

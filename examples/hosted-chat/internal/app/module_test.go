@@ -36,6 +36,13 @@ func TestHostedChatModuleReducerAndLiveView(t *testing.T) {
 		if rows != 1 {
 			t.Fatalf("local read rows after reducer = %d, want 1", rows)
 		}
+		eventRows := 0
+		for range view.TableScan(messageEventsTableID) {
+			eventRows++
+		}
+		if eventRows != 0 {
+			t.Fatalf("event rows after reducer = %d, want 0 retained rows", eventRows)
+		}
 		return nil
 	}); err != nil {
 		t.Fatalf("Read returned error: %v", err)

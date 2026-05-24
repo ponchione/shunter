@@ -714,6 +714,10 @@ export function createShunterClient(options) {
         if (active.rowCache === undefined || active.handle === undefined) {
             return;
         }
+        if (active.eventTable) {
+            active.handle.replaceRows([]);
+            return;
+        }
         if (update.insertRowBytes === undefined || update.deleteRowBytes === undefined) {
             if (active.decodeRow !== undefined || active.onUpdate !== undefined) {
                 throw new ShunterProtocolError(`${label} rows were not encoded as a RowList.`);
@@ -772,18 +776,35 @@ export function createShunterClient(options) {
                     return toShunterError(error, "validation", `${label} raw subscription update callback failed`);
                 }
             }
-            if (active.onUpdate !== undefined && active.decodeRow !== undefined) {
+            if ((active.onUpdate !== undefined || active.onInsert !== undefined || active.onDelete !== undefined) &&
+                active.decodeRow !== undefined) {
                 let inserts;
                 let deletes;
                 try {
                     inserts = decodeSubscriptionRows(update.insertRowBytes, active.decodeRow, `${label} insert`);
                     deletes = decodeSubscriptionRows(update.deleteRowBytes, active.decodeRow, `${label} delete`);
-                    active.onUpdate({
+                    active.onUpdate?.({
                         queryId: update.queryId,
                         tableName: update.tableName,
                         inserts,
                         deletes,
                     });
+                    for (let rowIndex = 0; rowIndex < inserts.length; rowIndex += 1) {
+                        active.onInsert?.({
+                            queryId: update.queryId,
+                            tableName: update.tableName,
+                            row: inserts[rowIndex],
+                            rowIndex,
+                        });
+                    }
+                    for (let rowIndex = 0; rowIndex < deletes.length; rowIndex += 1) {
+                        active.onDelete?.({
+                            queryId: update.queryId,
+                            tableName: update.tableName,
+                            row: deletes[rowIndex],
+                            rowIndex,
+                        });
+                    }
                     applyCachedUpdate(active, update, inserts, label);
                 }
                 catch (error) {
@@ -1000,8 +1021,11 @@ export function createShunterClient(options) {
                 onRows: active.onRows,
                 onInitialRows: active.onInitialRows,
                 onUpdate: active.onUpdate,
+                onInsert: active.onInsert,
+                onDelete: active.onDelete,
                 decodeRow: active.decodeRow,
                 handle: active.handle,
+                eventTable: active.eventTable,
                 resolve: () => { },
                 reject: (error) => {
                     removeActiveSubscription(active.queryId);
@@ -1049,9 +1073,12 @@ export function createShunterClient(options) {
             onRows: pending.onRows,
             onInitialRows: pending.onInitialRows,
             onUpdate: pending.onUpdate,
+            onInsert: pending.onInsert,
+            onDelete: pending.onDelete,
             decodeRow: pending.decodeRow,
             handle: pending.handle,
             rowCache: pending.handle === undefined ? undefined : new Map(),
+            eventTable: pending.eventTable,
         };
         registerActiveSubscription(active);
         if (pending.onRawRows !== undefined) {
@@ -1131,9 +1158,12 @@ export function createShunterClient(options) {
             unsubscribeMode: "multi",
             onRawUpdate: pending.onRawUpdate,
             onUpdate: pending.onUpdate,
+            onInsert: pending.onInsert,
+            onDelete: pending.onDelete,
             decodeRow: pending.decodeRow,
             handle: pending.handle,
             rowCache: pending.handle === undefined ? undefined : new Map(),
+            eventTable: pending.eventTable,
         }, response.updates.map((update) => update.queryId));
         pending.handle?.replaceRows([]);
         if (pending.onInitialRows !== undefined && pending.decodeRow !== undefined) {
@@ -1746,6 +1776,8 @@ export function createShunterClient(options) {
                     params: request.params,
                     onInitialRows: options.onInitialRows,
                     onUpdate: options.onUpdate,
+                    onInsert: options.onInsert,
+                    onDelete: options.onDelete,
                     onRawUpdate: options.onRawUpdate,
                     decodeRow: options.decodeRow,
                     handle,
@@ -1820,8 +1852,11 @@ export function createShunterClient(options) {
                     onRows: onRows,
                     onInitialRows: options.onInitialRows,
                     onUpdate: options.onUpdate,
+                    onInsert: options.onInsert,
+                    onDelete: options.onDelete,
                     decodeRow: options.decodeRow,
                     handle,
+                    eventTable: options.eventTable,
                     cleanup,
                     resolve: resolve,
                     reject,

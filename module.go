@@ -61,6 +61,16 @@ func (m *Module) TableDef(def schema.TableDefinition, opts ...schema.TableOption
 	return m
 }
 
+// EventTable registers a transient table definition through the underlying
+// schema builder and returns the receiver for fluent module declarations.
+// Event table inserts are emitted to subscriptions for the committing
+// transaction, but are not retained in committed state or snapshots.
+func (m *Module) EventTable(def schema.TableDefinition, opts ...schema.TableOption) *Module {
+	opts = append([]schema.TableOption{schema.WithEventTable()}, opts...)
+	m.builder.TableDef(def, opts...)
+	return m
+}
+
 // Reducer registers a named reducer through the underlying schema builder and
 // returns the receiver for fluent module declarations.
 func (m *Module) Reducer(name string, h schema.ReducerHandler, opts ...ReducerOption) *Module {

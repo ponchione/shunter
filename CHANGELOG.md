@@ -4,6 +4,12 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added the root `Module.EventTable` declaration helper, documented app-facing
+  event-table reducer usage, and wired hosted-chat to emit transient
+  `message_events`.
+- Generated TypeScript clients now emit event-table subscription helpers, and
+  the TypeScript SDK can mark table subscriptions as event-table streams so
+  managed handles do not retain transient inserts as cached state.
 - Fixed event-table metadata preservation in contract-derived schema lookups and
   startup snapshot compatibility checks.
 - Fixed event-table subscription evaluation so transient inserts participate in

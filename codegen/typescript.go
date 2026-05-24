@@ -71,6 +71,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	b.WriteString("export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;\n")
 	b.WriteString("export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;\n")
 	b.WriteString("export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;\n")
+	b.WriteString("export type SubscriptionRowEvent<Row = unknown> = ShunterSubscriptionRowEvent<Row>;\n")
 	b.WriteString("export type TableRow<Name extends TableName> = TableRows[Name];\n")
 	b.WriteString("export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;\n")
 	b.WriteString("export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;\n")
@@ -120,9 +121,16 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 		rowType := tableRowTypes[i]
 		functionName := uniqueTypeScriptIdentifier("subscribe"+tableTypes[i].identifier, topLevelValueNames)
 		fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>, onRows?: (rows: %s[]) => void, options: TableSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, rowType, rowType, rowType)
-		fmt.Fprintf(&b, "  const subscribeOptions: TableSubscriptionOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders[%s] } : options;\n", rowType, strconv.Quote(table.Name))
+		fmt.Fprintf(&b, "  const subscribeOptions: TableSubscriptionOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders[%s]%s } : { ...options%s };\n", rowType, strconv.Quote(table.Name), typeScriptEventTableOptionSuffix(table.IsEvent), typeScriptEventTableOptionSuffix(table.IsEvent))
 		fmt.Fprintf(&b, "  return subscribeTable(%s, onRows, subscribeOptions);\n", strconv.Quote(table.Name))
 		b.WriteString("}\n\n")
+		if table.IsEvent {
+			eventFunctionName := uniqueTypeScriptIdentifier(functionName+"Inserts", topLevelValueNames)
+			fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>, onInsert: (event: SubscriptionRowEvent<%s>) => void, options: TableSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", eventFunctionName, rowType, rowType, rowType)
+			fmt.Fprintf(&b, "  const subscribeOptions: TableSubscriptionOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders[%s], eventTable: true, onInsert } : { ...options, eventTable: true, onInsert };\n", rowType, strconv.Quote(table.Name))
+			fmt.Fprintf(&b, "  return subscribeTable(%s, undefined, subscribeOptions);\n", strconv.Quote(table.Name))
+			b.WriteString("}\n\n")
+		}
 	}
 
 	reducerNames := make([]string, 0, len(contract.Schema.Reducers))
@@ -388,6 +396,7 @@ func typeScriptTopLevelValueNames() map[string]int {
 		"tables",
 		"tableRowDecoders",
 		"tableReadPolicies",
+		"tableKinds",
 		"visibilityFilters",
 		"reducers",
 		"lifecycleReducers",
@@ -419,6 +428,7 @@ func typeScriptTopLevelValueNames() map[string]int {
 		"SubscriptionUnsubscribe",
 		"SubscriptionHandle",
 		"SubscriptionHandleReturnOptions",
+		"SubscriptionRowEvent",
 		"TableName",
 		"TableRows",
 		"TableRow",
@@ -441,6 +451,13 @@ func typeScriptTopLevelValueNames() map[string]int {
 		seen[name] = 1
 	}
 	return seen
+}
+
+func typeScriptEventTableOptionSuffix(isEvent bool) string {
+	if isEvent {
+		return ", eventTable: true"
+	}
+	return ""
 }
 
 func typeScriptTableRowTypes(tableTypes []namedTypeScriptIdentifier, topLevelValueNames map[string]int) []string {
@@ -474,6 +491,7 @@ func writeTypeScriptRuntimeImports(b *bytes.Buffer, runtimeImport string) {
 	b.WriteString("  SubscriptionUnsubscribe as ShunterSubscriptionUnsubscribe,\n")
 	b.WriteString("  SubscriptionHandle as ShunterSubscriptionHandle,\n")
 	b.WriteString("  SubscriptionHandleReturnOptions as ShunterSubscriptionHandleReturnOptions,\n")
+	b.WriteString("  SubscriptionRowEvent as ShunterSubscriptionRowEvent,\n")
 	b.WriteString("  TableRowDecoder as ShunterTableRowDecoder,\n")
 	b.WriteString("  TableRowDecoders as ShunterTableRowDecoders,\n")
 	b.WriteString("  TableSubscriber as ShunterTableSubscriber,\n")

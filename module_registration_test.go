@@ -31,6 +31,29 @@ func TestBuildExplicitVersionedModuleSucceeds(t *testing.T) {
 	}
 }
 
+func TestBuildEventTableWrapperMarksTableTransient(t *testing.T) {
+	mod := NewModule("chat").
+		SchemaVersion(1).
+		EventTable(schema.TableDefinition{
+			Name: "notifications",
+			Columns: []schema.ColumnDefinition{
+				{Name: "body", Type: types.KindString},
+			},
+		})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	_, ts, ok := rt.engine.Registry().TableByName("notifications")
+	if !ok || ts == nil {
+		t.Fatal("notifications table missing from built registry")
+	}
+	if !ts.IsEvent {
+		t.Fatal("EventTable registered persistent table; want event table")
+	}
+}
+
 func TestBuildSchemaVersionWithoutTablesStillFailsAtSchemaLayer(t *testing.T) {
 	mod := NewModule("chat").SchemaVersion(1)
 

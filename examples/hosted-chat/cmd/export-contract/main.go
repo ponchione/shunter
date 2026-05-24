@@ -14,7 +14,14 @@ func main() {
 	out := flag.String("out", "examples/hosted-chat/shunter.contract.json", "contract output path")
 	flag.Parse()
 
-	rt, err := shunter.Build(app.Module(), shunter.Config{DataDir: "./examples/hosted-chat/.contract-data"})
+	dataDir, err := os.MkdirTemp("", "shunter-hosted-chat-contract-*")
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(dataDir)
+
+	rt, err := shunter.Build(app.Module(), shunter.Config{DataDir: dataDir})
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)

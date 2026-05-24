@@ -488,6 +488,12 @@ export interface SubscriptionUpdate<Row = unknown> {
     readonly inserts: readonly Row[];
     readonly deletes: readonly Row[];
 }
+export interface SubscriptionRowEvent<Row = unknown> {
+    readonly queryId: QueryID;
+    readonly tableName: string;
+    readonly row: Row;
+    readonly rowIndex: number;
+}
 export type RowDecoder<Row = unknown> = (row: Uint8Array) => Row;
 export type TableRowDecoder<Row = unknown> = RowDecoder<Row>;
 export type TableRowDecoders<RowsByName extends object = Record<string, unknown>> = {
@@ -522,6 +528,8 @@ export interface DeclaredViewSubscriptionOptions<Row = unknown> {
     readonly decodeRow?: RowDecoder<Row>;
     readonly onInitialRows?: (rows: readonly Row[]) => void;
     readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
+    readonly onInsert?: (event: SubscriptionRowEvent<Row>) => void;
+    readonly onDelete?: (event: SubscriptionRowEvent<Row>) => void;
     readonly onRawUpdate?: RawSubscriptionUpdateCallback;
     readonly params?: Uint8Array;
 }
@@ -574,6 +582,9 @@ export interface TableSubscriptionOptions<Row = unknown> {
     readonly onRawRows?: (message: SubscribeSingleAppliedMessage) => void;
     readonly onRawUpdate?: RawSubscriptionUpdateCallback;
     readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
+    readonly onInsert?: (event: SubscriptionRowEvent<Row>) => void;
+    readonly onDelete?: (event: SubscriptionRowEvent<Row>) => void;
+    readonly eventTable?: boolean;
 }
 export interface ViewSubscriptionOptions<Row = unknown> {
     readonly requestId?: RequestID;
@@ -584,6 +595,8 @@ export interface ViewSubscriptionOptions<Row = unknown> {
     readonly onInitialRows?: (rows: readonly Row[]) => void;
     readonly onRawUpdate?: RawSubscriptionUpdateCallback;
     readonly onUpdate?: (update: SubscriptionUpdate<Row>) => void;
+    readonly onInsert?: (event: SubscriptionRowEvent<Row>) => void;
+    readonly onDelete?: (event: SubscriptionRowEvent<Row>) => void;
 }
 export type TableSubscriber<Name extends string = string, RowsByName extends Record<Name, unknown> = Record<Name, unknown>, Row = never> = <Table extends Name>(table: Table, onRows?: (rows: ([Row] extends [never] ? RowsByName[Table] : Row)[]) => void, options?: TableSubscriptionOptions<[Row] extends [never] ? RowsByName[Table] : Row>) => Promise<SubscriptionUnsubscribe>;
 export type TableHandleSubscriber<Name extends string = string> = <Table extends Name>(table: Table, onRows: ((rows: Uint8Array[]) => void) | undefined, options: TableSubscriptionOptions<Uint8Array> & SubscriptionHandleReturnOptions) => Promise<SubscriptionHandle<Uint8Array>>;

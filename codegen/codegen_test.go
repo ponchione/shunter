@@ -61,6 +61,7 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;`)
 	assertContains(t, ts, `export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;`)
 	assertContains(t, ts, `export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;`)
+	assertContains(t, ts, `export type SubscriptionRowEvent<Row = unknown> = ShunterSubscriptionRowEvent<Row>;`)
 	assertContains(t, ts, `export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;`)
 	assertContains(t, ts, `export type TableRowDecoder<Name extends TableName> = ShunterTableRowDecoder<TableRows[Name]>;`)
 	assertContains(t, ts, `export type TableRowDecoders<RowsByName extends object = TableRows> = ShunterTableRowDecoders<RowsByName>;`)
@@ -73,7 +74,7 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `body: values[1] as string,`)
 	assertContains(t, ts, `export const tableRowDecoders = {`)
 	assertContains(t, ts, `"messages": decodeMessagesRow,`)
-	assertContains(t, ts, `const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : options;`)
+	assertContains(t, ts, `const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : { ...options };`)
 	assertContains(t, ts, `return subscribeTable("messages", onRows, subscribeOptions);`)
 	assertContains(t, ts, `export const tableReadPolicies = {`)
 	assertContains(t, ts, `messages: { access: "private", permissions: [] },`)
@@ -1292,6 +1293,8 @@ func TestTypeScriptGeneratorEmitsTableKindMetadata(t *testing.T) {
 	assertContains(t, ts, `export const tableKinds = {`)
 	assertContains(t, ts, `messages: "persistent",`)
 	assertContains(t, ts, `notifications: "event",`)
+	assertContains(t, ts, `export function subscribeNotificationsInserts(subscribeTable: TableSubscriber<NotificationsRow>, onInsert: (event: SubscriptionRowEvent<NotificationsRow>) => void, options: TableSubscriptionOptions<NotificationsRow> = {}): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, ts, `const subscribeOptions: TableSubscriptionOptions<NotificationsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["notifications"], eventTable: true, onInsert } : { ...options, eventTable: true, onInsert };`)
 }
 
 func TestTypeScriptGeneratorDisambiguatesTableReadPolicyMetadataIdentifiers(t *testing.T) {

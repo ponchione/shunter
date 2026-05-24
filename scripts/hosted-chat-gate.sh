@@ -91,7 +91,7 @@ rtk go run ./cmd/shunter contract assert \
   --module-version v0.1.0 \
   --contract-version 1 \
   --schema-version 1 \
-  --tables 3 \
+  --tables 4 \
   --reducers 1 \
   --procedures 1 \
   --queries 1 \

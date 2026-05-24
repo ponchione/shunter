@@ -4,6 +4,7 @@ import {
   callSendMessageTyped,
   shunterContract,
   subscribeLiveMessagesHandle,
+  subscribeMessageEventsInserts,
 } from "./generated/hosted_chat";
 
 const client = createShunterClient({
@@ -13,6 +14,13 @@ const client = createShunterClient({
 });
 
 await client.connect();
+
+const unsubscribeMessageEvents = await subscribeMessageEventsInserts(
+  client.subscribeTable,
+  (event) => {
+    console.log(`event ${event.row.author}: ${event.row.body}`);
+  },
+);
 
 const liveMessages = await subscribeLiveMessagesHandle(client.subscribeDeclaredView, {
   returnHandle: true,
@@ -37,5 +45,6 @@ await callSendSystemMessageProcedureTyped(client.callProcedure, {
   body: "hello from the TypeScript procedure client",
 });
 
+await unsubscribeMessageEvents();
 await liveMessages.unsubscribe();
 await client.close();
