@@ -359,6 +359,33 @@ func TestApplyChangesetSkipsEventTableRowsDuringRecovery(t *testing.T) {
 	}
 }
 
+func TestApplyChangesetSkipsEventTableDeletesDuringRecovery(t *testing.T) {
+	cs := NewCommittedState()
+	const tid schema.TableID = 0
+	cs.RegisterTable(tid, NewTable(eventPKSchema()))
+
+	changeset := &Changeset{
+		TxID: 1,
+		Tables: map[schema.TableID]*TableChangeset{
+			tid: {
+				TableID: tid,
+				Schema:  eventPKSchema(),
+				Deletes: []types.ProductValue{mkRow(1, "expired")},
+			},
+		},
+	}
+	if err := ApplyChangeset(cs, changeset); err != nil {
+		t.Fatalf("ApplyChangeset event deletes: %v", err)
+	}
+	table, _ := cs.Table(tid)
+	if table.RowCount() != 0 {
+		t.Fatalf("replayed event table row count = %d, want 0", table.RowCount())
+	}
+	if table.NextID() != 1 {
+		t.Fatalf("event table next row ID after replayed delete = %d, want 1", table.NextID())
+	}
+}
+
 func TestValidateRowNullableColumns(t *testing.T) {
 	ts := &schema.TableSchema{
 		Columns: []schema.ColumnSchema{
