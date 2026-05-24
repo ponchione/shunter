@@ -57,6 +57,7 @@ func buildProtocolOptions(cfg ProtocolConfig) (protocol.ProtocolOptions, error) 
 func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 	signingKey := append([]byte(nil), cfg.AuthSigningKey...)
 	verificationKeys := copyAuthVerificationKeys(cfg.AuthVerificationKeys)
+	oidcIssuers := copyAuthOIDCIssuers(cfg.AuthOIDCIssuers)
 	issuers := append([]string(nil), cfg.AuthIssuers...)
 	audiences := append([]string(nil), cfg.AuthAudiences...)
 
@@ -91,6 +92,7 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 		jwtCfg := &auth.JWTConfig{
 			SigningKey:       append([]byte(nil), signingKey...),
 			VerificationKeys: verificationKeys,
+			JWKS:             oidcIssuers,
 			Issuers:          issuers,
 			Audiences:        audiences,
 			AuthMode:         auth.AuthModeAnonymous,
@@ -101,12 +103,13 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 		mintCfg := &auth.MintConfig{Issuer: issuer, Audience: audience, SigningKey: append([]byte(nil), signingKey...), Expiry: cfg.AnonymousTokenTTL}
 		return jwtCfg, mintCfg, nil
 	case AuthModeStrict:
-		if len(signingKey) == 0 && len(verificationKeys) == 0 {
+		if len(signingKey) == 0 && len(verificationKeys) == 0 && len(oidcIssuers) == 0 {
 			return nil, nil, ErrAuthSigningKeyRequired
 		}
 		jwtCfg := &auth.JWTConfig{
 			SigningKey:       signingKey,
 			VerificationKeys: verificationKeys,
+			JWKS:             oidcIssuers,
 			Issuers:          issuers,
 			Audiences:        audiences,
 			AuthMode:         auth.AuthModeStrict,

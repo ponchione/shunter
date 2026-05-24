@@ -51,13 +51,27 @@ type JWTVerificationKey struct {
 	Key       []byte
 }
 
+// JWKSConfig configures remote JSON Web Key Set verification for one trusted
+// issuer. Shunter only uses the JWKS URL for signature verification; issuer
+// and audience claim policy is still enforced through JWTConfig.Issuers and
+// JWTConfig.Audiences.
+type JWKSConfig struct {
+	Issuer         string
+	JWKSURL        string
+	Algorithms     []JWTAlgorithm
+	CacheTTL       time.Duration
+	RefreshTimeout time.Duration
+}
+
 // JWTConfig is the engine-level auth configuration. SigningKey
 // is the legacy HS256 verification key and remains supported for anonymous
 // token minting and existing strict-mode configuration. VerificationKeys adds
-// explicit local verification keys for HS256, RS256, and ES256.
+// explicit local verification keys for HS256, RS256, and ES256. JWKS adds
+// remote RS256/ES256 verification keys fetched from trusted issuer metadata.
 type JWTConfig struct {
 	SigningKey       []byte
 	VerificationKeys []JWTVerificationKey
+	JWKS             []JWKSConfig
 	Issuers          []string // empty = skip issuer allowlist validation
 	Audiences        []string // empty = skip audience validation (SPEC-005 §4.1)
 	AuthMode         AuthMode
@@ -119,7 +133,7 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	if config == nil {
 		return nil, fmt.Errorf("%w: config is required", ErrJWTInvalid)
 	}
-	keys, err := resolveJWTVerificationKeys(config)
+	localKeys, err := resolveLocalJWTVerificationKeys(config)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +141,16 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	if err != nil {
 		return nil, errors.Join(ErrJWTInvalid, err)
 	}
-	candidates := selectJWTVerificationKeys(keys, alg, keyID)
+	tokenIssuer, err := jwtUnverifiedIssuer(tokenString)
+	if err != nil {
+		return nil, errors.Join(ErrJWTInvalid, err)
+	}
+	candidates := selectJWTVerificationKeys(localKeys, alg, keyID)
+	remoteKeys, remoteErr := resolveJWKSVerificationKeys(config, alg, keyID, tokenIssuer, len(candidates) == 0)
+	if remoteErr != nil && len(candidates) == 0 {
+		return nil, errors.Join(ErrJWTInvalid, remoteErr)
+	}
+	candidates = append(candidates, selectJWTVerificationKeys(remoteKeys, alg, keyID)...)
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("%w: %w: alg=%q kid=%q", ErrJWTInvalid, ErrJWTUnsupportedAlg, alg, keyID)
 	}
@@ -162,12 +185,33 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	return nil, fmt.Errorf("%w: token reported invalid", ErrJWTInvalid)
 }
 
+func jwtUnverifiedIssuer(tokenString string) (string, error) {
+	parsed, _, err := jwt.NewParser().ParseUnverified(tokenString, jwt.MapClaims{})
+	if err != nil {
+		return "", err
+	}
+	if parsed == nil {
+		return "", fmt.Errorf("token claims missing")
+	}
+	mc, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", fmt.Errorf("unexpected claims type %T", parsed.Claims)
+	}
+	iss, _ := mc["iss"].(string)
+	return iss, nil
+}
+
 // ValidateJWTConfig validates configured local verification keys without
 // requiring a token. Hosts can call it at startup to catch malformed key
 // material before serving protocol traffic.
 func ValidateJWTConfig(config *JWTConfig) error {
-	_, err := resolveJWTVerificationKeys(config)
-	return err
+	if _, err := resolveLocalJWTVerificationKeys(config); err != nil {
+		return err
+	}
+	if err := validateJWKSConfig(config); err != nil {
+		return err
+	}
+	return nil
 }
 
 type resolvedJWTVerificationKey struct {
@@ -176,7 +220,7 @@ type resolvedJWTVerificationKey struct {
 	key       any
 }
 
-func resolveJWTVerificationKeys(config *JWTConfig) ([]resolvedJWTVerificationKey, error) {
+func resolveLocalJWTVerificationKeys(config *JWTConfig) ([]resolvedJWTVerificationKey, error) {
 	if config == nil {
 		return nil, fmt.Errorf("%w: config is required", ErrJWTInvalid)
 	}
@@ -188,7 +232,7 @@ func resolveJWTVerificationKeys(config *JWTConfig) ([]resolvedJWTVerificationKey
 		})
 	}
 	specs = append(specs, config.VerificationKeys...)
-	if len(specs) == 0 {
+	if len(specs) == 0 && len(config.JWKS) == 0 {
 		return nil, fmt.Errorf("%w: signing key or verification key is required", ErrJWTInvalid)
 	}
 	keys := make([]resolvedJWTVerificationKey, 0, len(specs))

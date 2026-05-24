@@ -56,10 +56,11 @@ routing or more direct lifecycle control.
 - `SHUNTER_AUTH_SIGNING_KEY`
 - `SHUNTER_AUTH_ISSUERS` as comma-separated values
 - `SHUNTER_AUTH_AUDIENCES` as comma-separated values
+- `SHUNTER_AUTH_OIDC_ISSUERS` as semicolon-separated `issuer,jwks-url` pairs
 
 Local development can use dev auth. Public protocol serving should use strict
-auth with explicit issuer, audience, and local key material. JWKS/OIDC discovery
-is still future work.
+auth with explicit issuer and audience policy plus local key material or
+`AuthOIDCIssuers` JWKS verification for RS256/ES256 identity-provider tokens.
 
 ## Example Workflow
 

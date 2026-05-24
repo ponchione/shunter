@@ -264,7 +264,6 @@ Do not include these in the first implementation:
 - SQL DML or arbitrary SQL mutation.
 - Dynamic module publish, update, or loading.
 - Generic HTTP management endpoints.
-- JWKS/OIDC discovery.
 - Stored admin profiles or credential keychains.
 - App-owned custom reducer argument codecs.
 - Multi-module host discovery.

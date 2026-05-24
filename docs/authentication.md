@@ -40,11 +40,14 @@ root runtime.
 Behavior:
 
 - Protocol connections must present a bearer token.
-- Either `AuthSigningKey` or at least one `AuthVerificationKeys` entry is
-  required when protocol serving is enabled.
+- Either `AuthSigningKey`, at least one `AuthVerificationKeys` entry, or at
+  least one `AuthOIDCIssuers` entry is required when protocol serving is
+  enabled.
 - `AuthSigningKey` validates legacy HS256 JWTs.
 - `AuthVerificationKeys` validates local HS256, RS256, or ES256 keys. RS256 and
   ES256 keys are PEM-encoded public keys or certificates.
+- `AuthOIDCIssuers` validates RS256 or ES256 tokens against remote JWKS
+  documents for configured trusted issuers.
 - A verification key's `KeyID` matches the token header `kid` for overlapping
   rotation. If a token supplies `kid`, keyed matches are preferred; unkeyed
   keys remain a fallback for legacy HS256 configurations.
@@ -59,8 +62,9 @@ Behavior:
 - Local reducer and declared-read calls do not receive the dev-mode allow-all
   permission bypass by default.
 
-Current strict mode does not include JWKS/OIDC discovery, automatic remote key
-refresh, or app-provided claim mappers.
+JWKS keys are fetched on demand, cached, and refreshed when a token presents an
+unknown `kid`. Current strict mode does not include OIDC discovery-document
+lookup, background remote key refresh, or app-provided claim mappers.
 
 ## Principal And Identity
 
@@ -114,9 +118,15 @@ mod.VisibilityFilter(shunter.VisibilityFilterDeclaration{
 old and new public keys or HMAC secrets during the overlap window, give keyed
 tokens a stable `kid`, then remove retired keys in a later deployment.
 
-Shunter does not fetch keys from an identity provider. Apps that use JWKS/OIDC
-must load the desired verification keys into config before runtime startup and
-restart or rebuild their serving process when that local key set changes.
+For remote key rotation, configure `AuthOIDCIssuers` with each trusted issuer
+and JWKS URL. Shunter fetches those JWKS documents when validating matching
+RS256 or ES256 tokens, caches successful key sets for the configured TTL, and
+refreshes a source immediately when a token's `kid` is not present in the
+cached set. Cached keys remain usable until their TTL expires.
+
+Local `AuthVerificationKeys` remain useful when deployments want key material
+fully controlled by app configuration. `AuthSigningKey` remains the legacy
+HS256 path and should not be used for third-party OIDC providers.
 
 ## Failure Behavior
 
@@ -134,20 +144,22 @@ restart or rebuild their serving process when that local key set changes.
 Before deploying strict auth:
 
 1. Set `AuthMode: shunter.AuthModeStrict`.
-2. Provide a strong `AuthSigningKey` for HS256 tokens or configure
-   `AuthVerificationKeys` for local HS256, RS256, or ES256 verification.
+2. Provide a strong `AuthSigningKey` for HS256 tokens, configure
+   `AuthVerificationKeys` for local HS256, RS256, or ES256 verification, or
+   configure `AuthOIDCIssuers` for remote RS256/ES256 JWKS verification.
 3. Configure `AuthIssuers` to the accepted token issuer values.
 4. Configure `AuthAudiences` when tokens should be scoped to this app.
 5. Ensure issued tokens contain `iss`, `sub`, and any required `permissions`.
 6. Keep token TTL and refresh policy in the application or identity provider.
 7. Test reducer, declared-read, raw subscription, raw query, and visibility
    behavior with allowed and denied callers.
-8. Document key replacement as a restart/deployment event.
+8. Document local key replacement as a restart/deployment event, or document
+   the JWKS cache TTL and issuer rotation policy when using remote keys.
 
 ## Unsupported In Current Strict Mode
 
-- JWKS or OIDC discovery
-- automatic remote key rotation or cache refresh
+- OIDC discovery-document lookup
+- background remote key refresh
 - app-provided claim-to-permission mappers
 - anonymous-token minting in strict mode
 - arbitrary token claims in visibility-filter SQL

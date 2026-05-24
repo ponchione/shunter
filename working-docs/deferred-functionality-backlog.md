@@ -204,19 +204,21 @@ Review later:
 
 ## Deferred Auth Expansion
 
-12. [ ] Remote auth key discovery and automatic rotation caches.
+12. [ ] OIDC discovery documents and background remote auth refresh.
 
 Owner: `auth`, `protocol`, root runtime config
 
 Deferred decision:
 - Local strict-mode JWT verification now supports configured HS256, RS256, and
   ES256 verification keys with optional `kid` matching.
-- Defer OIDC/JWKS discovery and automatic remote rotation caches.
+- Strict-mode JWKS verification now supports configured issuer/JWKS URL pairs
+  with on-demand fetch, cache reuse, and unknown-`kid` refresh.
+- Defer OIDC discovery-document lookup and background remote refresh.
 
 Review later:
-- JWKS/OIDC discovery.
-- Cache lifetimes.
-- Rotation behavior.
+- OIDC discovery-document lookup.
+- Background cache refresh.
+- Provider-specific cache lifetime policy.
 - Protocol 401 mapping.
 
 13. [ ] Richer app-visible auth claim context.

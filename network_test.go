@@ -219,6 +219,29 @@ func TestBuildAuthConfigStrictAcceptsVerificationKeysWithoutSigningKey(t *testin
 	}
 }
 
+func TestBuildAuthConfigStrictAcceptsOIDCIssuersWithoutLocalKey(t *testing.T) {
+	cfg := Config{
+		AuthMode: AuthModeStrict,
+		AuthOIDCIssuers: []AuthOIDCIssuer{{
+			Issuer:     "https://issuer.example",
+			JWKSURL:    "https://issuer.example/.well-known/jwks.json",
+			Algorithms: []AuthAlgorithm{AuthAlgorithmRS256},
+		}},
+		AuthIssuers:   []string{"https://issuer.example"},
+		AuthAudiences: []string{"app"},
+	}
+	jwtCfg, mintCfg, err := buildAuthConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildAuthConfig returned error: %v", err)
+	}
+	if jwtCfg.AuthMode != auth.AuthModeStrict || mintCfg != nil {
+		t.Fatalf("unexpected strict config: jwt=%+v mint=%+v", jwtCfg, mintCfg)
+	}
+	if len(jwtCfg.JWKS) != 1 || jwtCfg.JWKS[0].Issuer != "https://issuer.example" {
+		t.Fatalf("JWKS = %#v, want configured issuer", jwtCfg.JWKS)
+	}
+}
+
 func TestBuildAuthConfigStrictRejectsInvalidVerificationKey(t *testing.T) {
 	_, _, err := buildAuthConfig(Config{
 		AuthMode: AuthModeStrict,
@@ -231,9 +254,36 @@ func TestBuildAuthConfigStrictRejectsInvalidVerificationKey(t *testing.T) {
 	}
 }
 
+func TestConfigFromEnvParsesOIDCIssuers(t *testing.T) {
+	t.Setenv("SHUNTER_AUTH_OIDC_ISSUERS", "https://issuer.example,https://issuer.example/jwks.json; https://other.example, https://other.example/jwks")
+
+	cfg, err := ConfigFromEnvE()
+	if err != nil {
+		t.Fatalf("ConfigFromEnvE returned error: %v", err)
+	}
+	if len(cfg.AuthOIDCIssuers) != 2 {
+		t.Fatalf("AuthOIDCIssuers = %#v, want two entries", cfg.AuthOIDCIssuers)
+	}
+	if cfg.AuthOIDCIssuers[0].Issuer != "https://issuer.example" || cfg.AuthOIDCIssuers[0].JWKSURL != "https://issuer.example/jwks.json" {
+		t.Fatalf("first AuthOIDCIssuer = %#v", cfg.AuthOIDCIssuers[0])
+	}
+	if cfg.AuthOIDCIssuers[1].Issuer != "https://other.example" || cfg.AuthOIDCIssuers[1].JWKSURL != "https://other.example/jwks" {
+		t.Fatalf("second AuthOIDCIssuer = %#v", cfg.AuthOIDCIssuers[1])
+	}
+}
+
+func TestConfigFromEnvRejectsMalformedOIDCIssuer(t *testing.T) {
+	t.Setenv("SHUNTER_AUTH_OIDC_ISSUERS", "https://issuer.example")
+
+	if _, err := ConfigFromEnvE(); err == nil {
+		t.Fatal("ConfigFromEnvE succeeded with malformed OIDC issuer entry")
+	}
+}
+
 func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	key := []byte("strict-runtime-secret")
 	verificationKey := []byte("runtime-verification-secret")
+	oidcAlgorithms := []AuthAlgorithm{AuthAlgorithmRS256}
 	issuers := []string{"issuer"}
 	audiences := []string{"app"}
 	cfg := Config{
@@ -242,6 +292,9 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 		AuthSigningKey: key,
 		AuthVerificationKeys: []AuthVerificationKey{
 			{Algorithm: AuthAlgorithmHS256, KeyID: "runtime", Key: verificationKey},
+		},
+		AuthOIDCIssuers: []AuthOIDCIssuer{
+			{Issuer: "oidc", JWKSURL: "https://oidc.example/jwks.json", Algorithms: oidcAlgorithms},
 		},
 		AuthIssuers:   issuers,
 		AuthAudiences: audiences,
@@ -254,6 +307,7 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 
 	key[0] = 'X'
 	verificationKey[0] = 'X'
+	oidcAlgorithms[0] = AuthAlgorithmES256
 	issuers[0] = "mutated"
 	audiences[0] = "mutated"
 
@@ -270,10 +324,14 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	if len(got.AuthVerificationKeys) != 1 || string(got.AuthVerificationKeys[0].Key) != "runtime-verification-secret" {
 		t.Fatalf("Config AuthVerificationKeys = %#v, want detached original verification key", got.AuthVerificationKeys)
 	}
+	if len(got.AuthOIDCIssuers) != 1 || got.AuthOIDCIssuers[0].Algorithms[0] != AuthAlgorithmRS256 {
+		t.Fatalf("Config AuthOIDCIssuers = %#v, want detached original OIDC issuer", got.AuthOIDCIssuers)
+	}
 
 	got.AuthSigningKey[0] = 'Y'
 	got.AuthVerificationKeys[0].Key[0] = 'Y'
 	got.AuthVerificationKeys[0].KeyID = "changed"
+	got.AuthOIDCIssuers[0].Algorithms[0] = AuthAlgorithmES256
 	got.AuthIssuers[0] = "changed"
 	got.AuthAudiences[0] = "changed"
 
@@ -291,6 +349,9 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 		again.AuthVerificationKeys[0].KeyID != "runtime" ||
 		string(again.AuthVerificationKeys[0].Key) != "runtime-verification-secret" {
 		t.Fatalf("second Config AuthVerificationKeys = %#v, want detached original verification key", again.AuthVerificationKeys)
+	}
+	if len(again.AuthOIDCIssuers) != 1 || again.AuthOIDCIssuers[0].Algorithms[0] != AuthAlgorithmRS256 {
+		t.Fatalf("second Config AuthOIDCIssuers = %#v, want detached original OIDC issuer", again.AuthOIDCIssuers)
 	}
 }
 

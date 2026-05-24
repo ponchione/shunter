@@ -35,6 +35,11 @@ const (
 // RS256/ES256. KeyID optionally matches the token header's `kid` value.
 type AuthVerificationKey = auth.JWTVerificationKey
 
+// AuthOIDCIssuer configures remote JWKS verification for one trusted OIDC/JWT
+// issuer. Issuer and audience claims are still enforced by AuthIssuers and
+// AuthAudiences.
+type AuthOIDCIssuer = auth.JWKSConfig
+
 // Config contains hosted-runtime build, startup, protocol, and authentication
 // options. Zero values keep the local/dev path easy to boot unless a serving or
 // strict-auth path requires additional fields.
@@ -48,6 +53,7 @@ type Config struct {
 
 	AuthSigningKey       []byte
 	AuthVerificationKeys []AuthVerificationKey
+	AuthOIDCIssuers      []AuthOIDCIssuer
 	AuthIssuers          []string
 	AuthAudiences        []string
 
@@ -79,6 +85,7 @@ type Config struct {
 //   - SHUNTER_AUTH_SIGNING_KEY
 //   - SHUNTER_AUTH_ISSUERS: comma-separated
 //   - SHUNTER_AUTH_AUDIENCES: comma-separated
+//   - SHUNTER_AUTH_OIDC_ISSUERS: semicolon-separated issuer,jwks-url pairs
 func ConfigFromEnv() Config {
 	cfg, err := ConfigFromEnvE()
 	if err != nil {
@@ -114,6 +121,11 @@ func ConfigFromEnvE() (Config, error) {
 	}
 	cfg.AuthIssuers = splitEnvList(os.Getenv("SHUNTER_AUTH_ISSUERS"))
 	cfg.AuthAudiences = splitEnvList(os.Getenv("SHUNTER_AUTH_AUDIENCES"))
+	issuers, err := parseOIDCIssuerEnv(os.Getenv("SHUNTER_AUTH_OIDC_ISSUERS"))
+	if err != nil {
+		return Config{}, fmt.Errorf("SHUNTER_AUTH_OIDC_ISSUERS: %w", err)
+	}
+	cfg.AuthOIDCIssuers = issuers
 	return cfg, nil
 }
 
@@ -129,6 +141,31 @@ func splitEnvList(value string) []string {
 		}
 	}
 	return out
+}
+
+func parseOIDCIssuerEnv(value string) ([]AuthOIDCIssuer, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	entries := strings.Split(value, ";")
+	out := make([]AuthOIDCIssuer, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		parts := strings.Split(entry, ",")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("entry %q must be issuer,jwks-url", entry)
+		}
+		issuer := strings.TrimSpace(parts[0])
+		jwksURL := strings.TrimSpace(parts[1])
+		if issuer == "" || jwksURL == "" {
+			return nil, fmt.Errorf("entry %q must include issuer and jwks-url", entry)
+		}
+		out = append(out, AuthOIDCIssuer{Issuer: issuer, JWKSURL: jwksURL})
+	}
+	return out, nil
 }
 
 // ProtocolConfig exposes narrow top-level WebSocket protocol tuning. Zero

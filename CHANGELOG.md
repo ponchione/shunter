@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added strict-auth JWKS/OIDC issuer verification for RS256 and ES256 tokens,
+  including on-demand key fetch, cached key reuse, unknown-`kid` refresh, root
+  config/env wiring, and app-author docs.
 - Added the root `Module.EventTable` declaration helper, documented app-facing
   event-table reducer usage, and wired hosted-chat to emit transient
   `message_events`.

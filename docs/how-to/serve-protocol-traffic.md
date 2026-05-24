@@ -143,9 +143,9 @@ cfg := shunter.Config{
 }
 ```
 
-Use `AuthVerificationKeys` instead of `AuthSigningKey` when validating RS256 or
-ES256 tokens from an external issuer. The key material is local PEM public key or
-certificate data; Shunter does not fetch JWKS/OIDC keys.
+Use `AuthVerificationKeys` instead of `AuthSigningKey` when validating local
+RS256 or ES256 public key material. Use `AuthOIDCIssuers` when validating
+RS256 or ES256 tokens from an external issuer's JWKS endpoint.
 
 See [Configure auth](configure-auth.md) for the app-author setup path and
 [Authentication](../authentication.md) for the full strict-mode contract and

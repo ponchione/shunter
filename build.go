@@ -118,6 +118,7 @@ func copyConfig(cfg Config) Config {
 	out := cfg
 	out.AuthSigningKey = append([]byte(nil), cfg.AuthSigningKey...)
 	out.AuthVerificationKeys = copyAuthVerificationKeys(cfg.AuthVerificationKeys)
+	out.AuthOIDCIssuers = copyAuthOIDCIssuers(cfg.AuthOIDCIssuers)
 	out.AuthIssuers = append([]string(nil), cfg.AuthIssuers...)
 	out.AuthAudiences = append([]string(nil), cfg.AuthAudiences...)
 	return out
@@ -131,6 +132,18 @@ func copyAuthVerificationKeys(in []AuthVerificationKey) []AuthVerificationKey {
 	for i, key := range in {
 		out[i] = key
 		out[i].Key = append([]byte(nil), key.Key...)
+	}
+	return out
+}
+
+func copyAuthOIDCIssuers(in []AuthOIDCIssuer) []AuthOIDCIssuer {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]AuthOIDCIssuer, len(in))
+	for i, issuer := range in {
+		out[i] = issuer
+		out[i].Algorithms = append([]AuthAlgorithm(nil), issuer.Algorithms...)
 	}
 	return out
 }

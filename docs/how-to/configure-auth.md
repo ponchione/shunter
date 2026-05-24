@@ -74,7 +74,28 @@ cfg := shunter.Config{
 ```
 
 `KeyID` matches the token header `kid` during local key rotation. Shunter does
-not fetch JWKS/OIDC keys; load the accepted public keys from app configuration.
+not need a local public key when the issuer exposes a JWKS endpoint:
+
+```go
+cfg := shunter.Config{
+	DataDir:        "./data/chat",
+	EnableProtocol: true,
+	AuthMode:       shunter.AuthModeStrict,
+	AuthOIDCIssuers: []shunter.AuthOIDCIssuer{
+		{
+			Issuer:  "https://issuer.example",
+			JWKSURL: "https://issuer.example/.well-known/jwks.json",
+		},
+	},
+	AuthIssuers:   []string{"https://issuer.example"},
+	AuthAudiences: []string{"chat"},
+}
+```
+
+`AuthOIDCIssuers` fetches RS256 and ES256 JWKS keys on demand, caches successful
+key sets, and refreshes when a presented token uses an unknown `kid`. Keep
+`AuthIssuers` and `AuthAudiences` configured; JWKS configuration supplies
+signature keys, not claim policy.
 
 ## Permissions
 
@@ -160,12 +181,14 @@ The current stable parameter is `:sender`, derived from caller identity.
 ## Production Checklist
 
 - Set `AuthModeStrict` for public protocol serving.
-- Provide a strong `AuthSigningKey` for HS256 or configure
-  `AuthVerificationKeys` for HS256, RS256, or ES256.
+- Provide a strong `AuthSigningKey` for HS256, configure
+  `AuthVerificationKeys` for local HS256/RS256/ES256, or configure
+  `AuthOIDCIssuers` for remote RS256/ES256 JWKS verification.
 - Configure accepted issuers.
 - Configure audiences when tokens are app-scoped.
 - Include required permissions in issued tokens.
 - Test allowed and denied reducer calls.
 - Test allowed and denied declared reads.
 - Test visibility-filtered reads.
-- Document local key replacement as a restart/deployment event.
+- Document local key replacement as a restart/deployment event, or document the
+  JWKS cache TTL and issuer rotation policy when using remote keys.
