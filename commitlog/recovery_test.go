@@ -483,6 +483,92 @@ func TestOpenAndRecoverSnapshotPlusMixedTailSkipsEventRows(t *testing.T) {
 	}
 }
 
+func TestOpenAndRecoverEventOnlyTailAdvancesRecoveredHorizon(t *testing.T) {
+	root := t.TempDir()
+	committed, reg := buildEventAutoIncrementSnapshotCommittedState(t)
+	players, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	if err := players.InsertRow(players.AllocRowID(), types.ProductValue{types.NewUint64(1), types.NewString("snapshot-player")}); err != nil {
+		t.Fatal(err)
+	}
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, committed, 5)
+
+	seg, err := CreateSegment(root, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := EncodeChangeset(&store.Changeset{
+		TxID: 6,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			1: {
+				TableID:   1,
+				TableName: "events",
+				Inserts: []types.ProductValue{
+					{types.NewUint64(99), types.NewString("tail-event")},
+				},
+			},
+		},
+	})
+	if err != nil {
+		_ = seg.Close()
+		t.Fatal(err)
+	}
+	if err := seg.Append(&Record{TxID: 6, RecordType: RecordTypeChangeset, Payload: payload}); err != nil {
+		_ = seg.Close()
+		t.Fatal(err)
+	}
+	if err := seg.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 6 {
+		t.Fatalf("maxTxID = %d, want 6", maxTxID)
+	}
+	if recovered.CommittedTxID() != 6 {
+		t.Fatalf("committed txID after event-only replay = %d, want 6", recovered.CommittedTxID())
+	}
+	if report.RecoveredTxID != 6 {
+		t.Fatalf("report recovered txID = %d, want 6", report.RecoveredTxID)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 6, End: 6}) {
+		t.Fatalf("replayed tx range = %+v, want 6..6", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 6 || plan.NextTxID != 7 {
+		t.Fatalf("resume plan = %+v, want append-in-place on tx 6 segment at tx 7", plan)
+	}
+	if report.ResumePlan != plan {
+		t.Fatalf("report resume plan = %+v, want %+v", report.ResumePlan, plan)
+	}
+
+	recoveredPlayers, ok := recovered.Table(0)
+	if !ok {
+		t.Fatal("recovered players table missing")
+	}
+	assertRecoveryRows(t, recoveredPlayers, map[uint64]string{1: "snapshot-player"})
+
+	events, ok := recovered.Table(1)
+	if !ok {
+		t.Fatal("events table missing")
+	}
+	if events.RowCount() != 0 {
+		t.Fatalf("event row count after event-only tail replay = %d, want 0", events.RowCount())
+	}
+	if events.NextID() != 1 {
+		t.Fatalf("event next row ID after event-only tail replay = %d, want 1", events.NextID())
+	}
+	if seq, ok := events.SequenceValue(); !ok || seq != 1 {
+		t.Fatalf("event sequence after event-only tail replay = (%d, %v), want (1, true)", seq, ok)
+	}
+}
+
 func TestOpenAndRecoverDetailedReplayExplicitAutoincrementValueRaisesRecoveredSequence(t *testing.T) {
 	root := t.TempDir()
 	reg := buildRecoveryAutoIncrementRegistry(t)
