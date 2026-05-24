@@ -1,6 +1,7 @@
 package commitlog
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"os"
@@ -260,6 +261,33 @@ func TestSelectSnapshotSchemaMismatchEventKind(t *testing.T) {
 	assertSchemaMismatchDetail(t, err, "event")
 }
 
+func TestSelectSnapshotSchemaMismatchLegacyEventKind(t *testing.T) {
+	root := t.TempDir()
+	_, reg := buildEventAutoIncrementSnapshotCommittedState(t)
+	writeSelectionLegacyEventMetadataSnapshot(t, root, reg, 5)
+	data, readErr := ReadSnapshot(filepath.Join(root, "snapshots", "5"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if snapshotSchemaTableIsEvent(data.Schema, 1) {
+		t.Fatal("legacy schema snapshot unexpectedly preserved event metadata")
+	}
+
+	snap, skipped, err := selectSnapshotWithReport(root, 5, reg)
+	if err == nil {
+		t.Fatal("expected schema mismatch for legacy event kind metadata")
+	}
+	if snap != nil {
+		t.Fatalf("selected snapshot = %+v, want none on event kind mismatch", snap)
+	}
+	if len(skipped) != 0 {
+		t.Fatalf("skipped snapshots = %+v, want no fallback-style skip for schema mismatch", skipped)
+	}
+	assertSchemaMismatchDetail(t, err, "kind")
+	assertSchemaMismatchDetail(t, err, "event")
+	assertSchemaMismatchDetail(t, err, "events")
+}
+
 func TestSelectSnapshotSchemaMismatchColumnNameAndIndex(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -485,6 +513,48 @@ func writeSelectionSnapshot(t *testing.T, root string, reg schema.SchemaRegistry
 	t.Helper()
 	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
 	createSnapshotAt(t, writer, cs, txID)
+}
+
+func writeSelectionLegacyEventMetadataSnapshot(t *testing.T, root string, reg schema.SchemaRegistry, txID types.TxID) {
+	t.Helper()
+	body := snapshotBodyCapture{
+		schema: encodeLegacySchemaSnapshotBytes(t, reg),
+	}
+	for _, tableID := range reg.Tables() {
+		ts, ok := reg.Table(tableID)
+		if !ok {
+			t.Fatalf("registry missing table %d", tableID)
+		}
+		if snapshotSchemaHasAutoIncrement(ts) {
+			value := uint64(1)
+			if ts.IsEvent {
+				value = 9
+			}
+			body.sequences = append(body.sequences, snapshotSequenceCapture{tableID: tableID, value: value})
+		}
+		nextID := uint64(1)
+		if ts.Name == "players" {
+			nextID = 2
+		}
+		if ts.IsEvent {
+			nextID = 10
+		}
+		body.nextIDs = append(body.nextIDs, snapshotNextIDCapture{tableID: tableID, value: nextID})
+
+		var rows []types.ProductValue
+		switch {
+		case ts.Name == "players":
+			rows = []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}
+		case ts.IsEvent:
+			rows = []types.ProductValue{{types.NewUint64(8), types.NewString("legacy-event")}}
+		}
+		body.tables = append(body.tables, snapshotTableCapture{tableID: tableID, rows: rows})
+	}
+	var bodyBuf bytes.Buffer
+	if err := writeSnapshotBodyCapture(&bodyBuf, reg, txID, body); err != nil {
+		t.Fatal(err)
+	}
+	writeSnapshotBytes(t, filepath.Join(root, "snapshots", txIDString(uint64(txID))), txID, reg.Version(), bodyBuf.Bytes())
 }
 
 func corruptSelectionSnapshot(t *testing.T, root string, txID types.TxID) {
