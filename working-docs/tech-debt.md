@@ -12,8 +12,10 @@ live code, tests, focused docs, and Go doc when they disagree with this file.
 `docs/performance-envelopes.md` owns the current benchmark snapshot. The
 remaining measurement gaps are:
 
-- external canary-scale fanout and workload-derived fanout distributions
-- external canary workload timing, including canary-scale backup/restore
+- product-app and external-canary-scale fanout, including workload-derived
+  fanout distributions
+- product-app and external-canary workload timing, including canary-scale
+  backup/restore
 - production-sized memory profiles beyond the current local fixtures
 - enough historical runs to decide whether any row should become a hard
   release gate instead of advisory data
@@ -21,14 +23,23 @@ remaining measurement gaps are:
 Keep measured snapshots in `docs/performance-envelopes.md`; keep this section
 limited to the missing evidence.
 
-## External Canary Maintenance
+## Product And External Canary Maintenance
 
-The external `opsboard-canary` repository remains the integration proving
-ground. Keep it on public Shunter APIs and package-shaped `@shunter/client`
-installs. It should continue covering strict auth, permissions, visibility,
-reducers, declared reads, raw SQL escape hatches, subscriptions,
-restart/rollback, contract export, generated TypeScript, offline
-backup/restore, and one app-owned migration path.
+Kickbrass may serve as the primary product adoption canary while it is being
+implemented on Shunter. Use it to validate real app pressure: API ergonomics,
+generated TypeScript shape, auth, procedures/service adapters, persistence,
+deployment, backup/restore, and operational workflows.
+
+Do not add artificial Kickbrass features only to improve Shunter coverage. If a
+Shunter edge case is not natural product behavior, cover it in package tests,
+hosted-chat, or a synthetic/external canary.
+
+When the external `opsboard-canary` repository is available, keep it on public
+Shunter APIs and package-shaped `@shunter/client` installs. It should continue
+covering broad regression surfaces that product apps may not naturally touch:
+strict auth, permissions, visibility, reducers, declared reads, raw SQL escape
+hatches, subscriptions, restart/rollback, contract export, generated
+TypeScript, offline backup/restore, and one app-owned migration path.
 
 Do not add a duplicate in-repo reference app unless the product direction
 changes.

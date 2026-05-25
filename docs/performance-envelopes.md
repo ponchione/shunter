@@ -124,8 +124,8 @@ Every row is advisory.
   and multi-way joins at 512 rows per table are the clearest allocation and
   latency targets in the current coverage.
 - Subscription fanout coverage now includes same-query, varied single-table,
-  skewed hot-key, and varied two-table fixtures. Workload-derived and canary
-  distributions remain outside the local benchmark envelope.
+  skewed hot-key, and varied two-table fixtures. Workload-derived product-app
+  and external-canary distributions remain outside the local benchmark envelope.
 - Executor reducer commit coverage now includes one-at-a-time round trips and
   a queued 64-command burst fixture. These are internal executor fixtures, not
   public app or canary throughput measurements.
@@ -138,7 +138,7 @@ Every row is advisory.
   and four-way chains; refresh the pending rows when updating this envelope.
 - Offline backup/restore is covered for small and larger complete local
   DataDir fixtures and is expected to be I/O dominated; these rows do not
-  replace canary-scale backup/restore timing.
+  replace product-app or external-canary-scale backup/restore timing.
 - WebSocket coverage now includes a single SubscribeSingle round trip and
   16-, 64-, and 128-client light-update fanout fixtures. Slow-reader
   backpressure now has a network-level advisory row for unrelated healthy
@@ -241,7 +241,7 @@ Findings:
   benchmark fixture setup; fixture file creation dominates the sample, while
   the timed copy path remains mostly visible through directory walking, stat,
   file open, and cleanup allocations. The workload is still a local 6.001 MiB
-  fixture, not canary-scale backup/restore evidence.
+  fixture, not product-app or external-canary backup/restore evidence.
 - `BenchmarkSubscribeSingleWebSocketRoundTrip-24`: 16.137us/op,
   6,609 B/op, 82 allocs/op. Allocation space is dominated by SQL
   tokenization/parse/query-plan construction and WebSocket read/write timeout
@@ -291,14 +291,16 @@ These remain outside the current benchmark envelope:
 
 - WebSocket network-level subscription workloads beyond the current
   single-connection subscribe, 16/64/128-client light-update fanout, and
-  slow-reader backpressure fixtures, including external canary-scale fanout;
-  deterministic sender-level full-buffer rejection is covered separately
-- workload-derived or canary fanout distributions beyond the deterministic
-  in-process same-query, varied single-table, skewed hot-key, and varied
-  two-table predicate fixtures
-- external canary workload, including canary-scale backup/restore timing
+  slow-reader backpressure fixtures, including product-app and external-canary
+  scale fanout; deterministic sender-level full-buffer rejection is covered
+  separately
+- workload-derived product-app or external-canary fanout distributions beyond
+  the deterministic in-process same-query, varied single-table, skewed hot-key,
+  and varied two-table predicate fixtures
+- product-app and external-canary workload timing, including canary-scale
+  backup/restore timing
 - memory profiles outside the current subscription, single-WebSocket,
   16/64/128-client WebSocket fanout, sender-level backpressure, executor
   reducer commit, and small/larger local backup/restore fixtures, including
-  canary-scale, slow-reader network paths, and production-sized
-  backup/restore workloads
+  product-app scale, external-canary scale, slow-reader network paths, and
+  production-sized backup/restore workloads

@@ -8,8 +8,10 @@ delivery behind a single runtime-owned API.
 The v1 line is focused on self-hosted Go applications that link Shunter as a
 runtime library or run it as the app's backend server from a static Go binary.
 Core subsystems are implemented and covered by the v1 support docs, hardening
-tests, TypeScript SDK tests, the hosted-chat example gate, and the external
-`opsboard-canary` release gate.
+tests, TypeScript SDK tests, and the hosted-chat example gate. Broader
+product-app validation is expected to come from real Shunter-backed apps such as
+Kickbrass, with external synthetic canaries such as `opsboard-canary` used when
+available for coverage that real apps do not naturally exercise.
 
 ## Project Status
 
@@ -129,8 +131,9 @@ frontend-shaped client that calls a reducer and subscribes to a live view.
 The runtime has meaningful implementation depth, but several areas are still
 early or intentionally narrow:
 
-- the bundled hosted-chat example is intentionally small; the broader
-  maintained product canary remains the external `opsboard-canary` application
+- the bundled hosted-chat example is intentionally small; real product apps
+  such as Kickbrass should drive adoption feedback, while external synthetic
+  canaries remain useful for broad regression coverage when available
 - generated TypeScript and the private local package-shaped `@shunter/client`
   runtime are the v1 client path
 - SQL support is scoped to the documented v1 read surfaces; Shunter does not

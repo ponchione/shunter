@@ -790,13 +790,28 @@ Acceptance criteria:
 Goal: fill the largest product-functionality gaps for "Shunter is the
 backend/db".
 
-Deliverables:
+Status: substantially implemented for the static hosted-app architecture. The
+remaining work is product validation, workload evidence, and targeted hardening
+from real app usage.
+
+Completed deliverables:
 - event tables or equivalent transient event surface.
 - procedure/service-adapter design and first implementation.
 - maintained ordered/windowed live views.
 - production auth/JWKS support.
 - improved migration compatibility reports.
 - TypeScript SDK improvements driven by the example app.
+
+Next validation focus:
+- use Kickbrass as the primary product adoption canary when working on the app
+  as a Shunter-backed backend. Kickbrass should drive real API ergonomics,
+  TypeScript client shape, auth, procedures, deployment, and operational
+  feedback.
+- keep hosted-chat as the small in-repo smoke gate for the common hosted
+  workflow.
+- keep synthetic or external canaries for Shunter coverage that Kickbrass does
+  not naturally need. Do not add artificial Kickbrass features only to exercise
+  Shunter edge cases.
 
 Acceptance criteria:
 - apps can model persistent state, transient events, external-service
@@ -864,13 +879,12 @@ Go Shunter app server
 ## Capability Priority
 
 High priority:
-- hosted app server shape
-- TypeScript frontend ergonomics
-- event tables
-- procedure/service-adapter surface
-- maintained ordered/windowed views
-- auth/JWKS
-- migration reports and app-owned migration hooks
+- product-app validation through Kickbrass, without adding artificial features
+  only for Shunter coverage
+- workload-derived performance and operability evidence from real app usage
+- targeted hardening for the hosted surfaces already implemented: event
+  tables, procedures, maintained live windows, auth/JWKS, migration reports,
+  and generated TypeScript clients
 
 Medium priority:
 - richer schema types
