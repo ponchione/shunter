@@ -174,7 +174,7 @@ func (r *Runtime) CallReducer(ctx context.Context, reducerName string, args []by
 	if callOpts.caller.Identity.IsZero() {
 		callOpts.caller.Identity = defaultLocalIdentity
 	}
-	if !callOpts.permissionsSet && !callOpts.allowAllSet && r.buildConfig.AuthMode == AuthModeDev {
+	if !callOpts.permissionsSet && !callOpts.allowAllSet && r != nil && r.buildConfig.AuthMode == AuthModeDev {
 		callOpts.caller.AllowAllPermissions = true
 	}
 	return r.callReducerWithCallerAndRequest(ctx, reducerName, args, callOpts.caller, callOpts.requestID)
@@ -271,6 +271,9 @@ func (r *Runtime) WaitUntilDurable(ctx context.Context, txID types.TxID) error {
 }
 
 func (r *Runtime) readyExecutor() (*executor.Executor, error) {
+	if r == nil {
+		return nil, ErrRuntimeNotReady
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.readyLocked(); err != nil {
@@ -309,6 +312,9 @@ func (r *Runtime) Read(ctx context.Context, fn func(LocalReadView) error) error 
 }
 
 func (r *Runtime) readyState() (*store.CommittedState, error) {
+	if r == nil {
+		return nil, ErrRuntimeNotReady
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.readyLocked(); err != nil {

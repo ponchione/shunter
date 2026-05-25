@@ -33,6 +33,24 @@ func TestRuntimeCreateSnapshotWritesCommittedHorizon(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreateSnapshotNilRuntimeReturnsNotReady(t *testing.T) {
+	var rt *Runtime
+
+	_, err := rt.CreateSnapshot()
+	if !errors.Is(err, ErrRuntimeNotReady) {
+		t.Fatalf("CreateSnapshot nil runtime error = %v, want ErrRuntimeNotReady", err)
+	}
+}
+
+func TestRuntimeCompactCommitLogNilRuntimeReturnsNotReady(t *testing.T) {
+	var rt *Runtime
+
+	err := rt.CompactCommitLog(1)
+	if !errors.Is(err, ErrRuntimeNotReady) {
+		t.Fatalf("CompactCommitLog nil runtime error = %v, want ErrRuntimeNotReady", err)
+	}
+}
+
 func TestRuntimeCreateSnapshotFaultKeepsRuntimeUsable(t *testing.T) {
 	rt := buildValidTestRuntime(t)
 	rt.state.SetCommittedTxID(7)

@@ -54,6 +54,9 @@ func (r *Runtime) CompactCommitLog(snapshotTxID types.TxID) error {
 }
 
 func (r *Runtime) storageHandles() (runtimeStorageHandles, error) {
+	if r == nil {
+		return runtimeStorageHandles{}, ErrRuntimeNotReady
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

@@ -23,6 +23,15 @@ func TestCallReducerRequiresReadyRuntime(t *testing.T) {
 	}
 }
 
+func TestCallReducerNilRuntimeReturnsNotReady(t *testing.T) {
+	var rt *Runtime
+
+	_, err := rt.CallReducer(context.Background(), "send_message", nil)
+	if !errors.Is(err, ErrRuntimeNotReady) {
+		t.Fatalf("CallReducer nil runtime error = %v, want ErrRuntimeNotReady", err)
+	}
+}
+
 func TestCallReducerPreservesStartingState(t *testing.T) {
 	rt := buildValidTestRuntime(t)
 	rt.mu.Lock()
@@ -384,6 +393,15 @@ func TestReadRequiresReadyRuntime(t *testing.T) {
 	err := rt.Read(context.Background(), func(LocalReadView) error { return nil })
 	if !errors.Is(err, ErrRuntimeNotReady) {
 		t.Fatalf("Read before Start error = %v, want ErrRuntimeNotReady", err)
+	}
+}
+
+func TestReadNilRuntimeReturnsNotReady(t *testing.T) {
+	var rt *Runtime
+
+	err := rt.Read(context.Background(), func(LocalReadView) error { return nil })
+	if !errors.Is(err, ErrRuntimeNotReady) {
+		t.Fatalf("Read nil runtime error = %v, want ErrRuntimeNotReady", err)
 	}
 }
 
