@@ -45,9 +45,7 @@ type Client struct {
 
 // Dial connects to a Shunter protocol endpoint and reads the initial identity frame.
 func Dial(ctx context.Context, opts Options) (*Client, protocol.IdentityToken, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx = contextOrBackground(ctx)
 	target := strings.TrimSpace(opts.URL)
 	if target == "" {
 		return nil, protocol.IdentityToken{}, ErrURLRequired
@@ -130,6 +128,7 @@ func (c *Client) Send(ctx context.Context, msg any) error {
 	if c == nil || c.conn == nil {
 		return errors.New("protocol client is closed")
 	}
+	ctx = contextOrBackground(ctx)
 	frame, err := protocol.EncodeClientMessage(msg)
 	if err != nil {
 		return err
@@ -145,6 +144,7 @@ func (c *Client) Read(ctx context.Context) (uint8, any, error) {
 	if c == nil || c.conn == nil {
 		return 0, nil, errors.New("protocol client is closed")
 	}
+	ctx = contextOrBackground(ctx)
 	typ, frame, err := c.conn.Read(ctx)
 	if err != nil {
 		return 0, nil, classifyContextError(ctx, err)
@@ -164,6 +164,7 @@ func (c *Client) Close(ctx context.Context) error {
 	if c == nil || c.conn == nil {
 		return nil
 	}
+	ctx = contextOrBackground(ctx)
 	if !c.closeDone.CompareAndSwap(false, true) {
 		return nil
 	}
@@ -172,6 +173,13 @@ func (c *Client) Close(ctx context.Context) error {
 		return classifyContextError(ctx, err)
 	}
 	return nil
+}
+
+func contextOrBackground(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
 }
 
 func classifyContextError(ctx context.Context, err error) error {

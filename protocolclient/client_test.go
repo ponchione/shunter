@@ -114,6 +114,54 @@ func TestDialAllowsExplicitAnonymousConnection(t *testing.T) {
 	}
 }
 
+func TestDialAndCallReducerAllowsNilContext(t *testing.T) {
+	wantIdentity := protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}}
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, wantIdentity)
+
+		_, frame, err := ws.Read(r.Context())
+		if err != nil {
+			t.Errorf("server read client message: %v", err)
+			return
+		}
+		_, msg, err := protocol.DecodeClientMessage(frame)
+		if err != nil {
+			t.Errorf("DecodeClientMessage: %v", err)
+			return
+		}
+		call, ok := msg.(protocol.CallReducerMsg)
+		if !ok {
+			t.Errorf("client message = %T, want protocol.CallReducerMsg", msg)
+			return
+		}
+		writeProtocolClientServerMessage(t, ws, protocol.TransactionUpdate{
+			Status:      protocol.StatusCommitted{},
+			ReducerCall: protocol.ReducerCallInfo{ReducerName: call.ReducerName, RequestID: call.RequestID},
+		})
+
+		readCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, _, _ = ws.Read(readCtx)
+	})
+
+	var ctx context.Context
+	identity, update, err := DialAndCallReducer(ctx, Options{
+		URL:   srv.wsURL(),
+		Token: "operator-token",
+	}, ReducerCallRequest{Name: "send_message"})
+	if err != nil {
+		t.Fatalf("DialAndCallReducer returned error: %v", err)
+	}
+	if identity != wantIdentity {
+		t.Fatalf("identity = %+v, want %+v", identity, wantIdentity)
+	}
+	if update.ReducerCall.ReducerName != "send_message" || update.ReducerCall.RequestID != 1 {
+		t.Fatalf("DialAndCallReducer update = %+v", update)
+	}
+}
+
 func TestDialRequiresExplicitURLBeforeNetwork(t *testing.T) {
 	_, _, err := Dial(context.Background(), Options{URL: " \t", Token: "operator-token"})
 	if !errors.Is(err, ErrURLRequired) {
