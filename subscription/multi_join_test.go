@@ -858,7 +858,7 @@ func TestMultiJoinProjectionPreservesInitialAndDeltaShape(t *testing.T) {
 	s := multiJoinTestSchema()
 	inbox := make(chan FanOutMessage, 1)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
-	pred := multiJoinTestPredicate()
+	pred := multiJoinUnfilteredTestPredicate()
 	projection := []ProjectionColumn{{
 		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
 		Table:  1,
@@ -882,8 +882,8 @@ func TestMultiJoinProjectionPreservesInitialAndDeltaShape(t *testing.T) {
 	if initial.TableID != 1 || len(initial.Columns) != 1 || initial.Columns[0].Name != "id" {
 		t.Fatalf("initial projection shape = table %d columns %#v, want table 1 id", initial.TableID, initial.Columns)
 	}
-	if !productRowsHaveUint64IDs(initial.Inserts, 1, 2, 2, 3, 3) {
-		t.Fatalf("initial projected rows = %v, want ids 1,2,2,3,3", initial.Inserts)
+	if !productRowsHaveUint64IDs(initial.Inserts, 1, 2, 2, 2, 2, 3, 3, 3, 3) {
+		t.Fatalf("initial projected rows = %v, want ids 1,2,2,2,2,3,3,3,3", initial.Inserts)
 	}
 	for _, row := range initial.Inserts {
 		if len(row) != 1 {
@@ -917,7 +917,7 @@ func TestMultiJoinProjectionCancelsProjectedNoOpDelta(t *testing.T) {
 	s := multiJoinTestSchema()
 	inbox := make(chan FanOutMessage, 1)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
-	pred := multiJoinTestPredicate()
+	pred := multiJoinUnfilteredTestPredicate()
 	projection := []ProjectionColumn{{
 		Schema: schema.ColumnSchema{Index: 1, Name: "u32", Type: types.KindUint64},
 		Table:  1,
@@ -956,6 +956,87 @@ func TestMultiJoinProjectionCancelsProjectedNoOpDelta(t *testing.T) {
 	msg := <-inbox
 	if got := msg.Fanout[connID]; len(got) != 0 {
 		t.Fatalf("projected multi-join no-op fanout = %+v, want no updates", got)
+	}
+}
+
+func TestMultiJoinProjectionDeltaDiffsProjectedBeforeAfterBags(t *testing.T) {
+	s := multiJoinTestSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := multiJoinUnfilteredTestPredicate()
+	projection := []ProjectionColumn{
+		{Schema: schema.ColumnSchema{Index: 0, Name: "left_id", Type: types.KindUint64}, Table: 1, Column: 0, Alias: 0},
+		{Schema: schema.ColumnSchema{Index: 0, Name: "middle_id", Type: types.KindUint64}, Table: 2, Column: 0, Alias: 1},
+		{Schema: schema.ColumnSchema{Index: 0, Name: "right_id", Type: types.KindUint64}, Table: 3, Column: 0, Alias: 2},
+	}
+	beforeRows := map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(1), types.NewUint64(10)}},
+		2: {{types.NewUint64(20), types.NewUint64(10)}},
+		3: {{types.NewUint64(30), types.NewUint64(10)}},
+	}
+	afterRows := map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(2), types.NewUint64(10)}},
+		2: {{types.NewUint64(21), types.NewUint64(10)}},
+		3: beforeRows[3],
+	}
+	connID := types.ConnectionID{20}
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:            connID,
+		QueryID:           200,
+		Predicates:        []Predicate{pred},
+		ProjectionColumns: [][]ProjectionColumn{projection},
+	}, buildMockCommitted(s, beforeRows))
+	if err != nil {
+		t.Fatalf("RegisterSet multi-join projection: %v", err)
+	}
+	wantBefore := []types.ProductValue{{types.NewUint64(1), types.NewUint64(20), types.NewUint64(30)}}
+	if got := rowsFromUpdates(res.Update); !bagEqual(got, wantBefore) {
+		t.Fatalf("initial projected rows = %v, want %v", got, wantBefore)
+	}
+
+	cs := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			1: {
+				Inserts: []types.ProductValue{{types.NewUint64(2), types.NewUint64(10)}},
+				Deletes: []types.ProductValue{{types.NewUint64(1), types.NewUint64(10)}},
+			},
+			2: {
+				Inserts: []types.ProductValue{{types.NewUint64(21), types.NewUint64(10)}},
+				Deletes: []types.ProductValue{{types.NewUint64(20), types.NewUint64(10)}},
+			},
+		},
+	}
+	mgr.EvalAndBroadcast(types.TxID(1), cs, buildMockCommitted(s, afterRows), PostCommitMeta{})
+	update := requireSingleFanoutUpdate(t, <-inbox, connID)
+	wantInserts := []types.ProductValue{{types.NewUint64(2), types.NewUint64(21), types.NewUint64(30)}}
+	wantDeletes := wantBefore
+	if !bagEqual(update.Inserts, wantInserts) || !bagEqual(update.Deletes, wantDeletes) {
+		t.Fatalf("projected multi-join delta inserts/deletes = %v/%v, want %v/%v", update.Inserts, update.Deletes, wantInserts, wantDeletes)
+	}
+}
+
+func TestMultiJoinProjectionRejectsNonEqualityFilter(t *testing.T) {
+	s := multiJoinTestSchema()
+	mgr := NewManager(s, s)
+	pred := multiJoinTestPredicate()
+	projection := []ProjectionColumn{{
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Table:  1,
+		Column: 0,
+		Alias:  0,
+	}}
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:            types.ConnectionID{21},
+		QueryID:           210,
+		Predicates:        []Predicate{pred},
+		ProjectionColumns: [][]ProjectionColumn{projection},
+	}, multiJoinCommitted(false))
+	if !errors.Is(err, ErrInvalidPredicate) {
+		t.Fatalf("RegisterSet non-equality projected multi-join error = %v, want ErrInvalidPredicate", err)
+	}
+	if active := mgr.ActiveSubscriptionSets(); active != 0 {
+		t.Fatalf("ActiveSubscriptionSets = %d, want 0 after rejected projected multi-join", active)
 	}
 }
 

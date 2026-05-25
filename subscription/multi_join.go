@@ -25,6 +25,18 @@ func evalMultiJoinDelta(ctx context.Context, dv *DeltaView, p MultiJoin, project
 	if err != nil {
 		return nil, nil, err
 	}
+	if len(projection) > 0 {
+		before, err := collectMultiJoinProjectedRows(ctx, p, beforeRows, projection, 0)
+		if err != nil {
+			return nil, nil, err
+		}
+		after, err := collectMultiJoinProjectedRows(ctx, p, afterRows, projection, 0)
+		if err != nil {
+			return nil, nil, err
+		}
+		inserts, deletes = ReconcileJoinDelta([][]types.ProductValue{after}, [][]types.ProductValue{before})
+		return inserts, deletes, nil
+	}
 	insertFragments := make([][]types.ProductValue, 0, len(p.Relations))
 	deleteFragments := make([][]types.ProductValue, 0, len(p.Relations))
 	for i, rel := range p.Relations {

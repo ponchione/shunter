@@ -26,12 +26,18 @@ func validateProjectionColumns(pred Predicate, columns []ProjectionColumn, s Sch
 	if len(columns) == 0 {
 		return nil
 	}
+	if multi, ok := pred.(MultiJoin); ok && !multiJoinProjectionFilterIsEquality(multi.Filter) {
+		return fmt.Errorf("%w: multi-join projections only support equality filters", ErrInvalidPredicate)
+	}
 	for i, col := range columns {
 		label := fmt.Sprintf("projection column %d", i)
 		if err := validateDeclaredColumnIndex(label, col.Column, col.Schema); err != nil {
 			return err
 		}
 		if !projectionColumnMatchesEmittedRelation(pred, col) {
+			if _, ok := pred.(MultiJoin); ok {
+				return fmt.Errorf("%w: projection column %d must come from a joined relation", ErrInvalidPredicate, i)
+			}
 			return fmt.Errorf("%w: projection column %d must come from the emitted relation", ErrInvalidPredicate, i)
 		}
 		if err := validateDeclaredColumnSource(label, col.Table, col.Column, col.Schema, s); err != nil {
@@ -39,6 +45,21 @@ func validateProjectionColumns(pred Predicate, columns []ProjectionColumn, s Sch
 		}
 	}
 	return nil
+}
+
+func multiJoinProjectionFilterIsEquality(pred Predicate) bool {
+	switch p := pred.(type) {
+	case nil:
+		return true
+	case ColEq:
+		return true
+	case ColEqCol:
+		return true
+	case And:
+		return multiJoinProjectionFilterIsEquality(p.Left) && multiJoinProjectionFilterIsEquality(p.Right)
+	default:
+		return false
+	}
 }
 
 func projectionColumnMatchesEmittedRelation(pred Predicate, col ProjectionColumn) bool {

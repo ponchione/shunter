@@ -111,6 +111,15 @@ func TestSubscribeViewKickbrassLikeFlattenedLeaderboardDeltas(t *testing.T) {
 		leaderboardProjectedRow(leaderboardMatchA, 1, 88, "A-1", "v-a"),
 	}, "row move-in delta inserts")
 	assertProductValueBag(t, update.Deletes, nil, "row move-in delta deletes")
+
+	callLeaderboardReducer(t, rt, "update_leaderboard_source_and_stage")
+	update = requireLeaderboardLightUpdate(t, capture, connID, 301)
+	assertProductValueBag(t, update.Inserts, []types.ProductValue{
+		leaderboardProjectedRow(leaderboardMatchA, 1, 93, "A-1-source-stage", "v-a2"),
+	}, "source and stage update delta inserts")
+	assertProductValueBag(t, update.Deletes, []types.ProductValue{
+		leaderboardProjectedRow(leaderboardMatchA, 1, 88, "A-1", "v-a"),
+	}, "source and stage update delta deletes")
 }
 
 func TestSubscribeViewKickbrassLikeFlattenedLeaderboardParameterIsolation(t *testing.T) {
@@ -161,6 +170,7 @@ func leaderboardPilotModule() *Module {
 		Reducer("delete_leaderboard_stage_two", deleteLeaderboardStageTwoReducer).
 		Reducer("move_leaderboard_row_out", moveLeaderboardRowOutReducer).
 		Reducer("move_leaderboard_row_in", moveLeaderboardRowInReducer).
+		Reducer("update_leaderboard_source_and_stage", updateLeaderboardSourceAndStageReducer).
 		Reducer("insert_leaderboard_match_b", insertLeaderboardMatchBReducer).
 		View(ViewDeclaration{
 			Name:        "live_flattened_leaderboard",
@@ -283,6 +293,13 @@ func moveLeaderboardRowInReducer(ctx *schema.ReducerContext, _ []byte) ([]byte, 
 	return nil, updateLeaderboardRowMatch(ctx, "archived-match", leaderboardMatchA)
 }
 
+func updateLeaderboardSourceAndStageReducer(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {
+	if err := updateLeaderboardMatchSource(ctx, leaderboardMatchA, "v-a2"); err != nil {
+		return nil, err
+	}
+	return nil, updateLeaderboardStageScore(ctx, leaderboardMatchA, 1, leaderboardStageScoreRow(leaderboardMatchA, 1, 93, "A-1-source-stage"))
+}
+
 func insertLeaderboardMatchBReducer(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {
 	if err := insertLeaderboardBase(ctx, leaderboardMatchB, "v-b"); err != nil {
 		return nil, err
@@ -310,6 +327,18 @@ func updateLeaderboardStageScore(ctx *schema.ReducerContext, matchID string, sta
 		}
 	}
 	return fmt.Errorf("stage score %s/%d not found", matchID, stageID)
+}
+
+func updateLeaderboardMatchSource(ctx *schema.ReducerContext, matchID string, sourceVersion string) error {
+	for rowID, row := range ctx.DB.ScanTable(leaderboardMatchesTableID) {
+		if row[0].AsString() == matchID {
+			next := row.Copy()
+			next[1] = types.NewString(sourceVersion)
+			_, err := ctx.DB.Update(leaderboardMatchesTableID, rowID, next)
+			return err
+		}
+	}
+	return fmt.Errorf("leaderboard match %s not found", matchID)
 }
 
 func deleteLeaderboardStageScore(ctx *schema.ReducerContext, matchID string, stageID uint64) error {
