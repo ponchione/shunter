@@ -18,7 +18,7 @@ func runDescribe(stdout, stderr io.Writer, args []string) int {
 	urlValue := fs.String("url", "", "running Shunter app URL")
 	timeout := fs.Duration("timeout", defaultRunningAppTimeout, "bounded running-app diagnostics timeout")
 	format := fs.String("format", contractworkflow.FormatText, "output format: text or json")
-	section := fs.String("section", describeSectionAll, "section to print: all, tables, reducers, queries, views, or visibility")
+	section := fs.String("section", describeSectionAll, "section to print: all, tables, reducers, procedures, queries, views, or visibility")
 	if code, stop := parseFlags(fs, args); stop {
 		return code
 	}
@@ -331,6 +331,26 @@ func productColumnCount(product *shunter.ProductSchema) int {
 		return 0
 	}
 	return len(product.Columns)
+}
+
+func writeContractSummaryText(b *strings.Builder, describe describeSummary) {
+	fmt.Fprintf(b, "Module: %s", describe.Module.Name)
+	if describe.Module.Version != "" {
+		fmt.Fprintf(b, " %s", describe.Module.Version)
+	}
+	fmt.Fprintf(b, "\nContract version: %d\nSchema version: %d\n", describe.ContractVersion, describe.SchemaVersion)
+	fmt.Fprintf(
+		b,
+		"Counts: %d tables, %d columns, %d indexes, %d reducers, %d procedures, %d queries, %d views, %d visibility filters\n",
+		describe.Counts.Tables,
+		describe.Counts.Columns,
+		describe.Counts.Indexes,
+		describe.Counts.Reducers,
+		describe.Counts.Procedures,
+		describe.Counts.Queries,
+		describe.Counts.Views,
+		describe.Counts.VisibilityFilters,
+	)
 }
 
 type runningDescribeReport struct {

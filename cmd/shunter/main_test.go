@@ -69,6 +69,18 @@ func TestContractAssertHelpDocumentsExamples(t *testing.T) {
 	assertContains(t, out, "-visibility-filters")
 }
 
+func TestDescribeHelpDocumentsAllSections(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{"describe", "--help"})
+	if code != 0 {
+		t.Fatalf("run describe --help exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("run describe --help stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "all, tables, reducers, procedures, queries, views, or visibility")
+}
+
 func TestDescribeCommandReadsContractText(t *testing.T) {
 	dir := t.TempDir()
 	contract := cliContractFixture()

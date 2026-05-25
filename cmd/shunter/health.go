@@ -132,23 +132,7 @@ func (r healthContractReport) Text() string {
 	fmt.Fprintf(&b, "Scope: %s\n", r.Scope)
 	fmt.Fprintf(&b, "Running server checked: %t\n", r.RunningServerChecked)
 	fmt.Fprintf(&b, "Message: %s\n", r.Message)
-	fmt.Fprintf(&b, "Module: %s", r.Describe.Module.Name)
-	if r.Describe.Module.Version != "" {
-		fmt.Fprintf(&b, " %s", r.Describe.Module.Version)
-	}
-	fmt.Fprintf(&b, "\nContract version: %d\nSchema version: %d\n", r.Describe.ContractVersion, r.Describe.SchemaVersion)
-	fmt.Fprintf(
-		&b,
-		"Counts: %d tables, %d columns, %d indexes, %d reducers, %d procedures, %d queries, %d views, %d visibility filters\n",
-		r.Describe.Counts.Tables,
-		r.Describe.Counts.Columns,
-		r.Describe.Counts.Indexes,
-		r.Describe.Counts.Reducers,
-		r.Describe.Counts.Procedures,
-		r.Describe.Counts.Queries,
-		r.Describe.Counts.Views,
-		r.Describe.Counts.VisibilityFilters,
-	)
+	writeContractSummaryText(&b, r.Describe)
 	return b.String()
 }
 
