@@ -81,6 +81,27 @@ func TestMatchRowColNeNull(t *testing.T) {
 	}
 }
 
+func TestMatchRowNegativeColumnRejects(t *testing.T) {
+	row := types.ProductValue{types.NewUint64(42)}
+	predicates := []Predicate{
+		ColEq{Table: 1, Column: -1, Value: types.NewUint64(42)},
+		ColNe{Table: 1, Column: -1, Value: types.NewUint64(42)},
+		ColRange{
+			Table:  1,
+			Column: -1,
+			Lower:  Bound{Value: types.NewUint64(1), Inclusive: true},
+			Upper:  Bound{Value: types.NewUint64(99), Inclusive: true},
+		},
+		ColEqCol{LeftTable: 1, LeftColumn: -1, RightTable: 1, RightColumn: 0},
+		ColEqCol{LeftTable: 1, LeftColumn: 0, RightTable: 1, RightColumn: -1},
+	}
+	for _, pred := range predicates {
+		if MatchRow(pred, 1, row) {
+			t.Fatalf("%T with negative column matched; want reject", pred)
+		}
+	}
+}
+
 func TestMatchRowSideColEqColSameSide(t *testing.T) {
 	p := ColEqCol{LeftTable: 1, LeftColumn: 0, RightTable: 1, RightColumn: 1}
 	if !MatchRowSide(p, 1, 0, types.ProductValue{types.NewUint32(7), types.NewUint32(7)}) {
@@ -143,6 +164,28 @@ func TestMatchJoinPairColEqColSelfJoinAliases(t *testing.T) {
 		1, 1, types.ProductValue{types.NewUint32(99), types.NewUint32(5)},
 	) {
 		t.Fatal("self-join column equality should reject mismatched aliased value")
+	}
+}
+
+func TestMatchJoinPairNegativeColumnRejects(t *testing.T) {
+	left := types.ProductValue{types.NewUint32(7)}
+	right := types.ProductValue{types.NewUint32(7)}
+	predicates := []Predicate{
+		ColEq{Table: 1, Column: -1, Value: types.NewUint32(7)},
+		ColNe{Table: 2, Column: -1, Value: types.NewUint32(7)},
+		ColRange{
+			Table:  1,
+			Column: -1,
+			Lower:  Bound{Value: types.NewUint32(1), Inclusive: true},
+			Upper:  Bound{Value: types.NewUint32(9), Inclusive: true},
+		},
+		ColEqCol{LeftTable: 1, LeftColumn: -1, RightTable: 2, RightColumn: 0},
+		ColEqCol{LeftTable: 1, LeftColumn: 0, RightTable: 2, RightColumn: -1},
+	}
+	for _, pred := range predicates {
+		if MatchJoinPair(pred, 1, 0, left, 2, 0, right) {
+			t.Fatalf("%T with negative column matched; want reject", pred)
+		}
 	}
 }
 

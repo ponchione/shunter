@@ -686,16 +686,21 @@ func visitJoinCommittedPairsWithProbeIndex(
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if int(driveCol) >= len(driveRow) {
+		driveValue, ok := rowValue(driveRow, driveCol)
+		if !ok {
 			continue
 		}
-		key := store.NewIndexKey(driveRow[driveCol])
+		key := store.NewIndexKey(driveValue)
 		for _, rid := range view.IndexSeek(probeTable, probeIdx, key) {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			probeRow, ok := view.GetRow(probeTable, rid)
-			if !ok || int(probeCol) >= len(probeRow) || !driveRow[driveCol].Equal(probeRow[probeCol]) {
+			if !ok {
+				continue
+			}
+			probeValue, ok := rowValue(probeRow, probeCol)
+			if !ok || !driveValue.Equal(probeValue) {
 				continue
 			}
 			if driveIsLeft {

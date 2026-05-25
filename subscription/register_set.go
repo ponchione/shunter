@@ -506,11 +506,12 @@ func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.Produ
 		if !initialRowIDAllowed(projectedCandidates, filterProjected, projectedRID) {
 			continue
 		}
-		if int(projectedJoinCol) >= len(projectedRow) {
+		projectedJoinValue, ok := rowValue(projectedRow, projectedJoinCol)
+		if !ok {
 			continue
 		}
 		if hasOtherIdx {
-			key := store.NewIndexKey(projectedRow[projectedJoinCol])
+			key := store.NewIndexKey(projectedJoinValue)
 			for _, rid := range view.IndexSeek(otherTable, otherIdx, key) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
@@ -558,10 +559,11 @@ func (m *Manager) appendProjectedJoinRowsFromProjectedIndex(
 		if !initialRowIDAllowed(otherCandidates, filterOther, otherRID) {
 			continue
 		}
-		if int(otherJoinCol) >= len(otherRow) {
+		otherJoinValue, ok := rowValue(otherRow, otherJoinCol)
+		if !ok {
 			continue
 		}
-		key := store.NewIndexKey(otherRow[otherJoinCol])
+		key := store.NewIndexKey(otherJoinValue)
 		for _, projectedRID := range view.IndexSeek(projectedTable, projectedIdx, key) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -570,7 +572,10 @@ func (m *Manager) appendProjectedJoinRowsFromProjectedIndex(
 				continue
 			}
 			projectedRow, ok := view.GetRow(projectedTable, projectedRID)
-			if !ok || int(projectedJoinCol) >= len(projectedRow) {
+			if !ok {
+				continue
+			}
+			if _, ok := rowValue(projectedRow, projectedJoinCol); !ok {
 				continue
 			}
 			leftRow, rightRow := orientedRows(projectedRow, otherRow)

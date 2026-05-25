@@ -40,10 +40,11 @@ func MatchRowSide(pred Predicate, table TableID, sideAlias uint8, row types.Prod
 		if p.Alias != sideAlias {
 			return true
 		}
-		if int(p.Column) >= len(row) {
+		value, ok := rowValue(row, p.Column)
+		if !ok {
 			return false
 		}
-		return row[p.Column].Equal(p.Value)
+		return value.Equal(p.Value)
 	case ColNe:
 		if p.Table != table {
 			return true
@@ -51,10 +52,11 @@ func MatchRowSide(pred Predicate, table TableID, sideAlias uint8, row types.Prod
 		if p.Alias != sideAlias {
 			return true
 		}
-		if int(p.Column) >= len(row) {
+		value, ok := rowValue(row, p.Column)
+		if !ok {
 			return false
 		}
-		return !row[p.Column].Equal(p.Value)
+		return !value.Equal(p.Value)
 	case ColRange:
 		if p.Table != table {
 			return true
@@ -62,10 +64,11 @@ func MatchRowSide(pred Predicate, table TableID, sideAlias uint8, row types.Prod
 		if p.Alias != sideAlias {
 			return true
 		}
-		if int(p.Column) >= len(row) {
+		value, ok := rowValue(row, p.Column)
+		if !ok {
 			return false
 		}
-		return matchBounds(row[p.Column], p.Lower, p.Upper)
+		return matchBounds(value, p.Lower, p.Upper)
 	case ColEqCol:
 		leftMatches := p.LeftTable == table && p.LeftAlias == sideAlias
 		rightMatches := p.RightTable == table && p.RightAlias == sideAlias
@@ -73,10 +76,15 @@ func MatchRowSide(pred Predicate, table TableID, sideAlias uint8, row types.Prod
 			return true
 		}
 		if leftMatches && rightMatches {
-			if int(p.LeftColumn) >= len(row) || int(p.RightColumn) >= len(row) {
+			left, ok := rowValue(row, p.LeftColumn)
+			if !ok {
 				return false
 			}
-			return row[p.LeftColumn].Equal(row[p.RightColumn])
+			right, ok := rowValue(row, p.RightColumn)
+			if !ok {
+				return false
+			}
+			return left.Equal(right)
 		}
 		return true
 	case And:
@@ -111,32 +119,52 @@ func MatchJoinPair(pred Predicate, leftTable TableID, leftAlias uint8, leftRow t
 	switch p := pred.(type) {
 	case ColEq:
 		row, ok := joinPredicateRow(p.Table, p.Alias, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)
-		if !ok || int(p.Column) >= len(row) {
+		if !ok {
 			return false
 		}
-		return row[p.Column].Equal(p.Value)
+		value, ok := rowValue(row, p.Column)
+		if !ok {
+			return false
+		}
+		return value.Equal(p.Value)
 	case ColNe:
 		row, ok := joinPredicateRow(p.Table, p.Alias, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)
-		if !ok || int(p.Column) >= len(row) {
+		if !ok {
 			return false
 		}
-		return !row[p.Column].Equal(p.Value)
+		value, ok := rowValue(row, p.Column)
+		if !ok {
+			return false
+		}
+		return !value.Equal(p.Value)
 	case ColRange:
 		row, ok := joinPredicateRow(p.Table, p.Alias, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)
-		if !ok || int(p.Column) >= len(row) {
+		if !ok {
 			return false
 		}
-		return matchBounds(row[p.Column], p.Lower, p.Upper)
+		value, ok := rowValue(row, p.Column)
+		if !ok {
+			return false
+		}
+		return matchBounds(value, p.Lower, p.Upper)
 	case ColEqCol:
 		left, ok := joinPredicateRow(p.LeftTable, p.LeftAlias, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)
-		if !ok || int(p.LeftColumn) >= len(left) {
+		if !ok {
 			return false
 		}
 		right, ok := joinPredicateRow(p.RightTable, p.RightAlias, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)
-		if !ok || int(p.RightColumn) >= len(right) {
+		if !ok {
 			return false
 		}
-		return left[p.LeftColumn].Equal(right[p.RightColumn])
+		leftValue, ok := rowValue(left, p.LeftColumn)
+		if !ok {
+			return false
+		}
+		rightValue, ok := rowValue(right, p.RightColumn)
+		if !ok {
+			return false
+		}
+		return leftValue.Equal(rightValue)
 	case And:
 		return MatchJoinPair(p.Left, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow) &&
 			MatchJoinPair(p.Right, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)
@@ -179,6 +207,14 @@ func joinPredicateRow(table TableID, alias uint8, leftTable TableID, leftAlias u
 	default:
 		return nil, false
 	}
+}
+
+func rowValue(row types.ProductValue, col ColID) (Value, bool) {
+	idx := int(col)
+	if idx < 0 || idx >= len(row) {
+		return Value{}, false
+	}
+	return row[idx], true
 }
 
 // matchBounds reports whether v falls within [lower, upper].

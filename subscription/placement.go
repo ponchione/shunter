@@ -1862,10 +1862,11 @@ func forEachJoinedRHSFilterValue(
 	}
 	matched := false
 	for _, row := range rows {
-		if int(edge.LHSJoinCol) >= len(row) {
+		lhsValue, ok := rowValue(row, edge.LHSJoinCol)
+		if !ok {
 			continue
 		}
-		key := store.NewIndexKey(row[edge.LHSJoinCol])
+		key := store.NewIndexKey(lhsValue)
 		rowIDs := committed.IndexSeek(edge.RHSTable, rhsIdx, key)
 		for _, rid := range rowIDs {
 			rhsRow, ok := committed.GetRow(edge.RHSTable, rid)
@@ -1873,10 +1874,11 @@ func forEachJoinedRHSFilterValue(
 				continue
 			}
 			matched = true
-			if int(edge.RHSFilterCol) >= len(rhsRow) {
+			filterValue, ok := rowValue(rhsRow, edge.RHSFilterCol)
+			if !ok {
 				continue
 			}
-			fn(rhsRow[edge.RHSFilterCol])
+			fn(filterValue)
 		}
 	}
 	return matched
@@ -1925,10 +1927,11 @@ func forEachJoinedChangedRHSFilterValue(
 func changedJoinKeySet(rows []types.ProductValue, col ColID) map[valueKey]struct{} {
 	keys := make(map[valueKey]struct{}, len(rows))
 	for _, row := range rows {
-		if int(col) >= len(row) {
+		value, ok := rowValue(row, col)
+		if !ok {
 			continue
 		}
-		keys[encodeValueKey(row[col])] = struct{}{}
+		keys[encodeValueKey(value)] = struct{}{}
 	}
 	return keys
 }
@@ -1940,11 +1943,16 @@ func forEachChangedRHSFilterValue(
 	fn func(Value),
 ) {
 	for _, row := range rhsRows {
-		if int(edge.RHSJoinCol) >= len(row) || int(edge.RHSFilterCol) >= len(row) {
+		joinValue, ok := rowValue(row, edge.RHSJoinCol)
+		if !ok {
 			continue
 		}
-		if _, ok := lhsKeys[encodeValueKey(row[edge.RHSJoinCol])]; ok {
-			fn(row[edge.RHSFilterCol])
+		filterValue, ok := rowValue(row, edge.RHSFilterCol)
+		if !ok {
+			continue
+		}
+		if _, ok := lhsKeys[encodeValueKey(joinValue)]; ok {
+			fn(filterValue)
 		}
 	}
 }
@@ -1978,19 +1986,21 @@ func joinKeyOverlapsChangedRows(lhsRows []types.ProductValue, lhsCol ColID, rhsR
 	}
 	rhsKeys := make(map[valueKey]struct{}, len(rhsRows))
 	for _, row := range rhsRows {
-		if int(rhsCol) >= len(row) {
+		value, ok := rowValue(row, rhsCol)
+		if !ok {
 			continue
 		}
-		rhsKeys[encodeValueKey(row[rhsCol])] = struct{}{}
+		rhsKeys[encodeValueKey(value)] = struct{}{}
 	}
 	if len(rhsKeys) == 0 {
 		return false
 	}
 	for _, row := range lhsRows {
-		if int(lhsCol) >= len(row) {
+		value, ok := rowValue(row, lhsCol)
+		if !ok {
 			continue
 		}
-		if _, ok := rhsKeys[encodeValueKey(row[lhsCol])]; ok {
+		if _, ok := rhsKeys[encodeValueKey(value)]; ok {
 			return true
 		}
 	}

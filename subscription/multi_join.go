@@ -208,10 +208,7 @@ func multiJoinConditionColumnValue(tuple []types.ProductValue, ref MultiJoinColu
 		return Value{}, false
 	}
 	row := tuple[ref.Relation]
-	if int(ref.Column) >= len(row) {
-		return Value{}, false
-	}
-	return row[ref.Column], true
+	return rowValue(row, ref.Column)
 }
 
 func matchMultiJoinTuple(pred Predicate, relations []MultiJoinRelation, tuple []types.ProductValue) bool {
@@ -221,32 +218,52 @@ func matchMultiJoinTuple(pred Predicate, relations []MultiJoinRelation, tuple []
 	switch p := pred.(type) {
 	case ColEq:
 		row, ok := multiJoinPredicateRow(p.Table, p.Alias, relations, tuple)
-		if !ok || int(p.Column) >= len(row) {
+		if !ok {
 			return false
 		}
-		return row[p.Column].Equal(p.Value)
+		value, ok := rowValue(row, p.Column)
+		if !ok {
+			return false
+		}
+		return value.Equal(p.Value)
 	case ColNe:
 		row, ok := multiJoinPredicateRow(p.Table, p.Alias, relations, tuple)
-		if !ok || int(p.Column) >= len(row) {
+		if !ok {
 			return false
 		}
-		return !row[p.Column].Equal(p.Value)
+		value, ok := rowValue(row, p.Column)
+		if !ok {
+			return false
+		}
+		return !value.Equal(p.Value)
 	case ColRange:
 		row, ok := multiJoinPredicateRow(p.Table, p.Alias, relations, tuple)
-		if !ok || int(p.Column) >= len(row) {
+		if !ok {
 			return false
 		}
-		return matchBounds(row[p.Column], p.Lower, p.Upper)
+		value, ok := rowValue(row, p.Column)
+		if !ok {
+			return false
+		}
+		return matchBounds(value, p.Lower, p.Upper)
 	case ColEqCol:
 		left, ok := multiJoinPredicateRow(p.LeftTable, p.LeftAlias, relations, tuple)
-		if !ok || int(p.LeftColumn) >= len(left) {
+		if !ok {
 			return false
 		}
 		right, ok := multiJoinPredicateRow(p.RightTable, p.RightAlias, relations, tuple)
-		if !ok || int(p.RightColumn) >= len(right) {
+		if !ok {
 			return false
 		}
-		return left[p.LeftColumn].Equal(right[p.RightColumn])
+		leftValue, ok := rowValue(left, p.LeftColumn)
+		if !ok {
+			return false
+		}
+		rightValue, ok := rowValue(right, p.RightColumn)
+		if !ok {
+			return false
+		}
+		return leftValue.Equal(rightValue)
 	case And:
 		return matchMultiJoinTuple(p.Left, relations, tuple) && matchMultiJoinTuple(p.Right, relations, tuple)
 	case Or:

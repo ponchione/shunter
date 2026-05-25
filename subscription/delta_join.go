@@ -103,10 +103,11 @@ func joinDriveCommittedRows(
 	if probeIdx, ok := resolver.IndexIDForColumn(probeTable, probeCol); ok {
 		var out []types.ProductValue
 		for _, driveRow := range driving {
-			if int(driveCol) >= len(driveRow) {
+			driveValue, ok := rowValue(driveRow, driveCol)
+			if !ok {
 				continue
 			}
-			key := store.NewIndexKey(driveRow[driveCol])
+			key := store.NewIndexKey(driveValue)
 			rowIDs := dv.committed.IndexSeek(probeTable, probeIdx, key)
 			for _, rid := range rowIDs {
 				probeRow, ok := dv.committed.GetRow(probeTable, rid)
@@ -119,7 +120,8 @@ func joinDriveCommittedRows(
 			}
 			if dv.IsEventTable(probeTable) {
 				for _, probeRow := range dv.InsertedRows(probeTable) {
-					if int(probeCol) >= len(probeRow) || !driveRow[driveCol].Equal(probeRow[probeCol]) {
+					probeValue, ok := rowValue(probeRow, probeCol)
+					if !ok || !driveValue.Equal(probeValue) {
 						continue
 					}
 					if joined := tryJoinFilterFromDrive(driveRow, driveTable, probeRow, probeTable, driveIsLeft, join); joined != nil {
@@ -151,16 +153,17 @@ func joinDriveCommittedByDeltaIndex(
 	matchesByDrive := make([][]types.ProductValue, len(driving))
 	pending := 0
 	visitRowsAfter(dv, probeTable, func(probeRow types.ProductValue) {
-		if int(probeCol) >= len(probeRow) {
+		probeValue, ok := rowValue(probeRow, probeCol)
+		if !ok {
 			return
 		}
-		positions := dv.deltaIndexPositions(driveTable, driveCol, probeRow[probeCol], driveInserted)
+		positions := dv.deltaIndexPositions(driveTable, driveCol, probeValue, driveInserted)
 		for _, pos := range positions {
 			if pos >= len(driving) {
 				continue
 			}
 			driveRow := driving[pos]
-			if int(driveCol) >= len(driveRow) {
+			if _, ok := rowValue(driveRow, driveCol); !ok {
 				continue
 			}
 			if joined := tryJoinFilterFromDrive(driveRow, driveTable, probeRow, probeTable, driveIsLeft, join); joined != nil {
@@ -189,11 +192,13 @@ func joinDriveCommittedByNestedScan(
 ) []types.ProductValue {
 	var out []types.ProductValue
 	for _, driveRow := range driving {
-		if int(driveCol) >= len(driveRow) {
+		driveValue, ok := rowValue(driveRow, driveCol)
+		if !ok {
 			continue
 		}
 		visitRowsAfter(dv, probeTable, func(probeRow types.ProductValue) {
-			if int(probeCol) >= len(probeRow) || !driveRow[driveCol].Equal(probeRow[probeCol]) {
+			probeValue, ok := rowValue(probeRow, probeCol)
+			if !ok || !driveValue.Equal(probeValue) {
 				return
 			}
 			if joined := tryJoinFilterFromDrive(driveRow, driveTable, probeRow, probeTable, driveIsLeft, join); joined != nil {
@@ -250,10 +255,11 @@ func joinDriveDelta(
 	}
 	var out []types.ProductValue
 	for _, lrow := range driving {
-		if int(lhsCol) >= len(lrow) {
+		lhsValue, ok := rowValue(lrow, lhsCol)
+		if !ok {
 			continue
 		}
-		rhsRows := dv.DeltaIndexScan(rhsTable, rhsCol, lrow[lhsCol], probeInserts)
+		rhsRows := dv.DeltaIndexScan(rhsTable, rhsCol, lhsValue, probeInserts)
 		for _, rrow := range rhsRows {
 			if joined := tryJoinFilter(lrow, lhsTable, rrow, rhsTable, join); joined != nil {
 				out = append(out, joined)

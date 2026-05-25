@@ -112,10 +112,11 @@ func forEachJoinedChangedPathTraversalRHSFilterValue(
 func pathStartValues(rows []types.ProductValue, col ColID) map[valueKey]Value {
 	values := make(map[valueKey]Value, len(rows))
 	for _, row := range rows {
-		if int(col) >= len(row) {
+		value, ok := rowValue(row, col)
+		if !ok {
 			continue
 		}
-		values[encodeValueKey(row[col])] = row[col]
+		values[encodeValueKey(value)] = value
 	}
 	return values
 }
@@ -128,11 +129,16 @@ func collectChangedPathTraversalHopValues(
 	out map[valueKey]Value,
 ) {
 	for _, row := range rows {
-		if int(seekCol) >= len(row) || int(valueCol) >= len(row) {
+		seek, ok := rowValue(row, seekCol)
+		if !ok {
 			continue
 		}
-		if _, ok := values[encodeValueKey(row[seekCol])]; ok {
-			out[encodeValueKey(row[valueCol])] = row[valueCol]
+		value, ok := rowValue(row, valueCol)
+		if !ok {
+			continue
+		}
+		if _, ok := values[encodeValueKey(seek)]; ok {
+			out[encodeValueKey(value)] = value
 		}
 	}
 }
@@ -157,10 +163,14 @@ func collectCommittedPathTraversalHopValues(
 		key := store.NewIndexKey(value)
 		for _, rid := range committed.IndexSeek(table, idx, key) {
 			row, ok := committed.GetRow(table, rid)
-			if !ok || int(valueCol) >= len(row) {
+			if !ok {
 				continue
 			}
-			out[encodeValueKey(row[valueCol])] = row[valueCol]
+			value, ok := rowValue(row, valueCol)
+			if !ok {
+				continue
+			}
+			out[encodeValueKey(value)] = value
 		}
 	}
 }
@@ -173,11 +183,16 @@ func forEachChangedPathTraversalRHSFilterValue(
 ) {
 	rhsJoinCol := edge.toCols[edge.hopCount()-1]
 	for _, row := range rows {
-		if int(rhsJoinCol) >= len(row) || int(edge.rhsFilterCol) >= len(row) {
+		joinValue, ok := rowValue(row, rhsJoinCol)
+		if !ok {
 			continue
 		}
-		if _, ok := values[encodeValueKey(row[rhsJoinCol])]; ok {
-			fn(row[edge.rhsFilterCol])
+		filterValue, ok := rowValue(row, edge.rhsFilterCol)
+		if !ok {
+			continue
+		}
+		if _, ok := values[encodeValueKey(joinValue)]; ok {
+			fn(filterValue)
 		}
 	}
 }
@@ -201,10 +216,14 @@ func forEachCommittedPathTraversalRHSFilterValue(
 		key := store.NewIndexKey(value)
 		for _, rid := range committed.IndexSeek(edge.rhsTable(), rhsIdx, key) {
 			row, ok := committed.GetRow(edge.rhsTable(), rid)
-			if !ok || int(edge.rhsFilterCol) >= len(row) {
+			if !ok {
 				continue
 			}
-			fn(row[edge.rhsFilterCol])
+			filterValue, ok := rowValue(row, edge.rhsFilterCol)
+			if !ok {
+				continue
+			}
+			fn(filterValue)
 		}
 	}
 }
