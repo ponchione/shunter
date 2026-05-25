@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdh"
 	"crypto/ecdsa"
@@ -233,9 +234,23 @@ func fetchJWKS(source JWKSConfig) ([]resolvedJWTVerificationKey, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("fetch jwks: unexpected HTTP status %d", resp.StatusCode)
 	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxJWKSResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read jwks: %w", err)
+	}
+	if len(data) > maxJWKSResponseBytes {
+		return nil, fmt.Errorf("decode jwks: response exceeds %d bytes", maxJWKSResponseBytes)
+	}
 	var doc jwksDocument
-	dec := json.NewDecoder(io.LimitReader(resp.Body, maxJWKSResponseBytes+1))
+	dec := json.NewDecoder(bytes.NewReader(data))
 	if err := dec.Decode(&doc); err != nil {
+		return nil, fmt.Errorf("decode jwks: %w", err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("decode jwks: trailing JSON value")
+		}
 		return nil, fmt.Errorf("decode jwks: %w", err)
 	}
 	if len(doc.Keys) == 0 {

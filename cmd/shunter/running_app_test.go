@@ -330,6 +330,56 @@ func TestHealthCommandReadsRunningAppDiagnostics(t *testing.T) {
 	}
 }
 
+func TestHealthCommandRejectsOversizedRunningAppDiagnostics(t *testing.T) {
+	srv := runningAppProtocolTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			t.Fatalf("request path = %q, want /healthz", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(strings.Repeat(" ", maxRunningAppDiagnosticsResponseBytes)))
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"health",
+		"--url", srv.httpURL(),
+		"--format", "json",
+	})
+	if code != 1 {
+		t.Fatalf("health exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("health stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "response exceeds")
+}
+
+func TestHealthCommandRejectsTrailingRunningAppDiagnosticsJSON(t *testing.T) {
+	srv := runningAppProtocolTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			t.Fatalf("request path = %q, want /healthz", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(shunter.RuntimeHealthInspection{Status: shunter.HealthStatusOK})
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"health",
+		"--url", srv.httpURL(),
+		"--format", "json",
+	})
+	if code != 1 {
+		t.Fatalf("health exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("health stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "trailing JSON value")
+}
+
 func TestDescribeCommandReadsRunningAppDiagnostics(t *testing.T) {
 	srv := runningAppProtocolTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/debug/shunter/runtime" {

@@ -1,16 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
 	"time"
 )
+
+const maxRunningAppDiagnosticsResponseBytes = 4 << 20
 
 func normalizeRunningAppDiagnosticsURL(raw, endpoint string) (string, error) {
 	raw = strings.TrimSpace(raw)
@@ -70,8 +74,22 @@ func getRunningAppDiagnosticsJSON(target string, timeout time.Duration, allowSta
 	if !allowStatus(resp.StatusCode) {
 		return diagnosticsHTTPStatusError{StatusCode: resp.StatusCode}
 	}
-	decoder := json.NewDecoder(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxRunningAppDiagnosticsResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("read diagnostics JSON: %w", err)
+	}
+	if len(data) > maxRunningAppDiagnosticsResponseBytes {
+		return fmt.Errorf("decode diagnostics JSON: response exceeds %d bytes", maxRunningAppDiagnosticsResponseBytes)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	if err := decoder.Decode(out); err != nil {
+		return fmt.Errorf("decode diagnostics JSON: %w", err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("decode diagnostics JSON: trailing JSON value")
+		}
 		return fmt.Errorf("decode diagnostics JSON: %w", err)
 	}
 	return nil

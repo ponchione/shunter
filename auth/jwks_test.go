@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -209,6 +210,34 @@ func TestValidateJWTJWKSES256Accepted(t *testing.T) {
 	}
 	if claims.Subject != "alice" || claims.Issuer != "issuer" {
 		t.Fatalf("claims = %+v, want alice/issuer", claims)
+	}
+}
+
+func TestFetchJWKSRejectsOversizedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"keys":[]}`))
+		_, _ = w.Write([]byte(strings.Repeat(" ", maxJWKSResponseBytes)))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := fetchJWKS(JWKSConfig{Issuer: "issuer", JWKSURL: srv.URL})
+	if err == nil || !strings.Contains(err.Error(), "response exceeds") {
+		t.Fatalf("fetchJWKS error = %v, want response size error", err)
+	}
+}
+
+func TestFetchJWKSRejectsTrailingJSON(t *testing.T) {
+	_, jwk := generateRS256JWK(t, "rsa-1")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJWKS(t, w, jwk)
+		_, _ = w.Write([]byte(`{"keys":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := fetchJWKS(JWKSConfig{Issuer: "issuer", JWKSURL: srv.URL})
+	if err == nil || !strings.Contains(err.Error(), "trailing JSON value") {
+		t.Fatalf("fetchJWKS error = %v, want trailing JSON error", err)
 	}
 }
 
