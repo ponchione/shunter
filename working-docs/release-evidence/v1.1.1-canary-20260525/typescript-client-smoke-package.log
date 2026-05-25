@@ -1,0 +1,6 @@
+> node test/package-smoke.mjs
+> npm exec --yes --package typescript -- tsc -p tsconfig.build.json
+added 2 packages in 438ms
+added 2 packages in 242ms
+added 2 packages in 222ms
+added 3 packages in 222ms

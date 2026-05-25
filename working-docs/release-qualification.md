@@ -76,6 +76,49 @@ Decision:
 
 ## Records
 
+### v1.1.1-dev canary qualification - 2026-05-25
+
+- Status: passed
+- Operator: gernsback
+- Date/time: 2026-05-25T13:06:55Z
+- Environment: Linux gernsback 6.17.0-23-generic, linux/amd64,
+  Go go1.26.3
+- Shunter ref: `e93e51def0183ae94ae942b759dd803018f7a9cb`
+- Shunter worktree state: clean before evidence capture; dirty afterward with
+  this qualification record and evidence logs
+- `opsboard-canary` ref:
+  `e69bce73cb49fbd2334dd8b99eb664b07fc6e132`
+- `opsboard-canary` worktree state: clean; local-only canary maintenance commit
+  refreshed contract/codegen artifacts for the current Shunter protocol and SDK
+  surface before qualification
+
+Commands:
+
+| Scope | Working directory | Command | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| Shunter | `/home/gernsback/source/shunter` | `rtk go test ./...` | pass | `working-docs/release-evidence/v1.1.1-canary-20260525/shunter-go-test.log` |
+| Shunter | `/home/gernsback/source/shunter` | `rtk go vet ./...` | pass | `working-docs/release-evidence/v1.1.1-canary-20260525/shunter-go-vet.log` |
+| Shunter | `/home/gernsback/source/shunter` | `rtk go tool staticcheck ./...` | pass | `working-docs/release-evidence/v1.1.1-canary-20260525/shunter-staticcheck.log` |
+| TypeScript | `/home/gernsback/source/shunter` | `rtk npm --prefix typescript/client test` | pass | `working-docs/release-evidence/v1.1.1-canary-20260525/typescript-client-test.log` |
+| TypeScript | `/home/gernsback/source/shunter` | `rtk npm --prefix typescript/client run build` | pass | `working-docs/release-evidence/v1.1.1-canary-20260525/typescript-client-build.log` |
+| TypeScript | `/home/gernsback/source/shunter` | `rtk npm --prefix typescript/client run pack:dry-run` | pass | `working-docs/release-evidence/v1.1.1-canary-20260525/typescript-client-pack-dry-run.log` |
+| TypeScript | `/home/gernsback/source/shunter` | `rtk npm --prefix typescript/client run smoke:package` | pass | `working-docs/release-evidence/v1.1.1-canary-20260525/typescript-client-smoke-package.log` |
+| Hosted example | `/home/gernsback/source/shunter` | `rtk bash scripts/hosted-chat-gate.sh` | pass | `working-docs/release-evidence/v1.1.1-canary-20260525/hosted-chat-gate.log` |
+| Canary | `/home/gernsback/source/opsboard-canary` | `SHUNTER_CHECKOUT=/home/gernsback/source/shunter rtk make canary-quick` | pass | `working-docs/release-evidence/v1.1.1-canary-20260525/canary-quick.log` |
+| Canary | `/home/gernsback/source/opsboard-canary` | `SHUNTER_CHECKOUT=/home/gernsback/source/shunter rtk make canary-full` | pass | `working-docs/release-evidence/v1.1.1-canary-20260525/canary-full.log` |
+
+Residual risks:
+
+- `opsboard-canary` is a local-only checkout, so this evidence depends on the
+  local canary commit above rather than a remote-tracked ref.
+- This is a local `v1.1.1-dev` qualification record, not a tagged release
+  qualification.
+
+Decision:
+
+- Accepted as local canary-backed qualification for the current `v1.1.1-dev`
+  source line.
+
 ### v1.1.1-dev local qualification - 2026-05-24
 
 - Status: passed
