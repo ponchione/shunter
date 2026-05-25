@@ -35,6 +35,53 @@ type typeScriptRuntimeValueImports struct {
 	encodeBsatnProduct         bool
 }
 
+type typeScriptTableFacade struct {
+	identifier        string
+	name              string
+	rowType           string
+	subscribeFunction string
+	eventFunction     string
+	isEvent           bool
+}
+
+type typeScriptReducerFacade struct {
+	identifier        string
+	name              string
+	argsType          string
+	rawFunction       string
+	typedFunction     string
+	resultFunction    string
+	hasTypedArguments bool
+}
+
+type typeScriptProcedureFacade struct {
+	identifier        string
+	name              string
+	argsType          string
+	rawFunction       string
+	typedFunction     string
+	hasTypedArguments bool
+}
+
+type typeScriptQueryFacade struct {
+	identifier      string
+	name            string
+	paramsType      string
+	rowsType        string
+	runFunction     string
+	decodedFunction string
+	hasRows         bool
+}
+
+type typeScriptViewFacade struct {
+	identifier        string
+	name              string
+	paramsType        string
+	subscribeFunction string
+	handleFunction    string
+	rowType           string
+}
+
 func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerationOptions) ([]byte, error) {
 	var b bytes.Buffer
 
@@ -117,20 +164,30 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	}
 	writeTypeScriptTableReadPolicies(&b, contract.Schema.Tables, tableConstants)
 	writeTypeScriptVisibilityFilters(&b, contract.VisibilityFilters)
+	tableFacades := make([]typeScriptTableFacade, 0, len(contract.Schema.Tables))
 	for i, table := range contract.Schema.Tables {
 		rowType := tableRowTypes[i]
 		functionName := uniqueTypeScriptIdentifier("subscribe"+tableTypes[i].identifier, topLevelValueNames)
+		tableFacade := typeScriptTableFacade{
+			identifier:        tableConstants[i].identifier,
+			name:              table.Name,
+			rowType:           rowType,
+			subscribeFunction: functionName,
+			isEvent:           table.IsEvent,
+		}
 		fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>, onRows?: (rows: %s[]) => void, options: TableSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, rowType, rowType, rowType)
 		fmt.Fprintf(&b, "  const subscribeOptions: TableSubscriptionOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders[%s]%s } : { ...options%s };\n", rowType, strconv.Quote(table.Name), typeScriptEventTableOptionSuffix(table.IsEvent), typeScriptEventTableOptionSuffix(table.IsEvent))
 		fmt.Fprintf(&b, "  return subscribeTable(%s, onRows, subscribeOptions);\n", strconv.Quote(table.Name))
 		b.WriteString("}\n\n")
 		if table.IsEvent {
 			eventFunctionName := uniqueTypeScriptIdentifier(functionName+"Inserts", topLevelValueNames)
+			tableFacade.eventFunction = eventFunctionName
 			fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>, onInsert: (event: SubscriptionRowEvent<%s>) => void, options: TableSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", eventFunctionName, rowType, rowType, rowType)
 			fmt.Fprintf(&b, "  const subscribeOptions: TableSubscriptionOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders[%s], eventTable: true, onInsert } : { ...options, eventTable: true, onInsert };\n", rowType, strconv.Quote(table.Name))
 			fmt.Fprintf(&b, "  return subscribeTable(%s, undefined, subscribeOptions);\n", strconv.Quote(table.Name))
 			b.WriteString("}\n\n")
 		}
+		tableFacades = append(tableFacades, tableFacade)
 	}
 
 	reducerNames := make([]string, 0, len(contract.Schema.Reducers))
@@ -149,6 +206,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	for _, reducer := range contract.Schema.Reducers {
 		reducersByName[reducer.Name] = reducer
 	}
+	reducerFacades := make([]typeScriptReducerFacade, 0, len(reducerIdentifiers))
 	for _, reducer := range reducerIdentifiers {
 		reducerExport := reducersByName[reducer.name]
 		var argsTypeName, argsEncoderName string
@@ -169,20 +227,30 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 			}
 		}
 		functionName := uniqueTypeScriptIdentifier("call"+upperFirst(reducer.identifier), topLevelValueNames)
+		reducerFacade := typeScriptReducerFacade{
+			identifier:     reducer.identifier,
+			name:           reducer.name,
+			argsType:       argsTypeName,
+			rawFunction:    functionName,
+			resultFunction: uniqueTypeScriptIdentifier(functionName+"Result", topLevelValueNames),
+		}
 		fmt.Fprintf(&b, "export function %s(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {\n", functionName)
 		fmt.Fprintf(&b, "  return callReducer(%s, args);\n", strconv.Quote(reducer.name))
 		b.WriteString("}\n\n")
 		if reducerExport.Args != nil {
 			typedFunctionName := uniqueTypeScriptIdentifier(functionName+"Typed", topLevelValueNames)
+			reducerFacade.typedFunction = typedFunctionName
+			reducerFacade.hasTypedArguments = true
 			fmt.Fprintf(&b, "export function %s(callReducer: ReducerCaller, args: %s, options: EncodedReducerCallOptions<%s> = {}): Promise<Uint8Array> {\n", typedFunctionName, argsTypeName, argsTypeName)
 			fmt.Fprintf(&b, "  const callOptions: EncodedReducerCallOptions<%s> = options.encodeArgs === undefined ? { ...options, encodeArgs: %s } : options;\n", argsTypeName, argsEncoderName)
 			fmt.Fprintf(&b, "  return shunterCallReducerWithEncodedArgs(callReducer, %s, args, callOptions);\n", strconv.Quote(reducer.name))
 			b.WriteString("}\n\n")
 		}
-		resultFunctionName := uniqueTypeScriptIdentifier(functionName+"Result", topLevelValueNames)
+		resultFunctionName := reducerFacade.resultFunction
 		fmt.Fprintf(&b, "export function %s(callReducer: ReducerCaller, args: Uint8Array, options: ReducerCallResultOptions = {}): Promise<ReducerCallResult<typeof reducers.%s>> {\n", resultFunctionName, reducer.identifier)
 		fmt.Fprintf(&b, "  return shunterCallReducerWithResult(callReducer, %s, args, options);\n", strconv.Quote(reducer.name))
 		b.WriteString("}\n\n")
+		reducerFacades = append(reducerFacades, reducerFacade)
 	}
 	lifecycleReducerIdentifiers := uniqueTypeScriptIdentifiers(lifecycleReducerNames, typeScriptLifecycleIdentifier)
 	writeTypeScriptConstMap(&b, "lifecycleReducers", lifecycleReducerIdentifiers)
@@ -199,6 +267,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	for _, procedure := range contract.Procedures {
 		proceduresByName[procedure.Name] = procedure
 	}
+	procedureFacades := make([]typeScriptProcedureFacade, 0, len(procedureIdentifiers))
 	for _, procedure := range procedureIdentifiers {
 		procedureExport := proceduresByName[procedure.name]
 		var argsTypeName, argsEncoderName string
@@ -219,15 +288,24 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 			}
 		}
 		functionName := uniqueTypeScriptIdentifier("call"+upperFirst(procedure.identifier)+"Procedure", topLevelValueNames)
+		procedureFacade := typeScriptProcedureFacade{
+			identifier:  procedure.identifier,
+			name:        procedure.name,
+			argsType:    argsTypeName,
+			rawFunction: functionName,
+		}
 		fmt.Fprintf(&b, "export function %s(callProcedure: ProcedureCaller, args: Uint8Array): Promise<Uint8Array> {\n", functionName)
 		fmt.Fprintf(&b, "  return callProcedure(%s, args);\n", strconv.Quote(procedure.name))
 		b.WriteString("}\n\n")
 		if procedureExport.Args != nil {
 			typedFunctionName := uniqueTypeScriptIdentifier(functionName+"Typed", topLevelValueNames)
+			procedureFacade.typedFunction = typedFunctionName
+			procedureFacade.hasTypedArguments = true
 			fmt.Fprintf(&b, "export function %s(callProcedure: ProcedureCaller, args: %s): Promise<Uint8Array> {\n", typedFunctionName, argsTypeName)
 			fmt.Fprintf(&b, "  return callProcedure(%s, %s(args));\n", strconv.Quote(procedure.name), argsEncoderName)
 			b.WriteString("}\n\n")
 		}
+		procedureFacades = append(procedureFacades, procedureFacade)
 	}
 
 	queryNames := make([]string, len(contract.Queries))
@@ -240,6 +318,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	executableQueries := executableQueryIdentifiers(contract.Queries, queryIdentifiers)
 	writeTypeScriptSQLConstMap(&b, "querySQL", executableQueries)
 	b.WriteString("export type ExecutableQueryName = (typeof queries)[keyof typeof querySQL];\n\n")
+	queryFacades := make([]typeScriptQueryFacade, 0, len(executableQueries))
 	for _, query := range executableQueries {
 		queryDescription := contract.Queries[queryIndexByName(contract.Queries, query.name)]
 		var queryParamsTypeName, queryParamsEncoderName string
@@ -269,6 +348,12 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 			fmt.Fprintf(&b, "} as const satisfies TableRowDecoders<%s>;\n\n", queryRowsTypeName)
 		}
 		functionName := uniqueTypeScriptIdentifier("query"+upperFirst(query.identifier), topLevelValueNames)
+		queryFacade := typeScriptQueryFacade{
+			identifier:  query.identifier,
+			name:        query.name,
+			paramsType:  queryParamsTypeName,
+			runFunction: functionName,
+		}
 		if queryParamsTypeName != "" {
 			fmt.Fprintf(&b, "export function %s(runDeclaredQuery: DeclaredQueryRunner, params: %s, options: DeclaredQueryRunOptions = {}): Promise<Uint8Array> {\n", functionName, queryParamsTypeName)
 			fmt.Fprintf(&b, "  return runDeclaredQuery(%s, { ...options, params: %s(params) });\n", strconv.Quote(query.name), queryParamsEncoderName)
@@ -284,6 +369,9 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 			fmt.Fprintf(&b, "  return shunterDecodeDeclaredQueryResult(%s, data, decodeOptions);\n", strconv.Quote(query.name))
 			b.WriteString("}\n\n")
 			decodedFunctionName := uniqueTypeScriptIdentifier(functionName+"Decoded", topLevelValueNames)
+			queryFacade.decodedFunction = decodedFunctionName
+			queryFacade.rowsType = queryRowsTypeName
+			queryFacade.hasRows = true
 			if queryParamsTypeName != "" {
 				fmt.Fprintf(&b, "export async function %s(runDeclaredQuery: DeclaredQueryRunner, params: %s, options: DeclaredQueryDecodedRunOptions<%s> = {}): Promise<DecodedDeclaredQueryResult<typeof queries.%s, %s>> {\n", decodedFunctionName, queryParamsTypeName, queryRowsTypeName, query.identifier, queryRowsTypeName)
 				b.WriteString("  const queryOptions: DeclaredQueryOptions = {\n")
@@ -307,6 +395,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 			fmt.Fprintf(&b, "  return shunterDecodeDeclaredQueryResult(%s, data, options);\n", strconv.Quote(query.name))
 			b.WriteString("}\n\n")
 		}
+		queryFacades = append(queryFacades, queryFacade)
 	}
 
 	viewNames := make([]string, len(contract.Views))
@@ -319,6 +408,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	executableViews := executableViewIdentifiers(contract.Views, viewIdentifiers)
 	writeTypeScriptSQLConstMap(&b, "viewSQL", executableViews)
 	b.WriteString("export type ExecutableViewName = (typeof views)[keyof typeof viewSQL];\n\n")
+	viewFacades := make([]typeScriptViewFacade, 0, len(executableViews))
 	for _, view := range executableViews {
 		viewDescription := contract.Views[viewIndexByName(contract.Views, view.name)]
 		var viewParamsTypeName, viewParamsEncoderName string
@@ -340,6 +430,13 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 			}
 		}
 		functionName := uniqueTypeScriptIdentifier("subscribe"+upperFirst(view.identifier), topLevelValueNames)
+		viewFacade := typeScriptViewFacade{
+			identifier:        view.identifier,
+			name:              view.name,
+			paramsType:        viewParamsTypeName,
+			subscribeFunction: functionName,
+			rowType:           rowTypeName,
+		}
 		if rowTypeName != "" {
 			if viewParamsTypeName != "" {
 				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber, params: %s, options: DeclaredViewSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, viewParamsTypeName, rowTypeName)
@@ -354,6 +451,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 			}
 			b.WriteString("}\n\n")
 			handleFunctionName := uniqueTypeScriptIdentifier(functionName+"Handle", topLevelValueNames)
+			viewFacade.handleFunction = handleFunctionName
 			if viewParamsTypeName != "" {
 				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewHandleSubscriber, params: %s, options: DeclaredViewSubscriptionOptions<%s> & SubscriptionHandleReturnOptions): Promise<SubscriptionHandle<%s>> {\n", handleFunctionName, viewParamsTypeName, rowTypeName, rowTypeName)
 			} else {
@@ -376,10 +474,12 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 			}
 			b.WriteString("}\n\n")
 		}
+		viewFacades = append(viewFacades, viewFacade)
 	}
 
 	writeTypeScriptPermissions(&b, contract.Permissions)
 	writeTypeScriptReadModels(&b, contract.ReadModel.Declarations)
+	writeTypeScriptModuleClient(&b, tableFacades, reducerFacades, procedureFacades, queryFacades, viewFacades)
 
 	return b.Bytes(), nil
 }
@@ -407,6 +507,8 @@ func typeScriptTopLevelValueNames() map[string]int {
 		"viewSQL",
 		"permissions",
 		"readModels",
+		"ModuleClientBindings",
+		"createModuleClient",
 		"ReducerCaller",
 		"ProcedureCaller",
 		"EncodedReducerCallOptions",
@@ -833,6 +935,120 @@ func viewIndexByName(views []shunter.ViewDescription, name string) int {
 		}
 	}
 	return -1
+}
+
+func writeTypeScriptModuleClient(
+	b *bytes.Buffer,
+	tables []typeScriptTableFacade,
+	reducers []typeScriptReducerFacade,
+	procedures []typeScriptProcedureFacade,
+	queries []typeScriptQueryFacade,
+	views []typeScriptViewFacade,
+) {
+	b.WriteString("export interface ModuleClientBindings {\n")
+	b.WriteString("  readonly callReducer: ReducerCaller;\n")
+	b.WriteString("  readonly callProcedure: ProcedureCaller;\n")
+	b.WriteString("  readonly runDeclaredQuery: DeclaredQueryRunner;\n")
+	b.WriteString("  readonly subscribeDeclaredView: DeclaredViewSubscriber & DeclaredViewHandleSubscriber;\n")
+	b.WriteString("  readonly subscribeTable: <Table extends string, Row = Table extends TableName ? TableRows[Table] : Uint8Array>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe>;\n")
+	b.WriteString("}\n\n")
+
+	b.WriteString("export function createModuleClient(bindings: ModuleClientBindings) {\n")
+	b.WriteString("  return {\n")
+	b.WriteString("    reducers: {\n")
+	for _, reducer := range reducers {
+		fmt.Fprintf(b, "      %s: {\n", reducer.identifier)
+		if reducer.hasTypedArguments {
+			fmt.Fprintf(b, "        call: (args: %s, options: EncodedReducerCallOptions<%s> = {}) => %s(bindings.callReducer, args, options),\n", reducer.argsType, reducer.argsType, reducer.typedFunction)
+			fmt.Fprintf(b, "        raw: (args: Uint8Array) => %s(bindings.callReducer, args),\n", reducer.rawFunction)
+		} else {
+			fmt.Fprintf(b, "        call: (args: Uint8Array) => %s(bindings.callReducer, args),\n", reducer.rawFunction)
+		}
+		fmt.Fprintf(b, "        result: (args: Uint8Array, options: ReducerCallResultOptions = {}) => %s(bindings.callReducer, args, options),\n", reducer.resultFunction)
+		b.WriteString("      },\n")
+	}
+	b.WriteString("    },\n")
+
+	b.WriteString("    procedures: {\n")
+	for _, procedure := range procedures {
+		fmt.Fprintf(b, "      %s: {\n", procedure.identifier)
+		if procedure.hasTypedArguments {
+			fmt.Fprintf(b, "        call: (args: %s) => %s(bindings.callProcedure, args),\n", procedure.argsType, procedure.typedFunction)
+			fmt.Fprintf(b, "        raw: (args: Uint8Array) => %s(bindings.callProcedure, args),\n", procedure.rawFunction)
+		} else {
+			fmt.Fprintf(b, "        call: (args: Uint8Array) => %s(bindings.callProcedure, args),\n", procedure.rawFunction)
+		}
+		b.WriteString("      },\n")
+	}
+	b.WriteString("    },\n")
+
+	b.WriteString("    queries: {\n")
+	for _, query := range queries {
+		fmt.Fprintf(b, "      %s: {\n", query.identifier)
+		if query.paramsType != "" {
+			fmt.Fprintf(b, "        run: (params: %s, options: DeclaredQueryRunOptions = {}) => %s(bindings.runDeclaredQuery, params, options),\n", query.paramsType, query.runFunction)
+			if query.hasRows {
+				fmt.Fprintf(b, "        decoded: (params: %s, options: DeclaredQueryDecodedRunOptions<%s> = {}) => %s(bindings.runDeclaredQuery, params, options),\n", query.paramsType, query.rowsType, query.decodedFunction)
+			}
+		} else {
+			fmt.Fprintf(b, "        run: (options: DeclaredQueryRunOptions = {}) => bindings.runDeclaredQuery(%s, options),\n", strconv.Quote(query.name))
+			if query.hasRows {
+				fmt.Fprintf(b, "        decoded: (options: DeclaredQueryDecodeOptions<%s> = {}) => %s(bindings.runDeclaredQuery, options),\n", query.rowsType, query.decodedFunction)
+			}
+		}
+		b.WriteString("      },\n")
+	}
+	b.WriteString("    },\n")
+
+	b.WriteString("    views: {\n")
+	for _, view := range views {
+		fmt.Fprintf(b, "      %s: {\n", view.identifier)
+		if view.paramsType != "" {
+			fmt.Fprintf(b, "        subscribe: (params: %s, options: DeclaredViewSubscriptionOptions<%s> = {}) => %s(bindings.subscribeDeclaredView, params, options),\n", view.paramsType, typeScriptViewFacadeRowType(view), view.subscribeFunction)
+			if view.handleFunction != "" {
+				fmt.Fprintf(b, "        handle: (params: %s, options: DeclaredViewSubscriptionOptions<%s> & SubscriptionHandleReturnOptions) => %s(bindings.subscribeDeclaredView, params, options),\n", view.paramsType, view.rowType, view.handleFunction)
+			}
+		} else {
+			if view.rowType != "" {
+				fmt.Fprintf(b, "        subscribe: (options: DeclaredViewSubscriptionOptions<%s> = {}) => %s(bindings.subscribeDeclaredView, options),\n", view.rowType, view.subscribeFunction)
+				if view.handleFunction != "" {
+					fmt.Fprintf(b, "        handle: (options: DeclaredViewSubscriptionOptions<%s> & SubscriptionHandleReturnOptions) => %s(bindings.subscribeDeclaredView, options),\n", view.rowType, view.handleFunction)
+				}
+			} else {
+				fmt.Fprintf(b, "        subscribe: () => %s(bindings.subscribeDeclaredView),\n", view.subscribeFunction)
+			}
+		}
+		b.WriteString("      },\n")
+	}
+	b.WriteString("    },\n")
+
+	b.WriteString("    tables: {\n")
+	for _, table := range tables {
+		fmt.Fprintf(b, "      %s: {\n", table.identifier)
+		fmt.Fprintf(b, "        subscribe: (onRows?: (rows: %s[]) => void, options: TableSubscriptionOptions<%s> = {}) => %s(bindings.subscribeTable, onRows, options),\n", table.rowType, table.rowType, table.subscribeFunction)
+		b.WriteString("      },\n")
+	}
+	b.WriteString("    },\n")
+
+	b.WriteString("    events: {\n")
+	for _, table := range tables {
+		if !table.isEvent {
+			continue
+		}
+		fmt.Fprintf(b, "      %s: {\n", table.identifier)
+		fmt.Fprintf(b, "        onInsert: (handler: (event: SubscriptionRowEvent<%s>) => void, options: TableSubscriptionOptions<%s> = {}) => %s(bindings.subscribeTable, handler, options),\n", table.rowType, table.rowType, table.eventFunction)
+		b.WriteString("      },\n")
+	}
+	b.WriteString("    },\n")
+	b.WriteString("  } as const;\n")
+	b.WriteString("}\n\n")
+}
+
+func typeScriptViewFacadeRowType(view typeScriptViewFacade) string {
+	if view.rowType == "" {
+		return "unknown"
+	}
+	return view.rowType
 }
 
 func writeTypeScriptPermissions(b *bytes.Buffer, permissions shunter.PermissionContract) {

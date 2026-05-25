@@ -404,3 +404,76 @@ export const readModels = {
   },
 } as const;
 
+export interface ModuleClientBindings {
+  readonly callReducer: ReducerCaller;
+  readonly callProcedure: ProcedureCaller;
+  readonly runDeclaredQuery: DeclaredQueryRunner;
+  readonly subscribeDeclaredView: DeclaredViewSubscriber & DeclaredViewHandleSubscriber;
+  readonly subscribeTable: <Table extends string, Row = Table extends TableName ? TableRows[Table] : Uint8Array>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe>;
+}
+
+export function createModuleClient(bindings: ModuleClientBindings) {
+  return {
+    reducers: {
+      sendMessage: {
+        call: (args: Uint8Array) => callSendMessage(bindings.callReducer, args),
+        result: (args: Uint8Array, options: ReducerCallResultOptions = {}) => callSendMessageResult(bindings.callReducer, args, options),
+      },
+      sendMessage2: {
+        call: (args: Uint8Array) => callSendMessage2(bindings.callReducer, args),
+        result: (args: Uint8Array, options: ReducerCallResultOptions = {}) => callSendMessage2Result(bindings.callReducer, args, options),
+      },
+      default_: {
+        call: (args: Uint8Array) => callDefault_(bindings.callReducer, args),
+        result: (args: Uint8Array, options: ReducerCallResultOptions = {}) => callDefault_Result(bindings.callReducer, args, options),
+      },
+    },
+    procedures: {
+    },
+    queries: {
+      recentMessages: {
+        run: (options: DeclaredQueryRunOptions = {}) => bindings.runDeclaredQuery("recent_messages", options),
+      },
+      recentMessages2: {
+        run: (options: DeclaredQueryRunOptions = {}) => bindings.runDeclaredQuery("recent-messages", options),
+      },
+      class_: {
+        run: (options: DeclaredQueryRunOptions = {}) => bindings.runDeclaredQuery("class", options),
+      },
+      sQL: {
+        run: (options: DeclaredQueryRunOptions = {}) => bindings.runDeclaredQuery("sQL", options),
+      },
+    },
+    views: {
+      liveMessages: {
+        subscribe: () => subscribeLiveMessages(bindings.subscribeDeclaredView),
+      },
+      liveMessages2: {
+        subscribe: () => subscribeLiveMessages2(bindings.subscribeDeclaredView),
+      },
+      default_: {
+        subscribe: () => subscribeDefault_(bindings.subscribeDeclaredView),
+      },
+    },
+    tables: {
+      messages: {
+        subscribe: (onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}) => subscribeMessages(bindings.subscribeTable, onRows, options),
+      },
+      _: {
+        subscribe: (onRows?: (rows: _Row[]) => void, options: TableSubscriptionOptions<_Row> = {}) => subscribe_(bindings.subscribeTable, onRows, options),
+      },
+      _1Table: {
+        subscribe: (onRows?: (rows: _1TableRow[]) => void, options: TableSubscriptionOptions<_1TableRow> = {}) => subscribe_1Table(bindings.subscribeTable, onRows, options),
+      },
+      class_: {
+        subscribe: (onRows?: (rows: ClassRow[]) => void, options: TableSubscriptionOptions<ClassRow> = {}) => subscribeClass(bindings.subscribeTable, onRows, options),
+      },
+      class_2: {
+        subscribe: (onRows?: (rows: Class2Row[]) => void, options: TableSubscriptionOptions<Class2Row> = {}) => subscribeClass2(bindings.subscribeTable, onRows, options),
+      },
+    },
+    events: {
+    },
+  } as const;
+}
+

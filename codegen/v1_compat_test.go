@@ -203,6 +203,20 @@ func TestV1CompatibilityTypeScriptSnapshotCoversStableCategories(t *testing.T) {
 		`recentMessages: { tables: ["messages"], tags: ["history", "v1"] },`,
 		`liveMessageProjection: { tables: ["messages"], tags: ["projection", "v1"] },`,
 		`liveMessageCount: { tables: ["messages"], tags: ["aggregate", "v1"] },`,
+		`export interface ModuleClientBindings {`,
+		`readonly subscribeTable: <Table extends string, Row = Table extends TableName ? TableRows[Table] : Uint8Array>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe>;`,
+		`export function createModuleClient(bindings: ModuleClientBindings) {`,
+		`createMessage: {`,
+		`call: (args: CreateMessageArgs, options: EncodedReducerCallOptions<CreateMessageArgs> = {}) => callCreateMessageTyped(bindings.callReducer, args, options),`,
+		`raw: (args: Uint8Array) => callCreateMessage(bindings.callReducer, args),`,
+		`result: (args: Uint8Array, options: ReducerCallResultOptions = {}) => callCreateMessageResult(bindings.callReducer, args, options),`,
+		`recentMessages: {`,
+		`decoded: (options: DeclaredQueryDecodeOptions<RecentMessagesQueryRows> = {}) => queryRecentMessagesDecoded(bindings.runDeclaredQuery, options),`,
+		`liveMessageProjection: {`,
+		`handle: (options: DeclaredViewSubscriptionOptions<LiveMessageProjectionViewRow> & SubscriptionHandleReturnOptions) => subscribeLiveMessageProjectionHandle(bindings.subscribeDeclaredView, options),`,
+		`tables: {`,
+		`messages: {`,
+		`events: {`,
 	} {
 		assertContains(t, ts, want)
 	}

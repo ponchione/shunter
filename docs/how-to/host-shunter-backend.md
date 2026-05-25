@@ -206,8 +206,9 @@ npm run typecheck
 ```
 
 The generated client imports `@shunter/client`, connects to the Shunter
-WebSocket endpoint, calls reducers and procedures with generated BSATN argument
-encoders, and subscribes to declared views with generated row decoders.
+WebSocket endpoint, wraps the runtime client with `createModuleClient`, calls
+reducers and procedures through generated typed facade methods, and subscribes
+to declared views and event-table insert streams with generated row decoders.
 
 ## Release Gate
 

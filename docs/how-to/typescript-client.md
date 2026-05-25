@@ -98,6 +98,7 @@ import {
   createShunterClient,
 } from "@shunter/client";
 import {
+  createModuleClient,
   shunterContract,
   shunterProtocol,
 } from "./shunter.gen";
@@ -115,6 +116,7 @@ const client = createShunterClient({
 });
 
 await client.connect();
+const app = createModuleClient(client);
 ```
 
 The default browser path uses global `WebSocket`.
@@ -154,7 +156,8 @@ v1.
 
 Generated bindings always keep raw `Uint8Array` reducer helpers. When a
 contract exports reducer argument product schemas, generated bindings also
-include schema-aware argument encoders and typed helper wrappers.
+include schema-aware argument encoders, typed helper wrappers, and the
+module-bound facade returned by `createModuleClient`.
 
 ```ts
 import {
@@ -166,6 +169,11 @@ import {
 await callSendMessage(client.callReducer, rawArgs);
 
 await callSendMessageTyped(client.callReducer, {
+  channel: "general",
+  body: "hello",
+});
+
+await app.reducers.sendMessage.call({
   channel: "general",
   body: "hello",
 });
@@ -210,6 +218,9 @@ const byTopic = await queryMessagesByTopicDecoded(
 for (const row of byTopic.tables[0]?.rows ?? []) {
   console.log(row.body);
 }
+
+const recent = await app.queries.recentMessages.decoded();
+void recent;
 ```
 
 Use raw helpers when the app wants bytes or custom decoding. Use decoded helpers
@@ -258,6 +269,9 @@ const unsubscribeByTopic = await subscribeLiveMessagesByTopic(
 await unsubscribeMessages();
 await unsubscribeByTopic();
 await liveHandle.unsubscribe();
+
+const facadeHandle = await app.views.liveMessages.handle({ returnHandle: true });
+await facadeHandle.unsubscribe();
 ```
 
 Generated event-table helpers use the `subscribe<Name>Inserts` shape. They pass
@@ -273,6 +287,11 @@ const unsubscribeEvents = await subscribeNotificationsInserts(
 );
 
 await unsubscribeEvents();
+
+const unsubscribeFacadeEvents = await app.events.notifications.onInsert(({ row }) => {
+  console.log(row.message);
+});
+await unsubscribeFacadeEvents();
 ```
 
 Managed handles track `subscribing`, `active`, `unsubscribing`, and `closed`

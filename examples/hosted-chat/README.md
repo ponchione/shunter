@@ -114,9 +114,10 @@ npm run typecheck
 The TypeScript example asserts generated contract compatibility, connects to
 `/subscribe`, uses an optional browser token-provider path when
 `hosted-chat-token` is present in `localStorage`, enables bounded reconnect,
-subscribes to transient `message_events` inserts, keeps a decoded
-`live_messages` managed handle, and calls the generated `send_message` reducer
-helper and `send_system_message` procedure helper. The procedure is
+creates the generated module client facade, subscribes to transient
+`message_events` inserts, keeps a decoded `live_messages` managed handle, and
+calls the generated `send_message` reducer facade and `send_system_message`
+procedure facade. The procedure is
 intentionally shaped as a small service-adapter workflow: it runs outside the
 reducer executor, validates procedure arguments, and then calls the
 `send_message` reducer to make the durable state change.

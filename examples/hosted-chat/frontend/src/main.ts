@@ -4,12 +4,9 @@ import {
   type ConnectionState,
 } from "@shunter/client";
 import {
-  callSendSystemMessageProcedureTyped,
-  callSendMessageTyped,
+  createModuleClient,
   shunterContract,
   type ShunterSubprotocol,
-  subscribeLiveMessagesHandle,
-  subscribeMessageEventsInserts,
 } from "./generated/hosted_chat";
 
 const shunterUrl = "ws://127.0.0.1:3000/subscribe";
@@ -46,9 +43,10 @@ const client = createShunterClient({
     states.push(current);
   },
 });
+const chat = createModuleClient(client);
 
-let unsubscribeMessageEvents: Awaited<ReturnType<typeof subscribeMessageEventsInserts>> | undefined;
-let liveMessages: Awaited<ReturnType<typeof subscribeLiveMessagesHandle>> | undefined;
+let unsubscribeMessageEvents: Awaited<ReturnType<typeof chat.events.messageEvents.onInsert>> | undefined;
+let liveMessages: Awaited<ReturnType<typeof chat.views.liveMessages.handle>> | undefined;
 let runError: unknown;
 const cleanupErrors: unknown[] = [];
 
@@ -80,14 +78,11 @@ try {
   const negotiatedSubprotocol = metadata.subprotocol as ShunterSubprotocol;
   console.log(`connected with ${negotiatedSubprotocol}`);
 
-  unsubscribeMessageEvents = await subscribeMessageEventsInserts(
-    client.subscribeTable,
-    (event) => {
-      console.log(`event ${event.row.author}: ${event.row.body}`);
-    },
-  );
+  unsubscribeMessageEvents = await chat.events.messageEvents.onInsert((event) => {
+    console.log(`event ${event.row.author}: ${event.row.body}`);
+  });
 
-  liveMessages = await subscribeLiveMessagesHandle(client.subscribeDeclaredView, {
+  liveMessages = await chat.views.liveMessages.handle({
     returnHandle: true,
     onInitialRows(rows) {
       for (const row of rows) {
@@ -101,12 +96,12 @@ try {
     },
   });
 
-  await callSendMessageTyped(client.callReducer, {
+  await chat.reducers.sendMessage.call({
     author: "Ada",
     body: "hello from the TypeScript client",
   });
 
-  await callSendSystemMessageProcedureTyped(client.callProcedure, {
+  await chat.procedures.sendSystemMessage.call({
     body: "hello from the TypeScript procedure client",
   });
 } catch (error) {

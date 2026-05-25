@@ -528,3 +528,62 @@ export const readModels = {
   },
 } as const;
 
+export interface ModuleClientBindings {
+  readonly callReducer: ReducerCaller;
+  readonly callProcedure: ProcedureCaller;
+  readonly runDeclaredQuery: DeclaredQueryRunner;
+  readonly subscribeDeclaredView: DeclaredViewSubscriber & DeclaredViewHandleSubscriber;
+  readonly subscribeTable: <Table extends string, Row = Table extends TableName ? TableRows[Table] : Uint8Array>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe>;
+}
+
+export function createModuleClient(bindings: ModuleClientBindings) {
+  return {
+    reducers: {
+      createMessage: {
+        call: (args: CreateMessageArgs, options: EncodedReducerCallOptions<CreateMessageArgs> = {}) => callCreateMessageTyped(bindings.callReducer, args, options),
+        raw: (args: Uint8Array) => callCreateMessage(bindings.callReducer, args),
+        result: (args: Uint8Array, options: ReducerCallResultOptions = {}) => callCreateMessageResult(bindings.callReducer, args, options),
+      },
+    },
+    procedures: {
+    },
+    queries: {
+      recentMessages: {
+        run: (options: DeclaredQueryRunOptions = {}) => bindings.runDeclaredQuery("recent_messages", options),
+        decoded: (options: DeclaredQueryDecodeOptions<RecentMessagesQueryRows> = {}) => queryRecentMessagesDecoded(bindings.runDeclaredQuery, options),
+      },
+      messagesByTopic: {
+        run: (params: MessagesByTopicParams, options: DeclaredQueryRunOptions = {}) => queryMessagesByTopic(bindings.runDeclaredQuery, params, options),
+        decoded: (params: MessagesByTopicParams, options: DeclaredQueryDecodedRunOptions<MessagesByTopicQueryRows> = {}) => queryMessagesByTopicDecoded(bindings.runDeclaredQuery, params, options),
+      },
+    },
+    views: {
+      liveMessageProjection: {
+        subscribe: (options: DeclaredViewSubscriptionOptions<LiveMessageProjectionViewRow> = {}) => subscribeLiveMessageProjection(bindings.subscribeDeclaredView, options),
+        handle: (options: DeclaredViewSubscriptionOptions<LiveMessageProjectionViewRow> & SubscriptionHandleReturnOptions) => subscribeLiveMessageProjectionHandle(bindings.subscribeDeclaredView, options),
+      },
+      liveMessagesByTopic: {
+        subscribe: (params: LiveMessagesByTopicParams, options: DeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> = {}) => subscribeLiveMessagesByTopic(bindings.subscribeDeclaredView, params, options),
+        handle: (params: LiveMessagesByTopicParams, options: DeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> & SubscriptionHandleReturnOptions) => subscribeLiveMessagesByTopicHandle(bindings.subscribeDeclaredView, params, options),
+      },
+      liveMessageCount: {
+        subscribe: (options: DeclaredViewSubscriptionOptions<LiveMessageCountViewRow> = {}) => subscribeLiveMessageCount(bindings.subscribeDeclaredView, options),
+        handle: (options: DeclaredViewSubscriptionOptions<LiveMessageCountViewRow> & SubscriptionHandleReturnOptions) => subscribeLiveMessageCountHandle(bindings.subscribeDeclaredView, options),
+      },
+    },
+    tables: {
+      messages: {
+        subscribe: (onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}) => subscribeMessages(bindings.subscribeTable, onRows, options),
+      },
+      sysClients: {
+        subscribe: (onRows?: (rows: SysClientsRow[]) => void, options: TableSubscriptionOptions<SysClientsRow> = {}) => subscribeSysClients(bindings.subscribeTable, onRows, options),
+      },
+      sysScheduled: {
+        subscribe: (onRows?: (rows: SysScheduledRow[]) => void, options: TableSubscriptionOptions<SysScheduledRow> = {}) => subscribeSysScheduled(bindings.subscribeTable, onRows, options),
+      },
+    },
+    events: {
+    },
+  } as const;
+}
+

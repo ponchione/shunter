@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Generated TypeScript clients now include a module-bound
+  `createModuleClient` facade that groups reducer, procedure, declared-query,
+  declared-view, table subscription, and event-table insert helpers around a
+  connected runtime client; hosted-chat now uses this facade in its frontend
+  gate.
 - Added a module-linked hosted-chat maintenance command for offline DataDir
   compatibility preflight and registered migration-hook execution, and extended
   the hosted-chat gate to exercise fresh and compatible preflight flows.

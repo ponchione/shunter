@@ -106,6 +106,22 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `export const readModels = {`)
 	assertContains(t, ts, `recentMessages: { tables: ["messages"], tags: ["history"] },`)
 	assertContains(t, ts, `liveMessages: { tables: ["messages"], tags: ["realtime"] },`)
+	assertContains(t, ts, `export interface ModuleClientBindings {`)
+	assertContains(t, ts, `export function createModuleClient(bindings: ModuleClientBindings) {`)
+	assertContains(t, ts, `reducers: {`)
+	assertContains(t, ts, `sendMessage: {`)
+	assertContains(t, ts, `call: (args: Uint8Array) => callSendMessage(bindings.callReducer, args),`)
+	assertContains(t, ts, `result: (args: Uint8Array, options: ReducerCallResultOptions = {}) => callSendMessageResult(bindings.callReducer, args, options),`)
+	assertContains(t, ts, `queries: {`)
+	assertContains(t, ts, `recentMessages: {`)
+	assertContains(t, ts, `run: (options: DeclaredQueryRunOptions = {}) => bindings.runDeclaredQuery("recent_messages", options),`)
+	assertContains(t, ts, `views: {`)
+	assertContains(t, ts, `liveMessages: {`)
+	assertContains(t, ts, `subscribe: () => subscribeLiveMessages(bindings.subscribeDeclaredView),`)
+	assertContains(t, ts, `tables: {`)
+	assertContains(t, ts, `messages: {`)
+	assertContains(t, ts, `subscribe: (onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}) => subscribeMessages(bindings.subscribeTable, onRows, options),`)
+	assertContains(t, ts, `events: {`)
 }
 
 func TestGeneratorMapsNullableColumnsToUnionNull(t *testing.T) {
@@ -1295,6 +1311,9 @@ func TestTypeScriptGeneratorEmitsTableKindMetadata(t *testing.T) {
 	assertContains(t, ts, `notifications: "event",`)
 	assertContains(t, ts, `export function subscribeNotificationsInserts(subscribeTable: TableSubscriber<NotificationsRow>, onInsert: (event: SubscriptionRowEvent<NotificationsRow>) => void, options: TableSubscriptionOptions<NotificationsRow> = {}): Promise<SubscriptionUnsubscribe> {`)
 	assertContains(t, ts, `const subscribeOptions: TableSubscriptionOptions<NotificationsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["notifications"], eventTable: true, onInsert } : { ...options, eventTable: true, onInsert };`)
+	assertContains(t, ts, `events: {`)
+	assertContains(t, ts, `notifications: {`)
+	assertContains(t, ts, `onInsert: (handler: (event: SubscriptionRowEvent<NotificationsRow>) => void, options: TableSubscriptionOptions<NotificationsRow> = {}) => subscribeNotificationsInserts(bindings.subscribeTable, handler, options),`)
 }
 
 func TestTypeScriptGeneratorDisambiguatesTableReadPolicyMetadataIdentifiers(t *testing.T) {

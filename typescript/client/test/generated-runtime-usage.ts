@@ -59,6 +59,7 @@ import {
   callCreateMessage,
   callCreateMessageResult,
   callCreateMessageTyped,
+  createModuleClient,
   decodeCreateMessageResult,
   decodeLiveMessageProjectionViewRow,
   decodeLiveMessagesByTopicViewRow,
@@ -111,6 +112,7 @@ import type {
   MessagesByTopicQueryRow,
   MessagesByTopicQueryRows,
   MessagesRow,
+  ModuleClientBindings,
   ProcedureCaller,
   ProcedureName,
   RecentMessagesQueryRow,
@@ -552,6 +554,51 @@ async function exerciseGeneratedBindings(): Promise<void> {
     subscribeDeclaredView: generatedClientDeclaredViewSubscriber,
     subscribeTable: generatedClientTableSubscriber,
   };
+  const moduleClientBindings: ModuleClientBindings = {
+    callReducer: client.callReducer,
+    callProcedure: client.callProcedure,
+    runDeclaredQuery: client.runDeclaredQuery,
+    subscribeDeclaredView: client.subscribeDeclaredView,
+    subscribeTable: client.subscribeTable,
+  };
+  const moduleClient = createModuleClient(moduleClientBindings);
+  const moduleClientReducerBytes: Uint8Array = await moduleClient.reducers.createMessage.call(
+    generatedCreateMessageArgs,
+    generatedTypedReducerOptions,
+  );
+  const moduleClientRawReducerBytes: Uint8Array = await moduleClient.reducers.createMessage.raw(
+    new Uint8Array([1, 2, 3]),
+  );
+  const moduleClientReducerResult: Promise<GeneratedReducerCallResult<typeof reducers.createMessage>> =
+    moduleClient.reducers.createMessage.result(new Uint8Array([1, 2, 3]), reducerResultOptions);
+  const moduleClientRecentMessages: Promise<
+    GeneratedDecodedDeclaredQueryResult<typeof queries.recentMessages, RecentMessagesQueryRows>
+  > = moduleClient.queries.recentMessages.decoded();
+  const moduleClientMessagesByTopic: Promise<
+    GeneratedDecodedDeclaredQueryResult<typeof queries.messagesByTopic, MessagesByTopicQueryRows>
+  > = moduleClient.queries.messagesByTopic.decoded(
+    messagesByTopicParams,
+    generatedDeclaredQueryDecodedRunOptions,
+  );
+  const moduleClientRawMessagesByTopic: Uint8Array = await moduleClient.queries.messagesByTopic.run(
+    messagesByTopicParams,
+    generatedDeclaredQueryRunOptions,
+  );
+  const moduleClientUnsubscribeView: SubscriptionUnsubscribe =
+    await moduleClient.views.liveMessageProjection.subscribe(generatedDeclaredViewOptions);
+  await moduleClientUnsubscribeView();
+  const moduleClientViewHandle: SubscriptionHandle<LiveMessagesByTopicViewRow> =
+    await moduleClient.views.liveMessagesByTopic.handle(
+      liveMessagesByTopicParams,
+      { returnHandle: true },
+    );
+  await moduleClientViewHandle.unsubscribe();
+  const moduleClientUnsubscribeTable: SubscriptionUnsubscribe =
+    await moduleClient.tables.messages.subscribe((rows) => {
+      const firstBody: string | undefined = rows[0]?.body;
+      void firstBody;
+    });
+  await moduleClientUnsubscribeTable();
   const unsubscribeFromBindings: SubscriptionUnsubscribe =
     await subscribeLiveMessageCount(runtimeBindings.subscribeDeclaredView);
   await unsubscribeFromBindings();
@@ -627,6 +674,12 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void generatedTypedReducerOptions;
   void generatedTypedReducerResultOptions;
   void generatedTypedReducerBytes;
+  void moduleClientReducerBytes;
+  void moduleClientRawReducerBytes;
+  void moduleClientReducerResult;
+  void moduleClientRecentMessages;
+  void moduleClientMessagesByTopic;
+  void moduleClientRawMessagesByTopic;
   void encodedCreateMessageArgs;
   void typedReducerBytes;
   void typedReducerEnvelope;
