@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Declared live views now support the bounded multi-way inner-join projection
+  shape used by flattened leaderboard streams: equality joins and filters with
+  aliased projected columns from joined relations.
 - Generated TypeScript clients now include a module-bound
   `createModuleClient` facade that groups reducer, procedure, declared-query,
   declared-view, table subscription, and event-table insert helpers around a

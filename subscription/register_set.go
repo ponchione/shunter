@@ -110,7 +110,7 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection
 		case CrossJoin:
 			rows, err = m.appendProjectedCrossJoinRows(ctx, nil, view, p)
 		case MultiJoin:
-			rows, err = m.appendProjectedMultiJoinRows(ctx, nil, view, p)
+			rows, err = m.appendProjectedMultiJoinRows(ctx, nil, view, p, projection)
 		}
 		if err != nil {
 			return nil, err
@@ -126,7 +126,7 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection
 			TableID:        tableID,
 			TableName:      m.schema.TableName(tableID),
 			Columns:        columns,
-			Inserts:        projectRows(rows, projection),
+			Inserts:        projectJoinInitialRows(pred, rows, projection),
 		}}, nil
 	default:
 		tables := pred.Tables()

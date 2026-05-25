@@ -66,15 +66,21 @@ func projectionColumnMatchesEmittedRelation(pred Predicate, col ProjectionColumn
 		}
 		return col.Alias == p.LeftAlias
 	case MultiJoin:
-		if p.ProjectedRelation < 0 || p.ProjectedRelation >= len(p.Relations) {
-			return false
-		}
-		rel := p.Relations[p.ProjectedRelation]
-		return col.Table == rel.Table && col.Alias == rel.Alias
+		_, ok := multiJoinProjectionRelation(p.Relations, col)
+		return ok
 	default:
 		tables := pred.Tables()
 		return len(tables) == 1 && col.Table == tables[0] && col.Alias == 0
 	}
+}
+
+func multiJoinProjectionRelation(relations []MultiJoinRelation, col ProjectionColumn) (int, bool) {
+	for i, rel := range relations {
+		if col.Table == rel.Table && col.Alias == rel.Alias {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 func projectRows(rows []types.ProductValue, columns []ProjectionColumn) []types.ProductValue {
@@ -94,6 +100,13 @@ func projectRows(rows []types.ProductValue, columns []ProjectionColumn) []types.
 		out = append(out, projected)
 	}
 	return out
+}
+
+func projectJoinInitialRows(pred Predicate, rows []types.ProductValue, columns []ProjectionColumn) []types.ProductValue {
+	if _, ok := pred.(MultiJoin); ok {
+		return rows
+	}
+	return projectRows(rows, columns)
 }
 
 func projectionUpdateColumns(fallback []schema.ColumnSchema, projection []ProjectionColumn) []schema.ColumnSchema {

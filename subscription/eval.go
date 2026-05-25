@@ -458,11 +458,10 @@ func (m *Manager) evalQuery(ctx context.Context, qs *queryState, dv *DeltaView) 
 		if err := m.checkMultiJoinDeltaLimits(ctx, p, dv); err != nil {
 			return nil, err
 		}
-		ins, del, err := evalMultiJoinDelta(ctx, dv, p)
+		ins, del, err := evalMultiJoinDelta(ctx, dv, p, qs.projection)
 		if err != nil {
 			return nil, err
 		}
-		ins, del = projectDeltaRows(ins, del, qs.projection, len(qs.projection) > 0)
 		return m.deltaUpdate(p.ProjectedTable(), qs.projection, ins, del), nil
 	default:
 		var updates []SubscriptionUpdate

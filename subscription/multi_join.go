@@ -8,15 +8,15 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func (m *Manager) appendProjectedMultiJoinRows(ctx context.Context, out []types.ProductValue, view store.CommittedReadView, p MultiJoin) ([]types.ProductValue, error) {
-	rows, err := multiJoinRowsFromView(ctx, view, p, m.InitialRowLimit)
+func (m *Manager) appendProjectedMultiJoinRows(ctx context.Context, out []types.ProductValue, view store.CommittedReadView, p MultiJoin, projection []ProjectionColumn) ([]types.ProductValue, error) {
+	rows, err := multiJoinRowsFromView(ctx, view, p, projection, m.InitialRowLimit)
 	if err != nil {
 		return nil, err
 	}
 	return append(out, rows...), nil
 }
 
-func evalMultiJoinDelta(ctx context.Context, dv *DeltaView, p MultiJoin) (inserts, deletes []types.ProductValue, err error) {
+func evalMultiJoinDelta(ctx context.Context, dv *DeltaView, p MultiJoin, projection []ProjectionColumn) (inserts, deletes []types.ProductValue, err error) {
 	beforeRows, err := multiJoinRowsByRelationBefore(ctx, dv, p)
 	if err != nil {
 		return nil, nil, err
@@ -33,7 +33,7 @@ func evalMultiJoinDelta(ctx context.Context, dv *DeltaView, p MultiJoin) (insert
 		}
 		if rows := dv.InsertedRows(rel.Table); len(rows) > 0 {
 			fragmentRows := multiJoinDeltaRowsByRelation(beforeRows, afterRows, i, rows, true)
-			fragment, err := collectMultiJoinProjectedRows(ctx, p, fragmentRows, 0)
+			fragment, err := collectMultiJoinProjectedRows(ctx, p, fragmentRows, projection, 0)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -41,7 +41,7 @@ func evalMultiJoinDelta(ctx context.Context, dv *DeltaView, p MultiJoin) (insert
 		}
 		if rows := dv.DeletedRows(rel.Table); len(rows) > 0 {
 			fragmentRows := multiJoinDeltaRowsByRelation(beforeRows, afterRows, i, rows, false)
-			fragment, err := collectMultiJoinProjectedRows(ctx, p, fragmentRows, 0)
+			fragment, err := collectMultiJoinProjectedRows(ctx, p, fragmentRows, projection, 0)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -83,12 +83,12 @@ func multiJoinRowsByRelationBefore(ctx context.Context, dv *DeltaView, p MultiJo
 	return rowsByRelation, nil
 }
 
-func multiJoinRowsFromView(ctx context.Context, view store.CommittedReadView, p MultiJoin, limit int) ([]types.ProductValue, error) {
+func multiJoinRowsFromView(ctx context.Context, view store.CommittedReadView, p MultiJoin, projection []ProjectionColumn, limit int) ([]types.ProductValue, error) {
 	rowsByRelation, err := multiJoinRowsByRelationFromView(ctx, view, p)
 	if err != nil {
 		return nil, err
 	}
-	return collectMultiJoinProjectedRows(ctx, p, rowsByRelation, limit)
+	return collectMultiJoinProjectedRows(ctx, p, rowsByRelation, projection, limit)
 }
 
 func multiJoinRowsByRelationFromView(ctx context.Context, view store.CommittedReadView, p MultiJoin) ([][]types.ProductValue, error) {
@@ -124,16 +124,35 @@ func multiJoinRowsByRelationAfter(ctx context.Context, dv *DeltaView, p MultiJoi
 	return rowsByRelation, nil
 }
 
-func collectMultiJoinProjectedRows(ctx context.Context, p MultiJoin, rowsByRelation [][]types.ProductValue, limit int) ([]types.ProductValue, error) {
+func collectMultiJoinProjectedRows(ctx context.Context, p MultiJoin, rowsByRelation [][]types.ProductValue, projection []ProjectionColumn, limit int) ([]types.ProductValue, error) {
 	var out []types.ProductValue
 	err := visitMultiJoinTuples(ctx, p, rowsByRelation, func(tuple []types.ProductValue) error {
 		if limit > 0 && len(out) >= limit {
 			return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, limit)
 		}
-		out = append(out, tuple[p.ProjectedRelation])
+		out = append(out, projectMultiJoinTuple(tuple, p, projection))
 		return nil
 	})
 	return out, err
+}
+
+func projectMultiJoinTuple(tuple []types.ProductValue, p MultiJoin, projection []ProjectionColumn) types.ProductValue {
+	if len(projection) == 0 {
+		return tuple[p.ProjectedRelation]
+	}
+	out := make(types.ProductValue, 0, len(projection))
+	for _, col := range projection {
+		relation, ok := multiJoinProjectionRelation(p.Relations, col)
+		if !ok || relation < 0 || relation >= len(tuple) {
+			continue
+		}
+		value, ok := rowValue(tuple[relation], col.Column)
+		if !ok {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
 }
 
 func visitMultiJoinTuples(ctx context.Context, p MultiJoin, rowsByRelation [][]types.ProductValue, visit func([]types.ProductValue) error) error {
