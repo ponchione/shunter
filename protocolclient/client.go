@@ -113,7 +113,16 @@ func (c *Client) NextRequestID() uint32 {
 	if c == nil {
 		return 0
 	}
-	return c.nextID.Add(1)
+	for {
+		current := c.nextID.Load()
+		next := current + 1
+		if next == 0 {
+			next = 1
+		}
+		if c.nextID.CompareAndSwap(current, next) {
+			return next
+		}
+	}
 }
 
 // Send encodes and writes one client protocol message.

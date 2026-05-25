@@ -57,6 +57,18 @@ func TestDialSendsBearerTokenNegotiatesSubprotocolAndReadsIdentity(t *testing.T)
 	}
 }
 
+func TestClientNextRequestIDSkipsZeroAfterWrap(t *testing.T) {
+	client := &Client{}
+	client.nextID.Store(^uint32(0) - 1)
+
+	if got := client.NextRequestID(); got != ^uint32(0) {
+		t.Fatalf("request ID before wrap = %d, want %d", got, uint32(^uint32(0)))
+	}
+	if got := client.NextRequestID(); got != 1 {
+		t.Fatalf("request ID after wrap = %d, want 1", got)
+	}
+}
+
 func TestDialRequiresExplicitTokenBeforeNetwork(t *testing.T) {
 	called := make(chan struct{}, 1)
 	srv := protocolClientTestServer(t, func(http.ResponseWriter, *http.Request) {
