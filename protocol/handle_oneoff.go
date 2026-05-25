@@ -824,10 +824,11 @@ func visitOneOffJoinPairs(ctx context.Context, view store.CommittedReadView, joi
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				if int(outerCol) >= len(outerRow) {
+				outerValue, ok := oneOffRowValue(outerRow, outerCol)
+				if !ok {
 					continue
 				}
-				key := store.NewIndexKey(outerRow[outerCol])
+				key := store.NewIndexKey(outerValue)
 				for _, rid := range view.IndexSeek(innerTable, innerIdx, key) {
 					if err := ctx.Err(); err != nil {
 						return err
@@ -849,7 +850,7 @@ func visitOneOffJoinPairs(ctx context.Context, view store.CommittedReadView, joi
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if int(outerCol) >= len(outerRow) {
+		if _, ok := oneOffRowValue(outerRow, outerCol); !ok {
 			continue
 		}
 		for _, innerRow := range view.TableScan(innerTable) {
@@ -865,16 +866,29 @@ func visitOneOffJoinPairs(ctx context.Context, view store.CommittedReadView, joi
 }
 
 func oneOffJoinPairMatches(join subscription.Join, leftRow, rightRow types.ProductValue) bool {
-	if int(join.LeftCol) >= len(leftRow) || int(join.RightCol) >= len(rightRow) {
+	leftValue, ok := oneOffRowValue(leftRow, join.LeftCol)
+	if !ok {
 		return false
 	}
-	if !leftRow[join.LeftCol].Equal(rightRow[join.RightCol]) {
+	rightValue, ok := oneOffRowValue(rightRow, join.RightCol)
+	if !ok {
+		return false
+	}
+	if !leftValue.Equal(rightValue) {
 		return false
 	}
 	if join.Filter != nil && !subscription.MatchJoinPair(join.Filter, join.Left, join.LeftAlias, leftRow, join.Right, join.RightAlias, rightRow) {
 		return false
 	}
 	return true
+}
+
+func oneOffRowValue(row types.ProductValue, col types.ColID) (types.Value, bool) {
+	idx := int(col)
+	if idx < 0 || idx >= len(row) {
+		return types.Value{}, false
+	}
+	return row[idx], true
 }
 
 func evaluateOneOffCrossJoinProjection(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, columns []compiledSQLProjectionColumn, limit int) ([]types.ProductValue, error) {

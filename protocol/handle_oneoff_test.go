@@ -13,6 +13,7 @@ import (
 	"github.com/ponchione/shunter/query/sql"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -3172,6 +3173,54 @@ func TestHandleOneOffQuery_JoinFilterCrossSideOrDoesNotPassEveryPair(t *testing.
 		{types.NewUint32(3), types.NewUint32(30)},
 	}
 	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestOneOffJoinNegativeColumnRejects(t *testing.T) {
+	left := types.ProductValue{types.NewUint32(7)}
+	right := types.ProductValue{types.NewUint32(7)}
+
+	if oneOffJoinPairMatches(subscription.Join{LeftCol: -1, RightCol: 0}, left, right) {
+		t.Fatal("negative left join column matched; want reject")
+	}
+	if oneOffJoinPairMatches(subscription.Join{LeftCol: 0, RightCol: -1}, left, right) {
+		t.Fatal("negative right join column matched; want reject")
+	}
+}
+
+func TestVisitOneOffJoinPairsNegativeColumnDoesNotPanic(t *testing.T) {
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {{types.NewUint32(7)}},
+		2: {{types.NewUint32(7)}},
+	}}
+	join := subscription.Join{Left: 1, LeftCol: -1, Right: 2, RightCol: 0}
+
+	var visits int
+	if err := visitOneOffJoinPairs(context.Background(), snap, join, nil, func(_, _ types.ProductValue) bool {
+		visits++
+		return true
+	}); err != nil {
+		t.Fatalf("visitOneOffJoinPairs unindexed: %v", err)
+	}
+	if visits != 0 {
+		t.Fatalf("unindexed visits = %d, want 0", visits)
+	}
+
+	indexed := &indexedCountingSnapshot{
+		mockSnapshot: snap,
+		table:        2,
+		column:       0,
+		index:        42,
+	}
+	resolver := &indexedOneOffSchemaLookup{table: 2, column: 0, index: 42}
+	if err := visitOneOffJoinPairs(context.Background(), indexed, join, resolver, func(_, _ types.ProductValue) bool {
+		visits++
+		return true
+	}); err != nil {
+		t.Fatalf("visitOneOffJoinPairs indexed: %v", err)
+	}
+	if visits != 0 {
+		t.Fatalf("indexed visits = %d, want 0", visits)
+	}
 }
 
 func TestHandleOneOffQuery_JoinProjectionOnLeftTable(t *testing.T) {
