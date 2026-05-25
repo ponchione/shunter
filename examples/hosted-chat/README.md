@@ -50,6 +50,21 @@ rtk go run ./cmd/shunter contract assert --contract examples/hosted-chat/shunter
 rtk go run ./cmd/shunter health --contract examples/hosted-chat/shunter.contract.json
 ```
 
+Run module-aware offline maintenance from the app-owned binary:
+
+```bash
+rtk go run ./examples/hosted-chat/cmd/maintain preflight \
+  --data-dir ./examples/hosted-chat/data \
+  --format json
+
+rtk go run ./examples/hosted-chat/cmd/maintain migrate \
+  --data-dir ./examples/hosted-chat/data
+```
+
+The generic `shunter` CLI can copy offline `DataDir` directories, but
+schema-aware preflight and migration commands must live in an app-owned binary
+so they can link `app.Module()` directly.
+
 With the backend running, call the reducer and read the declared query through
 the running-app CLI:
 
@@ -116,9 +131,10 @@ rtk ./scripts/hosted-chat-gate.sh
 
 The gate builds and tests the Go example, exports the contract, asserts
 contract-local surface counts, validates the contract artifact, checks
-contract-local health, starts a real server on an ephemeral local port, checks
-live `health` and `describe`, runs one CLI reducer call, one CLI procedure
-call, one declared query, and one raw SQL read against it, stops the server,
-runs offline backup and restore, restarts from the restored `DataDir`, verifies
-recovered query results, regenerates the TypeScript bindings, and runs the
-frontend typecheck.
+contract-local health, runs app-owned fresh preflight, starts a real server on
+an ephemeral local port, checks live `health` and `describe`, runs one CLI
+reducer call, one CLI procedure call, one declared query, and one raw SQL read
+against it, stops the server, runs app-owned compatible preflight and no-op
+migration, runs offline backup and restore, restarts from the restored
+`DataDir`, verifies recovered query results, regenerates the TypeScript
+bindings, and runs the frontend typecheck.

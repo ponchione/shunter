@@ -16,7 +16,8 @@ func TestProductionLoggingStaysRuntimeScoped(t *testing.T) {
 		"observability.go": {},
 	}
 	allowedGlobalOutputFiles := map[string]struct{}{
-		"cmd/shunter/main.go": {},
+		"cmd/shunter/main.go":                       {},
+		"examples/hosted-chat/cmd/maintain/main.go": {},
 	}
 	processGlobalLogCalls := map[string]struct{}{
 		"Default":   {},

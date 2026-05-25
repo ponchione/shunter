@@ -155,6 +155,22 @@ an app-owned migration plan. If recovery has durable log data but cannot select
 a snapshot, schema-version drift is blocked because there is no persisted schema
 map to reconcile table IDs safely.
 
+Preflight CLIs must be app-owned binaries because they need to link the module
+declarations directly:
+
+```go
+report, err := shunter.CheckDataDirCompatibilityReport(mod, shunter.Config{
+	DataDir: "./data/chat",
+})
+if err != nil {
+	return err
+}
+_ = report.Status
+```
+
+The hosted-chat example includes this shape under
+`examples/hosted-chat/cmd/maintain`.
+
 ## Migrations
 
 Migration hooks are app-owned code, not a general SQL migration engine.

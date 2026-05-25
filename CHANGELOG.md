@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added a module-linked hosted-chat maintenance command for offline DataDir
+  compatibility preflight and registered migration-hook execution, and extended
+  the hosted-chat gate to exercise fresh and compatible preflight flows.
 - Added hosted-app DataDir compatibility reports and safe additive recovery for
   schema-version-only drift, added tables, and appended non-unique/non-primary
   indexes while keeping row-shape changes, table drops, and new unique/primary

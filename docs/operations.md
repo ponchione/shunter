@@ -214,7 +214,7 @@ Recommended flow:
 1. Stop runtime ownership of the target `DataDir`.
 2. Take an offline backup.
 3. Run `CheckDataDirCompatibilityReport`, `CheckDataDirCompatibility`, or a
-   contract plan before changing data.
+   module-linked preflight helper before changing data.
 4. Run `RunModuleDataDirMigrations` or `RunDataDirMigrations` from an app-owned
    maintenance binary that links the module.
 5. Restart the normal app binary and verify state through public reads.
@@ -229,6 +229,10 @@ and new unique or primary constraints remain blocked until an app-owned
 migration plan rewrites or validates the stored data. Additive schema-version
 changes require a selected snapshot; log-only recovery with no selected snapshot
 is blocked because table ID reconciliation cannot be proven safe.
+
+Preflight helpers must be app-owned binaries so they can link the app module
+directly; the hosted-chat example keeps the maintained shape under
+`examples/hosted-chat/cmd/maintain`.
 
 Registered startup migration hooks run during runtime startup. Offline
 migration binaries can run the same registered hooks without starting normal

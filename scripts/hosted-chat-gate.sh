@@ -15,6 +15,8 @@ query_json="$(mktemp)"
 sql_query_json="$(mktemp)"
 running_describe_json="$(mktemp)"
 running_health_json="$(mktemp)"
+preflight_json="$(mktemp)"
+migrate_json="$(mktemp)"
 run_data="$(mktemp -d)"
 backup_data="$(mktemp -d)"
 restored_data="$(mktemp -d)"
@@ -25,7 +27,7 @@ cleanup() {
     kill "$server_pid" >/dev/null 2>&1 || true
     wait "$server_pid" >/dev/null 2>&1 || true
   fi
-  rm -f "$build_bin" "$describe_json" "$health_json" "$validate_json" "$assert_json" "$call_json" "$procedure_json" "$query_json" "$sql_query_json" "$running_describe_json" "$running_health_json" "$server_log"
+  rm -f "$build_bin" "$describe_json" "$health_json" "$validate_json" "$assert_json" "$call_json" "$procedure_json" "$query_json" "$sql_query_json" "$running_describe_json" "$running_health_json" "$preflight_json" "$migrate_json" "$server_log"
   rm -rf "$run_data" "$backup_data" "$restored_data"
 }
 trap cleanup EXIT
@@ -112,6 +114,11 @@ rtk grep '"running_server_checked": false' "$health_json"
 listen_port="$(free_port)"
 server_url="http://127.0.0.1:${listen_port}"
 rm -rf "$backup_data" "$restored_data"
+rtk go run ./examples/hosted-chat/cmd/maintain preflight \
+  --data-dir "$run_data" \
+  --format json > "$preflight_json"
+rtk grep '"status": "fresh"' "$preflight_json"
+rtk grep '"compatible": true' "$preflight_json"
 start_server "$run_data" "$listen_port"
 wait_for_query_ready "$server_url"
 rtk go run ./cmd/shunter health \
@@ -169,6 +176,16 @@ rtk grep '"body": "hello from hosted-chat procedure"' "$sql_query_json"
 
 stop_server_cleanly
 
+rtk go run ./examples/hosted-chat/cmd/maintain preflight \
+  --data-dir "$run_data" \
+  --format json > "$preflight_json"
+rtk grep '"status": "compatible"' "$preflight_json"
+rtk grep '"compatible": true' "$preflight_json"
+rtk go run ./examples/hosted-chat/cmd/maintain migrate \
+  --data-dir "$run_data" \
+  --format json > "$migrate_json"
+rtk grep '"DataDir": "' "$migrate_json"
+rtk grep '"DurableTxID":' "$migrate_json"
 rtk go run ./cmd/shunter backup --data-dir "$run_data" --out "$backup_data"
 rtk go run ./cmd/shunter restore --backup "$backup_data" --data-dir "$restored_data"
 
