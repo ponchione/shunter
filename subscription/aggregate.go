@@ -601,12 +601,8 @@ func aggregateCrossJoinCommittedValue(ctx context.Context, view store.CommittedR
 }
 
 func aggregateMultiJoinCommittedValue(ctx context.Context, view store.CommittedReadView, multi MultiJoin, aggregate *Aggregate) (types.Value, error) {
-	acc, err := newJoinAggregateAccumulator(aggregate)
-	if err != nil {
-		return types.Value{}, err
-	}
 	if view == nil {
-		return acc.value()
+		return aggregateMultiJoinRowsValue(ctx, multi, nil, aggregate)
 	}
 	rowsByRelation, err := multiJoinRowsByRelationFromView(ctx, view, multi)
 	if err != nil {
