@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ponchione/shunter/internal/autoincrement"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
@@ -276,7 +277,7 @@ func nextSequenceValueForTable(table *store.Table) (uint64, bool) {
 
 	maxSeen := uint64(0)
 	for _, row := range table.Scan() {
-		value, ok := autoIncrementValueAsUint64(row[sequenceCol], ts.Columns[sequenceCol].Type)
+		value, ok := autoincrement.ValueAsUint64(row[sequenceCol], ts.Columns[sequenceCol].Type)
 		if !ok {
 			continue
 		}
@@ -288,48 +289,6 @@ func nextSequenceValueForTable(table *store.Table) (uint64, bool) {
 		return maxSeen, true
 	}
 	return maxSeen + 1, true
-}
-
-func autoIncrementValueAsUint64(v types.Value, kind schema.ValueKind) (uint64, bool) {
-	if v.IsNull() {
-		return 0, false
-	}
-	switch kind {
-	case schema.KindInt8:
-		n := int64(v.AsInt8())
-		if n < 0 {
-			return 0, false
-		}
-		return uint64(n), true
-	case schema.KindInt16:
-		n := int64(v.AsInt16())
-		if n < 0 {
-			return 0, false
-		}
-		return uint64(n), true
-	case schema.KindInt32:
-		n := int64(v.AsInt32())
-		if n < 0 {
-			return 0, false
-		}
-		return uint64(n), true
-	case schema.KindInt64:
-		n := v.AsInt64()
-		if n < 0 {
-			return 0, false
-		}
-		return uint64(n), true
-	case schema.KindUint8:
-		return uint64(v.AsUint8()), true
-	case schema.KindUint16:
-		return uint64(v.AsUint16()), true
-	case schema.KindUint32:
-		return uint64(v.AsUint32()), true
-	case schema.KindUint64:
-		return v.AsUint64(), true
-	default:
-		return 0, false
-	}
 }
 
 func validateSnapshotLogBoundary(segments []SegmentInfo, snapshotTxID types.TxID) error {

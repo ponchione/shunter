@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 
+	"github.com/ponchione/shunter/internal/autoincrement"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
@@ -115,7 +116,7 @@ func advanceReplaySequenceForInsert(table *Table, row types.ProductValue) {
 	if table.sequence == nil || table.sequenceCol < 0 {
 		return
 	}
-	value, ok := autoIncrementValueAsUint64(row[table.sequenceCol], table.schema.Columns[table.sequenceCol].Type)
+	value, ok := autoincrement.ValueAsUint64(row[table.sequenceCol], table.schema.Columns[table.sequenceCol].Type)
 	if !ok {
 		return
 	}

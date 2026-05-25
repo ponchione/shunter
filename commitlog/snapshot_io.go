@@ -18,6 +18,7 @@ import (
 	"lukechampine.com/blake3"
 
 	"github.com/ponchione/shunter/bsatn"
+	"github.com/ponchione/shunter/internal/autoincrement"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
@@ -1113,7 +1114,7 @@ func validateSnapshotSequenceBounds(sequences map[schema.TableID]uint64, schemaB
 		}
 		maxSeen := uint64(0)
 		for _, row := range table.Rows {
-			value, ok := autoIncrementValueAsUint64(row[sequenceCol], tableSchema.Columns[sequenceCol].Type)
+			value, ok := autoincrement.ValueAsUint64(row[sequenceCol], tableSchema.Columns[sequenceCol].Type)
 			if !ok {
 				continue
 			}

@@ -5,6 +5,7 @@ import (
 	"iter"
 	"sync/atomic"
 
+	"github.com/ponchione/shunter/internal/autoincrement"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
@@ -92,7 +93,7 @@ func (t *Transaction) applyAutoIncrement(tableID schema.TableID, table *Table, r
 
 	col := table.schema.Columns[table.sequenceCol]
 	if !isZeroAutoIncrementValue(row[table.sequenceCol], col.Type) {
-		value, ok := autoIncrementValueAsUint64(row[table.sequenceCol], col.Type)
+		value, ok := autoincrement.ValueAsUint64(row[table.sequenceCol], col.Type)
 		return row, value, ok, nil
 	}
 
@@ -145,50 +146,8 @@ func nextAutoIncrementSequenceValue(observed uint64) uint64 {
 }
 
 func isZeroAutoIncrementValue(v types.Value, kind schema.ValueKind) bool {
-	n, ok := autoIncrementValueAsUint64(v, kind)
+	n, ok := autoincrement.ValueAsUint64(v, kind)
 	return ok && n == 0
-}
-
-func autoIncrementValueAsUint64(v types.Value, kind schema.ValueKind) (uint64, bool) {
-	if v.IsNull() {
-		return 0, false
-	}
-	switch kind {
-	case schema.KindInt8:
-		n := int64(v.AsInt8())
-		if n < 0 {
-			return 0, false
-		}
-		return uint64(n), true
-	case schema.KindInt16:
-		n := int64(v.AsInt16())
-		if n < 0 {
-			return 0, false
-		}
-		return uint64(n), true
-	case schema.KindInt32:
-		n := int64(v.AsInt32())
-		if n < 0 {
-			return 0, false
-		}
-		return uint64(n), true
-	case schema.KindInt64:
-		n := v.AsInt64()
-		if n < 0 {
-			return 0, false
-		}
-		return uint64(n), true
-	case schema.KindUint8:
-		return uint64(v.AsUint8()), true
-	case schema.KindUint16:
-		return uint64(v.AsUint16()), true
-	case schema.KindUint32:
-		return uint64(v.AsUint32()), true
-	case schema.KindUint64:
-		return v.AsUint64(), true
-	default:
-		return 0, false
-	}
 }
 
 func newAutoIncrementValue(n uint64, kind schema.ValueKind) types.Value {
