@@ -155,9 +155,7 @@ func matchingJWKSVerificationKeys(keys []resolvedJWTVerificationKey, alg JWTAlgo
 		if keyID != "" && key.keyID != keyID {
 			continue
 		}
-		if keyID == "" || key.keyID == keyID {
-			out = append(out, key)
-		}
+		out = append(out, key)
 	}
 	return out
 }
@@ -353,10 +351,5 @@ func ecdsaPublicKeyFromJWK(raw jwkDocumentKey) (*ecdsa.PublicKey, error) {
 }
 
 func cloneResolvedJWTVerificationKeys(in []resolvedJWTVerificationKey) []resolvedJWTVerificationKey {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]resolvedJWTVerificationKey, len(in))
-	copy(out, in)
-	return out
+	return slices.Clone(in)
 }

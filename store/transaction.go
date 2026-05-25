@@ -440,15 +440,16 @@ func (t *Transaction) untrackTxInsert(tableID schema.TableID, rowID types.RowID,
 			continue
 		}
 		key := idx.ExtractKey(row)
-		bucket := entries[key.hash64()]
+		hash := key.hash64()
+		bucket := entries[hash]
 		for i, entry := range bucket {
 			if entry.rowID == rowID {
-				entries[key.hash64()] = append(bucket[:i], bucket[i+1:]...)
+				entries[hash] = append(bucket[:i], bucket[i+1:]...)
 				break
 			}
 		}
-		if len(entries[key.hash64()]) == 0 {
-			delete(entries, key.hash64())
+		if len(entries[hash]) == 0 {
+			delete(entries, hash)
 		}
 	}
 	if t.txRowIndexes != nil {
