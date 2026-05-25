@@ -139,11 +139,9 @@ func (e *Executor) sweepDanglingClients(ctx context.Context) error {
 		if int(SysClientsColIdentity) >= len(row) {
 			continue
 		}
-		connBytes := row[SysClientsColConnectionID].AsBytes()
-		identityBytes := row[SysClientsColIdentity].AsBytes()
 		var t sysClientsTarget
-		copy(t.conn[:], connBytes)
-		copy(t.identity[:], identityBytes)
+		copy(t.conn[:], row[SysClientsColConnectionID].BytesView())
+		copy(t.identity[:], row[SysClientsColIdentity].BytesView())
 		targets = append(targets, t)
 	}
 	view.Close()
@@ -252,7 +250,7 @@ func deleteSysClientsRow(tx *store.Transaction, sysID schema.TableID, conn types
 		if int(SysClientsColConnectionID) >= len(row) {
 			continue
 		}
-		if !bytes.Equal(row[SysClientsColConnectionID].AsBytes(), conn[:]) {
+		if !bytes.Equal(row[SysClientsColConnectionID].BytesView(), conn[:]) {
 			continue
 		}
 		targetRowID = rowID

@@ -255,7 +255,7 @@ func scheduledCallReducerCommand(row types.ProductValue) CallReducerCmd {
 	return CallReducerCmd{
 		Request: ReducerRequest{
 			ReducerName:    row[SysScheduledColReducerName].AsString(),
-			Args:           append([]byte(nil), row[SysScheduledColArgs].AsBytes()...),
+			Args:           row[SysScheduledColArgs].AsBytes(),
 			Source:         CallSourceScheduled,
 			ScheduleID:     ScheduleID(row[SysScheduledColScheduleID].AsUint64()),
 			IntendedFireAt: row[SysScheduledColNextRunAtNs].AsInt64(),
