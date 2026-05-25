@@ -37,7 +37,7 @@ type dataDirModuleVersion struct {
 	SchemaVersion uint32 `json:"schema_version"`
 }
 
-func validateDataDirMetadata(dataDir string, mod *Module, reg schema.SchemaRegistry) error {
+func validateDataDirMetadata(dataDir string, mod *Module, _ schema.SchemaRegistry) error {
 	metadata, ok, err := readDataDirMetadata(dataDir)
 	if err != nil {
 		return err
@@ -53,9 +53,6 @@ func validateDataDirMetadata(dataDir string, mod *Module, reg schema.SchemaRegis
 	}
 	if metadata.Module.Name != mod.name {
 		return fmt.Errorf("data dir metadata module name = %q, want %q", metadata.Module.Name, mod.name)
-	}
-	if metadata.Module.SchemaVersion != reg.Version() {
-		return fmt.Errorf("data dir metadata schema_version = %d, want %d", metadata.Module.SchemaVersion, reg.Version())
 	}
 	return nil
 }

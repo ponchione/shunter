@@ -398,7 +398,7 @@ func (r *Runtime) refreshStartupRecoveryAfterDurabilityClose(finalDurableTxID ty
 	// Startup owns a temporary durability worker before r.durability is
 	// installed. If it durably appends migration records and a later startup
 	// step fails, a same-runtime retry must resume from the new log horizon.
-	state, recoveredTxID, resumePlan, recoveryReport, err := openOrBootstrapState(r.dataDir, r.registry)
+	state, recoveredTxID, resumePlan, recoveryReport, recoveryRegistry, err := openOrBootstrapState(r.dataDir, r.registry)
 	if err != nil {
 		return
 	}
@@ -411,6 +411,7 @@ func (r *Runtime) refreshStartupRecoveryAfterDurabilityClose(finalDurableTxID ty
 	r.durableTxID = recoveredTxID
 	r.resumePlan = resumePlan
 	r.recovery = newSuccessfulRuntimeRecoveryFacts(recoveryReport)
+	r.registry = recoveryRegistry
 	r.mu.Unlock()
 }
 

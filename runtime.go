@@ -97,20 +97,21 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		return fail(fmt.Errorf("build hosted runtime schema: %w", err))
 	}
 	registry := engine.Registry()
-	readCatalog, err := newDeclaredReadCatalog(mod.queries, mod.views, registry)
-	if err != nil {
-		return fail(fmt.Errorf("build hosted runtime declared reads: %w", err))
-	}
 	if err := validateDataDirMetadata(preview.dataDir, mod, registry); err != nil {
 		return fail(fmt.Errorf("build hosted runtime state: %w", err))
 	}
 
 	recoveryStart := time.Now()
-	state, recoveredTxID, resumePlan, recoveryReport, err := openOrBootstrapState(preview.dataDir, registry)
+	state, recoveredTxID, resumePlan, recoveryReport, recoveryRegistry, err := openOrBootstrapState(preview.dataDir, registry)
 	if err != nil {
 		err = fmt.Errorf("build hosted runtime state: %w", err)
 		observability.recordRecoveryFailed(err, time.Since(recoveryStart))
 		return fail(err)
+	}
+	registry = recoveryRegistry
+	readCatalog, err := newDeclaredReadCatalog(mod.queries, mod.views, registry)
+	if err != nil {
+		return fail(fmt.Errorf("build hosted runtime declared reads: %w", err))
 	}
 	observability.recordRecoveryCompleted(recoveryReport, time.Since(recoveryStart))
 	state.SetObserver(observability)

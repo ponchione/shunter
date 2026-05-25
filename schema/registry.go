@@ -125,6 +125,46 @@ func newSchemaRegistry(schemas []TableSchema, b *Builder) SchemaRegistry {
 	return r
 }
 
+func newRemappedRegistry(base SchemaRegistry, schemas []TableSchema) SchemaRegistry {
+	r := &schemaRegistry{
+		tables:        make([]TableSchema, len(schemas)),
+		byID:          make(map[TableID]int, len(schemas)),
+		byName:        make(map[string]int, len(schemas)),
+		byFoldedName:  make(map[string]int, len(schemas)),
+		indexByColumn: make(map[tableColumn]IndexID),
+		tableIDs:      make([]TableID, len(schemas)),
+		reducers:      make(map[string]ReducerHandler),
+		version:       base.Version(),
+	}
+
+	for i := range schemas {
+		r.tables[i] = cloneTableSchema(schemas[i])
+		r.byID[r.tables[i].ID] = i
+		r.byName[r.tables[i].Name] = i
+		r.addFoldedTableName(strings.ToLower(r.tables[i].Name), i)
+		for _, idx := range r.tables[i].Indexes {
+			if len(idx.Columns) != 1 {
+				continue
+			}
+			key := tableColumn{table: r.tables[i].ID, col: types.ColID(idx.Columns[0])}
+			if _, exists := r.indexByColumn[key]; !exists {
+				r.indexByColumn[key] = idx.ID
+			}
+		}
+		r.tableIDs[i] = r.tables[i].ID
+	}
+
+	for _, name := range base.Reducers() {
+		if handler, ok := base.Reducer(name); ok {
+			r.reducers[name] = handler
+			r.reducerNames = append(r.reducerNames, name)
+		}
+	}
+	r.onConnect = base.OnConnect()
+	r.onDisconnect = base.OnDisconnect()
+	return r
+}
+
 func (r *schemaRegistry) addFoldedTableName(folded string, i int) {
 	if existing, ok := r.byFoldedName[folded]; ok && existing != i {
 		r.byFoldedName[folded] = ambiguousFoldedTableName

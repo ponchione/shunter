@@ -144,6 +144,17 @@ if err := shunter.CheckDataDirCompatibility(mod, shunter.Config{DataDir: "./data
 }
 ```
 
+Use `CheckDataDirCompatibilityReport` when deployment tooling needs a
+machine-readable preflight result. The report classifies exact matches, fresh
+directories, safe additive changes, and blocked changes. Safe additive startup
+currently covers schema-version-only drift, added tables, and appended
+non-unique/non-primary indexes. Recovery preserves existing table IDs by name
+and assigns new tables fresh IDs above the recovered snapshot maximum.
+Row-shape changes, table drops, and new unique or primary constraints require
+an app-owned migration plan. If recovery has durable log data but cannot select
+a snapshot, schema-version drift is blocked because there is no persisted schema
+map to reconcile table IDs safely.
+
 ## Migrations
 
 Migration hooks are app-owned code, not a general SQL migration engine.

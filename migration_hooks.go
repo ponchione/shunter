@@ -104,10 +104,11 @@ func RunDataDirMigrations(ctx context.Context, mod *Module, cfg Config, hooks ..
 		return result, nil
 	}
 
-	state, recoveredTxID, resumePlan, _, err := openOrBootstrapState(preview.dataDir, preview.registry)
+	state, recoveredTxID, resumePlan, _, recoveryRegistry, err := openOrBootstrapState(preview.dataDir, preview.registry)
 	if err != nil {
 		return MigrationRunResult{}, fmt.Errorf("run data dir migrations state: %w", err)
 	}
+	preview.registry = recoveryRegistry
 	result.RecoveredTxID = recoveredTxID
 	result.DurableTxID = recoveredTxID
 

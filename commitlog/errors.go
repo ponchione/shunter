@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -295,6 +296,7 @@ func (e *HistoryGapError) Is(target error) bool {
 type SchemaMismatchError struct {
 	Detail string
 	Cause  error
+	Report schema.SchemaCompatibilityReport
 }
 
 func (e *SchemaMismatchError) Error() string {

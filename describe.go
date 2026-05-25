@@ -99,10 +99,13 @@ func (m *Module) Describe() ModuleDescription {
 
 // ExportSchema returns a detached schema snapshot for diagnostics and tooling.
 func (r *Runtime) ExportSchema() *schema.SchemaExport {
-	if r == nil || r.engine == nil {
+	if r == nil {
 		return &schema.SchemaExport{}
 	}
-	out := copySchemaExport(r.engine.ExportSchema())
+	r.mu.Lock()
+	registry := r.registry
+	r.mu.Unlock()
+	out := copySchemaExport(schema.ExportSchemaRegistry(registry))
 	out = applyReducerProductSchemas(out, r.module.reducerDeclarations())
 	return &out
 }

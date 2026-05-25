@@ -341,7 +341,7 @@ func TestSelectSnapshotSchemaMismatchAutoIncrementFlag(t *testing.T) {
 	assertSchemaMismatchDetail(t, err, "auto_increment")
 }
 
-func TestSelectSnapshotSchemaMismatchMissingTable(t *testing.T) {
+func TestSelectSnapshotSchemaAdditiveMissingTableIsCompatible(t *testing.T) {
 	root := t.TempDir()
 	cs, reg := buildSnapshotCommittedState(t)
 	writeSelectionSnapshot(t, root, reg, cs, 5)
@@ -357,12 +357,12 @@ func TestSelectSnapshotSchemaMismatchMissingTable(t *testing.T) {
 		}
 	})
 
-	_, err := SelectSnapshot(root, 5, mismatchReg)
-	assertSchemaMismatchDetail(t, err, "missing")
-	assertSchemaMismatchDetail(t, err, "guilds")
+	if _, err := SelectSnapshot(root, 5, mismatchReg); err != nil {
+		t.Fatalf("SelectSnapshot with additive table returned error: %v", err)
+	}
 }
 
-func TestSelectSnapshotSchemaMismatchExtraIndex(t *testing.T) {
+func TestSelectSnapshotSchemaAdditiveExtraNonUniqueIndexIsCompatible(t *testing.T) {
 	root := t.TempDir()
 	cs, reg := buildSnapshotCommittedState(t)
 	writeSelectionSnapshot(t, root, reg, cs, 5)
@@ -372,8 +372,9 @@ func TestSelectSnapshotSchemaMismatchExtraIndex(t *testing.T) {
 		tables[0] = players
 	})
 
-	_, err := SelectSnapshot(root, 5, mismatchReg)
-	assertSchemaMismatchDetail(t, err, "index")
+	if _, err := SelectSnapshot(root, 5, mismatchReg); err != nil {
+		t.Fatalf("SelectSnapshot with additive non-unique index returned error: %v", err)
+	}
 }
 
 func TestSelectSnapshotSchemaMismatchIndexDetails(t *testing.T) {
@@ -424,7 +425,7 @@ func TestSelectSnapshotSchemaMismatchIndexDetails(t *testing.T) {
 	}
 }
 
-func TestSelectSnapshotSchemaSnapshotVersionMismatch(t *testing.T) {
+func TestSelectSnapshotSchemaSnapshotVersionMismatchIsCompatible(t *testing.T) {
 	root := t.TempDir()
 	cs, reg := buildSnapshotCommittedState(t)
 	writeSelectionSnapshot(t, root, reg, cs, 5)
@@ -440,8 +441,9 @@ func TestSelectSnapshotSchemaSnapshotVersionMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = SelectSnapshot(root, 5, reg)
-	assertSchemaMismatchDetail(t, err, "schema snapshot version")
+	if _, err = SelectSnapshot(root, 5, reg); err != nil {
+		t.Fatalf("SelectSnapshot with schema snapshot version drift returned error: %v", err)
+	}
 }
 
 type selectionRegistryConfig struct {

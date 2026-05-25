@@ -63,9 +63,18 @@ func (e *Engine) ExportSchema() *SchemaExport {
 	if e == nil || e.registry == nil {
 		return &SchemaExport{}
 	}
-	out := &SchemaExport{Version: e.registry.Version()}
-	for _, tableID := range e.registry.Tables() {
-		ts, ok := e.registry.Table(tableID)
+	return ExportSchemaRegistry(e.registry)
+}
+
+// ExportSchemaRegistry traverses an immutable registry and produces a detached
+// value snapshot suitable for JSON serialization and code generation.
+func ExportSchemaRegistry(reg SchemaRegistry) *SchemaExport {
+	if reg == nil {
+		return &SchemaExport{}
+	}
+	out := &SchemaExport{Version: reg.Version()}
+	for _, tableID := range reg.Tables() {
+		ts, ok := reg.Table(tableID)
 		if !ok {
 			continue
 		}
@@ -99,13 +108,13 @@ func (e *Engine) ExportSchema() *SchemaExport {
 		}
 		out.Tables = append(out.Tables, te)
 	}
-	for _, name := range e.registry.Reducers() {
+	for _, name := range reg.Reducers() {
 		out.Reducers = append(out.Reducers, ReducerExport{Name: name, Lifecycle: false})
 	}
-	if e.registry.OnConnect() != nil {
+	if reg.OnConnect() != nil {
 		out.Reducers = append(out.Reducers, ReducerExport{Name: "OnConnect", Lifecycle: true})
 	}
-	if e.registry.OnDisconnect() != nil {
+	if reg.OnDisconnect() != nil {
 		out.Reducers = append(out.Reducers, ReducerExport{Name: "OnDisconnect", Lifecycle: true})
 	}
 	return out

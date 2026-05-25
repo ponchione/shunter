@@ -28,6 +28,25 @@ type runtimeBuildPreview struct {
 	visibilityFilters []VisibilityFilterDescription
 }
 
+type DataDirCompatibilityStatus string
+
+const (
+	DataDirCompatibilityCompatible DataDirCompatibilityStatus = "compatible"
+	DataDirCompatibilityFresh      DataDirCompatibilityStatus = "fresh"
+	DataDirCompatibilityAdditive   DataDirCompatibilityStatus = "additive"
+	DataDirCompatibilityBlocked    DataDirCompatibilityStatus = "blocked"
+)
+
+type DataDirCompatibilityReport struct {
+	Compatible          bool                             `json:"compatible"`
+	Status              DataDirCompatibilityStatus       `json:"status"`
+	DataDir             string                           `json:"data_dir"`
+	RequiresBackup      bool                             `json:"requires_backup"`
+	RequiresOfflineHook bool                             `json:"requires_offline_hook"`
+	Schema              schema.SchemaCompatibilityReport `json:"schema"`
+	BlockingError       string                           `json:"blocking_error,omitempty"`
+}
+
 func previewRuntimeBuild(mod *Module, cfg Config) (runtimeBuildPreview, error) {
 	if mod == nil {
 		return runtimeBuildPreview{}, fmt.Errorf("module must not be nil")
@@ -170,49 +189,185 @@ func CheckDataDirCompatibility(mod *Module, cfg Config) error {
 		return fmt.Errorf("check data dir compatibility: %w", err)
 	}
 
-	_, _, _, _, err = commitlog.OpenAndRecoverWithReport(preview.dataDir, preview.registry)
+	_, _, _, recoveryReport, err := commitlog.OpenAndRecoverWithReport(preview.dataDir, preview.registry)
 	if errors.Is(err, commitlog.ErrNoData) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("check data dir compatibility: %w", err)
 	}
+	if _, err := logOnlyRecoverySchemaCompatibilityReport(preview.dataDir, preview.registry, recoveryReport); err != nil {
+		return fmt.Errorf("check data dir compatibility: %w", err)
+	}
 	return nil
 }
 
-func openOrBootstrapState(dataDir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, commitlog.RecoveryResumePlan, commitlog.RecoveryReport, error) {
-	if err := os.MkdirAll(dataDir, dataDirMode); err != nil {
-		return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, fmt.Errorf("mkdir data dir: %w", err)
+// CheckDataDirCompatibilityReport validates cfg.DataDir and returns a
+// machine-readable hosted-app migration preflight report. It does not create or
+// mutate the DataDir. Safe additive schema changes currently include
+// schema-version-only drift, added tables, and appended non-unique/non-primary
+// indexes; row-shape changes and destructive table/index changes remain
+// blocked until app-owned migration hooks rewrite or validate persisted rows.
+func CheckDataDirCompatibilityReport(mod *Module, cfg Config) (DataDirCompatibilityReport, error) {
+	preview, err := previewRuntimeBuild(mod, cfg)
+	if err != nil {
+		return DataDirCompatibilityReport{}, err
+	}
+	report := DataDirCompatibilityReport{
+		Compatible: true,
+		Status:     DataDirCompatibilityFresh,
+		DataDir:    preview.dataDir,
+		Schema: schema.SchemaCompatibilityReport{
+			Compatible:        true,
+			Status:            schema.SchemaCompatibilityCompatible,
+			RegisteredVersion: preview.registry.Version(),
+		},
+	}
+	info, err := os.Stat(preview.dataDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return report, nil
+	}
+	if err != nil {
+		return blockedDataDirCompatibilityReport(report, fmt.Errorf("inspect data dir %s: %w", preview.dataDir, err)), nil
+	}
+	if !info.IsDir() {
+		return blockedDataDirCompatibilityReport(report, fmt.Errorf("data dir %s is not a directory", preview.dataDir)), nil
+	}
+	if err := validateDataDirMetadata(preview.dataDir, mod, preview.registry); err != nil {
+		return blockedDataDirCompatibilityReport(report, fmt.Errorf("check data dir compatibility: %w", err)), nil
 	}
 
-	committed, recoveredTxID, plan, report, err := commitlog.OpenAndRecoverWithReport(dataDir, reg)
+	_, _, _, recoveryReport, err := commitlog.OpenAndRecoverWithReport(preview.dataDir, preview.registry)
+	if errors.Is(err, commitlog.ErrNoData) {
+		return report, nil
+	}
+	if err != nil {
+		applySchemaMismatchReport(&report, err)
+		return blockedDataDirCompatibilityReport(report, fmt.Errorf("check data dir compatibility: %w", err)), nil
+	}
+	if schemaReport, err := logOnlyRecoverySchemaCompatibilityReport(preview.dataDir, preview.registry, recoveryReport); err != nil {
+		report.Schema = schemaReport
+		return blockedDataDirCompatibilityReport(report, fmt.Errorf("check data dir compatibility: %w", err)), nil
+	}
+	report.Schema = recoveryReport.SchemaCompatibility
+	if report.Schema.Status == "" {
+		report.Schema = schema.SchemaCompatibilityReport{
+			Compatible:        true,
+			Status:            schema.SchemaCompatibilityCompatible,
+			RegisteredVersion: preview.registry.Version(),
+		}
+	}
+	report.Compatible = report.Schema.Compatible
+	switch report.Schema.Status {
+	case schema.SchemaCompatibilityAdditive:
+		report.Status = DataDirCompatibilityAdditive
+		report.RequiresBackup = true
+	case schema.SchemaCompatibilityBlocked:
+		report.Status = DataDirCompatibilityBlocked
+		report.RequiresBackup = true
+		report.RequiresOfflineHook = true
+	default:
+		report.Status = DataDirCompatibilityCompatible
+	}
+	return report, nil
+}
+
+func blockedDataDirCompatibilityReport(report DataDirCompatibilityReport, err error) DataDirCompatibilityReport {
+	report.Compatible = false
+	report.Status = DataDirCompatibilityBlocked
+	report.RequiresBackup = true
+	report.RequiresOfflineHook = true
+	if err != nil {
+		report.BlockingError = err.Error()
+	}
+	report.Schema.Compatible = false
+	report.Schema.Status = schema.SchemaCompatibilityBlocked
+	return report
+}
+
+func applySchemaMismatchReport(report *DataDirCompatibilityReport, err error) {
+	if report == nil || err == nil {
+		return
+	}
+	var schemaErr *commitlog.SchemaMismatchError
+	if errors.As(err, &schemaErr) && schemaErr.Report.Status != "" {
+		report.Schema = schemaErr.Report
+	}
+}
+
+func logOnlyRecoverySchemaCompatibilityReport(dataDir string, reg schema.SchemaRegistry, recoveryReport commitlog.RecoveryReport) (schema.SchemaCompatibilityReport, error) {
+	if !recoveryReport.HasDurableLog || recoveryReport.HasSelectedSnapshot {
+		return schema.SchemaCompatibilityReport{}, nil
+	}
+	registeredVersion := uint32(0)
+	if reg != nil {
+		registeredVersion = reg.Version()
+	}
+	metadata, ok, err := readDataDirMetadata(dataDir)
+	if err != nil {
+		detail := fmt.Sprintf("data dir has durable commit log but no selected snapshot, and metadata could not be read: %v", err)
+		return blockedLogOnlySchemaReport(registeredVersion, 0, detail), errors.New(detail)
+	}
+	if !ok {
+		detail := "data dir has durable commit log but no selected snapshot or schema metadata; a selected snapshot is required before schema-version changes can be checked safely"
+		return blockedLogOnlySchemaReport(registeredVersion, 0, detail), errors.New(detail)
+	}
+	if metadata.Module.SchemaVersion == registeredVersion {
+		return schema.SchemaCompatibilityReport{}, nil
+	}
+	detail := fmt.Sprintf("data dir has durable commit log but no selected snapshot; metadata schema_version=%d, registered=%d; create or restore a snapshot before additive schema-version changes", metadata.Module.SchemaVersion, registeredVersion)
+	return blockedLogOnlySchemaReport(registeredVersion, metadata.Module.SchemaVersion, detail), errors.New(detail)
+}
+
+func blockedLogOnlySchemaReport(registeredVersion, persistedVersion uint32, detail string) schema.SchemaCompatibilityReport {
+	return schema.SchemaCompatibilityReport{
+		Compatible:        false,
+		Status:            schema.SchemaCompatibilityBlocked,
+		RegisteredVersion: registeredVersion,
+		SnapshotVersion:   persistedVersion,
+		Issues: []schema.SchemaCompatibilityIssue{{
+			Kind:   schema.SchemaCompatibilityIssueMissingRegistry,
+			Detail: detail,
+		}},
+	}
+}
+
+func openOrBootstrapState(dataDir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, commitlog.RecoveryResumePlan, commitlog.RecoveryReport, schema.SchemaRegistry, error) {
+	if err := os.MkdirAll(dataDir, dataDirMode); err != nil {
+		return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, reg, fmt.Errorf("mkdir data dir: %w", err)
+	}
+
+	committed, recoveredTxID, plan, report, recoveryRegistry, err := commitlog.OpenAndRecoverWithRegistryReport(dataDir, reg)
 	if err == nil {
-		return committed, recoveredTxID, plan, report, nil
+		if _, err := logOnlyRecoverySchemaCompatibilityReport(dataDir, reg, report); err != nil {
+			return nil, 0, commitlog.RecoveryResumePlan{}, report, recoveryRegistry, err
+		}
+		return committed, recoveredTxID, plan, report, recoveryRegistry, nil
 	}
 	if !errors.Is(err, commitlog.ErrNoData) {
-		return nil, 0, commitlog.RecoveryResumePlan{}, report, err
+		return nil, 0, commitlog.RecoveryResumePlan{}, report, recoveryRegistry, err
 	}
 
 	fresh := store.NewCommittedState()
 	for _, tid := range reg.Tables() {
 		tableSchema, ok := reg.Table(tid)
 		if !ok {
-			return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, fmt.Errorf("registry missing table %d", tid)
+			return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, reg, fmt.Errorf("registry missing table %d", tid)
 		}
 		fresh.RegisterTable(tid, store.NewTable(tableSchema))
 	}
 	if err := commitlog.NewSnapshotWriter(dataDir, reg).CreateSnapshot(fresh, 0); err != nil {
-		return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, fmt.Errorf("initial snapshot: %w", err)
+		return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, reg, fmt.Errorf("initial snapshot: %w", err)
 	}
-	committed, recoveredTxID, plan, _, err = commitlog.OpenAndRecoverWithReport(dataDir, reg)
+	committed, recoveredTxID, plan, _, recoveryRegistry, err = commitlog.OpenAndRecoverWithRegistryReport(dataDir, reg)
 	if err != nil {
-		return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, err
+		return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, recoveryRegistry, err
 	}
 	report = commitlog.RecoveryReport{
 		RecoveredTxID: recoveredTxID,
 		ResumePlan:    plan,
 	}
-	return committed, recoveredTxID, plan, report, nil
+	return committed, recoveredTxID, plan, report, recoveryRegistry, nil
 }
 
 func buildExecutorReducerRegistry(reg schema.SchemaRegistry, declarations []ReducerDeclaration) (*executor.ReducerRegistry, error) {

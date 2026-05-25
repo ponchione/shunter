@@ -213,10 +213,22 @@ Recommended flow:
 
 1. Stop runtime ownership of the target `DataDir`.
 2. Take an offline backup.
-3. Run `CheckDataDirCompatibility` or a contract plan before changing data.
+3. Run `CheckDataDirCompatibilityReport`, `CheckDataDirCompatibility`, or a
+   contract plan before changing data.
 4. Run `RunModuleDataDirMigrations` or `RunDataDirMigrations` from an app-owned
    maintenance binary that links the module.
 5. Restart the normal app binary and verify state through public reads.
+
+The DataDir compatibility report is the runtime-backed preflight. It classifies
+fresh directories, exact matches, safe additive schema changes, and blocked
+changes without mutating the directory. Safe additive startup currently covers
+schema-version-only drift, added tables, and appended non-unique/non-primary
+indexes. Recovery preserves existing table IDs by name and assigns new tables
+fresh IDs above the recovered snapshot maximum. Row-shape changes, table drops,
+and new unique or primary constraints remain blocked until an app-owned
+migration plan rewrites or validates the stored data. Additive schema-version
+changes require a selected snapshot; log-only recovery with no selected snapshot
+is blocked because table ID reconciliation cannot be proven safe.
 
 Registered startup migration hooks run during runtime startup. Offline
 migration binaries can run the same registered hooks without starting normal

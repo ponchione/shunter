@@ -6,11 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ponchione/shunter/commitlog"
 	"github.com/ponchione/shunter/executor"
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/store"
+	"github.com/ponchione/shunter/types"
 )
 
 func TestBuildBootstrapsCommittedStateForModuleTables(t *testing.T) {
@@ -368,6 +372,173 @@ func TestCheckDataDirCompatibilityReportsSchemaMismatch(t *testing.T) {
 	assertErrorContains(t, err, "name mismatch")
 	assertErrorContains(t, err, "body")
 	assertErrorContains(t, err, "text")
+}
+
+func TestCheckDataDirCompatibilityAllowsSafeAdditiveTableAndIndex(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Build(validChatModule(), Config{DataDir: dir}); err != nil {
+		t.Fatalf("initial Build returned error: %v", err)
+	}
+	messages := messagesTableDef()
+	messages.Indexes = []schema.IndexDefinition{{Name: "body_idx", Columns: []string{"body"}}}
+	audit := schema.TableDefinition{
+		Name: "audit_events",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: types.KindUint64, PrimaryKey: true, AutoIncrement: true},
+			{Name: "body", Type: types.KindString},
+		},
+	}
+	next := NewModule("chat").SchemaVersion(2).TableDef(messages).TableDef(audit)
+
+	report, err := CheckDataDirCompatibilityReport(next, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("CheckDataDirCompatibilityReport returned error: %v", err)
+	}
+	if !report.Compatible || report.Status != DataDirCompatibilityAdditive {
+		t.Fatalf("compatibility report = %#v, want additive compatible", report)
+	}
+	if !report.RequiresBackup || report.RequiresOfflineHook {
+		t.Fatalf("backup/offline flags = %t/%t, want backup without required hook", report.RequiresBackup, report.RequiresOfflineHook)
+	}
+	if len(report.Schema.Changes) != 3 {
+		t.Fatalf("schema changes = %#v, want version, index, and table", report.Schema.Changes)
+	}
+	if err := CheckDataDirCompatibility(next, Config{DataDir: dir}); err != nil {
+		t.Fatalf("CheckDataDirCompatibility additive returned error: %v", err)
+	}
+	rt, err := Build(next, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build additive returned error: %v", err)
+	}
+	defer rt.Close()
+
+	auditID, _, ok := rt.registry.TableByName("audit_events")
+	if !ok {
+		t.Fatal("audit_events table missing after additive build")
+	}
+	sysClientsID, _, ok := rt.registry.TableByName("sys_clients")
+	if !ok || sysClientsID != 1 {
+		t.Fatalf("sys_clients table id = %d ok=%t, want preserved snapshot id 1", sysClientsID, ok)
+	}
+	if auditID <= sysClientsID {
+		t.Fatalf("audit_events id = %d, want assigned after existing snapshot tables", auditID)
+	}
+	exported := rt.ExportSchema()
+	if exportedSysClientsID, ok := exportedTableID(exported, "sys_clients"); !ok || exportedSysClientsID != sysClientsID {
+		t.Fatalf("ExportSchema sys_clients id = %d ok=%t, want reconciled id %d", exportedSysClientsID, ok, sysClientsID)
+	}
+	if exportedAuditID, ok := exportedTableID(exported, "audit_events"); !ok || exportedAuditID != auditID {
+		t.Fatalf("ExportSchema audit_events id = %d ok=%t, want reconciled id %d", exportedAuditID, ok, auditID)
+	}
+}
+
+func TestCheckDataDirCompatibilityBlocksLogOnlySchemaVersionDrift(t *testing.T) {
+	dir := t.TempDir()
+	initial, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("initial Build returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = initial.Close() })
+	messageID, _, ok := initial.registry.TableByName("messages")
+	if !ok {
+		t.Fatal("messages table missing")
+	}
+	tx := store.NewTransaction(initial.state, initial.registry)
+	if _, err := tx.Insert(messageID, types.ProductValue{types.NewUint64(0), types.NewString("hello")}); err != nil {
+		t.Fatalf("insert message: %v", err)
+	}
+	tx.Seal()
+	changeset, err := store.Commit(initial.state, tx)
+	if err != nil {
+		t.Fatalf("commit message: %v", err)
+	}
+	changeset.TxID = 1
+	initial.state.SetCommittedTxID(1)
+	options := commitlog.DefaultCommitLogOptions()
+	durability, err := commitlog.NewDurabilityWorkerWithResumePlan(dir, initial.resumePlan, options)
+	if err != nil {
+		t.Fatalf("open durability worker: %v", err)
+	}
+	durability.EnqueueCommitted(1, changeset)
+	wait := durability.WaitUntilDurable(1)
+	select {
+	case got := <-wait:
+		if got != 1 {
+			t.Fatalf("durable tx = %d, want 1", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for durable tx")
+	}
+	if _, err := durability.Close(); err != nil {
+		t.Fatalf("close durability worker: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, "0")); err != nil {
+		t.Fatalf("remove bootstrap snapshot: %v", err)
+	}
+
+	audit := messagesTableDef()
+	audit.Name = "audit_events"
+	next := NewModule("chat").SchemaVersion(2).TableDef(audit).TableDef(messagesTableDef())
+	report, err := CheckDataDirCompatibilityReport(next, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("CheckDataDirCompatibilityReport returned error: %v", err)
+	}
+	if report.Compatible || report.Status != DataDirCompatibilityBlocked {
+		t.Fatalf("compatibility report = %#v, want blocked", report)
+	}
+	if report.Schema.Status != schema.SchemaCompatibilityBlocked || len(report.Schema.Issues) == 0 {
+		t.Fatalf("schema report = %#v, want blocked issue", report.Schema)
+	}
+	if !strings.Contains(report.BlockingError, "no selected snapshot") {
+		t.Fatalf("blocking error = %q, want no selected snapshot detail", report.BlockingError)
+	}
+	if _, err := Build(next, Config{DataDir: dir}); err == nil {
+		t.Fatal("Build with log-only schema drift returned nil, want blocked")
+	} else if !strings.Contains(err.Error(), "no selected snapshot") {
+		t.Fatalf("Build error = %v, want no selected snapshot detail", err)
+	}
+}
+
+func TestCheckDataDirCompatibilityReportBlocksRowShapeChanges(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Build(validChatModule(), Config{DataDir: dir}); err != nil {
+		t.Fatalf("initial Build returned error: %v", err)
+	}
+	mismatch := messagesTableDef()
+	mismatch.Columns = append(mismatch.Columns, schema.ColumnDefinition{Name: "extra", Type: types.KindString, Nullable: true})
+	next := NewModule("chat").SchemaVersion(2).TableDef(mismatch)
+
+	report, err := CheckDataDirCompatibilityReport(next, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("CheckDataDirCompatibilityReport returned error: %v", err)
+	}
+	if report.Compatible || report.Status != DataDirCompatibilityBlocked {
+		t.Fatalf("compatibility report = %#v, want blocked", report)
+	}
+	if !report.RequiresBackup || !report.RequiresOfflineHook {
+		t.Fatalf("backup/offline flags = %t/%t, want both required", report.RequiresBackup, report.RequiresOfflineHook)
+	}
+	if report.BlockingError == "" {
+		t.Fatal("blocked report missing blocking error")
+	}
+	if !strings.Contains(report.BlockingError, "row-shape changes require an app-owned migration") {
+		t.Fatalf("blocking error = %q, want row-shape migration detail", report.BlockingError)
+	}
+	if report.Schema.Status != schema.SchemaCompatibilityBlocked || len(report.Schema.Issues) == 0 {
+		t.Fatalf("schema report = %#v, want blocked issues", report.Schema)
+	}
+}
+
+func exportedTableID(exported *schema.SchemaExport, name string) (schema.TableID, bool) {
+	if exported == nil {
+		return 0, false
+	}
+	for _, table := range exported.Tables {
+		if table.Name == name {
+			return table.ID, true
+		}
+	}
+	return 0, false
 }
 
 func validChatModule() *Module {

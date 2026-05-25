@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added hosted-app DataDir compatibility reports and safe additive recovery for
+  schema-version-only drift, added tables, and appended non-unique/non-primary
+  indexes while keeping row-shape changes, table drops, and new unique/primary
+  constraints blocked for app-owned migrations.
 - Hardened the hosted-chat TypeScript frontend cleanup path so subscription
   unsubscribe and client close steps fail with bounded diagnostics instead of
   hanging the example gate indefinitely.
@@ -478,6 +482,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added reusable offline `DataDir` backup and restore helpers for app-owned binaries.
 - Added generic CLI commands for offline runtime `DataDir` backup and restore.
 - Added runtime snapshot creation and commit log compaction helpers for app-owned maintenance workflows.
+- Blocked schema-version drift during log-only recovery when no snapshot can be
+  selected, preventing additive migrations from replaying old table IDs through
+  an unreconciled current registry.
 - Added reusable runtime and host health/readiness inspection helpers.
 - Added `Host.ListenAndServe` for app-owned serving of multi-module hosts.
 - Added app-owned contract export and runtime-to-codegen file helpers in `contractworkflow`.
