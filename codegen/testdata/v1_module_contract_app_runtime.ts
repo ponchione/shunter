@@ -75,6 +75,7 @@ export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = Execut
 export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;
 export type DeclaredViewHandleSubscriber = ShunterDeclaredViewHandleSubscriber<ExecutableViewName>;
 export type DeclaredViewSubscriptionOptions<Row = unknown> = Omit<ShunterDeclaredViewSubscriptionOptions<Row>, "params">;
+export type DeclaredViewSubscribeOptions<Row = unknown> = Omit<DeclaredViewSubscriptionOptions<Row>, "returnHandle"> & { readonly returnHandle?: false | undefined };
 export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;
 export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;
 export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;
@@ -82,6 +83,8 @@ export type SubscriptionRowEvent<Row = unknown> = ShunterSubscriptionRowEvent<Ro
 export type TableRow<Name extends TableName> = TableRows[Name];
 export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;
 export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;
+export type TableSubscribeOptions<Row = unknown> = Omit<TableSubscriptionOptions<Row>, "returnHandle"> & { readonly returnHandle?: false | undefined };
+export type TableSubscribeCaller<Row = never> = <Table extends TableName>(table: Table, onRows?: (rows: ([Row] extends [never] ? TableRows[Table] : Row)[]) => void, options?: TableSubscribeOptions<[Row] extends [never] ? TableRows[Table] : Row>) => Promise<SubscriptionUnsubscribe>;
 export type TableRowDecoder<Name extends TableName> = ShunterTableRowDecoder<TableRows[Name]>;
 export type TableRowDecoders<RowsByName extends object = TableRows> = ShunterTableRowDecoders<RowsByName>;
 export type UUID = string;
@@ -194,18 +197,18 @@ export const visibilityFilters = {
   ownMessages: { sql: "SELECT * FROM messages WHERE sender = :sender", returnTable: "messages", returnTableId: 0, usesCallerIdentity: true },
 } as const;
 
-export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>, onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : { ...options };
+export function subscribeMessages(subscribeTable: TableSubscribeCaller<MessagesRow>, onRows?: (rows: MessagesRow[]) => void, options: TableSubscribeOptions<MessagesRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscribeOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : { ...options };
   return subscribeTable("messages", onRows, subscribeOptions);
 }
 
-export function subscribeSysClients(subscribeTable: TableSubscriber<SysClientsRow>, onRows?: (rows: SysClientsRow[]) => void, options: TableSubscriptionOptions<SysClientsRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<SysClientsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_clients"] } : { ...options };
+export function subscribeSysClients(subscribeTable: TableSubscribeCaller<SysClientsRow>, onRows?: (rows: SysClientsRow[]) => void, options: TableSubscribeOptions<SysClientsRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscribeOptions<SysClientsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_clients"] } : { ...options };
   return subscribeTable("sys_clients", onRows, subscribeOptions);
 }
 
-export function subscribeSysScheduled(subscribeTable: TableSubscriber<SysScheduledRow>, onRows?: (rows: SysScheduledRow[]) => void, options: TableSubscriptionOptions<SysScheduledRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<SysScheduledRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_scheduled"] } : { ...options };
+export function subscribeSysScheduled(subscribeTable: TableSubscribeCaller<SysScheduledRow>, onRows?: (rows: SysScheduledRow[]) => void, options: TableSubscribeOptions<SysScheduledRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscribeOptions<SysScheduledRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_scheduled"] } : { ...options };
   return subscribeTable("sys_scheduled", onRows, subscribeOptions);
 }
 
@@ -426,8 +429,8 @@ export function decodeLiveMessageProjectionViewRow(row: Uint8Array): LiveMessage
   }));
 }
 
-export function subscribeLiveMessageProjection(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscriptionOptions<LiveMessageProjectionViewRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: DeclaredViewSubscriptionOptions<LiveMessageProjectionViewRow> = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessageProjectionViewRow } : options;
+export function subscribeLiveMessageProjection(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscribeOptions<LiveMessageProjectionViewRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: DeclaredViewSubscribeOptions<LiveMessageProjectionViewRow> = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessageProjectionViewRow } : options;
   return subscribeDeclaredView("live_message_projection", subscribeOptions);
 }
 
@@ -467,8 +470,8 @@ export function decodeLiveMessagesByTopicViewRow(row: Uint8Array): LiveMessagesB
   }));
 }
 
-export function subscribeLiveMessagesByTopic(subscribeDeclaredView: DeclaredViewSubscriber, params: LiveMessagesByTopicParams, options: DeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: DeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessagesByTopicViewRow } : options;
+export function subscribeLiveMessagesByTopic(subscribeDeclaredView: DeclaredViewSubscriber, params: LiveMessagesByTopicParams, options: DeclaredViewSubscribeOptions<LiveMessagesByTopicViewRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: DeclaredViewSubscribeOptions<LiveMessagesByTopicViewRow> = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessagesByTopicViewRow } : options;
   return subscribeDeclaredView("live_messages_by_topic", { ...subscribeOptions, params: encodeLiveMessagesByTopicParams(params) });
 }
 
@@ -491,8 +494,8 @@ export function decodeLiveMessageCountViewRow(row: Uint8Array): LiveMessageCount
   }));
 }
 
-export function subscribeLiveMessageCount(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscriptionOptions<LiveMessageCountViewRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: DeclaredViewSubscriptionOptions<LiveMessageCountViewRow> = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessageCountViewRow } : options;
+export function subscribeLiveMessageCount(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscribeOptions<LiveMessageCountViewRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: DeclaredViewSubscribeOptions<LiveMessageCountViewRow> = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessageCountViewRow } : options;
   return subscribeDeclaredView("live_message_count", subscribeOptions);
 }
 
@@ -533,7 +536,7 @@ export interface ModuleClientBindings {
   readonly callProcedure: ProcedureCaller;
   readonly runDeclaredQuery: DeclaredQueryRunner;
   readonly subscribeDeclaredView: DeclaredViewSubscriber & DeclaredViewHandleSubscriber;
-  readonly subscribeTable: <Table extends string, Row = Table extends TableName ? TableRows[Table] : Uint8Array>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe>;
+  readonly subscribeTable: TableSubscribeCaller & (<Table extends string, Row = Table extends TableName ? TableRows[Table] : Uint8Array>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe | SubscriptionHandle<Row>>);
 }
 
 export function createModuleClient(bindings: ModuleClientBindings) {
@@ -559,27 +562,27 @@ export function createModuleClient(bindings: ModuleClientBindings) {
     },
     views: {
       liveMessageProjection: {
-        subscribe: (options: DeclaredViewSubscriptionOptions<LiveMessageProjectionViewRow> = {}) => subscribeLiveMessageProjection(bindings.subscribeDeclaredView, options),
+        subscribe: (options: DeclaredViewSubscribeOptions<LiveMessageProjectionViewRow> = {}) => subscribeLiveMessageProjection(bindings.subscribeDeclaredView, options),
         handle: (options: DeclaredViewSubscriptionOptions<LiveMessageProjectionViewRow> & SubscriptionHandleReturnOptions) => subscribeLiveMessageProjectionHandle(bindings.subscribeDeclaredView, options),
       },
       liveMessagesByTopic: {
-        subscribe: (params: LiveMessagesByTopicParams, options: DeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> = {}) => subscribeLiveMessagesByTopic(bindings.subscribeDeclaredView, params, options),
+        subscribe: (params: LiveMessagesByTopicParams, options: DeclaredViewSubscribeOptions<LiveMessagesByTopicViewRow> = {}) => subscribeLiveMessagesByTopic(bindings.subscribeDeclaredView, params, options),
         handle: (params: LiveMessagesByTopicParams, options: DeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> & SubscriptionHandleReturnOptions) => subscribeLiveMessagesByTopicHandle(bindings.subscribeDeclaredView, params, options),
       },
       liveMessageCount: {
-        subscribe: (options: DeclaredViewSubscriptionOptions<LiveMessageCountViewRow> = {}) => subscribeLiveMessageCount(bindings.subscribeDeclaredView, options),
+        subscribe: (options: DeclaredViewSubscribeOptions<LiveMessageCountViewRow> = {}) => subscribeLiveMessageCount(bindings.subscribeDeclaredView, options),
         handle: (options: DeclaredViewSubscriptionOptions<LiveMessageCountViewRow> & SubscriptionHandleReturnOptions) => subscribeLiveMessageCountHandle(bindings.subscribeDeclaredView, options),
       },
     },
     tables: {
       messages: {
-        subscribe: (onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}) => subscribeMessages(bindings.subscribeTable, onRows, options),
+        subscribe: (onRows?: (rows: MessagesRow[]) => void, options: TableSubscribeOptions<MessagesRow> = {}) => subscribeMessages(bindings.subscribeTable, onRows, options),
       },
       sysClients: {
-        subscribe: (onRows?: (rows: SysClientsRow[]) => void, options: TableSubscriptionOptions<SysClientsRow> = {}) => subscribeSysClients(bindings.subscribeTable, onRows, options),
+        subscribe: (onRows?: (rows: SysClientsRow[]) => void, options: TableSubscribeOptions<SysClientsRow> = {}) => subscribeSysClients(bindings.subscribeTable, onRows, options),
       },
       sysScheduled: {
-        subscribe: (onRows?: (rows: SysScheduledRow[]) => void, options: TableSubscriptionOptions<SysScheduledRow> = {}) => subscribeSysScheduled(bindings.subscribeTable, onRows, options),
+        subscribe: (onRows?: (rows: SysScheduledRow[]) => void, options: TableSubscribeOptions<SysScheduledRow> = {}) => subscribeSysScheduled(bindings.subscribeTable, onRows, options),
       },
     },
     events: {

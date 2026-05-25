@@ -75,6 +75,7 @@ export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = Execut
 export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;
 export type DeclaredViewHandleSubscriber = ShunterDeclaredViewHandleSubscriber<ExecutableViewName>;
 export type DeclaredViewSubscriptionOptions<Row = unknown> = Omit<ShunterDeclaredViewSubscriptionOptions<Row>, "params">;
+export type DeclaredViewSubscribeOptions<Row = unknown> = Omit<DeclaredViewSubscriptionOptions<Row>, "returnHandle"> & { readonly returnHandle?: false | undefined };
 export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;
 export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;
 export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;
@@ -82,6 +83,8 @@ export type SubscriptionRowEvent<Row = unknown> = ShunterSubscriptionRowEvent<Ro
 export type TableRow<Name extends TableName> = TableRows[Name];
 export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;
 export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;
+export type TableSubscribeOptions<Row = unknown> = Omit<TableSubscriptionOptions<Row>, "returnHandle"> & { readonly returnHandle?: false | undefined };
+export type TableSubscribeCaller<Row = never> = <Table extends TableName>(table: Table, onRows?: (rows: ([Row] extends [never] ? TableRows[Table] : Row)[]) => void, options?: TableSubscribeOptions<[Row] extends [never] ? TableRows[Table] : Row>) => Promise<SubscriptionUnsubscribe>;
 export type TableRowDecoder<Name extends TableName> = ShunterTableRowDecoder<TableRows[Name]>;
 export type TableRowDecoders<RowsByName extends object = TableRows> = ShunterTableRowDecoders<RowsByName>;
 export type UUID = string;
@@ -209,28 +212,28 @@ export const tableKinds = {
 export const visibilityFilters = {
 } as const;
 
-export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>, onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : { ...options };
+export function subscribeMessages(subscribeTable: TableSubscribeCaller<MessagesRow>, onRows?: (rows: MessagesRow[]) => void, options: TableSubscribeOptions<MessagesRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscribeOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : { ...options };
   return subscribeTable("messages", onRows, subscribeOptions);
 }
 
-export function subscribeMessageEvents(subscribeTable: TableSubscriber<MessageEventsRow>, onRows?: (rows: MessageEventsRow[]) => void, options: TableSubscriptionOptions<MessageEventsRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<MessageEventsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["message_events"], eventTable: true } : { ...options, eventTable: true };
+export function subscribeMessageEvents(subscribeTable: TableSubscribeCaller<MessageEventsRow>, onRows?: (rows: MessageEventsRow[]) => void, options: TableSubscribeOptions<MessageEventsRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscribeOptions<MessageEventsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["message_events"], eventTable: true } : { ...options, eventTable: true };
   return subscribeTable("message_events", onRows, subscribeOptions);
 }
 
-export function subscribeMessageEventsInserts(subscribeTable: TableSubscriber<MessageEventsRow>, onInsert: (event: SubscriptionRowEvent<MessageEventsRow>) => void, options: TableSubscriptionOptions<MessageEventsRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<MessageEventsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["message_events"], eventTable: true, onInsert } : { ...options, eventTable: true, onInsert };
+export function subscribeMessageEventsInserts(subscribeTable: TableSubscribeCaller<MessageEventsRow>, onInsert: (event: SubscriptionRowEvent<MessageEventsRow>) => void, options: TableSubscribeOptions<MessageEventsRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscribeOptions<MessageEventsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["message_events"], eventTable: true, onInsert } : { ...options, eventTable: true, onInsert };
   return subscribeTable("message_events", undefined, subscribeOptions);
 }
 
-export function subscribeSysClients(subscribeTable: TableSubscriber<SysClientsRow>, onRows?: (rows: SysClientsRow[]) => void, options: TableSubscriptionOptions<SysClientsRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<SysClientsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_clients"] } : { ...options };
+export function subscribeSysClients(subscribeTable: TableSubscribeCaller<SysClientsRow>, onRows?: (rows: SysClientsRow[]) => void, options: TableSubscribeOptions<SysClientsRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscribeOptions<SysClientsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_clients"] } : { ...options };
   return subscribeTable("sys_clients", onRows, subscribeOptions);
 }
 
-export function subscribeSysScheduled(subscribeTable: TableSubscriber<SysScheduledRow>, onRows?: (rows: SysScheduledRow[]) => void, options: TableSubscriptionOptions<SysScheduledRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<SysScheduledRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_scheduled"] } : { ...options };
+export function subscribeSysScheduled(subscribeTable: TableSubscribeCaller<SysScheduledRow>, onRows?: (rows: SysScheduledRow[]) => void, options: TableSubscribeOptions<SysScheduledRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscribeOptions<SysScheduledRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_scheduled"] } : { ...options };
   return subscribeTable("sys_scheduled", onRows, subscribeOptions);
 }
 
@@ -388,8 +391,8 @@ export function decodeLiveMessagesViewRow(row: Uint8Array): LiveMessagesViewRow 
   }));
 }
 
-export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscriptionOptions<LiveMessagesViewRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: DeclaredViewSubscriptionOptions<LiveMessagesViewRow> = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessagesViewRow } : options;
+export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscribeOptions<LiveMessagesViewRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: DeclaredViewSubscribeOptions<LiveMessagesViewRow> = options.decodeRow === undefined ? { ...options, decodeRow: decodeLiveMessagesViewRow } : options;
   return subscribeDeclaredView("live_messages", subscribeOptions);
 }
 
@@ -419,7 +422,7 @@ export interface ModuleClientBindings {
   readonly callProcedure: ProcedureCaller;
   readonly runDeclaredQuery: DeclaredQueryRunner;
   readonly subscribeDeclaredView: DeclaredViewSubscriber & DeclaredViewHandleSubscriber;
-  readonly subscribeTable: <Table extends string, Row = Table extends TableName ? TableRows[Table] : Uint8Array>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe>;
+  readonly subscribeTable: TableSubscribeCaller & (<Table extends string, Row = Table extends TableName ? TableRows[Table] : Uint8Array>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe | SubscriptionHandle<Row>>);
 }
 
 export function createModuleClient(bindings: ModuleClientBindings) {
@@ -445,27 +448,27 @@ export function createModuleClient(bindings: ModuleClientBindings) {
     },
     views: {
       liveMessages: {
-        subscribe: (options: DeclaredViewSubscriptionOptions<LiveMessagesViewRow> = {}) => subscribeLiveMessages(bindings.subscribeDeclaredView, options),
+        subscribe: (options: DeclaredViewSubscribeOptions<LiveMessagesViewRow> = {}) => subscribeLiveMessages(bindings.subscribeDeclaredView, options),
         handle: (options: DeclaredViewSubscriptionOptions<LiveMessagesViewRow> & SubscriptionHandleReturnOptions) => subscribeLiveMessagesHandle(bindings.subscribeDeclaredView, options),
       },
     },
     tables: {
       messages: {
-        subscribe: (onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}) => subscribeMessages(bindings.subscribeTable, onRows, options),
+        subscribe: (onRows?: (rows: MessagesRow[]) => void, options: TableSubscribeOptions<MessagesRow> = {}) => subscribeMessages(bindings.subscribeTable, onRows, options),
       },
       messageEvents: {
-        subscribe: (onRows?: (rows: MessageEventsRow[]) => void, options: TableSubscriptionOptions<MessageEventsRow> = {}) => subscribeMessageEvents(bindings.subscribeTable, onRows, options),
+        subscribe: (onRows?: (rows: MessageEventsRow[]) => void, options: TableSubscribeOptions<MessageEventsRow> = {}) => subscribeMessageEvents(bindings.subscribeTable, onRows, options),
       },
       sysClients: {
-        subscribe: (onRows?: (rows: SysClientsRow[]) => void, options: TableSubscriptionOptions<SysClientsRow> = {}) => subscribeSysClients(bindings.subscribeTable, onRows, options),
+        subscribe: (onRows?: (rows: SysClientsRow[]) => void, options: TableSubscribeOptions<SysClientsRow> = {}) => subscribeSysClients(bindings.subscribeTable, onRows, options),
       },
       sysScheduled: {
-        subscribe: (onRows?: (rows: SysScheduledRow[]) => void, options: TableSubscriptionOptions<SysScheduledRow> = {}) => subscribeSysScheduled(bindings.subscribeTable, onRows, options),
+        subscribe: (onRows?: (rows: SysScheduledRow[]) => void, options: TableSubscribeOptions<SysScheduledRow> = {}) => subscribeSysScheduled(bindings.subscribeTable, onRows, options),
       },
     },
     events: {
       messageEvents: {
-        onInsert: (handler: (event: SubscriptionRowEvent<MessageEventsRow>) => void, options: TableSubscriptionOptions<MessageEventsRow> = {}) => subscribeMessageEventsInserts(bindings.subscribeTable, handler, options),
+        onInsert: (handler: (event: SubscriptionRowEvent<MessageEventsRow>) => void, options: TableSubscribeOptions<MessageEventsRow> = {}) => subscribeMessageEventsInserts(bindings.subscribeTable, handler, options),
       },
     },
   } as const;

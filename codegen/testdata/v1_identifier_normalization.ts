@@ -73,6 +73,7 @@ export type DecodedDeclaredQueryResult<Name extends ExecutableQueryName = Execut
 export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;
 export type DeclaredViewHandleSubscriber = ShunterDeclaredViewHandleSubscriber<ExecutableViewName>;
 export type DeclaredViewSubscriptionOptions<Row = unknown> = Omit<ShunterDeclaredViewSubscriptionOptions<Row>, "params">;
+export type DeclaredViewSubscribeOptions<Row = unknown> = Omit<DeclaredViewSubscriptionOptions<Row>, "returnHandle"> & { readonly returnHandle?: false | undefined };
 export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;
 export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;
 export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;
@@ -80,6 +81,8 @@ export type SubscriptionRowEvent<Row = unknown> = ShunterSubscriptionRowEvent<Ro
 export type TableRow<Name extends TableName> = TableRows[Name];
 export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;
 export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;
+export type TableSubscribeOptions<Row = unknown> = Omit<TableSubscriptionOptions<Row>, "returnHandle"> & { readonly returnHandle?: false | undefined };
+export type TableSubscribeCaller<Row = never> = <Table extends TableName>(table: Table, onRows?: (rows: ([Row] extends [never] ? TableRows[Table] : Row)[]) => void, options?: TableSubscribeOptions<[Row] extends [never] ? TableRows[Table] : Row>) => Promise<SubscriptionUnsubscribe>;
 export type TableRowDecoder<Name extends TableName> = ShunterTableRowDecoder<TableRows[Name]>;
 export type TableRowDecoders<RowsByName extends object = TableRows> = ShunterTableRowDecoders<RowsByName>;
 export type UUID = string;
@@ -223,28 +226,28 @@ export const visibilityFilters = {
   class_: { sql: "SELECT * FROM messages WHERE body = 'reserved'", returnTable: "messages", returnTableId: 0, usesCallerIdentity: false },
 } as const;
 
-export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>, onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : { ...options };
+export function subscribeMessages(subscribeTable: TableSubscribeCaller<MessagesRow>, onRows?: (rows: MessagesRow[]) => void, options: TableSubscribeOptions<MessagesRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscribeOptions<MessagesRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["messages"] } : { ...options };
   return subscribeTable("messages", onRows, subscribeOptions);
 }
 
-export function subscribe_(subscribeTable: TableSubscriber<_Row>, onRows?: (rows: _Row[]) => void, options: TableSubscriptionOptions<_Row> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<_Row> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["!!!"] } : { ...options };
+export function subscribe_(subscribeTable: TableSubscribeCaller<_Row>, onRows?: (rows: _Row[]) => void, options: TableSubscribeOptions<_Row> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscribeOptions<_Row> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["!!!"] } : { ...options };
   return subscribeTable("!!!", onRows, subscribeOptions);
 }
 
-export function subscribe_1Table(subscribeTable: TableSubscriber<_1TableRow>, onRows?: (rows: _1TableRow[]) => void, options: TableSubscriptionOptions<_1TableRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<_1TableRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["1-table"] } : { ...options };
+export function subscribe_1Table(subscribeTable: TableSubscribeCaller<_1TableRow>, onRows?: (rows: _1TableRow[]) => void, options: TableSubscribeOptions<_1TableRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscribeOptions<_1TableRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["1-table"] } : { ...options };
   return subscribeTable("1-table", onRows, subscribeOptions);
 }
 
-export function subscribeClass(subscribeTable: TableSubscriber<ClassRow>, onRows?: (rows: ClassRow[]) => void, options: TableSubscriptionOptions<ClassRow> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<ClassRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["class"] } : { ...options };
+export function subscribeClass(subscribeTable: TableSubscribeCaller<ClassRow>, onRows?: (rows: ClassRow[]) => void, options: TableSubscribeOptions<ClassRow> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscribeOptions<ClassRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["class"] } : { ...options };
   return subscribeTable("class", onRows, subscribeOptions);
 }
 
-export function subscribeClass2(subscribeTable: TableSubscriber<Class2Row>, onRows?: (rows: Class2Row[]) => void, options: TableSubscriptionOptions<Class2Row> = {}): Promise<SubscriptionUnsubscribe> {
-  const subscribeOptions: TableSubscriptionOptions<Class2Row> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["class!"] } : { ...options };
+export function subscribeClass2(subscribeTable: TableSubscribeCaller<Class2Row>, onRows?: (rows: Class2Row[]) => void, options: TableSubscribeOptions<Class2Row> = {}): Promise<SubscriptionUnsubscribe> {
+  const subscribeOptions: TableSubscribeOptions<Class2Row> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["class!"] } : { ...options };
   return subscribeTable("class!", onRows, subscribeOptions);
 }
 
@@ -409,7 +412,7 @@ export interface ModuleClientBindings {
   readonly callProcedure: ProcedureCaller;
   readonly runDeclaredQuery: DeclaredQueryRunner;
   readonly subscribeDeclaredView: DeclaredViewSubscriber & DeclaredViewHandleSubscriber;
-  readonly subscribeTable: <Table extends string, Row = Table extends TableName ? TableRows[Table] : Uint8Array>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe>;
+  readonly subscribeTable: TableSubscribeCaller & (<Table extends string, Row = Table extends TableName ? TableRows[Table] : Uint8Array>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe | SubscriptionHandle<Row>>);
 }
 
 export function createModuleClient(bindings: ModuleClientBindings) {
@@ -457,19 +460,19 @@ export function createModuleClient(bindings: ModuleClientBindings) {
     },
     tables: {
       messages: {
-        subscribe: (onRows?: (rows: MessagesRow[]) => void, options: TableSubscriptionOptions<MessagesRow> = {}) => subscribeMessages(bindings.subscribeTable, onRows, options),
+        subscribe: (onRows?: (rows: MessagesRow[]) => void, options: TableSubscribeOptions<MessagesRow> = {}) => subscribeMessages(bindings.subscribeTable, onRows, options),
       },
       _: {
-        subscribe: (onRows?: (rows: _Row[]) => void, options: TableSubscriptionOptions<_Row> = {}) => subscribe_(bindings.subscribeTable, onRows, options),
+        subscribe: (onRows?: (rows: _Row[]) => void, options: TableSubscribeOptions<_Row> = {}) => subscribe_(bindings.subscribeTable, onRows, options),
       },
       _1Table: {
-        subscribe: (onRows?: (rows: _1TableRow[]) => void, options: TableSubscriptionOptions<_1TableRow> = {}) => subscribe_1Table(bindings.subscribeTable, onRows, options),
+        subscribe: (onRows?: (rows: _1TableRow[]) => void, options: TableSubscribeOptions<_1TableRow> = {}) => subscribe_1Table(bindings.subscribeTable, onRows, options),
       },
       class_: {
-        subscribe: (onRows?: (rows: ClassRow[]) => void, options: TableSubscriptionOptions<ClassRow> = {}) => subscribeClass(bindings.subscribeTable, onRows, options),
+        subscribe: (onRows?: (rows: ClassRow[]) => void, options: TableSubscribeOptions<ClassRow> = {}) => subscribeClass(bindings.subscribeTable, onRows, options),
       },
       class_2: {
-        subscribe: (onRows?: (rows: Class2Row[]) => void, options: TableSubscriptionOptions<Class2Row> = {}) => subscribeClass2(bindings.subscribeTable, onRows, options),
+        subscribe: (onRows?: (rows: Class2Row[]) => void, options: TableSubscribeOptions<Class2Row> = {}) => subscribeClass2(bindings.subscribeTable, onRows, options),
       },
     },
     events: {

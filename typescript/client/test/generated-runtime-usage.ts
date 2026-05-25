@@ -92,13 +92,14 @@ import {
 import type {
   CreateMessageArgs,
   CreateMessageResult,
-  DeclaredQueryOptions as GeneratedDeclaredQueryOptions,
-  DeclaredQueryDecodedRunOptions as GeneratedDeclaredQueryDecodedRunOptions,
-  DeclaredQueryRunOptions as GeneratedDeclaredQueryRunOptions,
+	  DeclaredQueryOptions as GeneratedDeclaredQueryOptions,
+	  DeclaredQueryDecodedRunOptions as GeneratedDeclaredQueryDecodedRunOptions,
+	  DeclaredQueryRunOptions as GeneratedDeclaredQueryRunOptions,
   DeclaredQueryRunner,
   DeclaredQueryDecodeOptions as GeneratedDeclaredQueryDecodeOptions,
   DeclaredViewHandleSubscriber as GeneratedDeclaredViewHandleSubscriber,
   DeclaredViewSubscriber,
+  DeclaredViewSubscribeOptions as GeneratedDeclaredViewSubscribeOptions,
   DeclaredViewSubscriptionOptions as GeneratedDeclaredViewSubscriptionOptions,
   DecodedDeclaredQueryResult as GeneratedDecodedDeclaredQueryResult,
   EncodedReducerCallOptions as GeneratedEncodedReducerCallOptions,
@@ -127,6 +128,7 @@ import type {
   TableRowDecoder as GeneratedTableRowDecoder,
   TableRowDecoders as GeneratedTableRowDecoders,
   TableRows,
+  TableSubscribeOptions as GeneratedTableSubscribeOptions,
   TableSubscriber,
   TableSubscriptionOptions as GeneratedTableSubscriptionOptions,
 } from "../../../codegen/testdata/v1_module_contract";
@@ -134,6 +136,14 @@ import {
   shunterContract as appScopedShunterContract,
   shunterProtocol as appScopedShunterProtocol,
 } from "../../../codegen/testdata/v1_module_contract_app_runtime";
+import {
+  createModuleClient as createHostedChatModuleClient,
+} from "../../../examples/hosted-chat/frontend/src/generated/hosted_chat";
+import type {
+  MessageEventsRow as HostedChatMessageEventsRow,
+  ModuleClientBindings as HostedChatModuleClientBindings,
+  SubscriptionRowEvent as HostedChatSubscriptionRowEvent,
+} from "../../../examples/hosted-chat/frontend/src/generated/hosted_chat";
 
 const generatedProtocolMetadata: ProtocolMetadata = generatedProtocol;
 const runtimeProtocolMetadata: ProtocolMetadata = runtimeProtocol;
@@ -293,7 +303,7 @@ async function exerciseGeneratedBindings(): Promise<void> {
   };
   const exportedGeneratedTableRowDecoders: GeneratedTableRowDecoders =
     generatedTableRowDecodersValue;
-  const generatedTableSubscriptionOptions: GeneratedTableSubscriptionOptions<MessagesRow> = {
+  const generatedTableSubscriptionOptions: GeneratedTableSubscribeOptions<MessagesRow> = {
     decodeRow: generatedMessageRowDecoder,
   };
   const declaredQueryRowDecoder: DeclaredQueryRowDecoder<MessagesRow> = (_tableName, row) =>
@@ -495,7 +505,7 @@ async function exerciseGeneratedBindings(): Promise<void> {
   };
   const liveProjectionDecoder: RowDecoder<LiveMessageProjectionViewRow> =
     decodeLiveMessageProjectionViewRow;
-  const generatedDeclaredViewOptions: GeneratedDeclaredViewSubscriptionOptions<LiveMessageProjectionViewRow> = {
+  const generatedDeclaredViewOptions: GeneratedDeclaredViewSubscribeOptions<LiveMessageProjectionViewRow> = {
     decodeRow: liveProjectionDecoder,
   };
   const unsubscribeView: SubscriptionUnsubscribe =
@@ -512,11 +522,11 @@ async function exerciseGeneratedBindings(): Promise<void> {
   };
   const liveMessagesByTopicDecoder: RowDecoder<LiveMessagesByTopicViewRow> =
     decodeLiveMessagesByTopicViewRow;
-  const generatedParameterizedDeclaredViewOptions: GeneratedDeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> = {
+  const generatedParameterizedDeclaredViewOptions: GeneratedDeclaredViewSubscribeOptions<LiveMessagesByTopicViewRow> = {
     decodeRow: liveMessagesByTopicDecoder,
   };
   // @ts-expect-error generated declared-view helper options hide encoded params.
-  const generatedParameterizedDeclaredViewOptionsWithParams: GeneratedDeclaredViewSubscriptionOptions<LiveMessagesByTopicViewRow> = { params: encodedLiveMessagesByTopicParams };
+  const generatedParameterizedDeclaredViewOptionsWithParams: GeneratedDeclaredViewSubscribeOptions<LiveMessagesByTopicViewRow> = { params: encodedLiveMessagesByTopicParams };
   const unsubscribeParameterizedView: SubscriptionUnsubscribe =
     await subscribeLiveMessagesByTopic(
       declaredViewSubscriber,
@@ -561,7 +571,20 @@ async function exerciseGeneratedBindings(): Promise<void> {
     subscribeDeclaredView: client.subscribeDeclaredView,
     subscribeTable: client.subscribeTable,
   };
+  const moduleClientBindingSubscribeHandle: Promise<SubscriptionUnsubscribe | SubscriptionHandle<MessagesRow>> =
+    moduleClientBindings.subscribeTable("messages", undefined, {
+      decodeRow: messageRowDecoder,
+      returnHandle: true,
+    });
   const moduleClient = createModuleClient(moduleClientBindings);
+  const hostedChatModuleClientBindings: HostedChatModuleClientBindings = {
+    callReducer: client.callReducer,
+    callProcedure: client.callProcedure,
+    runDeclaredQuery: client.runDeclaredQuery,
+    subscribeDeclaredView: client.subscribeDeclaredView,
+    subscribeTable: client.subscribeTable,
+  };
+  const hostedChatModuleClient = createHostedChatModuleClient(hostedChatModuleClientBindings);
   const moduleClientReducerBytes: Uint8Array = await moduleClient.reducers.createMessage.call(
     generatedCreateMessageArgs,
     generatedTypedReducerOptions,
@@ -587,6 +610,8 @@ async function exerciseGeneratedBindings(): Promise<void> {
   const moduleClientUnsubscribeView: SubscriptionUnsubscribe =
     await moduleClient.views.liveMessageProjection.subscribe(generatedDeclaredViewOptions);
   await moduleClientUnsubscribeView();
+  // @ts-expect-error facade view subscribe methods return unsubscribe functions only.
+  const moduleClientInvalidViewHandle = await moduleClient.views.liveMessageProjection.subscribe({ returnHandle: true });
   const moduleClientViewHandle: SubscriptionHandle<LiveMessagesByTopicViewRow> =
     await moduleClient.views.liveMessagesByTopic.handle(
       liveMessagesByTopicParams,
@@ -599,6 +624,17 @@ async function exerciseGeneratedBindings(): Promise<void> {
       void firstBody;
     });
   await moduleClientUnsubscribeTable();
+  // @ts-expect-error facade table subscribe methods return unsubscribe functions only.
+  const moduleClientInvalidTableHandle = await moduleClient.tables.messages.subscribe(undefined, { returnHandle: true });
+  const hostedChatMessageEventHandler = (event: HostedChatSubscriptionRowEvent<HostedChatMessageEventsRow>): void => {
+    const eventBody: string = event.row.body;
+    void eventBody;
+  };
+  const hostedChatEventUnsubscribe: SubscriptionUnsubscribe =
+    await hostedChatModuleClient.events.messageEvents.onInsert(hostedChatMessageEventHandler);
+  await hostedChatEventUnsubscribe();
+  // @ts-expect-error facade event insert helpers return unsubscribe functions only.
+  const hostedChatInvalidEventHandle = await hostedChatModuleClient.events.messageEvents.onInsert(hostedChatMessageEventHandler, { returnHandle: true });
   const unsubscribeFromBindings: SubscriptionUnsubscribe =
     await subscribeLiveMessageCount(runtimeBindings.subscribeDeclaredView);
   await unsubscribeFromBindings();
@@ -666,6 +702,8 @@ async function exerciseGeneratedBindings(): Promise<void> {
     generatedTableSubscriptionOptions,
   );
   await unsubscribeGeneratedDecodedTable();
+  // @ts-expect-error generated table subscribe helpers return unsubscribe functions only.
+  const invalidGeneratedTableHandle = await subscribeMessages(tableSubscriber, undefined, { returnHandle: true });
 
   void reducerBytes;
   void generatedCreateMessageArgs;
@@ -680,6 +718,11 @@ async function exerciseGeneratedBindings(): Promise<void> {
   void moduleClientRecentMessages;
   void moduleClientMessagesByTopic;
   void moduleClientRawMessagesByTopic;
+  void moduleClientBindingSubscribeHandle;
+  void moduleClientInvalidViewHandle;
+  void moduleClientInvalidTableHandle;
+  void hostedChatInvalidEventHandle;
+  void invalidGeneratedTableHandle;
   void encodedCreateMessageArgs;
   void typedReducerBytes;
   void typedReducerEnvelope;

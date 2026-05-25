@@ -115,6 +115,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	b.WriteString("export type DeclaredViewSubscriber = ShunterDeclaredViewSubscriber<ExecutableViewName>;\n")
 	b.WriteString("export type DeclaredViewHandleSubscriber = ShunterDeclaredViewHandleSubscriber<ExecutableViewName>;\n")
 	b.WriteString("export type DeclaredViewSubscriptionOptions<Row = unknown> = Omit<ShunterDeclaredViewSubscriptionOptions<Row>, \"params\">;\n")
+	b.WriteString("export type DeclaredViewSubscribeOptions<Row = unknown> = Omit<DeclaredViewSubscriptionOptions<Row>, \"returnHandle\"> & { readonly returnHandle?: false | undefined };\n")
 	b.WriteString("export type SubscriptionUnsubscribe = ShunterSubscriptionUnsubscribe;\n")
 	b.WriteString("export type SubscriptionHandle<Row = unknown> = ShunterSubscriptionHandle<Row>;\n")
 	b.WriteString("export type SubscriptionHandleReturnOptions = ShunterSubscriptionHandleReturnOptions;\n")
@@ -122,6 +123,8 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	b.WriteString("export type TableRow<Name extends TableName> = TableRows[Name];\n")
 	b.WriteString("export type TableSubscriber<Row = never> = ShunterTableSubscriber<TableName, TableRows, Row>;\n")
 	b.WriteString("export type TableSubscriptionOptions<Row = unknown> = ShunterTableSubscriptionOptions<Row>;\n")
+	b.WriteString("export type TableSubscribeOptions<Row = unknown> = Omit<TableSubscriptionOptions<Row>, \"returnHandle\"> & { readonly returnHandle?: false | undefined };\n")
+	b.WriteString("export type TableSubscribeCaller<Row = never> = <Table extends TableName>(table: Table, onRows?: (rows: ([Row] extends [never] ? TableRows[Table] : Row)[]) => void, options?: TableSubscribeOptions<[Row] extends [never] ? TableRows[Table] : Row>) => Promise<SubscriptionUnsubscribe>;\n")
 	b.WriteString("export type TableRowDecoder<Name extends TableName> = ShunterTableRowDecoder<TableRows[Name]>;\n")
 	b.WriteString("export type TableRowDecoders<RowsByName extends object = TableRows> = ShunterTableRowDecoders<RowsByName>;\n")
 	b.WriteString("export type UUID = string;\n")
@@ -175,15 +178,15 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 			subscribeFunction: functionName,
 			isEvent:           table.IsEvent,
 		}
-		fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>, onRows?: (rows: %s[]) => void, options: TableSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, rowType, rowType, rowType)
-		fmt.Fprintf(&b, "  const subscribeOptions: TableSubscriptionOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders[%s]%s } : { ...options%s };\n", rowType, strconv.Quote(table.Name), typeScriptEventTableOptionSuffix(table.IsEvent), typeScriptEventTableOptionSuffix(table.IsEvent))
+		fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscribeCaller<%s>, onRows?: (rows: %s[]) => void, options: TableSubscribeOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, rowType, rowType, rowType)
+		fmt.Fprintf(&b, "  const subscribeOptions: TableSubscribeOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders[%s]%s } : { ...options%s };\n", rowType, strconv.Quote(table.Name), typeScriptEventTableOptionSuffix(table.IsEvent), typeScriptEventTableOptionSuffix(table.IsEvent))
 		fmt.Fprintf(&b, "  return subscribeTable(%s, onRows, subscribeOptions);\n", strconv.Quote(table.Name))
 		b.WriteString("}\n\n")
 		if table.IsEvent {
 			eventFunctionName := uniqueTypeScriptIdentifier(functionName+"Inserts", topLevelValueNames)
 			tableFacade.eventFunction = eventFunctionName
-			fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>, onInsert: (event: SubscriptionRowEvent<%s>) => void, options: TableSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", eventFunctionName, rowType, rowType, rowType)
-			fmt.Fprintf(&b, "  const subscribeOptions: TableSubscriptionOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders[%s], eventTable: true, onInsert } : { ...options, eventTable: true, onInsert };\n", rowType, strconv.Quote(table.Name))
+			fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscribeCaller<%s>, onInsert: (event: SubscriptionRowEvent<%s>) => void, options: TableSubscribeOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", eventFunctionName, rowType, rowType, rowType)
+			fmt.Fprintf(&b, "  const subscribeOptions: TableSubscribeOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders[%s], eventTable: true, onInsert } : { ...options, eventTable: true, onInsert };\n", rowType, strconv.Quote(table.Name))
 			fmt.Fprintf(&b, "  return subscribeTable(%s, undefined, subscribeOptions);\n", strconv.Quote(table.Name))
 			b.WriteString("}\n\n")
 		}
@@ -439,11 +442,11 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 		}
 		if rowTypeName != "" {
 			if viewParamsTypeName != "" {
-				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber, params: %s, options: DeclaredViewSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, viewParamsTypeName, rowTypeName)
+				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber, params: %s, options: DeclaredViewSubscribeOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, viewParamsTypeName, rowTypeName)
 			} else {
-				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscriptionOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, rowTypeName)
+				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscribeOptions<%s> = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, rowTypeName)
 			}
-			fmt.Fprintf(&b, "  const subscribeOptions: DeclaredViewSubscriptionOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: %s } : options;\n", rowTypeName, decoderName)
+			fmt.Fprintf(&b, "  const subscribeOptions: DeclaredViewSubscribeOptions<%s> = options.decodeRow === undefined ? { ...options, decodeRow: %s } : options;\n", rowTypeName, decoderName)
 			if viewParamsTypeName != "" {
 				fmt.Fprintf(&b, "  return subscribeDeclaredView(%s, { ...subscribeOptions, params: %s(params) });\n", strconv.Quote(view.name), viewParamsEncoderName)
 			} else {
@@ -466,7 +469,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 			b.WriteString("}\n\n")
 		} else {
 			if viewParamsTypeName != "" {
-				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber, params: %s, options: DeclaredViewSubscriptionOptions = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, viewParamsTypeName)
+				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber, params: %s, options: DeclaredViewSubscribeOptions = {}): Promise<SubscriptionUnsubscribe> {\n", functionName, viewParamsTypeName)
 				fmt.Fprintf(&b, "  return subscribeDeclaredView(%s, { ...options, params: %s(params) });\n", strconv.Quote(view.name), viewParamsEncoderName)
 			} else {
 				fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber): Promise<SubscriptionUnsubscribe> {\n", functionName)
@@ -527,6 +530,7 @@ func typeScriptTopLevelValueNames() map[string]int {
 		"DeclaredViewSubscriber",
 		"DeclaredViewHandleSubscriber",
 		"DeclaredViewSubscriptionOptions",
+		"DeclaredViewSubscribeOptions",
 		"SubscriptionUnsubscribe",
 		"SubscriptionHandle",
 		"SubscriptionHandleReturnOptions",
@@ -536,6 +540,8 @@ func typeScriptTopLevelValueNames() map[string]int {
 		"TableRow",
 		"TableSubscriber",
 		"TableSubscriptionOptions",
+		"TableSubscribeOptions",
+		"TableSubscribeCaller",
 		"TableRowDecoder",
 		"TableRowDecoders",
 		"UUID",
@@ -950,7 +956,7 @@ func writeTypeScriptModuleClient(
 	b.WriteString("  readonly callProcedure: ProcedureCaller;\n")
 	b.WriteString("  readonly runDeclaredQuery: DeclaredQueryRunner;\n")
 	b.WriteString("  readonly subscribeDeclaredView: DeclaredViewSubscriber & DeclaredViewHandleSubscriber;\n")
-	b.WriteString("  readonly subscribeTable: <Table extends string, Row = Table extends TableName ? TableRows[Table] : Uint8Array>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe>;\n")
+	b.WriteString("  readonly subscribeTable: TableSubscribeCaller & (<Table extends string, Row = Table extends TableName ? TableRows[Table] : Uint8Array>(table: Table, onRows?: (rows: Row[]) => void, options?: TableSubscriptionOptions<Row>) => Promise<SubscriptionUnsubscribe | SubscriptionHandle<Row>>);\n")
 	b.WriteString("}\n\n")
 
 	b.WriteString("export function createModuleClient(bindings: ModuleClientBindings) {\n")
@@ -1004,13 +1010,13 @@ func writeTypeScriptModuleClient(
 	for _, view := range views {
 		fmt.Fprintf(b, "      %s: {\n", view.identifier)
 		if view.paramsType != "" {
-			fmt.Fprintf(b, "        subscribe: (params: %s, options: DeclaredViewSubscriptionOptions<%s> = {}) => %s(bindings.subscribeDeclaredView, params, options),\n", view.paramsType, typeScriptViewFacadeRowType(view), view.subscribeFunction)
+			fmt.Fprintf(b, "        subscribe: (params: %s, options: DeclaredViewSubscribeOptions<%s> = {}) => %s(bindings.subscribeDeclaredView, params, options),\n", view.paramsType, typeScriptViewFacadeRowType(view), view.subscribeFunction)
 			if view.handleFunction != "" {
 				fmt.Fprintf(b, "        handle: (params: %s, options: DeclaredViewSubscriptionOptions<%s> & SubscriptionHandleReturnOptions) => %s(bindings.subscribeDeclaredView, params, options),\n", view.paramsType, view.rowType, view.handleFunction)
 			}
 		} else {
 			if view.rowType != "" {
-				fmt.Fprintf(b, "        subscribe: (options: DeclaredViewSubscriptionOptions<%s> = {}) => %s(bindings.subscribeDeclaredView, options),\n", view.rowType, view.subscribeFunction)
+				fmt.Fprintf(b, "        subscribe: (options: DeclaredViewSubscribeOptions<%s> = {}) => %s(bindings.subscribeDeclaredView, options),\n", view.rowType, view.subscribeFunction)
 				if view.handleFunction != "" {
 					fmt.Fprintf(b, "        handle: (options: DeclaredViewSubscriptionOptions<%s> & SubscriptionHandleReturnOptions) => %s(bindings.subscribeDeclaredView, options),\n", view.rowType, view.handleFunction)
 				}
@@ -1025,7 +1031,7 @@ func writeTypeScriptModuleClient(
 	b.WriteString("    tables: {\n")
 	for _, table := range tables {
 		fmt.Fprintf(b, "      %s: {\n", table.identifier)
-		fmt.Fprintf(b, "        subscribe: (onRows?: (rows: %s[]) => void, options: TableSubscriptionOptions<%s> = {}) => %s(bindings.subscribeTable, onRows, options),\n", table.rowType, table.rowType, table.subscribeFunction)
+		fmt.Fprintf(b, "        subscribe: (onRows?: (rows: %s[]) => void, options: TableSubscribeOptions<%s> = {}) => %s(bindings.subscribeTable, onRows, options),\n", table.rowType, table.rowType, table.subscribeFunction)
 		b.WriteString("      },\n")
 	}
 	b.WriteString("    },\n")
@@ -1036,7 +1042,7 @@ func writeTypeScriptModuleClient(
 			continue
 		}
 		fmt.Fprintf(b, "      %s: {\n", table.identifier)
-		fmt.Fprintf(b, "        onInsert: (handler: (event: SubscriptionRowEvent<%s>) => void, options: TableSubscriptionOptions<%s> = {}) => %s(bindings.subscribeTable, handler, options),\n", table.rowType, table.rowType, table.eventFunction)
+		fmt.Fprintf(b, "        onInsert: (handler: (event: SubscriptionRowEvent<%s>) => void, options: TableSubscribeOptions<%s> = {}) => %s(bindings.subscribeTable, handler, options),\n", table.rowType, table.rowType, table.eventFunction)
 		b.WriteString("      },\n")
 	}
 	b.WriteString("    },\n")
