@@ -12,7 +12,11 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-const changesetVersion byte = 1
+const (
+	changesetVersion       = 1
+	changesetUint32Bytes   = 4
+	changesetTableMinBytes = 12 // table_id + insert_count + delete_count
+)
 
 // EncodeChangeset serializes a Changeset to bytes.
 func EncodeChangeset(cs *store.Changeset) ([]byte, error) {
@@ -189,12 +193,12 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 	pos := 1
 	tableCount := binary.LittleEndian.Uint32(data[pos:])
 	pos += 4
-	if err := requireChangesetCountFitsRemaining("table count", tableCount, data, pos); err != nil {
+	if err := requireChangesetCountFitsRemaining("table count", tableCount, data, pos, changesetUint32Bytes); err != nil {
 		return nil, err
 	}
 
 	cs := &store.Changeset{
-		Tables: make(map[schema.TableID]*store.TableChangeset, int(tableCount)),
+		Tables: make(map[schema.TableID]*store.TableChangeset, changesetTableMapCap(tableCount, len(data)-pos)),
 	}
 
 	for range tableCount {
@@ -220,7 +224,7 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 		}
 		insertCount := binary.LittleEndian.Uint32(data[pos:])
 		pos += 4
-		if err := requireChangesetCountFitsRemaining("insert count", insertCount, data, pos); err != nil {
+		if err := requireChangesetCountFitsRemaining("insert count", insertCount, data, pos, changesetUint32Bytes); err != nil {
 			return nil, err
 		}
 		tc.Inserts = make([]types.ProductValue, int(insertCount))
@@ -239,7 +243,7 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 		}
 		deleteCount := binary.LittleEndian.Uint32(data[pos:])
 		pos += 4
-		if err := requireChangesetCountFitsRemaining("delete count", deleteCount, data, pos); err != nil {
+		if err := requireChangesetCountFitsRemaining("delete count", deleteCount, data, pos, changesetUint32Bytes); err != nil {
 			return nil, err
 		}
 		tc.Deletes = make([]types.ProductValue, int(deleteCount))
@@ -265,12 +269,20 @@ func changesetDecodeErrorf(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrTraversal}, args...)...)
 }
 
-func requireChangesetCountFitsRemaining(name string, count uint32, data []byte, pos int) error {
+func requireChangesetCountFitsRemaining(name string, count uint32, data []byte, pos int, minItemBytes int) error {
 	remaining := len(data) - pos
-	if uint64(count) > uint64(remaining/4) {
+	if uint64(count)*uint64(minItemBytes) > uint64(remaining) {
 		return changesetDecodeErrorf("commitlog: %s %d exceeds remaining %d", name, count, remaining)
 	}
 	return nil
+}
+
+func changesetTableMapCap(tableCount uint32, remaining int) int {
+	capByRemaining := uint64(remaining / changesetTableMinBytes)
+	if uint64(tableCount) < capByRemaining {
+		return int(tableCount)
+	}
+	return int(capByRemaining)
 }
 
 func decodeRow(data []byte, ts *schema.TableSchema, maxRowBytes uint32) (types.ProductValue, int, error) {
