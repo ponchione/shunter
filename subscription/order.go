@@ -3,6 +3,7 @@ package subscription
 import (
 	"fmt"
 	"slices"
+	"sort"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
@@ -149,7 +150,7 @@ func compareOrderedInitialRows(a, b orderedInitialRow, orderBy []OrderByColumn) 
 }
 
 func upperBoundOrderedInitialRows(rows []orderedInitialRow, item orderedInitialRow, orderBy []OrderByColumn) int {
-	return sortSearch(len(rows), func(i int) bool {
+	return sort.Search(len(rows), func(i int) bool {
 		return compareOrderedInitialRows(rows[i], item, orderBy) > 0
 	})
 }
@@ -160,17 +161,4 @@ func flattenOrderedInitialRows(ordered []orderedInitialRow) []types.ProductValue
 		out = append(out, row.row)
 	}
 	return out
-}
-
-func sortSearch(n int, f func(int) bool) int {
-	i, j := 0, n
-	for i < j {
-		h := int(uint(i+j) >> 1)
-		if !f(h) {
-			i = h + 1
-		} else {
-			j = h
-		}
-	}
-	return i
 }
