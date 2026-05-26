@@ -18,7 +18,8 @@ notes, and future-work trackers live under `../working-docs/`.
 
 Use [authentication](authentication.md) for the full current auth contract,
 [operations](operations.md) for backup/restore and release runbooks, and
-[performance envelopes](performance-envelopes.md) for the current advisory
+[benchmark workflow](benchmarks.md) for repeatable before/after measurement.
+Use [performance envelopes](performance-envelopes.md) for the current advisory
 benchmark snapshot.
 
 ## Compatibility And Support
@@ -59,6 +60,8 @@ Runtime implementation packages such as `store`, `subscription`, `executor`,
   permissions, visibility, key replacement, and production checklist.
 - [Operations](operations.md) - `DataDir` lifecycle, backup/restore,
   migrations, upgrades, and release checklist.
+- [Benchmark workflow](benchmarks.md) - standard benchmark commands,
+  comparison rules, and PR reporting expectations.
 - [Performance envelopes](performance-envelopes.md) - current advisory
   benchmark snapshot, workload fixtures, and known measurement gaps.
 
