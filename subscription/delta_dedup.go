@@ -71,7 +71,7 @@ func appendReconciledRows(
 func encodeRowKey(row types.ProductValue) string {
 	enc := acquireCanonicalEncoder()
 	defer releaseCanonicalEncoder(enc)
-	enc.writeU32(uint32(len(row)))
+	enc.writeLen(len(row))
 	for _, v := range row {
 		encodeValue(enc, v)
 	}

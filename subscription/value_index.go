@@ -197,9 +197,9 @@ func encodeValueKey(v Value) valueKey {
 	case types.KindArrayString:
 		enc := acquireCanonicalEncoder()
 		xs := v.ArrayStringView()
-		enc.writeU32(uint32(len(xs)))
+		enc.writeLen(len(xs))
 		for _, s := range xs {
-			enc.writeU32(uint32(len(s)))
+			enc.writeLen(len(s))
 			enc.buf = append(enc.buf, s...)
 		}
 		k.str = string(enc.buf)
