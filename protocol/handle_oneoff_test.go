@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/big"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/bsatn"
@@ -61,6 +62,18 @@ func (s *mockSnapshot) GetRow(_ schema.TableID, _ types.RowID) (types.ProductVal
 func (s *mockSnapshot) RowCount(id schema.TableID) int { return len(s.rows[id]) }
 
 func (s *mockSnapshot) Close() {}
+
+type rowCountSnapshot struct {
+	*mockSnapshot
+	counts map[schema.TableID]int
+}
+
+func (s *rowCountSnapshot) RowCount(id schema.TableID) int {
+	if n, ok := s.counts[id]; ok {
+		return n
+	}
+	return s.mockSnapshot.RowCount(id)
+}
 
 type countingSnapshot struct {
 	*mockSnapshot
@@ -7971,6 +7984,42 @@ func TestHandleOneOffQuery_ShunterCrossJoinWhereCountWithLimitReturnsFullAggrega
 	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
 	wantRows := []types.ProductValue{{types.NewUint64(2)}}
 	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQueryCrossJoinCountRejectsRowCountOverflow(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint64},
+		}}},
+		"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint64},
+		}}},
+	}}
+	snap := &rowCountSnapshot{
+		mockSnapshot: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}},
+		counts: map[schema.TableID]int{
+			1: math.MaxInt,
+			2: 3,
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   []byte{0xCD},
+		QueryString: "SELECT COUNT(*) AS n FROM t JOIN s",
+	}, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected row-count overflow error, got nil")
+	}
+	if !strings.Contains(*result.Error, "cross join row count overflow") {
+		t.Fatalf("Error = %q, want overflow", *result.Error)
+	}
 }
 
 // TestHandleOneOffQuery_ShunterSqlInvalidAggregateWithoutAliasRejected pins the

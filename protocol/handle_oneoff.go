@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"time"
 
@@ -1078,7 +1079,19 @@ func countOneOffCrossJoin(ctx context.Context, view store.CommittedReadView, pro
 	if projectedTable == cross.Left {
 		otherTable = cross.Right
 	}
-	return uint64(view.RowCount(projectedTable)) * uint64(view.RowCount(otherTable)), nil
+	return checkedCrossJoinRowCount(view.RowCount(projectedTable), view.RowCount(otherTable))
+}
+
+func checkedCrossJoinRowCount(projectedCount, otherCount int) (uint64, error) {
+	if projectedCount < 0 || otherCount < 0 {
+		return 0, fmt.Errorf("cross join row count is negative: %d * %d", projectedCount, otherCount)
+	}
+	projected := uint64(projectedCount)
+	other := uint64(otherCount)
+	if projected != 0 && other > math.MaxUint64/projected {
+		return 0, fmt.Errorf("cross join row count overflow: %d * %d", projectedCount, otherCount)
+	}
+	return projected * other, nil
 }
 
 func visitOneOffCrossJoinPairs(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, projectedSideOuter bool, visit func(leftRow, rightRow types.ProductValue) bool) error {

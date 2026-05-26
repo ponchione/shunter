@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- One-off `COUNT(*)` over unfiltered cross joins now rejects overflowing
+  row-count products instead of silently wrapping the aggregate result.
 - Contract workflow JSON argument decoding now accepts the decimal-string
   integer forms emitted by contract-aware JSON row rendering, including full
   128-bit and 256-bit integer values.
