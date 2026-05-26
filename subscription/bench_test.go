@@ -172,6 +172,57 @@ func BenchmarkRegisterSetOrderedInitialRows(b *testing.B) {
 	}
 }
 
+func BenchmarkInitialRowsForTableOrderedWindow(b *testing.B) {
+	cases := []struct {
+		path       string
+		totalRows  int
+		limitRows  uint64
+		offsetRows uint64
+		inputOrder string
+		keyColumns int
+	}{
+		{path: "table_scan", totalRows: 128, limitRows: 10, inputOrder: "ascending", keyColumns: 1},
+		{path: "table_scan", totalRows: 1024, limitRows: 100, inputOrder: "shuffled", keyColumns: 1},
+		{path: "table_scan", totalRows: 4096, limitRows: 1000, offsetRows: 100, inputOrder: "shuffled", keyColumns: 2},
+		{path: "index_range", totalRows: 1024, limitRows: 100, inputOrder: "descending", keyColumns: 1},
+		{path: "index_range", totalRows: 4096, limitRows: 100, inputOrder: "shuffled", keyColumns: 2},
+	}
+
+	for _, tc := range cases {
+		name := fmt.Sprintf("%s/rows_%d/limit_%d/offset_%d/%s/%dcol", tc.path, tc.totalRows, tc.limitRows, tc.offsetRows, tc.inputOrder, tc.keyColumns)
+		b.Run(name, func(b *testing.B) {
+			s := benchmarkOrderedInitialRowSchema()
+			rows := benchmarkOrderedInitialRows(tc.totalRows, tc.inputOrder, tc.keyColumns)
+			view := buildMockCommitted(s, map[TableID][]types.ProductValue{1: rows})
+			pred := benchmarkInitialRowsForTablePredicate(tc.path, tc.totalRows)
+			orderBy := benchmarkInitialRowOrderBy(tc.keyColumns)
+			limitRows := tc.limitRows
+			var offset *uint64
+			if tc.offsetRows > 0 {
+				offsetRows := tc.offsetRows
+				offset = &offsetRows
+			}
+			mgr := NewManager(s, benchmarkInitialRowsForTableResolver(s, tc.path))
+			window := initialRowWindow{orderBy: orderBy, limit: &limitRows, offset: offset}
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			returnedRows := 0
+			for i := 0; i < b.N; i++ {
+				collector := newInitialRowCollector(context.Background(), 0)
+				got, err := mgr.initialRowsForTable(collector, pred, view, 1, window)
+				if err != nil {
+					b.Fatal(err)
+				}
+				returnedRows += len(got)
+			}
+			if returnedRows == 0 {
+				b.Fatal("initialRowsForTable returned no rows")
+			}
+		})
+	}
+}
+
 func BenchmarkBoundedOrderedInitialRowsAdd(b *testing.B) {
 	cases := []struct {
 		totalRows  int
@@ -312,6 +363,33 @@ func benchmarkInitialRowOrderBy(keyColumns int) []OrderByColumn {
 		}
 	}
 	return orderBy
+}
+
+func benchmarkInitialRowsForTablePredicate(path string, totalRows int) Predicate {
+	switch path {
+	case "table_scan":
+		return AllRows{Table: 1}
+	case "index_range":
+		return ColRange{
+			Table:  1,
+			Column: 0,
+			Lower:  Bound{Value: types.NewUint64(0), Inclusive: true},
+			Upper:  Bound{Value: types.NewUint64(uint64(totalRows)), Inclusive: true},
+		}
+	default:
+		panic(fmt.Sprintf("unsupported initial rows path %q", path))
+	}
+}
+
+func benchmarkInitialRowsForTableResolver(s *fakeSchema, path string) IndexResolver {
+	switch path {
+	case "table_scan":
+		return nil
+	case "index_range":
+		return s
+	default:
+		panic(fmt.Sprintf("unsupported initial rows path %q", path))
+	}
 }
 
 func benchmarkInitialRowOrderByDirection(keyColumns int, direction string) []OrderByColumn {
