@@ -139,10 +139,11 @@ func (h *schedulerHandle) insertScheduleLocked(reducerName string, args []byte, 
 	if err := validateScheduledReducerTarget(h.reg, reducerName); err != nil {
 		return 0, err
 	}
-	if h.seq.Peek() == 0 {
+	idValue, ok := h.seq.NextNonZero()
+	if !ok {
 		return 0, ErrScheduleIDExhausted
 	}
-	id := ScheduleID(h.seq.Next())
+	id := ScheduleID(idValue)
 	row := types.ProductValue{
 		SysScheduledColScheduleID:  types.NewUint64(uint64(id)),
 		SysScheduledColReducerName: types.NewString(reducerName),

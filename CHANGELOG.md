@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Scheduler ID allocation now atomically consumes the last non-zero ID and
+  reports exhaustion without ever inserting `schedule_id = 0`.
+- Recovery `ApplyChangeset` now treats a nil changeset as an empty no-op,
+  matching the existing nil changeset helpers.
 - Ordered live-view initial materialization now avoids per-row ORDER BY key
   copies and only encodes deterministic tie-break keys when comparisons need
   them, reducing allocations for bounded ordered windows.

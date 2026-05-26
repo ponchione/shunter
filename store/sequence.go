@@ -22,6 +22,19 @@ func (s *Sequence) Next() uint64 {
 	return v
 }
 
+// NextNonZero returns the current non-zero value and advances the sequence.
+// A zero next value is treated as exhausted and is not consumed.
+func (s *Sequence) NextNonZero() (uint64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.next == 0 {
+		return 0, false
+	}
+	v := s.next
+	s.next++
+	return v, true
+}
+
 // Peek returns the current value without incrementing.
 func (s *Sequence) Peek() uint64 {
 	s.mu.Lock()

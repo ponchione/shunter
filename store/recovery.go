@@ -11,6 +11,9 @@ import (
 // ApplyChangeset replays a changeset directly into committed state.
 // Used for crash recovery — bypasses transaction lifecycle.
 func ApplyChangeset(cs *CommittedState, changeset *Changeset) error {
+	if changeset == nil {
+		return nil
+	}
 	cs.Lock()
 	defer cs.Unlock()
 

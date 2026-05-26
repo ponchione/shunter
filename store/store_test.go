@@ -1295,6 +1295,23 @@ func TestSequenceReset(t *testing.T) {
 	}
 }
 
+func TestSequenceNextNonZeroExhaustion(t *testing.T) {
+	s := NewSequence()
+	s.Reset(^uint64(0))
+
+	v, ok := s.NextNonZero()
+	if !ok || v != ^uint64(0) {
+		t.Fatalf("NextNonZero at max = (%d, %v), want (max uint64, true)", v, ok)
+	}
+	v, ok = s.NextNonZero()
+	if ok || v != 0 {
+		t.Fatalf("NextNonZero after wrap = (%d, %v), want (0, false)", v, ok)
+	}
+	if got := s.Peek(); got != 0 {
+		t.Fatalf("Peek after exhausted NextNonZero = %d, want 0", got)
+	}
+}
+
 // --- Recovery tests (E8) ---
 
 func TestApplyChangeset(t *testing.T) {
@@ -1316,6 +1333,13 @@ func TestApplyChangeset(t *testing.T) {
 	tbl, _ := cs.Table(0)
 	if tbl.RowCount() != 1 {
 		t.Fatal("ApplyChangeset should insert 1 row")
+	}
+}
+
+func TestApplyChangesetNilIsNoOp(t *testing.T) {
+	cs, _ := buildTestState()
+	if err := ApplyChangeset(cs, nil); err != nil {
+		t.Fatalf("ApplyChangeset(nil): %v", err)
 	}
 }
 

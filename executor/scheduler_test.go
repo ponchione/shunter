@@ -263,6 +263,32 @@ func TestSchedulerHandleScheduleDistinctIDs(t *testing.T) {
 	}
 }
 
+func TestSchedulerHandleScheduleConsumesLastIDThenExhausts(t *testing.T) {
+	tx, h, _ := setupScheduler(t)
+	h.seq.Reset(^uint64(0))
+
+	id, err := h.Schedule("r", nil, time.Unix(1, 0))
+	if err != nil {
+		t.Fatalf("Schedule at last ID: %v", err)
+	}
+	if id != ScheduleID(^uint64(0)) {
+		t.Fatalf("Schedule at last ID = %d, want max uint64", id)
+	}
+
+	next, err := h.Schedule("r", nil, time.Unix(2, 0))
+	if !errors.Is(err, ErrScheduleIDExhausted) {
+		t.Fatalf("Schedule after last ID = (%d, %v), want ErrScheduleIDExhausted", next, err)
+	}
+	if next != 0 {
+		t.Fatalf("Schedule after last ID returned id %d, want 0", next)
+	}
+	for _, row := range tx.TxState().Inserts(h.tableID) {
+		if row[SysScheduledColScheduleID].AsUint64() == 0 {
+			t.Fatal("exhausted schedule sequence inserted schedule_id 0")
+		}
+	}
+}
+
 func TestSchedulerHandleCancelDeletesTxLocal(t *testing.T) {
 	tx, h, _ := setupScheduler(t)
 
