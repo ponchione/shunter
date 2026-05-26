@@ -36,6 +36,11 @@ func TestDecodeRowListReturnsDetachedRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeRowList: %v", err)
 	}
+	for i, row := range decoded {
+		if cap(row) != len(row) {
+			t.Fatalf("decoded row %d cap = %d, want len %d", i, cap(row), len(row))
+		}
+	}
 
 	frame[len(frame)-1] = 0xff
 	if got := decoded[1][0]; got != 0x0c {

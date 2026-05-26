@@ -551,9 +551,7 @@ func readBytes(body []byte, off int) ([]byte, int, error) {
 	if uint64(n) > uint64(len(body)-off) {
 		return nil, off, fmt.Errorf("%w: bytes length %d exceeds remaining %d", ErrMalformedMessage, n, len(body)-off)
 	}
-	out := make([]byte, n)
-	copy(out, body[off:off+int(n)])
-	return out, off + int(n), nil
+	return bytes.Clone(body[off : off+int(n)]), off + int(n), nil
 }
 
 func requireCountFitsRemaining(name string, count uint32, body []byte, off int, minPerItem int) error {

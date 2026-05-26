@@ -138,27 +138,47 @@ func DecodeRowList(data []byte) ([][]byte, error) {
 		return nil, fmt.Errorf("%w: rowlist truncated at count (have %d, need 4)", ErrMalformedMessage, len(data))
 	}
 	count := binary.LittleEndian.Uint32(data[0:4])
-	off := 4
-	if err := requireCountFitsRemaining("rowlist rows", count, data, off, 4); err != nil {
+	if err := requireCountFitsRemaining("rowlist rows", count, data, 4, 4); err != nil {
 		return nil, err
 	}
-	rows := make([][]byte, 0, count)
-	for i := uint32(0); i < count; i++ {
-		if len(data)-off < 4 {
-			return nil, fmt.Errorf("%w: row %d length prefix truncated", ErrMalformedMessage, i)
-		}
-		rowLen := binary.LittleEndian.Uint32(data[off : off+4])
-		off += 4
-		if uint64(rowLen) > uint64(len(data)-off) {
-			return nil, fmt.Errorf("%w: row %d length %d exceeds remaining %d", ErrMalformedMessage, i, rowLen, len(data)-off)
-		}
-		row := make([]byte, rowLen)
-		copy(row, data[off:off+int(rowLen)])
-		off += int(rowLen)
-		rows = append(rows, row)
+
+	off, totalRowBytes, err := scanRowList(data, count)
+	if err != nil {
+		return nil, err
 	}
 	if off != len(data) {
 		return nil, fmt.Errorf("%w: rowlist trailing bytes at offset %d", ErrMalformedMessage, off)
 	}
+
+	rows := make([][]byte, 0, count)
+	payload := make([]byte, totalRowBytes)
+	off = 4
+	payloadOff := 0
+	for range count {
+		rowLen := int(binary.LittleEndian.Uint32(data[off : off+4]))
+		off += 4
+		row := payload[payloadOff : payloadOff+rowLen : payloadOff+rowLen]
+		copy(row, data[off:off+rowLen])
+		off += rowLen
+		payloadOff += rowLen
+		rows = append(rows, row)
+	}
 	return rows, nil
+}
+
+func scanRowList(data []byte, count uint32) (off int, totalRowBytes int, err error) {
+	off = 4
+	for i := uint32(0); i < count; i++ {
+		if len(data)-off < 4 {
+			return off, 0, fmt.Errorf("%w: row %d length prefix truncated", ErrMalformedMessage, i)
+		}
+		rowLen := binary.LittleEndian.Uint32(data[off : off+4])
+		off += 4
+		if uint64(rowLen) > uint64(len(data)-off) {
+			return off, 0, fmt.Errorf("%w: row %d length %d exceeds remaining %d", ErrMalformedMessage, i, rowLen, len(data)-off)
+		}
+		off += int(rowLen)
+		totalRowBytes += int(rowLen)
+	}
+	return off, totalRowBytes, nil
 }
