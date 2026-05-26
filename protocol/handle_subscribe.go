@@ -1673,7 +1673,7 @@ func newBoundSQLLiteralCompiler(caller *types.Identity, parameters []SQLQueryPar
 		if _, exists := compiler.byName[parameter.Name]; exists {
 			return nil, fmt.Errorf("%w: SQL parameter :%s is bound more than once", sql.ErrUnsupportedSQL, parameter.Name)
 		}
-		compiler.byName[parameter.Name] = parameter.Value
+		compiler.byName[parameter.Name] = parameter.Value.Copy()
 		compiler.order = append(compiler.order, parameter.Name)
 	}
 	return compiler, nil
