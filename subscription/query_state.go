@@ -144,13 +144,7 @@ func (r *queryRegistry) getQuery(hash QueryHash) *queryState {
 // subscriptionsForConn returns a copy of the subscription IDs for the given
 // connection. Safe to iterate while removing entries.
 func (r *queryRegistry) subscriptionsForConn(connID types.ConnectionID) []types.SubscriptionID {
-	subs := r.byConn[connID]
-	if len(subs) == 0 {
-		return nil
-	}
-	out := make([]types.SubscriptionID, len(subs))
-	copy(out, subs)
-	return out
+	return copySlice(r.byConn[connID])
 }
 
 // hasActive reports whether any query is registered.

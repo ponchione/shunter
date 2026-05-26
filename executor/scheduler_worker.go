@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"maps"
 	"sync"
 	"time"
 
@@ -298,11 +299,7 @@ func (s *Scheduler) inFlightSnapshot() map[scheduledFireKey]struct{} {
 	if len(s.inFlight) == 0 {
 		return nil
 	}
-	out := make(map[scheduledFireKey]struct{}, len(s.inFlight))
-	for key := range s.inFlight {
-		out[key] = struct{}{}
-	}
-	return out
+	return maps.Clone(s.inFlight)
 }
 
 func (s *Scheduler) isInFlight(row types.ProductValue) bool {

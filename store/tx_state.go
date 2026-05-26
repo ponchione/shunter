@@ -1,6 +1,8 @@
 package store
 
 import (
+	"maps"
+
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
@@ -138,9 +140,5 @@ func copyDeleteMap(in map[types.RowID]struct{}) map[types.RowID]struct{} {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make(map[types.RowID]struct{}, len(in))
-	for rowID := range in {
-		out[rowID] = struct{}{}
-	}
-	return out
+	return maps.Clone(in)
 }
