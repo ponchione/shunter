@@ -383,7 +383,8 @@ func (t *Transaction) trackTxInsert(tableID schema.TableID, rowID types.RowID, r
 			continue
 		}
 		key := idx.ExtractKey(row)
-		entries[key.hash64()] = append(entries[key.hash64()], txUniqueEntry{rowID: rowID, key: key})
+		hash := key.hash64()
+		entries[hash] = append(entries[hash], txUniqueEntry{rowID: rowID, key: key})
 	}
 	if t.txRowIndexes != nil {
 		if entries, ok := t.txRowIndexes[tableID]; ok {

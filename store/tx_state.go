@@ -13,14 +13,14 @@ type TxState struct {
 
 // NewTxState creates an empty transaction state.
 func NewTxState() *TxState {
-	return &TxState{
-		inserts: make(map[schema.TableID]map[types.RowID]types.ProductValue),
-		deletes: make(map[schema.TableID]map[types.RowID]struct{}),
-	}
+	return &TxState{}
 }
 
 // AddInsert records a tx-local insert.
 func (tx *TxState) AddInsert(tableID schema.TableID, id types.RowID, row types.ProductValue) {
+	if tx.inserts == nil {
+		tx.inserts = make(map[schema.TableID]map[types.RowID]types.ProductValue)
+	}
 	m := tx.inserts[tableID]
 	if m == nil {
 		m = make(map[types.RowID]types.ProductValue)
@@ -41,6 +41,9 @@ func (tx *TxState) RemoveInsert(tableID schema.TableID, id types.RowID) {
 
 // AddDelete records that a committed row should be deleted.
 func (tx *TxState) AddDelete(tableID schema.TableID, id types.RowID) {
+	if tx.deletes == nil {
+		tx.deletes = make(map[schema.TableID]map[types.RowID]struct{})
+	}
 	m := tx.deletes[tableID]
 	if m == nil {
 		m = make(map[types.RowID]struct{})
