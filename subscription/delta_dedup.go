@@ -17,49 +17,38 @@ func ReconcileJoinDelta(insertFragments, deleteFragments [][]types.ProductValue)
 
 	for _, frag := range insertFragments {
 		for _, row := range frag {
-			key := encodeRowKey(row)
-			if _, ok := st.insertRows[key]; !ok {
-				st.insertRows[key] = row
-				st.insertOrder = append(st.insertOrder, key)
-			}
-			st.insertCounts[key]++
+			incrementRowBag(st.insertRows, &st.insertOrder, row)
 		}
 	}
 
 	for _, frag := range deleteFragments {
 		for _, row := range frag {
-			key := encodeRowKey(row)
-			if st.insertCounts[key] > 0 {
-				st.insertCounts[key]--
-			} else {
-				if _, ok := st.deleteRows[key]; !ok {
-					st.deleteRows[key] = row
-					st.deleteOrder = append(st.deleteOrder, key)
-				}
-				st.deleteCounts[key]++
+			if decrementRowCount(st.insertRows, row) {
+				continue
 			}
+			incrementRowBag(st.deleteRows, &st.deleteOrder, row)
 		}
 	}
 
-	inserts = appendReconciledRows(inserts, st.insertOrder, st.insertCounts, st.insertRows, "insert")
-	deletes = appendReconciledRows(deletes, st.deleteOrder, st.deleteCounts, st.deleteRows, "delete")
+	inserts = appendReconciledRows(inserts, st.insertOrder, st.insertRows, "insert")
+	deletes = appendReconciledRows(deletes, st.deleteOrder, st.deleteRows, "delete")
 	return inserts, deletes
 }
 
 func appendReconciledRows(
 	out []types.ProductValue,
-	order []string,
-	counts map[string]int,
-	rows map[string]types.ProductValue,
+	order []countedRowRef,
+	rows map[uint64]countedRowBucket,
 	label string,
 ) []types.ProductValue {
-	for _, k := range order {
-		n := counts[k]
+	for _, ref := range order {
+		row := rows[ref.hash].row(ref.overflowIndex)
+		n := row.count
 		if n < 0 {
 			panic(fmt.Sprintf("subscription: negative %s count %d for row key", label, n))
 		}
 		for i := 0; i < n; i++ {
-			out = append(out, rows[k])
+			out = append(out, row.row)
 		}
 	}
 	return out

@@ -11,18 +11,17 @@ const (
 	pooledProductValueSliceMaxCap = 4096
 	pooledScratchMapMaxLen        = 4096
 	distinctChangedValueLinearMax = 16
+	rowCountMapHintMax            = 256
 )
 
 // dedupState is the reusable bag-dedup scratch state. It holds the insert
 // and delete count maps so they can be cleared and reused across transactions
 // (SPEC-004 §9.2). Maps are the dominant allocation in ReconcileJoinDelta.
 type dedupState struct {
-	insertCounts map[string]int
-	insertRows   map[string]types.ProductValue
-	insertOrder  []string
-	deleteCounts map[string]int
-	deleteRows   map[string]types.ProductValue
-	deleteOrder  []string
+	insertRows  map[uint64]countedRowBucket
+	insertOrder []countedRowRef
+	deleteRows  map[uint64]countedRowBucket
+	deleteOrder []countedRowRef
 }
 
 // candidateScratch is the reusable candidate-collection scratch state used by
@@ -36,12 +35,10 @@ type candidateScratch struct {
 var dedupPool = sync.Pool{
 	New: func() any {
 		return &dedupState{
-			insertCounts: make(map[string]int),
-			insertRows:   make(map[string]types.ProductValue),
-			insertOrder:  make([]string, 0, 8),
-			deleteCounts: make(map[string]int),
-			deleteRows:   make(map[string]types.ProductValue),
-			deleteOrder:  make([]string, 0, 8),
+			insertRows:  make(map[uint64]countedRowBucket),
+			insertOrder: make([]countedRowRef, 0, 8),
+			deleteRows:  make(map[uint64]countedRowBucket),
+			deleteOrder: make([]countedRowRef, 0, 8),
 		}
 	},
 }
@@ -187,34 +184,24 @@ func releaseDeltaView(dv *DeltaView) {
 
 // clear empties all internal maps while preserving capacity.
 func (s *dedupState) clear() {
-	if len(s.insertCounts) > pooledScratchMapMaxLen {
-		s.insertCounts = make(map[string]int)
-	} else {
-		clear(s.insertCounts)
-	}
 	if len(s.insertRows) > pooledScratchMapMaxLen {
-		s.insertRows = make(map[string]types.ProductValue)
+		s.insertRows = make(map[uint64]countedRowBucket)
 	} else {
 		clear(s.insertRows)
 	}
 	if cap(s.insertOrder) > pooledProductValueSliceMaxCap {
-		s.insertOrder = make([]string, 0, 8)
+		s.insertOrder = make([]countedRowRef, 0, 8)
 	} else {
 		clear(s.insertOrder)
 		s.insertOrder = s.insertOrder[:0]
 	}
-	if len(s.deleteCounts) > pooledScratchMapMaxLen {
-		s.deleteCounts = make(map[string]int)
-	} else {
-		clear(s.deleteCounts)
-	}
 	if len(s.deleteRows) > pooledScratchMapMaxLen {
-		s.deleteRows = make(map[string]types.ProductValue)
+		s.deleteRows = make(map[uint64]countedRowBucket)
 	} else {
 		clear(s.deleteRows)
 	}
 	if cap(s.deleteOrder) > pooledProductValueSliceMaxCap {
-		s.deleteOrder = make([]string, 0, 8)
+		s.deleteOrder = make([]countedRowRef, 0, 8)
 	} else {
 		clear(s.deleteOrder)
 		s.deleteOrder = s.deleteOrder[:0]

@@ -550,13 +550,10 @@ func (m *Manager) windowedRowsAfter(ctx context.Context, qs *queryState, dv *Del
 }
 
 func (m *Manager) windowedRowsBefore(ctx context.Context, qs *queryState, dv *DeltaView, table TableID) ([]types.ProductValue, error) {
-	var insertCounts map[string]int
+	var insertCounts map[uint64]countedRowBucket
 	insertedRows := dv.InsertedRows(table)
 	if len(insertedRows) > 0 {
-		insertCounts = make(map[string]int, len(insertedRows))
-	}
-	for _, row := range insertedRows {
-		insertCounts[encodeRowKey(row)]++
+		insertCounts = countRows(insertedRows)
 	}
 	rows, err := collectWindowRows(ctx, dv.CommittedView(), qs.predicate, table, insertCounts, dv.DeletedRows(table))
 	if err != nil {
@@ -565,22 +562,25 @@ func (m *Manager) windowedRowsBefore(ctx context.Context, qs *queryState, dv *De
 	return applyLiveWindow(rows, qs)
 }
 
-func collectWindowRows(ctx context.Context, view store.CommittedReadView, pred Predicate, table TableID, skipCounts map[string]int, appendDeleted []types.ProductValue) ([]types.ProductValue, error) {
+func collectWindowRows(ctx context.Context, view store.CommittedReadView, pred Predicate, table TableID, skipCounts map[uint64]countedRowBucket, appendDeleted []types.ProductValue) ([]types.ProductValue, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	var rows []types.ProductValue
+	rowCap := len(appendDeleted)
+	if view != nil {
+		rowCap += view.RowCount(table)
+	}
+	if rowCap > 0 {
+		rows = make([]types.ProductValue, 0, rowCap)
+	}
 	if view != nil {
 		for _, row := range view.TableScan(table) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			if skipCounts != nil {
-				key := encodeRowKey(row)
-				if skipCounts[key] > 0 {
-					skipCounts[key]--
-					continue
-				}
+			if skipCounts != nil && decrementRowCount(skipCounts, row) {
+				continue
 			}
 			if MatchRow(pred, table, row) {
 				rows = append(rows, row)
@@ -816,6 +816,9 @@ func tableRowsFromView(ctx context.Context, view store.CommittedReadView, table 
 		return nil, nil
 	}
 	var rows []types.ProductValue
+	if rowCount := view.RowCount(table); rowCount > 0 {
+		rows = make([]types.ProductValue, 0, rowCount)
+	}
 	for _, row := range view.TableScan(table) {
 		if err := ctxErr(ctx); err != nil {
 			return nil, err
@@ -908,18 +911,105 @@ func subtractProjectedRowsByKey(current, inserted []types.ProductValue) []types.
 		remaining = append(remaining, current...)
 		return remaining
 	}
-	insertCounts := make(map[string]int, len(inserted))
-	for _, row := range inserted {
-		insertCounts[encodeRowKey(row)]++
-	}
+	insertCounts := countRows(inserted)
 	remaining := make([]types.ProductValue, 0, len(current))
 	for _, row := range current {
-		key := encodeRowKey(row)
-		if insertCounts[key] > 0 {
-			insertCounts[key]--
+		if decrementRowCount(insertCounts, row) {
 			continue
 		}
 		remaining = append(remaining, row)
 	}
 	return remaining
+}
+
+type countedRow struct {
+	row   types.ProductValue
+	count int
+}
+
+type countedRowRef struct {
+	hash          uint64
+	overflowIndex int
+}
+
+type countedRowBucket struct {
+	first    countedRow
+	overflow []countedRow
+}
+
+func (b countedRowBucket) row(overflowIndex int) countedRow {
+	if overflowIndex < 0 {
+		return b.first
+	}
+	return b.overflow[overflowIndex]
+}
+
+func countRows(rows []types.ProductValue) map[uint64]countedRowBucket {
+	counts := make(map[uint64]countedRowBucket, rowCountMapHint(len(rows)))
+	for _, row := range rows {
+		incrementRowCount(counts, row)
+	}
+	return counts
+}
+
+func rowCountMapHint(n int) int {
+	if n > rowCountMapHintMax {
+		return rowCountMapHintMax
+	}
+	return n
+}
+
+func incrementRowCount(counts map[uint64]countedRowBucket, row types.ProductValue) {
+	incrementCountedRow(counts, row)
+}
+
+func incrementRowBag(counts map[uint64]countedRowBucket, order *[]countedRowRef, row types.ProductValue) {
+	hash, overflowIndex, added := incrementCountedRow(counts, row)
+	if added {
+		*order = append(*order, countedRowRef{hash: hash, overflowIndex: overflowIndex})
+	}
+}
+
+func incrementCountedRow(counts map[uint64]countedRowBucket, row types.ProductValue) (uint64, int, bool) {
+	hash := row.Hash64()
+	bucket := counts[hash]
+	if bucket.first.count == 0 && bucket.first.row == nil {
+		bucket.first = countedRow{row: row, count: 1}
+		counts[hash] = bucket
+		return hash, -1, true
+	}
+	if bucket.first.row.Equal(row) {
+		bucket.first.count++
+		counts[hash] = bucket
+		return hash, -1, false
+	}
+	for i := range bucket.overflow {
+		if bucket.overflow[i].row.Equal(row) {
+			bucket.overflow[i].count++
+			return hash, i, false
+		}
+	}
+	bucket.overflow = append(bucket.overflow, countedRow{row: row, count: 1})
+	counts[hash] = bucket
+	return hash, len(bucket.overflow) - 1, true
+}
+
+func decrementRowCount(counts map[uint64]countedRowBucket, row types.ProductValue) bool {
+	hash := row.Hash64()
+	bucket, ok := counts[hash]
+	if !ok {
+		return false
+	}
+	if bucket.first.count > 0 && bucket.first.row.Equal(row) {
+		bucket.first.count--
+		counts[hash] = bucket
+		return true
+	}
+	for i := range bucket.overflow {
+		if bucket.overflow[i].count > 0 && bucket.overflow[i].row.Equal(row) {
+			bucket.overflow[i].count--
+			return true
+		}
+	}
+	return false
 }
