@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
@@ -206,8 +207,7 @@ func (w initialRowWindow) orderedKeepLimit(collector *initialRowCollector) int {
 	if w.offset == nil || *w.offset == 0 {
 		return outputLimit
 	}
-	maxInt := int(^uint(0) >> 1)
-	if *w.offset > uint64(maxInt-outputLimit) {
+	if *w.offset > uint64(math.MaxInt-outputLimit) {
 		return 0
 	}
 	return int(*w.offset) + outputLimit
@@ -228,9 +228,8 @@ func initialUint64LimitAsInt(v *uint64) int {
 	if v == nil {
 		return 0
 	}
-	maxInt := int(^uint(0) >> 1)
-	if *v > uint64(maxInt) {
-		return maxInt
+	if *v > uint64(math.MaxInt) {
+		return math.MaxInt
 	}
 	return int(*v)
 }
@@ -524,7 +523,7 @@ func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.Produ
 					continue
 				}
 				leftRow, rightRow := orientedRows(projectedRow, otherRow)
-				if tryJoinFilter(leftRow, p.Left, rightRow, p.Right, &p) == nil {
+				if !joinPairMatches(leftRow, p.Left, rightRow, p.Right, &p) {
 					continue
 				}
 				if err := add(projectedRow); err != nil {

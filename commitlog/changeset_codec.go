@@ -53,7 +53,7 @@ func encodeChangesetWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecor
 			return nil, err
 		}
 	}
-	maxAlloc := uint64(int(^uint(0) >> 1))
+	maxAlloc := uint64(math.MaxInt)
 	if size > maxAlloc {
 		return nil, fmt.Errorf("%w: changeset payload %d exceeds max allocation %d", ErrTraversal, size, maxAlloc)
 	}

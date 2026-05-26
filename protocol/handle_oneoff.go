@@ -281,9 +281,8 @@ func oneOffRowLimit(limit *uint64) int {
 	if limit == nil {
 		return -1
 	}
-	maxInt := int(^uint(0) >> 1)
-	if *limit > uint64(maxInt) {
-		return maxInt
+	if *limit > uint64(math.MaxInt) {
+		return math.MaxInt
 	}
 	return int(*limit)
 }
@@ -556,9 +555,8 @@ func oneOffRowOffset(offset *uint64) int {
 	if offset == nil {
 		return 0
 	}
-	maxInt := int(^uint(0) >> 1)
-	if *offset > uint64(maxInt) {
-		return maxInt
+	if *offset > uint64(math.MaxInt) {
+		return math.MaxInt
 	}
 	return int(*offset)
 }
@@ -570,9 +568,8 @@ func oneOffScanLimit(offset int, limit int) int {
 	if limit < 0 {
 		return -1
 	}
-	maxInt := int(^uint(0) >> 1)
-	if offset > maxInt-limit {
-		return maxInt
+	if offset > math.MaxInt-limit {
+		return math.MaxInt
 	}
 	return offset + limit
 }
