@@ -345,20 +345,20 @@ func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.Committe
 
 		// Tier 1: batched value-index lookup.
 		m.indexes.Value.ForEachTrackedColumn(tid, func(col ColID) {
-			for _, v := range collectDistinctChangedValues(st.distinct, col, tc) {
+			forEachDistinctChangedValue(st, col, tc, func(v Value) {
 				m.indexes.Value.ForEachHash(tid, col, v, func(h QueryHash) {
 					cands[h] = struct{}{}
 				})
-			}
+			})
 		})
 
 		// Tier 1b: batched range-index lookup.
 		m.indexes.Range.ForEachTrackedColumn(tid, func(col ColID) {
-			for _, v := range collectDistinctChangedValues(st.distinct, col, tc) {
+			forEachDistinctChangedValue(st, col, tc, func(v Value) {
 				m.indexes.Range.ForEachHash(tid, col, v, func(h QueryHash) {
 					cands[h] = struct{}{}
 				})
-			}
+			})
 		})
 
 		// Tier 2: join edges where this table is the LHS.
@@ -382,6 +382,47 @@ func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.Committe
 		})
 	}
 	return cands
+}
+
+func forEachDistinctChangedValue(st *candidateScratch, col ColID, tc *store.TableChangeset, fn func(Value)) {
+	changedRows := len(tc.Inserts) + len(tc.Deletes)
+	if changedRows == 0 {
+		return
+	}
+	if changedRows <= distinctChangedValueLinearMax {
+		keys := st.distinctKeys[:0]
+		keys = forEachDistinctChangedRow(keys, col, tc.Inserts, fn)
+		keys = forEachDistinctChangedRow(keys, col, tc.Deletes, fn)
+		clear(keys)
+		st.distinctKeys = keys[:0]
+		return
+	}
+	for _, v := range collectDistinctChangedValues(st.distinct, col, tc) {
+		fn(v)
+	}
+}
+
+func forEachDistinctChangedRow(keys []valueKey, col ColID, rows []types.ProductValue, fn func(Value)) []valueKey {
+	for _, row := range rows {
+		if int(col) >= len(row) {
+			continue
+		}
+		v := row[col]
+		k := encodeValueKey(v)
+		seen := false
+		for _, existing := range keys {
+			if existing == k {
+				seen = true
+				break
+			}
+		}
+		if seen {
+			continue
+		}
+		keys = append(keys, k)
+		fn(v)
+	}
+	return keys
 }
 
 func collectDistinctChangedValues(distinct map[valueKey]Value, col ColID, tc *store.TableChangeset) map[valueKey]Value {

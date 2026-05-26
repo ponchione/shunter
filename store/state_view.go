@@ -114,7 +114,7 @@ func (sv *StateView) SeekIndexBounds(tableID schema.TableID, indexID schema.Inde
 		tableID,
 		indexID,
 		func(idx *Index) []types.RowID {
-			return slices.Collect(idx.BTree().SeekBounds(low, high))
+			return idx.BTree().collectBounds(low, high)
 		},
 		func(idx *Index, row types.ProductValue) bool {
 			key := idx.ExtractKey(row)

@@ -690,10 +690,10 @@ func (m *Manager) RegisterSet(
 	if err := copyRegisterSetOption("order-by column", req.OrderByColumns, predicateCount, orderBys, copySlice[OrderByColumn]); err != nil {
 		return SubscriptionSetRegisterResult{}, err
 	}
-	if err := copyRegisterSetOption("limit", req.Limits, predicateCount, limits, copyRowLimit); err != nil {
+	if err := copyRegisterSetOption("limit", req.Limits, predicateCount, limits, copyUint64Ptr); err != nil {
 		return SubscriptionSetRegisterResult{}, err
 	}
-	if err := copyRegisterSetOption("offset", req.Offsets, predicateCount, offsets, copyRowOffset); err != nil {
+	if err := copyRegisterSetOption("offset", req.Offsets, predicateCount, offsets, copyUint64Ptr); err != nil {
 		return SubscriptionSetRegisterResult{}, err
 	}
 	// Pre-validate every predicate before touching registry state.

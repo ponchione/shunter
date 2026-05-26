@@ -1,12 +1,6 @@
 package subscription
 
-import (
-	"github.com/ponchione/shunter/types"
-)
-
-func copyRowOffset(in *uint64) *uint64 {
-	return copyRowLimit(in)
-}
+import "github.com/ponchione/shunter/types"
 
 // ValidateOffset checks the narrow executable live OFFSET surface.
 func ValidateOffset(pred Predicate, offset *uint64, aggregate *Aggregate, s SchemaLookup) error {

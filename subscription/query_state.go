@@ -61,8 +61,8 @@ func (r *queryRegistry) createQueryState(hash QueryHash, pred Predicate, project
 		projection:  copySlice(projection),
 		aggregate:   copyAggregate(aggregate),
 		orderBy:     copySlice(orderBy),
-		limit:       copyRowLimit(limit),
-		offset:      copyRowOffset(offset),
+		limit:       copyUint64Ptr(limit),
+		offset:      copyUint64Ptr(offset),
 		subscribers: make(map[types.ConnectionID]map[types.SubscriptionID]subscriptionDeliveryMeta),
 	}
 	r.byHash[hash] = qs

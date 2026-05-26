@@ -10,6 +10,7 @@ const (
 	pooledBufferDefaultCap        = 4 * 1024
 	pooledProductValueSliceMaxCap = 4096
 	pooledScratchMapMaxLen        = 4096
+	distinctChangedValueLinearMax = 16
 )
 
 // dedupState is the reusable bag-dedup scratch state. It holds the insert
@@ -27,8 +28,9 @@ type dedupState struct {
 // candidateScratch is the reusable candidate-collection scratch state used by
 // the evaluation loop to avoid re-allocating hot-path maps per transaction.
 type candidateScratch struct {
-	candidates map[QueryHash]struct{}
-	distinct   map[valueKey]Value
+	candidates   map[QueryHash]struct{}
+	distinct     map[valueKey]Value
+	distinctKeys []valueKey
 }
 
 var dedupPool = sync.Pool{
@@ -127,6 +129,12 @@ func releaseCandidateScratch(st *candidateScratch) {
 		st.distinct = make(map[valueKey]Value)
 	} else {
 		clear(st.distinct)
+	}
+	if cap(st.distinctKeys) > pooledProductValueSliceMaxCap {
+		st.distinctKeys = nil
+	} else {
+		clear(st.distinctKeys)
+		st.distinctKeys = st.distinctKeys[:0]
 	}
 	candidateScratchPool.Put(st)
 }

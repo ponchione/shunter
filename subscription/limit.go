@@ -4,7 +4,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func copyRowLimit(in *uint64) *uint64 {
+func copyUint64Ptr(in *uint64) *uint64 {
 	if in == nil {
 		return nil
 	}
