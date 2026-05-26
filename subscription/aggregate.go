@@ -216,7 +216,7 @@ func validateSumAggregateWithArgument(aggregate *Aggregate, validateArg func(*Ag
 	if err := validateArg(aggregate.Argument); err != nil {
 		return err
 	}
-	wantKind, ok := sumAggregateResultKind(aggregate.Argument.Schema.Type)
+	wantKind, ok := valueagg.SumResultKind(aggregate.Argument.Schema.Type)
 	if !ok {
 		return fmt.Errorf("%w: SUM aggregate only supports integer and float columns", ErrInvalidPredicate)
 	}
@@ -1066,17 +1066,4 @@ func aggregateArgumentValue(row types.ProductValue, table TableID, pred Predicat
 
 func emptySumAggregateValue(aggregate *Aggregate) (types.Value, error) {
 	return valueagg.NewSum(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable).Value()
-}
-
-func sumAggregateResultKind(kind types.ValueKind) (types.ValueKind, bool) {
-	switch kind {
-	case types.KindInt8, types.KindInt16, types.KindInt32, types.KindInt64:
-		return types.KindInt64, true
-	case types.KindUint8, types.KindUint16, types.KindUint32, types.KindUint64:
-		return types.KindUint64, true
-	case types.KindFloat32, types.KindFloat64:
-		return types.KindFloat64, true
-	default:
-		return 0, false
-	}
 }

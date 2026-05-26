@@ -52,6 +52,20 @@ func NewSum(kind types.ValueKind, nullable bool) *Sum {
 	return &Sum{kind: kind, nullable: nullable}
 }
 
+// SumResultKind returns the aggregate result kind for SUM over a column kind.
+func SumResultKind(kind types.ValueKind) (types.ValueKind, bool) {
+	switch kind {
+	case types.KindInt8, types.KindInt16, types.KindInt32, types.KindInt64:
+		return types.KindInt64, true
+	case types.KindUint8, types.KindUint16, types.KindUint32, types.KindUint64:
+		return types.KindUint64, true
+	case types.KindFloat32, types.KindFloat64:
+		return types.KindFloat64, true
+	default:
+		return 0, false
+	}
+}
+
 // Add contributes one value to the accumulator. Null values are ignored.
 func (a *Sum) Add(value types.Value) error {
 	if a.err != nil {
