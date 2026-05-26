@@ -113,6 +113,47 @@ func TestPolicyRequiresModuleMigrationMetadataForReducerPermissionChanges(t *tes
 	}
 }
 
+func TestPolicyRequiresModuleMigrationMetadataForProcedurePermissionChanges(t *testing.T) {
+	old := contractFixture()
+	old.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
+	current := contractFixture()
+	current.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
+	current.Permissions.Procedures = []shunter.PermissionContractDeclaration{{
+		Name:     "archive_message",
+		Required: []string{"messages:archive"},
+	}}
+
+	result := CheckPolicy(Compare(old, current), current, PolicyOptions{})
+	assertWarning(t, result.Warnings, WarningMissingMigrationMetadata, SurfacePermission, "procedure.archive_message")
+
+	current.Migrations.Module = shunter.MigrationMetadata{
+		Compatibility: shunter.MigrationCompatibilityBreaking,
+		Notes:         "tighten procedure permission",
+	}
+	result = CheckPolicy(Compare(old, current), current, PolicyOptions{Strict: true})
+	if result.Failed {
+		t.Fatalf("strict policy failed despite module migration metadata: %#v", result.Warnings)
+	}
+}
+
+func TestPolicyRequiresModuleMigrationMetadataForProcedureChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
+
+	result := CheckPolicy(Compare(old, current), current, PolicyOptions{})
+	assertWarning(t, result.Warnings, WarningMissingMigrationMetadata, SurfaceProcedure, "archive_message")
+
+	current.Migrations.Module = shunter.MigrationMetadata{
+		Compatibility: shunter.MigrationCompatibilityCompatible,
+		Notes:         "add procedure",
+	}
+	result = CheckPolicy(Compare(old, current), current, PolicyOptions{Strict: true})
+	if result.Failed {
+		t.Fatalf("strict policy failed despite module migration metadata: %#v", result.Warnings)
+	}
+}
+
 func TestPolicyRequiresMigrationMetadataForAdditiveTableReadPolicyChanges(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()

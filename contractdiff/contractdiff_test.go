@@ -380,6 +380,27 @@ func TestContractDiffClassifiesReducerPermissionChanges(t *testing.T) {
 	assertChange(t, report.Changes, ChangeKindAdditive, SurfacePermission, "reducer.send_message")
 }
 
+func TestContractDiffClassifiesProcedurePermissionChanges(t *testing.T) {
+	old := contractFixture()
+	old.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
+	current := contractFixture()
+	current.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
+	current.Permissions.Procedures = []shunter.PermissionContractDeclaration{{
+		Name:     "archive_message",
+		Required: []string{"messages:archive"},
+	}}
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfacePermission, "procedure.archive_message")
+
+	old = current
+	current = contractFixture()
+	current.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfacePermission, "procedure.archive_message")
+}
+
 func TestContractDiffDetectsReducerProductSchemaChanges(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()
@@ -401,6 +422,53 @@ func TestContractDiffDetectsReducerProductSchemaChanges(t *testing.T) {
 	if text := report.Text(); !strings.Contains(text, "reducer args schema changed") ||
 		!strings.Contains(text, "reducer result schema removed") {
 		t.Fatalf("Text() = %q, want reducer product schema breaking changes", text)
+	}
+}
+
+func TestContractDiffDetectsProcedureSurfaceChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceProcedure, "archive_message")
+
+	old = current
+	current = contractFixture()
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceProcedure, "archive_message")
+}
+
+func TestContractDiffDetectsProcedureProductSchemaChanges(t *testing.T) {
+	old := contractFixture()
+	old.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
+	current := contractFixture()
+	current.Procedures = []shunter.ProcedureDescription{{
+		Name:   "archive_message",
+		Args:   &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "message_id", Type: "uint64"}}},
+		Result: &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "ok", Type: "bool"}}},
+	}}
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceProcedure, "archive_message")
+	if text := report.Text(); !strings.Contains(text, "procedure args schema added") ||
+		!strings.Contains(text, "procedure result schema added") {
+		t.Fatalf("Text() = %q, want procedure product schema additions", text)
+	}
+
+	old = current
+	current = contractFixture()
+	current.Procedures = []shunter.ProcedureDescription{{
+		Name: "archive_message",
+		Args: &shunter.ProductSchema{Columns: []shunter.ProductColumn{{Name: "message_id", Type: "string"}}},
+	}}
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceProcedure, "archive_message")
+	if text := report.Text(); !strings.Contains(text, "procedure args schema changed") ||
+		!strings.Contains(text, "procedure result schema removed") {
+		t.Fatalf("Text() = %q, want procedure product schema breaking changes", text)
 	}
 }
 
@@ -543,9 +611,14 @@ func TestContractDiffClassifiesDeclaredReadParameterChanges(t *testing.T) {
 
 func TestContractDiffIgnoresDeclaredReadPermissionOrder(t *testing.T) {
 	old := contractFixture()
+	old.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
 	old.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
 		Name:     "send_message",
 		Required: []string{"messages:send", "messages:audit"},
+	}}
+	old.Permissions.Procedures = []shunter.PermissionContractDeclaration{{
+		Name:     "archive_message",
+		Required: []string{"messages:archive", "messages:audit"},
 	}}
 	old.Permissions.Queries = []shunter.PermissionContractDeclaration{{
 		Name:     "history",
@@ -556,9 +629,14 @@ func TestContractDiffIgnoresDeclaredReadPermissionOrder(t *testing.T) {
 		Required: []string{"messages:subscribe", "messages:audit"},
 	}}
 	current := contractFixture()
+	current.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
 	current.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
 		Name:     "send_message",
 		Required: []string{"messages:audit", "messages:send"},
+	}}
+	current.Permissions.Procedures = []shunter.PermissionContractDeclaration{{
+		Name:     "archive_message",
+		Required: []string{"messages:audit", "messages:archive"},
 	}}
 	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{
 		Name:     "history",
@@ -572,6 +650,7 @@ func TestContractDiffIgnoresDeclaredReadPermissionOrder(t *testing.T) {
 	report := Compare(old, current)
 
 	assertNoChange(t, report.Changes, SurfacePermission, "reducer.send_message")
+	assertNoChange(t, report.Changes, SurfacePermission, "procedure.archive_message")
 	assertNoChange(t, report.Changes, SurfacePermission, "query.history")
 	assertNoChange(t, report.Changes, SurfacePermission, "view.live")
 }

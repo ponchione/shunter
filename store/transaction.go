@@ -388,7 +388,8 @@ func (t *Transaction) trackTxInsert(tableID schema.TableID, rowID types.RowID, r
 	}
 	if t.txRowIndexes != nil {
 		if entries, ok := t.txRowIndexes[tableID]; ok {
-			entries[row.Hash64()] = append(entries[row.Hash64()], txRowEntry{rowID: rowID, row: row})
+			hash := row.Hash64()
+			entries[hash] = append(entries[hash], txRowEntry{rowID: rowID, row: row})
 		}
 	}
 }

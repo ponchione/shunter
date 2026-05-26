@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Contract diff and migration-plan tooling now report procedure additions,
+  removals, argument/result schema drift, and procedure permission drift.
 - One-off `COUNT(*)` over unfiltered cross joins now rejects overflowing
   row-count products instead of silently wrapping the aggregate result.
 - Contract workflow JSON argument decoding now accepts the decimal-string

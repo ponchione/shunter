@@ -33,6 +33,7 @@ const (
 	SurfaceColumn            Surface = "column"
 	SurfaceIndex             Surface = "index"
 	SurfaceReducer           Surface = "reducer"
+	SurfaceProcedure         Surface = "procedure"
 	SurfaceQuery             Surface = "query"
 	SurfaceView              Surface = "view"
 	SurfaceVisibilityFilter  Surface = "visibility_filter"
@@ -82,6 +83,7 @@ func Compare(old, current shunter.ModuleContract) Report {
 	compareModuleMetadata(&out, old.Module, current.Module)
 	compareTables(&out, old.Schema.Tables, current.Schema.Tables)
 	compareReducers(&out, old.Schema.Reducers, current.Schema.Reducers)
+	compareProcedures(&out, old.Procedures, current.Procedures)
 	compareNamedQueries(&out, SurfaceQuery, old.Queries, current.Queries)
 	compareNamedViews(&out, old.Views, current.Views)
 	compareVisibilityFilters(&out, old.VisibilityFilters, current.VisibilityFilters)
@@ -306,6 +308,25 @@ func compareReducers(out *Report, oldReducers, currentReducers []schema.ReducerE
 	}
 }
 
+func compareProcedures(out *Report, oldProcedures, currentProcedures []shunter.ProcedureDescription) {
+	oldByName := procedureMap(oldProcedures)
+	currentByName := procedureMap(currentProcedures)
+	for name, current := range currentByName {
+		old, ok := oldByName[name]
+		if !ok {
+			out.add(ChangeKindAdditive, SurfaceProcedure, name, "procedure added")
+			continue
+		}
+		compareProductSchema(out, SurfaceProcedure, name, "procedure args schema", old.Args, current.Args)
+		compareProductSchema(out, SurfaceProcedure, name, "procedure result schema", old.Result, current.Result)
+	}
+	for name := range oldByName {
+		if _, ok := currentByName[name]; !ok {
+			out.add(ChangeKindBreaking, SurfaceProcedure, name, "procedure removed")
+		}
+	}
+}
+
 func compareNamedQueries(out *Report, surface Surface, oldQueries, currentQueries []shunter.QueryDescription) {
 	oldByName := queryMap(oldQueries)
 	currentByName := queryMap(currentQueries)
@@ -426,6 +447,7 @@ func compareVisibilityFilters(out *Report, oldFilters, currentFilters []shunter.
 
 func comparePermissions(out *Report, oldPermissions, currentPermissions shunter.PermissionContract) {
 	comparePermissionCategory(out, "reducer", oldPermissions.Reducers, currentPermissions.Reducers)
+	comparePermissionCategory(out, "procedure", oldPermissions.Procedures, currentPermissions.Procedures)
 	comparePermissionCategory(out, "query", oldPermissions.Queries, currentPermissions.Queries)
 	comparePermissionCategory(out, "view", oldPermissions.Views, currentPermissions.Views)
 }
@@ -437,21 +459,21 @@ func comparePermissionCategory(out *Report, category string, oldDeclarations, cu
 		old, ok := oldByName[name]
 		fullName := category + "." + name
 		if !ok {
-			out.add(permissionChangeKind(category, nil, current.Required), SurfacePermission, fullName, "permission requirements added")
+			out.add(permissionChangeKind(nil, current.Required), SurfacePermission, fullName, "permission requirements added")
 			continue
 		}
 		if !unorderedStringSlicesEqual(old.Required, current.Required) {
-			out.add(permissionChangeKind(category, old.Required, current.Required), SurfacePermission, fullName, "permission requirements changed")
+			out.add(permissionChangeKind(old.Required, current.Required), SurfacePermission, fullName, "permission requirements changed")
 		}
 	}
 	for name := range oldByName {
 		if _, ok := currentByName[name]; !ok {
-			out.add(permissionChangeKind(category, oldByName[name].Required, nil), SurfacePermission, category+"."+name, "permission requirements removed")
+			out.add(permissionChangeKind(oldByName[name].Required, nil), SurfacePermission, category+"."+name, "permission requirements removed")
 		}
 	}
 }
 
-func permissionChangeKind(category string, oldRequired, currentRequired []string) ChangeKind {
+func permissionChangeKind(oldRequired, currentRequired []string) ChangeKind {
 	if stringSliceSubset(currentRequired, oldRequired) {
 		return ChangeKindAdditive
 	}
@@ -548,6 +570,10 @@ func columnPositionMap(columns []schema.ColumnExport) map[string]int {
 
 func reducerMap(reducers []schema.ReducerExport) map[string]schema.ReducerExport {
 	return mapBy(reducers, func(reducer schema.ReducerExport) string { return reducer.Name })
+}
+
+func procedureMap(procedures []shunter.ProcedureDescription) map[string]shunter.ProcedureDescription {
+	return mapBy(procedures, func(procedure shunter.ProcedureDescription) string { return procedure.Name })
 }
 
 func indexMap(indexes []schema.IndexExport) map[string]schema.IndexExport {

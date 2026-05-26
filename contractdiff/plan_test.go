@@ -268,15 +268,50 @@ func TestMigrationPlanClassifiesReducerPermissionChangesByAccessImpact(t *testin
 	assertPlanClassification(t, entry, shunter.MigrationClassificationManualReviewNeeded)
 }
 
+func TestMigrationPlanClassifiesProcedurePermissionChangesByAccessImpact(t *testing.T) {
+	old := contractFixture()
+	old.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
+	current := contractFixture()
+	current.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
+	current.Permissions.Procedures = []shunter.PermissionContractDeclaration{{
+		Name:     "archive_message",
+		Required: []string{"messages:archive"},
+	}}
+
+	plan := Plan(old, current, PlanOptions{})
+
+	entry := requirePlanEntry(t, plan, ChangeKindBreaking, SurfacePermission, "procedure.archive_message")
+	if entry.Action != PlanActionManualReviewNeeded || entry.Severity != PlanSeverityBlocking {
+		t.Fatalf("stricter procedure permission action/severity = %s/%s, want blocking manual review", entry.Action, entry.Severity)
+	}
+
+	old = current
+	current = contractFixture()
+	current.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
+
+	plan = Plan(old, current, PlanOptions{})
+
+	entry = requirePlanEntry(t, plan, ChangeKindAdditive, SurfacePermission, "procedure.archive_message")
+	if entry.Action != PlanActionManualReviewNeeded || entry.Severity != PlanSeverityWarning {
+		t.Fatalf("looser procedure permission action/severity = %s/%s, want warning manual review", entry.Action, entry.Severity)
+	}
+	assertPlanClassification(t, entry, shunter.MigrationClassificationManualReviewNeeded)
+}
+
 func TestMigrationPlanIgnoresPermissionOrderOnlyChanges(t *testing.T) {
 	old := contractFixture()
 	old.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
 		Access:      schema.TableAccessPermissioned,
 		Permissions: []string{"messages:read", "messages:audit"},
 	}
+	old.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
 	old.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
 		Name:     "send_message",
 		Required: []string{"messages:send", "messages:audit"},
+	}}
+	old.Permissions.Procedures = []shunter.PermissionContractDeclaration{{
+		Name:     "archive_message",
+		Required: []string{"messages:archive", "messages:audit"},
 	}}
 	old.Permissions.Queries = []shunter.PermissionContractDeclaration{{
 		Name:     "history",
@@ -291,9 +326,14 @@ func TestMigrationPlanIgnoresPermissionOrderOnlyChanges(t *testing.T) {
 		Access:      schema.TableAccessPermissioned,
 		Permissions: []string{"messages:audit", "messages:read"},
 	}
+	current.Procedures = []shunter.ProcedureDescription{{Name: "archive_message"}}
 	current.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
 		Name:     "send_message",
 		Required: []string{"messages:audit", "messages:send"},
+	}}
+	current.Permissions.Procedures = []shunter.PermissionContractDeclaration{{
+		Name:     "archive_message",
+		Required: []string{"messages:audit", "messages:archive"},
 	}}
 	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{
 		Name:     "history",
