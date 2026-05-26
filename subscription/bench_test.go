@@ -116,6 +116,124 @@ func BenchmarkRegisterSetInitialQueryAllRows(b *testing.B) {
 	}
 }
 
+func BenchmarkBoundedOrderedInitialRowsAdd(b *testing.B) {
+	cases := []struct {
+		totalRows  int
+		keepRows   int
+		inputOrder string
+		keyColumns int
+	}{
+		{totalRows: 128, keepRows: 10, inputOrder: "ascending", keyColumns: 1},
+		{totalRows: 128, keepRows: 100, inputOrder: "descending", keyColumns: 2},
+		{totalRows: 1024, keepRows: 10, inputOrder: "descending", keyColumns: 1},
+		{totalRows: 1024, keepRows: 100, inputOrder: "shuffled", keyColumns: 1},
+		{totalRows: 1024, keepRows: 100, inputOrder: "shuffled", keyColumns: 2},
+		{totalRows: 4096, keepRows: 10, inputOrder: "ascending", keyColumns: 1},
+		{totalRows: 4096, keepRows: 100, inputOrder: "descending", keyColumns: 2},
+		{totalRows: 4096, keepRows: 1000, inputOrder: "shuffled", keyColumns: 1},
+		{totalRows: 4096, keepRows: 1000, inputOrder: "shuffled", keyColumns: 2},
+	}
+
+	for _, tc := range cases {
+		name := fmt.Sprintf("rows_%d/keep_%d/%s/%dcol", tc.totalRows, tc.keepRows, tc.inputOrder, tc.keyColumns)
+		b.Run(name, func(b *testing.B) {
+			rows := benchmarkOrderedInitialRows(tc.totalRows, tc.inputOrder, tc.keyColumns)
+			orderBy := benchmarkInitialRowOrderBy(tc.keyColumns)
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			kept := 0
+			for i := 0; i < b.N; i++ {
+				bounded := newBoundedOrderedInitialRows(orderBy, tc.keepRows)
+				for _, row := range rows {
+					if err := bounded.add(row); err != nil {
+						b.Fatal(err)
+					}
+				}
+				kept += len(bounded.productRows())
+			}
+			if kept == 0 {
+				b.Fatal("bounded ordered rows kept no rows")
+			}
+		})
+	}
+}
+
+func BenchmarkOrderWindowRows(b *testing.B) {
+	for _, totalRows := range []int{128, 1024, 4096} {
+		for _, inputOrder := range []string{"ascending", "descending", "shuffled"} {
+			for _, keyColumns := range []int{1, 2} {
+				name := fmt.Sprintf("rows_%d/%s/%dcol", totalRows, inputOrder, keyColumns)
+				b.Run(name, func(b *testing.B) {
+					rows := benchmarkOrderedInitialRows(totalRows, inputOrder, keyColumns)
+					orderBy := benchmarkInitialRowOrderBy(keyColumns)
+
+					b.ResetTimer()
+					b.ReportAllocs()
+					orderedRows := 0
+					for i := 0; i < b.N; i++ {
+						ordered, err := orderWindowRows(rows, orderBy, true)
+						if err != nil {
+							b.Fatal(err)
+						}
+						orderedRows += len(ordered)
+					}
+					if orderedRows == 0 {
+						b.Fatal("ordered no rows")
+					}
+				})
+			}
+		}
+	}
+}
+
+func benchmarkInitialRowOrderBy(keyColumns int) []OrderByColumn {
+	orderBy := make([]OrderByColumn, keyColumns)
+	for i := range orderBy {
+		orderBy[i] = OrderByColumn{
+			Schema: schema.ColumnSchema{Index: i, Name: fmt.Sprintf("k%d", i), Type: types.KindUint64},
+			Table:  1,
+			Column: ColID(i),
+		}
+	}
+	return orderBy
+}
+
+func benchmarkOrderedInitialRows(totalRows int, inputOrder string, keyColumns int) []types.ProductValue {
+	rows := make([]types.ProductValue, totalRows)
+	for i := range rows {
+		rank := benchmarkOrderInputRank(i, totalRows, inputOrder)
+		switch keyColumns {
+		case 1:
+			rows[i] = types.ProductValue{
+				types.NewUint64(uint64(rank)),
+				types.NewUint64(uint64((rank*31 + 7) % totalRows)),
+			}
+		case 2:
+			rows[i] = types.ProductValue{
+				types.NewUint64(uint64(rank / 16)),
+				types.NewUint64(uint64(rank % 16)),
+			}
+		default:
+			panic(fmt.Sprintf("unsupported key column count %d", keyColumns))
+		}
+	}
+	return rows
+}
+
+func benchmarkOrderInputRank(i, totalRows int, inputOrder string) int {
+	switch inputOrder {
+	case "ascending":
+		return i
+	case "descending":
+		return totalRows - 1 - i
+	case "shuffled":
+		return (i*65 + 17) % totalRows
+	default:
+		panic(fmt.Sprintf("unsupported input order %q", inputOrder))
+	}
+}
+
 func BenchmarkProjectedRowsBeforeLargeBags(b *testing.B) {
 	const totalRows = 4096
 	const distinctRows = 64
