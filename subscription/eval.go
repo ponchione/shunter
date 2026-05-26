@@ -404,10 +404,10 @@ func forEachDistinctChangedValue(st *candidateScratch, col ColID, tc *store.Tabl
 
 func forEachDistinctChangedRow(keys []valueKey, col ColID, rows []types.ProductValue, fn func(Value)) []valueKey {
 	for _, row := range rows {
-		if int(col) >= len(row) {
+		v, ok := rowValue(row, col)
+		if !ok {
 			continue
 		}
-		v := row[col]
 		k := encodeValueKey(v)
 		seen := false
 		for _, existing := range keys {
@@ -443,8 +443,8 @@ func collectDistinctRows(distinct map[valueKey]Value, col ColID, rows []types.Pr
 
 func forEachRowColumnValue(rows []types.ProductValue, col ColID, fn func(Value)) {
 	for _, row := range rows {
-		if int(col) < len(row) {
-			fn(row[col])
+		if v, ok := rowValue(row, col); ok {
+			fn(v)
 		}
 	}
 }

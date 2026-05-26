@@ -91,10 +91,11 @@ func buildDeltaIndexForRows(rows []types.ProductValue, cols []ColID) map[ColID]m
 	for _, col := range cols {
 		byVal := acquireValuePositionIndex()
 		for i, row := range rows {
-			if int(col) >= len(row) {
+			value, ok := rowValue(row, col)
+			if !ok {
 				continue
 			}
-			key := encodeValueKey(row[col])
+			key := encodeValueKey(value)
 			byVal[key] = append(byVal[key], i)
 		}
 		byCol[col] = byVal

@@ -50,6 +50,19 @@ func TestDeltaViewBuildsIndexesOnlyForActiveColumns(t *testing.T) {
 	}
 }
 
+func TestDeltaViewIgnoresNegativeIndexColumn(t *testing.T) {
+	cs := simpleChangeset(1,
+		[]types.ProductValue{{types.NewUint64(1), types.NewString("a")}},
+		nil,
+	)
+	dv := NewDeltaView(nil, cs, map[TableID][]ColID{1: {-1}})
+	defer dv.Release()
+
+	if got := dv.DeltaIndexScan(1, -1, types.NewUint64(1), true); len(got) != 0 {
+		t.Fatalf("DeltaIndexScan negative column = %v, want no rows", got)
+	}
+}
+
 func TestDeltaViewPanicsOnUnindexedColumn(t *testing.T) {
 	cs := simpleChangeset(1,
 		[]types.ProductValue{{types.NewUint64(1), types.NewString("a")}},
@@ -76,5 +89,34 @@ func TestDeltaViewNilChangeset(t *testing.T) {
 	dv := NewDeltaView(nil, nil, nil)
 	if got := dv.InsertedRows(1); got != nil {
 		t.Fatalf("nil changeset = %v, want nil", got)
+	}
+}
+
+func TestDistinctChangedValueIgnoresNegativeColumn(t *testing.T) {
+	st := acquireCandidateScratch()
+	defer releaseCandidateScratch(st)
+
+	tc := &store.TableChangeset{
+		Inserts: []types.ProductValue{{types.NewUint64(1)}},
+		Deletes: []types.ProductValue{{types.NewUint64(2)}},
+	}
+	calls := 0
+	forEachDistinctChangedValue(st, -1, tc, func(Value) {
+		calls++
+	})
+	if calls != 0 {
+		t.Fatalf("linear distinct callback count = %d, want 0", calls)
+	}
+
+	rows := make([]types.ProductValue, distinctChangedValueLinearMax+1)
+	for i := range rows {
+		rows[i] = types.ProductValue{types.NewUint64(uint64(i))}
+	}
+	tc = &store.TableChangeset{Inserts: rows}
+	forEachDistinctChangedValue(st, -1, tc, func(Value) {
+		calls++
+	})
+	if calls != 0 {
+		t.Fatalf("map distinct callback count = %d, want 0", calls)
 	}
 }
