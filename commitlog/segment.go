@@ -2,7 +2,6 @@ package commitlog
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -207,26 +206,14 @@ func readRecordPayload(r io.Reader, dataLen uint32) ([]byte, error) {
 	if dataLen == 0 {
 		return []byte{}, nil
 	}
-
-	if dataLen <= DefaultCommitLogOptions().MaxRecordPayloadBytes {
-		payload := make([]byte, dataLen)
-		if _, err := io.ReadFull(r, payload); err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				return nil, ErrTruncatedRecord
-			}
-			return nil, err
-		}
-		return payload, nil
-	}
-
-	var buf bytes.Buffer
-	if _, err := io.CopyN(&buf, r, int64(dataLen)); err != nil {
+	payload := make([]byte, dataLen)
+	if _, err := io.ReadFull(r, payload); err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, ErrTruncatedRecord
 		}
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	return payload, nil
 }
 
 // SegmentFileName returns the log filename for a starting TxID.
