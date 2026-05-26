@@ -50,7 +50,9 @@ const (
 )
 
 var encoderPool = sync.Pool{
-	New: func() any { return &canonicalEncoder{} },
+	New: func() any {
+		return &canonicalEncoder{buf: make([]byte, 0, pooledBufferDefaultCap)}
+	},
 }
 
 type canonicalEncoder struct {
@@ -59,17 +61,19 @@ type canonicalEncoder struct {
 
 func acquireCanonicalEncoder() *canonicalEncoder {
 	enc := encoderPool.Get().(*canonicalEncoder)
-	if enc.buf == nil {
-		enc.buf = acquirePooledBuffer()
-	} else {
-		enc.buf = enc.buf[:0]
+	if cap(enc.buf) < pooledBufferDefaultCap {
+		enc.buf = make([]byte, 0, pooledBufferDefaultCap)
 	}
+	enc.buf = enc.buf[:0]
 	return enc
 }
 
 func releaseCanonicalEncoder(enc *canonicalEncoder) {
-	releasePooledBuffer(enc.buf)
-	enc.buf = nil
+	if cap(enc.buf) > pooledBufferDefaultCap {
+		enc.buf = nil
+	} else {
+		enc.buf = enc.buf[:0]
+	}
 	encoderPool.Put(enc)
 }
 

@@ -46,13 +46,6 @@ var dedupPool = sync.Pool{
 	},
 }
 
-var pooledBufferPool = sync.Pool{
-	New: func() any {
-		buf := make([]byte, 0, pooledBufferDefaultCap)
-		return &buf
-	},
-}
-
 var candidateScratchPool = sync.Pool{
 	New: func() any {
 		return &candidateScratch{
@@ -93,25 +86,6 @@ var deltaViewPool = sync.Pool{
 			},
 		}
 	},
-}
-
-func acquirePooledBuffer() []byte {
-	buf := (*pooledBufferPool.Get().(*[]byte))[:0]
-	if cap(buf) < pooledBufferDefaultCap {
-		return make([]byte, 0, pooledBufferDefaultCap)
-	}
-	return buf
-}
-
-func releasePooledBuffer(buf []byte) {
-	if cap(buf) != pooledBufferDefaultCap {
-		if cap(buf) > pooledBufferDefaultCap {
-			return
-		}
-		buf = make([]byte, 0, pooledBufferDefaultCap)
-	}
-	buf = buf[:0]
-	pooledBufferPool.Put(&buf)
 }
 
 func acquireCandidateScratch() *candidateScratch {

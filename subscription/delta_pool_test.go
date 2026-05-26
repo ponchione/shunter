@@ -7,46 +7,44 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func TestBufferPoolReturnsClearedDefaultSizedBuffers(t *testing.T) {
+func TestCanonicalEncoderPoolReturnsClearedDefaultSizedBuffers(t *testing.T) {
 	for i := 0; i < 8; i++ {
-		buf := acquirePooledBuffer()
-		if len(buf) != 0 {
-			t.Fatalf("iteration %d: acquirePooledBuffer len = %d, want 0", i, len(buf))
+		enc := acquireCanonicalEncoder()
+		if len(enc.buf) != 0 {
+			t.Fatalf("iteration %d: acquireCanonicalEncoder len = %d, want 0", i, len(enc.buf))
 		}
-		if cap(buf) != pooledBufferDefaultCap {
-			t.Fatalf("iteration %d: acquirePooledBuffer cap = %d, want %d", i, cap(buf), pooledBufferDefaultCap)
+		if cap(enc.buf) != pooledBufferDefaultCap {
+			t.Fatalf("iteration %d: acquireCanonicalEncoder cap = %d, want %d", i, cap(enc.buf), pooledBufferDefaultCap)
 		}
 
-		buf = append(buf, byte(i), byte(i+1), byte(i+2))
-		releasePooledBuffer(buf)
+		enc.writeByte(byte(i))
+		releaseCanonicalEncoder(enc)
 
-		reused := acquirePooledBuffer()
-		if len(reused) != 0 {
-			t.Fatalf("iteration %d: reused buffer len = %d, want 0", i, len(reused))
+		reused := acquireCanonicalEncoder()
+		if len(reused.buf) != 0 {
+			t.Fatalf("iteration %d: reused encoder len = %d, want 0", i, len(reused.buf))
 		}
-		if cap(reused) != pooledBufferDefaultCap {
-			t.Fatalf("iteration %d: reused buffer cap = %d, want %d", i, cap(reused), pooledBufferDefaultCap)
+		if cap(reused.buf) != pooledBufferDefaultCap {
+			t.Fatalf("iteration %d: reused encoder cap = %d, want %d", i, cap(reused.buf), pooledBufferDefaultCap)
 		}
-		reused = append(reused, 9)
-		if reused[0] != 9 {
-			t.Fatalf("iteration %d: reused buffer first byte = %d, want 9", i, reused[0])
+		reused.writeByte(9)
+		if reused.buf[0] != 9 {
+			t.Fatalf("iteration %d: reused encoder first byte = %d, want 9", i, reused.buf[0])
 		}
-		releasePooledBuffer(reused)
+		releaseCanonicalEncoder(reused)
 	}
 }
 
-func TestBufferPoolDropsOversizedBuffers(t *testing.T) {
-	oversized := make([]byte, 0, pooledBufferDefaultCap*2)
-	ptr := slicePtr(oversized[:1])
-	releasePooledBuffer(oversized)
+func TestCanonicalEncoderPoolDropsOversizedBuffers(t *testing.T) {
+	enc := acquireCanonicalEncoder()
+	enc.buf = make([]byte, 1, pooledBufferDefaultCap*2)
+	releaseCanonicalEncoder(enc)
 
-	next := acquirePooledBuffer()
-	if cap(next) != pooledBufferDefaultCap {
-		t.Fatalf("next buffer cap = %d, want %d", cap(next), pooledBufferDefaultCap)
+	next := acquireCanonicalEncoder()
+	if cap(next.buf) != pooledBufferDefaultCap {
+		t.Fatalf("next encoder cap = %d, want %d", cap(next.buf), pooledBufferDefaultCap)
 	}
-	if slicePtr(next[:1]) == ptr {
-		t.Fatalf("oversized buffer backing array should not be retained in the pool")
-	}
+	releaseCanonicalEncoder(next)
 }
 
 func TestProductValueSlicePoolDropsOversizedSlices(t *testing.T) {
