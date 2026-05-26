@@ -243,6 +243,59 @@ func BenchmarkOrderWindowRows(b *testing.B) {
 	}
 }
 
+func BenchmarkOrderedInitialRowsComparatorShapes(b *testing.B) {
+	cases := []struct {
+		operation      string
+		totalRows      int
+		keepRows       int
+		inputOrder     string
+		keyColumns     int
+		orderDirection string
+		keyShape       string
+	}{
+		{operation: "bounded", totalRows: 1024, keepRows: 100, inputOrder: "shuffled", keyColumns: 1, orderDirection: "desc", keyShape: "unique"},
+		{operation: "bounded", totalRows: 4096, keepRows: 1000, inputOrder: "shuffled", keyColumns: 1, orderDirection: "desc", keyShape: "ties"},
+		{operation: "bounded", totalRows: 4096, keepRows: 1000, inputOrder: "shuffled", keyColumns: 2, orderDirection: "mixed", keyShape: "ties"},
+		{operation: "full", totalRows: 1024, inputOrder: "shuffled", keyColumns: 1, orderDirection: "desc", keyShape: "ties"},
+		{operation: "full", totalRows: 4096, inputOrder: "descending", keyColumns: 2, orderDirection: "mixed", keyShape: "ties"},
+	}
+
+	for _, tc := range cases {
+		name := fmt.Sprintf("%s/rows_%d/%s/%dcol/%s/%s", tc.operation, tc.totalRows, tc.inputOrder, tc.keyColumns, tc.orderDirection, tc.keyShape)
+		b.Run(name, func(b *testing.B) {
+			rows := benchmarkOrderedInitialRowsForShape(tc.totalRows, tc.inputOrder, tc.keyColumns, tc.keyShape)
+			orderBy := benchmarkInitialRowOrderByDirection(tc.keyColumns, tc.orderDirection)
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			measuredRows := 0
+			for i := 0; i < b.N; i++ {
+				switch tc.operation {
+				case "bounded":
+					bounded := newBoundedOrderedInitialRows(orderBy, tc.keepRows)
+					for _, row := range rows {
+						if err := bounded.add(row); err != nil {
+							b.Fatal(err)
+						}
+					}
+					measuredRows += len(bounded.rows)
+				case "full":
+					ordered, err := orderWindowRows(rows, orderBy, true)
+					if err != nil {
+						b.Fatal(err)
+					}
+					measuredRows += len(ordered)
+				default:
+					b.Fatalf("unsupported ordered benchmark operation %q", tc.operation)
+				}
+			}
+			if measuredRows == 0 {
+				b.Fatal("ordered comparator benchmark measured no rows")
+			}
+		})
+	}
+}
+
 func benchmarkOrderedInitialRowSchema() *fakeSchema {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 0)
@@ -261,6 +314,36 @@ func benchmarkInitialRowOrderBy(keyColumns int) []OrderByColumn {
 	return orderBy
 }
 
+func benchmarkInitialRowOrderByDirection(keyColumns int, direction string) []OrderByColumn {
+	orderBy := benchmarkInitialRowOrderBy(keyColumns)
+	switch direction {
+	case "asc":
+		return orderBy
+	case "desc":
+		for i := range orderBy {
+			orderBy[i].Desc = true
+		}
+	case "mixed":
+		for i := range orderBy {
+			orderBy[i].Desc = i%2 == 1
+		}
+	default:
+		panic(fmt.Sprintf("unsupported order direction %q", direction))
+	}
+	return orderBy
+}
+
+func benchmarkOrderedInitialRowsForShape(totalRows int, inputOrder string, keyColumns int, keyShape string) []types.ProductValue {
+	switch keyShape {
+	case "unique":
+		return benchmarkOrderedInitialRows(totalRows, inputOrder, keyColumns)
+	case "ties":
+		return benchmarkTieHeavyOrderedInitialRows(totalRows, inputOrder, keyColumns)
+	default:
+		panic(fmt.Sprintf("unsupported ordered key shape %q", keyShape))
+	}
+}
+
 func benchmarkOrderedInitialRows(totalRows int, inputOrder string, keyColumns int) []types.ProductValue {
 	rows := make([]types.ProductValue, totalRows)
 	for i := range rows {
@@ -275,6 +358,30 @@ func benchmarkOrderedInitialRows(totalRows int, inputOrder string, keyColumns in
 			rows[i] = types.ProductValue{
 				types.NewUint64(uint64(rank / 16)),
 				types.NewUint64(uint64(rank % 16)),
+			}
+		default:
+			panic(fmt.Sprintf("unsupported key column count %d", keyColumns))
+		}
+	}
+	return rows
+}
+
+func benchmarkTieHeavyOrderedInitialRows(totalRows int, inputOrder string, keyColumns int) []types.ProductValue {
+	rows := make([]types.ProductValue, totalRows)
+	for i := range rows {
+		rank := benchmarkOrderInputRank(i, totalRows, inputOrder)
+		switch keyColumns {
+		case 1:
+			rows[i] = types.ProductValue{
+				types.NewUint64(uint64(rank % 8)),
+				types.NewUint64(uint64(rank)),
+				types.NewUint64(uint64((rank*31 + 7) % totalRows)),
+			}
+		case 2:
+			rows[i] = types.ProductValue{
+				types.NewUint64(uint64(rank % 16)),
+				types.NewUint64(uint64((rank / 16) % 4)),
+				types.NewUint64(uint64(rank)),
 			}
 		default:
 			panic(fmt.Sprintf("unsupported key column count %d", keyColumns))
