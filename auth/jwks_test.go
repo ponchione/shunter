@@ -85,6 +85,49 @@ func TestValidateJWTJWKSRefreshesForUnknownKeyID(t *testing.T) {
 	}
 }
 
+func TestValidateJWTJWKSRefreshesForUnknownKeyIDWithLocalCandidate(t *testing.T) {
+	_, localPEM := generateRS256TestKey(t)
+	oldPrivateKey, oldJWK := generateRS256JWK(t, "old")
+	newPrivateKey, newJWK := generateRS256JWK(t, "new")
+	keys := atomic.Value{}
+	keys.Store([]jwkDocumentKey{oldJWK})
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		writeJWKS(t, w, keys.Load().([]jwkDocumentKey)...)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &JWTConfig{
+		VerificationKeys: []JWTVerificationKey{{
+			Algorithm: JWTAlgorithmRS256,
+			Key:       localPEM,
+		}},
+		JWKS: []JWKSConfig{{
+			Issuer:   "issuer",
+			JWKSURL:  srv.URL,
+			CacheTTL: time.Hour,
+		}},
+		Issuers:  []string{"issuer"},
+		AuthMode: AuthModeStrict,
+	}
+	if _, err := ValidateJWT(mintRS256Token(t, oldPrivateKey, "old", "issuer"), cfg); err != nil {
+		t.Fatalf("old token did not validate: %v", err)
+	}
+
+	keys.Store([]jwkDocumentKey{newJWK})
+	claims, err := ValidateJWT(mintRS256Token(t, newPrivateKey, "new", "issuer"), cfg)
+	if err != nil {
+		t.Fatalf("new token after jwks rotation did not validate with local candidate present: %v", err)
+	}
+	if claims.Subject != "alice" {
+		t.Fatalf("claims = %+v, want alice", claims)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("jwks requests = %d, want refresh after kid miss", got)
+	}
+}
+
 func TestValidateJWTJWKSDoesNotFallbackToUnkeyedKeyWhenTokenHasKeyID(t *testing.T) {
 	privateKey, jwk := generateRS256JWK(t, "")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

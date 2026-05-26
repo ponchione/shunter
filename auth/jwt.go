@@ -146,7 +146,7 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 		return nil, errors.Join(ErrJWTInvalid, err)
 	}
 	candidates := selectJWTVerificationKeys(localKeys, alg, keyID)
-	remoteKeys, remoteErr := resolveJWKSVerificationKeys(config, alg, keyID, tokenIssuer, len(candidates) == 0)
+	remoteKeys, remoteErr := resolveJWKSVerificationKeys(config, alg, keyID, tokenIssuer)
 	if remoteErr != nil && len(candidates) == 0 {
 		return nil, errors.Join(ErrJWTInvalid, remoteErr)
 	}

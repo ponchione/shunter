@@ -108,7 +108,7 @@ func isLoopbackJWKSHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func resolveJWKSVerificationKeys(config *JWTConfig, alg JWTAlgorithm, keyID, tokenIssuer string, forceRefresh bool) ([]resolvedJWTVerificationKey, error) {
+func resolveJWKSVerificationKeys(config *JWTConfig, alg JWTAlgorithm, keyID, tokenIssuer string) ([]resolvedJWTVerificationKey, error) {
 	if config == nil || len(config.JWKS) == 0 {
 		return nil, nil
 	}
@@ -130,7 +130,7 @@ func resolveJWKSVerificationKeys(config *JWTConfig, alg JWTAlgorithm, keyID, tok
 			continue
 		}
 		matches := matchingJWKSVerificationKeys(keys, alg, keyID)
-		if len(matches) == 0 && forceRefresh && keyID != "" {
+		if len(matches) == 0 && keyID != "" {
 			keys, err = keysForJWKS(source, true)
 			if err != nil {
 				lastErr = err
