@@ -2,11 +2,12 @@ package types
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 	"unicode/utf8"
 )
 
@@ -111,8 +112,8 @@ func appendCanonicalJSONObject(out *bytes.Buffer, dec *json.Decoder) error {
 	if delim, ok := end.(json.Delim); !ok || delim != '}' {
 		return fmt.Errorf("shunter: %w: expected object end", ErrInvalidJSON)
 	}
-	sort.Slice(members, func(i, j int) bool {
-		return members[i].key < members[j].key
+	slices.SortFunc(members, func(a, b jsonMember) int {
+		return cmp.Compare(a.key, b.key)
 	})
 	out.WriteByte('{')
 	for i, member := range members {

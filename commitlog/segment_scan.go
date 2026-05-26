@@ -1,13 +1,14 @@
 package commitlog
 
 import (
+	"cmp"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"github.com/ponchione/shunter/types"
 )
@@ -86,7 +87,7 @@ func listSegmentPaths(dir string) ([]segmentPath, error) {
 			startTx: startTx,
 		})
 	}
-	sort.Slice(paths, func(i, j int) bool { return paths[i].startTx < paths[j].startTx })
+	slices.SortFunc(paths, func(a, b segmentPath) int { return cmp.Compare(a.startTx, b.startTx) })
 	return paths, nil
 }
 

@@ -1,9 +1,10 @@
 package subscription
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/ponchione/shunter/store"
@@ -203,15 +204,14 @@ func sortFanoutBySubscription(fanout CommitFanout) {
 		if len(updates) < 2 {
 			continue
 		}
-		sort.SliceStable(updates, func(i, j int) bool {
-			left, right := updates[i], updates[j]
-			if left.SubscriptionID != right.SubscriptionID {
-				return left.SubscriptionID < right.SubscriptionID
+		slices.SortStableFunc(updates, func(left, right SubscriptionUpdate) int {
+			if n := cmp.Compare(left.SubscriptionID, right.SubscriptionID); n != 0 {
+				return n
 			}
-			if left.TableID != right.TableID {
-				return left.TableID < right.TableID
+			if n := cmp.Compare(left.TableID, right.TableID); n != 0 {
+				return n
 			}
-			return left.TableName < right.TableName
+			return cmp.Compare(left.TableName, right.TableName)
 		})
 		fanout[connID] = updates
 	}

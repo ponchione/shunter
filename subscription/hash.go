@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
-	"sort"
+	"slices"
 	"sync"
 
 	"lukechampine.com/blake3"
@@ -226,8 +226,8 @@ func sortCanonicalPredicates(preds []Predicate) {
 	for i, pred := range preds {
 		ordered[i] = canonicalPredicate{pred: pred, key: canonicalPredicateBytes(pred)}
 	}
-	sort.Slice(ordered, func(i, j int) bool {
-		return bytes.Compare(ordered[i].key, ordered[j].key) < 0
+	slices.SortFunc(ordered, func(a, b canonicalPredicate) int {
+		return bytes.Compare(a.key, b.key)
 	})
 	for i := range ordered {
 		preds[i] = ordered[i].pred

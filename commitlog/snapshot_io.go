@@ -2,6 +2,7 @@ package commitlog
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -9,7 +10,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -73,7 +74,7 @@ func RemoveLockFile(snapshotDir string) error {
 
 func EncodeSchemaSnapshot(w io.Writer, reg schema.SchemaRegistry) error {
 	ids := reg.Tables()
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	if err := writeUint32Full(w, reg.Version()); err != nil {
 		return err
 	}
@@ -792,7 +793,7 @@ func validateSnapshotTxID(txID types.TxID) error {
 
 func captureCommittedSnapshotBodyLocked(body *snapshotBodyCapture, committed *store.CommittedState) error {
 	ids := committed.TableIDsLocked()
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	for _, tableID := range ids {
 		table, _ := committed.TableLocked(tableID)
 		if table.Schema().IsEvent {
@@ -1199,7 +1200,7 @@ func sortedSnapshotBootstrapTableIDs[T any](values map[schema.TableID]T) []schem
 	for tableID := range values {
 		tableIDs = append(tableIDs, tableID)
 	}
-	sort.Slice(tableIDs, func(i, j int) bool { return tableIDs[i] < tableIDs[j] })
+	slices.Sort(tableIDs)
 	return tableIDs
 }
 
@@ -1282,7 +1283,7 @@ func ListSnapshots(baseDir string) ([]types.TxID, error) {
 		}
 		ids = append(ids, types.TxID(txID))
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] > ids[j] })
+	slices.SortFunc(ids, func(a, b types.TxID) int { return cmp.Compare(b, a) })
 	return ids, nil
 }
 
@@ -1305,7 +1306,7 @@ func deterministicRows(table *store.Table) ([]types.ProductValue, error) {
 	for id, row := range table.Scan() {
 		pairs = append(pairs, pair{id: id, row: row})
 	}
-	sort.Slice(pairs, func(i, j int) bool { return pairs[i].id < pairs[j].id })
+	slices.SortFunc(pairs, func(a, b pair) int { return cmp.Compare(a.id, b.id) })
 	rows := make([]types.ProductValue, len(pairs))
 	for i, p := range pairs {
 		rows[i] = p.row
