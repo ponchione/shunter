@@ -471,6 +471,37 @@ func TestChangesetCodecDeterministicOrderingAndLengthPrefixes(t *testing.T) {
 	}
 }
 
+func TestDecodeChangesetRejectsImpossibleCountsBeforeAccumulation(t *testing.T) {
+	reg := contractTestSchema(t)
+	payload := func(words ...uint32) []byte {
+		out := []byte{changesetVersion}
+		for _, word := range words {
+			out = appendUint32(out, word)
+		}
+		return out
+	}
+
+	for _, tc := range []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{"table_count", payload(2, 0), "table count 2 exceeds remaining 4"},
+		{"insert_count", payload(1, 0, 2, 0), "insert count 2 exceeds remaining 4"},
+		{"delete_count", payload(1, 0, 0, 2, 0), "delete count 2 exceeds remaining 4"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DecodeChangeset(tc.data, reg)
+			if !errors.Is(err, ErrTraversal) {
+				t.Fatalf("DecodeChangeset error = %v, want ErrTraversal", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("DecodeChangeset error = %v, want detail %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestDecodeSchemaSnapshotRejectsNullableAutoIncrementColumn(t *testing.T) {
 	var buf bytes.Buffer
 	write := func(err error) {

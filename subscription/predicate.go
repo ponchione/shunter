@@ -7,6 +7,8 @@
 package subscription
 
 import (
+	"slices"
+
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
@@ -140,20 +142,15 @@ func unionPredicateTables(leftPred, rightPred Predicate) []TableID {
 		right = rightPred.Tables()
 	}
 	out := make([]TableID, 0, len(left)+len(right))
-	seen := make(map[TableID]struct{}, len(left)+len(right))
-	for _, t := range left {
-		if _, ok := seen[t]; ok {
-			continue
+	out = appendUniqueTables(out, left)
+	return appendUniqueTables(out, right)
+}
+
+func appendUniqueTables(out []TableID, tables []TableID) []TableID {
+	for _, t := range tables {
+		if !slices.Contains(out, t) {
+			out = append(out, t)
 		}
-		seen[t] = struct{}{}
-		out = append(out, t)
-	}
-	for _, t := range right {
-		if _, ok := seen[t]; ok {
-			continue
-		}
-		seen[t] = struct{}{}
-		out = append(out, t)
 	}
 	return out
 }
@@ -269,13 +266,10 @@ func (MultiJoin) sealed() {}
 
 func (p MultiJoin) Tables() []TableID {
 	out := make([]TableID, 0, len(p.Relations))
-	seen := make(map[TableID]struct{}, len(p.Relations))
 	for _, rel := range p.Relations {
-		if _, ok := seen[rel.Table]; ok {
-			continue
+		if !slices.Contains(out, rel.Table) {
+			out = append(out, rel.Table)
 		}
-		seen[rel.Table] = struct{}{}
-		out = append(out, rel.Table)
 	}
 	return out
 }

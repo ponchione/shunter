@@ -59,6 +59,21 @@ func TestJoinTablesBoth(t *testing.T) {
 	requireTables(t, "Join.Tables()", []TableID{1, 2}, p.Tables())
 }
 
+func TestCrossJoinTablesBoth(t *testing.T) {
+	p := CrossJoin{Left: 1, Right: 2}
+	requireTables(t, "CrossJoin.Tables()", []TableID{1, 2}, p.Tables())
+}
+
+func TestMultiJoinTablesDedupOrdered(t *testing.T) {
+	p := MultiJoin{Relations: []MultiJoinRelation{
+		{Table: 3},
+		{Table: 7},
+		{Table: 3},
+		{Table: 9},
+	}}
+	requireTables(t, "MultiJoin.Tables()", []TableID{3, 7, 9}, p.Tables())
+}
+
 func TestJoinNilFilterAllowed(t *testing.T) {
 	p := Join{Left: 1, Right: 2, Filter: nil}
 	if p.Filter != nil {
@@ -132,4 +147,6 @@ func TestPredicateSealed(t *testing.T) {
 	var _ Predicate = AllRows{}
 	var _ Predicate = NoRows{}
 	var _ Predicate = Join{}
+	var _ Predicate = CrossJoin{}
+	var _ Predicate = MultiJoin{}
 }

@@ -189,6 +189,9 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 	pos := 1
 	tableCount := binary.LittleEndian.Uint32(data[pos:])
 	pos += 4
+	if err := requireChangesetCountFitsRemaining("table count", tableCount, data, pos); err != nil {
+		return nil, err
+	}
 
 	cs := &store.Changeset{
 		Tables: make(map[schema.TableID]*store.TableChangeset),
@@ -217,6 +220,9 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 		}
 		insertCount := binary.LittleEndian.Uint32(data[pos:])
 		pos += 4
+		if err := requireChangesetCountFitsRemaining("insert count", insertCount, data, pos); err != nil {
+			return nil, err
+		}
 		for range insertCount {
 			row, n, err := decodeRow(data[pos:], ts, maxRowBytes)
 			if err != nil {
@@ -232,6 +238,9 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 		}
 		deleteCount := binary.LittleEndian.Uint32(data[pos:])
 		pos += 4
+		if err := requireChangesetCountFitsRemaining("delete count", deleteCount, data, pos); err != nil {
+			return nil, err
+		}
 		for range deleteCount {
 			row, n, err := decodeRow(data[pos:], ts, maxRowBytes)
 			if err != nil {
@@ -252,6 +261,14 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 
 func changesetDecodeErrorf(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrTraversal}, args...)...)
+}
+
+func requireChangesetCountFitsRemaining(name string, count uint32, data []byte, pos int) error {
+	remaining := len(data) - pos
+	if uint64(count) > uint64(remaining/4) {
+		return changesetDecodeErrorf("commitlog: %s %d exceeds remaining %d", name, count, remaining)
+	}
+	return nil
 }
 
 func decodeRow(data []byte, ts *schema.TableSchema, maxRowBytes uint32) (types.ProductValue, int, error) {

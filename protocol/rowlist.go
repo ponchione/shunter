@@ -28,13 +28,10 @@ func EncodeRowListChecked(rows [][]byte) ([]byte, error) {
 		return nil, err
 	}
 	size := uint64(4)
-	rowSizes := make([]uint32, len(rows))
-	for i, r := range rows {
-		rowLen, err := checkedProtocolLen("rowlist row", len(r))
-		if err != nil {
+	for _, r := range rows {
+		if _, err := checkedProtocolLen("rowlist row", len(r)); err != nil {
 			return nil, err
 		}
-		rowSizes[i] = rowLen
 		size += 4 + uint64(len(r))
 		if size > maxProtocolAlloc() {
 			return nil, fmt.Errorf("%w: rowlist payload size %d exceeds max allocation", ErrMessageTooLarge, size)
@@ -43,8 +40,8 @@ func EncodeRowListChecked(rows [][]byte) ([]byte, error) {
 	out := make([]byte, int(size))
 	binary.LittleEndian.PutUint32(out[0:4], count)
 	off := 4
-	for i, r := range rows {
-		binary.LittleEndian.PutUint32(out[off:off+4], rowSizes[i])
+	for _, r := range rows {
+		binary.LittleEndian.PutUint32(out[off:off+4], uint32(len(r)))
 		off += 4
 		copy(out[off:off+len(r)], r)
 		off += len(r)
