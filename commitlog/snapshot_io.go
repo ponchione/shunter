@@ -317,23 +317,21 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 }
 
 func readOptionalSchemaSnapshotEventFlags(r io.Reader, tables []schema.TableSchema) error {
-	trailing, err := io.ReadAll(r)
-	if err != nil {
-		return err
-	}
-	if len(trailing) == 0 {
-		return nil
-	}
-	reader := bytes.NewReader(trailing)
 	var magic [4]byte
-	if _, err := io.ReadFull(reader, magic[:]); err != nil {
-		return fmt.Errorf("%w: incomplete schema snapshot event flag metadata: %w", ErrSnapshot, err)
+	if _, err := io.ReadFull(r, magic[:]); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return fmt.Errorf("%w: incomplete schema snapshot event flag metadata: %w", ErrSnapshot, err)
+		}
+		return err
 	}
 	if magic != schemaSnapshotEventFlagsMagic {
 		return fmt.Errorf("%w: invalid schema snapshot trailing metadata", ErrSnapshot)
 	}
 	var count uint32
-	if err := binary.Read(reader, binary.LittleEndian, &count); err != nil {
+	if err := binary.Read(r, binary.LittleEndian, &count); err != nil {
 		return fmt.Errorf("%w: incomplete schema snapshot event flag count: %w", ErrSnapshot, err)
 	}
 	if int(count) != len(tables) {
@@ -346,11 +344,11 @@ func readOptionalSchemaSnapshotEventFlags(r io.Reader, tables []schema.TableSche
 	seen := make(map[schema.TableID]struct{}, len(tables))
 	for range count {
 		var tableID uint32
-		if err := binary.Read(reader, binary.LittleEndian, &tableID); err != nil {
+		if err := binary.Read(r, binary.LittleEndian, &tableID); err != nil {
 			return fmt.Errorf("%w: incomplete schema snapshot event flag table ID: %w", ErrSnapshot, err)
 		}
 		var flag [1]byte
-		if _, err := io.ReadFull(reader, flag[:]); err != nil {
+		if _, err := io.ReadFull(r, flag[:]); err != nil {
 			return fmt.Errorf("%w: incomplete schema snapshot event flag value: %w", ErrSnapshot, err)
 		}
 		isEvent, err := decodeSchemaSnapshotBool(flag[0], "table event")
@@ -368,7 +366,7 @@ func readOptionalSchemaSnapshotEventFlags(r io.Reader, tables []schema.TableSche
 		seen[id] = struct{}{}
 		table.IsEvent = isEvent
 	}
-	if err := requireNoTrailingBytes(reader, "trailing schema snapshot event flag bytes"); err != nil {
+	if err := requireNoTrailingBytes(r, "trailing schema snapshot event flag bytes"); err != nil {
 		return err
 	}
 	return nil
