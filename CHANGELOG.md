@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Detached contract validation now rejects names that duplicate after trimming
+  surrounding whitespace, and schema engine startup checks now retain a
+  build-time copy of recovered snapshot metadata.
 - Schema export type parsing now shares the same canonical mapping used for
   export formatting, and fixed-size identity/connection ID hex parsing now
   decodes directly into destination arrays without changing invalid-input

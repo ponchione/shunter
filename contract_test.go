@@ -650,6 +650,20 @@ func TestModuleContractValidationRejectsInvalidReducerProductSchema(t *testing.T
 	}
 }
 
+func TestModuleContractValidationRejectsTrimmedDuplicateNames(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Queries = append(contract.Queries, contract.Queries[0])
+	contract.Queries[1].Name = " " + contract.Queries[0].Name + " "
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted duplicate query names after trimming")
+	}
+	if !strings.Contains(err.Error(), `queries name " recent_messages " is duplicated`) {
+		t.Fatalf("ValidateModuleContract error = %v, want trimmed duplicate query name context", err)
+	}
+}
+
 func TestModuleContractValidationRejectsInvalidDeclaredReadParameters(t *testing.T) {
 	tests := []struct {
 		name    string

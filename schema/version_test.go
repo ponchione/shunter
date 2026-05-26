@@ -260,3 +260,37 @@ func TestEngineStartRunsCompatibilityCheck(t *testing.T) {
 		t.Fatalf("expected SchemaMismatchError from Start, got %T", err)
 	}
 }
+
+func TestEngineStartUsesBuildTimeSnapshotCopy(t *testing.T) {
+	b := NewBuilder()
+	b.SchemaVersion(3)
+	b.TableDef(TableDefinition{
+		Name:    "players",
+		Columns: []ColumnDefinition{{Name: "id", Type: KindUint64, PrimaryKey: true}},
+	})
+	snapshot := &SnapshotSchema{
+		Version: 99,
+		Tables: []TableSchema{{
+			ID:      0,
+			Name:    "players",
+			Columns: []ColumnSchema{{Index: 0, Name: "other_id", Type: KindUint64}},
+			Indexes: []IndexSchema{{ID: 0, Name: "pk", Columns: []int{0}, Unique: true, Primary: true}},
+		}},
+	}
+	e, err := b.Build(EngineOptions{StartupSnapshotSchema: snapshot})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot.Version = 3
+	snapshot.Tables[0].Columns[0].Name = "id"
+
+	err = e.Start(context.Background())
+	if err == nil {
+		t.Fatal("Start should use the build-time snapshot copy, not caller mutations")
+	}
+	var mismatch *SchemaMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("expected SchemaMismatchError from Start, got %T", err)
+	}
+}

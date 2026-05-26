@@ -116,5 +116,24 @@ func (b *Builder) buildEngine(opts EngineOptions) (*Engine, error) {
 
 	reg := newSchemaRegistry(schemas, &builtBuilder)
 
-	return &Engine{registry: reg, opts: opts}, nil
+	return &Engine{registry: reg, opts: cloneEngineOptions(opts)}, nil
+}
+
+func cloneEngineOptions(opts EngineOptions) EngineOptions {
+	opts.StartupSnapshotSchema = cloneSnapshotSchemaPtr(opts.StartupSnapshotSchema)
+	return opts
+}
+
+func cloneSnapshotSchemaPtr(in *SnapshotSchema) *SnapshotSchema {
+	if in == nil {
+		return nil
+	}
+	out := &SnapshotSchema{
+		Version: in.Version,
+		Tables:  make([]TableSchema, len(in.Tables)),
+	}
+	for i, table := range in.Tables {
+		out.Tables[i] = cloneTableSchema(table)
+	}
+	return out
 }

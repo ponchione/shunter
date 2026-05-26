@@ -476,11 +476,11 @@ func validateMigrationMetadata(path string, metadata MigrationMetadata, errs *[]
 }
 
 func validateContractName(path, name string, seen map[string]struct{}, errs *[]error) bool {
-	return validateContractKeyedName(path, name, name, seen, errs)
+	return validateContractKeyedName(path, name, strings.TrimSpace(name), seen, errs)
 }
 
 func validateContractSurfaceName(path, surface, name string, seen map[string]struct{}, errs *[]error) bool {
-	return validateContractKeyedName(path, name, surface+"\x00"+name, seen, errs)
+	return validateContractKeyedName(path, name, surface+"\x00"+strings.TrimSpace(name), seen, errs)
 }
 
 func validateContractKeyedName(path, name, key string, seen map[string]struct{}, errs *[]error) bool {
