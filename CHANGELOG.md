@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Ordered live-view initial materialization now avoids per-row ORDER BY key
+  copies and only encodes deterministic tie-break keys when comparisons need
+  them, reducing allocations for bounded ordered windows.
 - Contract diff and migration-plan tooling now report procedure additions,
   removals, argument/result schema drift, and procedure permission drift.
 - One-off `COUNT(*)` over unfiltered cross joins now rejects overflowing

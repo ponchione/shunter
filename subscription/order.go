@@ -2,7 +2,6 @@ package subscription
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 
 	"github.com/ponchione/shunter/schema"
@@ -46,7 +45,6 @@ func validateOrderByColumns(pred Predicate, orderBy []OrderByColumn, aggregate *
 
 type orderedInitialRow struct {
 	row    types.ProductValue
-	key    []types.Value
 	rowKey string
 }
 
@@ -56,21 +54,31 @@ type boundedOrderedInitialRows struct {
 	rows    []orderedInitialRow
 }
 
+type orderedInitialRowsSorter struct {
+	rows    []orderedInitialRow
+	orderBy []OrderByColumn
+}
+
+func (s orderedInitialRowsSorter) Len() int { return len(s.rows) }
+
+func (s orderedInitialRowsSorter) Less(i, j int) bool {
+	return compareOrderedInitialRows(&s.rows[i], &s.rows[j], s.orderBy) < 0
+}
+
+func (s orderedInitialRowsSorter) Swap(i, j int) { s.rows[i], s.rows[j] = s.rows[j], s.rows[i] }
+
 func orderWindowRows(rows []types.ProductValue, orderBy []OrderByColumn, deterministic bool) ([]types.ProductValue, error) {
 	if len(rows) == 0 || !deterministic {
 		return rows, nil
 	}
 	ordered := make([]orderedInitialRow, 0, len(rows))
 	for _, row := range rows {
-		keys, err := initialRowOrderKey(row, orderBy)
-		if err != nil {
+		if err := validateInitialRowOrderRow(row, orderBy); err != nil {
 			return nil, err
 		}
-		ordered = append(ordered, orderedInitialRow{row: row, key: keys, rowKey: encodeRowKey(row)})
+		ordered = append(ordered, orderedInitialRow{row: row})
 	}
-	slices.SortStableFunc(ordered, func(a, b orderedInitialRow) int {
-		return compareOrderedInitialRows(a, b, orderBy)
-	})
+	sort.Stable(orderedInitialRowsSorter{rows: ordered, orderBy: orderBy})
 	return flattenOrderedInitialRows(ordered), nil
 }
 
@@ -89,12 +97,11 @@ func (b *boundedOrderedInitialRows) add(row types.ProductValue) error {
 	if b == nil {
 		return nil
 	}
-	key, err := initialRowOrderKey(row, b.orderBy)
-	if err != nil {
+	if err := validateInitialRowOrderRow(row, b.orderBy); err != nil {
 		return err
 	}
-	item := orderedInitialRow{row: row, key: key, rowKey: encodeRowKey(row)}
-	pos := upperBoundOrderedInitialRows(b.rows, item, b.orderBy)
+	item := orderedInitialRow{row: row}
+	pos := upperBoundOrderedInitialRows(b.rows, &item, b.orderBy)
 	if len(b.rows) == b.keep && pos == b.keep {
 		return nil
 	}
@@ -114,24 +121,27 @@ func (b *boundedOrderedInitialRows) productRows() []types.ProductValue {
 	return flattenOrderedInitialRows(b.rows)
 }
 
-func initialRowOrderKey(row types.ProductValue, orderBy []OrderByColumn) ([]types.Value, error) {
-	if len(orderBy) == 0 {
-		return nil, nil
-	}
-	keys := make([]types.Value, len(orderBy))
-	for i, term := range orderBy {
+func validateInitialRowOrderRow(row types.ProductValue, orderBy []OrderByColumn) error {
+	for _, term := range orderBy {
 		idx := int(term.Column)
 		if idx < 0 || idx >= len(row) {
-			return nil, fmt.Errorf("ORDER BY column %q is missing from row", term.Schema.Name)
+			return fmt.Errorf("ORDER BY column %q is missing from row", term.Schema.Name)
 		}
-		keys[i] = row[idx]
 	}
-	return keys, nil
+	return nil
 }
 
-func compareOrderedInitialRows(a, b orderedInitialRow, orderBy []OrderByColumn) int {
-	for i, term := range orderBy {
-		cmp := a.key[i].Compare(b.key[i])
+func (r *orderedInitialRow) canonicalRowKey() string {
+	if r.rowKey == "" {
+		r.rowKey = encodeRowKey(r.row)
+	}
+	return r.rowKey
+}
+
+func compareOrderedInitialRows(a, b *orderedInitialRow, orderBy []OrderByColumn) int {
+	for _, term := range orderBy {
+		idx := int(term.Column)
+		cmp := a.row[idx].Compare(b.row[idx])
 		if cmp == 0 {
 			continue
 		}
@@ -140,18 +150,20 @@ func compareOrderedInitialRows(a, b orderedInitialRow, orderBy []OrderByColumn) 
 		}
 		return cmp
 	}
-	if a.rowKey < b.rowKey {
+	aKey := a.canonicalRowKey()
+	bKey := b.canonicalRowKey()
+	if aKey < bKey {
 		return -1
 	}
-	if a.rowKey > b.rowKey {
+	if aKey > bKey {
 		return 1
 	}
 	return 0
 }
 
-func upperBoundOrderedInitialRows(rows []orderedInitialRow, item orderedInitialRow, orderBy []OrderByColumn) int {
+func upperBoundOrderedInitialRows(rows []orderedInitialRow, item *orderedInitialRow, orderBy []OrderByColumn) int {
 	return sort.Search(len(rows), func(i int) bool {
-		return compareOrderedInitialRows(rows[i], item, orderBy) > 0
+		return compareOrderedInitialRows(&rows[i], item, orderBy) > 0
 	})
 }
 
