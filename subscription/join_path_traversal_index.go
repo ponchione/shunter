@@ -200,7 +200,7 @@ func (ji *joinRangePathTraversalIndex) ForEachHash(edge joinPathTraversalEdge, f
 		return
 	}
 	for _, bucket := range byRange {
-		if !rangeContainsValue(filterValue, bucket.lower, bucket.upper) {
+		if !matchBounds(filterValue, bucket.lower, bucket.upper) {
 			continue
 		}
 		for h := range bucket.hashes {

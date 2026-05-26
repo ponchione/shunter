@@ -102,6 +102,30 @@ func TestMatchRowNegativeColumnRejects(t *testing.T) {
 	}
 }
 
+func TestMatchRowColRangeMismatchedBoundKindRejects(t *testing.T) {
+	row := types.ProductValue{types.NewUint64(42)}
+
+	lowerMismatch := ColRange{
+		Table:  1,
+		Column: 0,
+		Lower:  Bound{Value: types.NewString("bad"), Inclusive: true},
+		Upper:  Bound{Unbounded: true},
+	}
+	if MatchRow(lowerMismatch, 1, row) {
+		t.Fatal("mismatched lower bound kind should not match")
+	}
+
+	upperMismatch := ColRange{
+		Table:  1,
+		Column: 0,
+		Lower:  Bound{Unbounded: true},
+		Upper:  Bound{Value: types.NewString("bad"), Inclusive: true},
+	}
+	if MatchRow(upperMismatch, 1, row) {
+		t.Fatal("mismatched upper bound kind should not match")
+	}
+}
+
 func TestMatchRowSideColEqColSameSide(t *testing.T) {
 	p := ColEqCol{LeftTable: 1, LeftColumn: 0, RightTable: 1, RightColumn: 1}
 	if !MatchRowSide(p, 1, 0, types.ProductValue{types.NewUint32(7), types.NewUint32(7)}) {
@@ -186,6 +210,22 @@ func TestMatchJoinPairNegativeColumnRejects(t *testing.T) {
 		if MatchJoinPair(pred, 1, 0, left, 2, 0, right) {
 			t.Fatalf("%T with negative column matched; want reject", pred)
 		}
+	}
+}
+
+func TestMatchJoinPairColRangeMismatchedBoundKindRejects(t *testing.T) {
+	p := ColRange{
+		Table:  2,
+		Column: 0,
+		Lower:  Bound{Value: types.NewString("bad"), Inclusive: true},
+		Upper:  Bound{Unbounded: true},
+	}
+
+	if MatchJoinPair(p,
+		1, 0, types.ProductValue{types.NewUint64(1)},
+		2, 0, types.ProductValue{types.NewUint64(42)},
+	) {
+		t.Fatal("mismatched bound kind should not match joined rows")
 	}
 }
 

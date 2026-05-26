@@ -219,6 +219,12 @@ func rowValue(row types.ProductValue, col ColID) (Value, bool) {
 
 // matchBounds reports whether v falls within [lower, upper].
 func matchBounds(v Value, lower, upper Bound) bool {
+	if !lower.Unbounded && lower.Value.Kind() != v.Kind() {
+		return false
+	}
+	if !upper.Unbounded && upper.Value.Kind() != v.Kind() {
+		return false
+	}
 	if !lower.Unbounded {
 		c := v.Compare(lower.Value)
 		if lower.Inclusive {

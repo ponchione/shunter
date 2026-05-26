@@ -408,14 +408,7 @@ func forEachDistinctChangedRow(keys []valueKey, col ColID, rows []types.ProductV
 			continue
 		}
 		k := encodeValueKey(v)
-		seen := false
-		for _, existing := range keys {
-			if existing == k {
-				seen = true
-				break
-			}
-		}
-		if seen {
+		if slices.Contains(keys, k) {
 			continue
 		}
 		keys = append(keys, k)

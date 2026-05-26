@@ -129,7 +129,7 @@ func (r *RangeIndex) ForEachHash(table TableID, col ColID, value Value, fn func(
 		return
 	}
 	for _, bucket := range byRange {
-		if !rangeContainsValue(value, bucket.lower, bucket.upper) {
+		if !matchBounds(value, bucket.lower, bucket.upper) {
 			continue
 		}
 		for h := range bucket.hashes {
@@ -162,14 +162,4 @@ func makeRangeKey(lower, upper Bound) rangeKey {
 		k.upper = encodeValueKey(upper.Value)
 	}
 	return k
-}
-
-func rangeContainsValue(v Value, lower, upper Bound) bool {
-	if !lower.Unbounded && lower.Value.Kind() != v.Kind() {
-		return false
-	}
-	if !upper.Unbounded && upper.Value.Kind() != v.Kind() {
-		return false
-	}
-	return matchBounds(v, lower, upper)
 }
