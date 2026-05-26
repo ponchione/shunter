@@ -132,7 +132,7 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 	var matchedRows []types.ProductValue
 	var encodedRows []types.ProductValue
 	rowsAlreadyProjected := false
-	rowsAlreadyOrderedAndLimited := false
+	rowsAlreadyWindowed := false
 	if query.Aggregate != nil {
 		// Aggregate shape happens over the full matched input; OFFSET/LIMIT then
 		// slice the one-row aggregate output (reference ProjectList::Limit wraps
@@ -192,24 +192,34 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 					return SQLQueryResult{}, err
 				}
 				matchedRows = rows
-				rowsAlreadyOrderedAndLimited = true
+				rowsAlreadyWindowed = true
 			} else {
+				unordered := len(query.OrderBy) == 0
+				skipped := 0
 				_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(pv types.ProductValue) bool {
+					if unordered && skipped < rowOffset {
+						skipped++
+						return true
+					}
 					matchedRows = append(matchedRows, pv)
+					if unordered {
+						return !oneOffLimitReached(len(matchedRows), rowLimit)
+					}
 					return !oneOffLimitReached(len(matchedRows), scanLimit)
 				})
 				if err != nil {
 					return SQLQueryResult{}, err
 				}
+				rowsAlreadyWindowed = unordered
 			}
 		}
-		if len(query.OrderBy) != 0 && !rowsAlreadyProjected && !rowsAlreadyOrderedAndLimited {
+		if len(query.OrderBy) != 0 && !rowsAlreadyProjected && !rowsAlreadyWindowed {
 			var err error
 			matchedRows, err = orderAndLimitOneOffRows(matchedRows, query.OrderBy, rowOffset, rowLimit)
 			if err != nil {
 				return SQLQueryResult{}, err
 			}
-		} else if len(query.OrderBy) == 0 {
+		} else if len(query.OrderBy) == 0 && !rowsAlreadyWindowed {
 			matchedRows = sliceOneOffRows(matchedRows, rowOffset, rowLimit)
 		}
 		if len(query.ProjectionColumns) != 0 && !rowsAlreadyProjected {
