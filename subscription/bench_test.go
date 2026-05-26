@@ -470,6 +470,54 @@ func BenchmarkFanOut1KClientsMultiTableVariedQueries(b *testing.B) {
 	}
 }
 
+func BenchmarkEvalOrderedLimitedWindowDelta(b *testing.B) {
+	cases := []struct {
+		totalRows  int
+		limitRows  uint64
+		inputOrder string
+		keyColumns int
+		changeKind string
+	}{
+		{totalRows: 128, limitRows: 10, inputOrder: "ascending", keyColumns: 1, changeKind: "insert_head"},
+		{totalRows: 1024, limitRows: 100, inputOrder: "descending", keyColumns: 1, changeKind: "delete_head"},
+		{totalRows: 1024, limitRows: 100, inputOrder: "shuffled", keyColumns: 2, changeKind: "insert_outside"},
+		{totalRows: 4096, limitRows: 100, inputOrder: "descending", keyColumns: 2, changeKind: "insert_head"},
+		{totalRows: 4096, limitRows: 1000, inputOrder: "shuffled", keyColumns: 1, changeKind: "delete_head"},
+	}
+
+	for _, tc := range cases {
+		name := fmt.Sprintf("rows_%d/limit_%d/%s/%dcol/%s", tc.totalRows, tc.limitRows, tc.inputOrder, tc.keyColumns, tc.changeKind)
+		b.Run(name, func(b *testing.B) {
+			s := benchmarkOrderedInitialRowSchema()
+			beforeRows := benchmarkLiveOrderedWindowRows(tc.totalRows, tc.inputOrder, tc.keyColumns)
+			afterRows, inserted, deleted := benchmarkLiveOrderedWindowChange(beforeRows, tc.totalRows, tc.keyColumns, tc.changeKind)
+			before := buildMockCommitted(s, map[TableID][]types.ProductValue{1: beforeRows})
+			after := buildMockCommitted(s, map[TableID][]types.ProductValue{1: afterRows})
+			cs := simpleChangeset(1, inserted, deleted)
+			orderBy := benchmarkInitialRowOrderBy(tc.keyColumns)
+			limitRows := tc.limitRows
+			inbox := make(chan FanOutMessage, 1024)
+			mgr := NewManager(s, s, WithFanOutInbox(inbox))
+			if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+				ConnID:         types.ConnectionID{1},
+				QueryID:        10,
+				Predicates:     []Predicate{AllRows{Table: 1}},
+				OrderByColumns: [][]OrderByColumn{orderBy},
+				Limits:         []*uint64{&limitRows},
+			}, before); err != nil {
+				b.Fatal(err)
+			}
+			drainBenchmarkInbox(b, inbox)
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				mgr.EvalAndBroadcast(types.TxID(uint64(i+1)), cs, after, PostCommitMeta{})
+			}
+		})
+	}
+}
+
 func benchmarkSkewedFanoutPredicate(i, hotClients, changedRows, hotValue int) Predicate {
 	if i < hotClients {
 		return ColEq{Table: 1, Column: 0, Value: types.NewUint64(uint64(hotValue))}
@@ -580,6 +628,59 @@ func benchmarkMultiTableFanoutBucket(table TableID, value uint64) types.Value {
 		return types.NewInt32(int32(value % 4))
 	}
 	return benchmarkVariedFanoutBucket(value)
+}
+
+func benchmarkLiveOrderedWindowRows(totalRows int, inputOrder string, keyColumns int) []types.ProductValue {
+	rows := make([]types.ProductValue, totalRows)
+	for i := range rows {
+		rank := benchmarkOrderInputRank(i, totalRows, inputOrder)
+		rows[i] = benchmarkLiveOrderedWindowRow(rank+1, totalRows, keyColumns)
+	}
+	return rows
+}
+
+func benchmarkLiveOrderedWindowChange(beforeRows []types.ProductValue, totalRows int, keyColumns int, changeKind string) (afterRows, inserted, deleted []types.ProductValue) {
+	afterRows = append([]types.ProductValue(nil), beforeRows...)
+	switch changeKind {
+	case "insert_head":
+		inserted = []types.ProductValue{benchmarkLiveOrderedWindowRow(0, totalRows, keyColumns)}
+		afterRows = append(afterRows, inserted...)
+	case "insert_outside":
+		inserted = []types.ProductValue{benchmarkLiveOrderedWindowRow(totalRows+1, totalRows, keyColumns)}
+		afterRows = append(afterRows, inserted...)
+	case "delete_head":
+		deleted = []types.ProductValue{benchmarkLiveOrderedWindowRow(1, totalRows, keyColumns)}
+		afterRows = benchmarkRowsWithoutOne(afterRows, deleted[0])
+	default:
+		panic(fmt.Sprintf("unsupported live ordered window change %q", changeKind))
+	}
+	return afterRows, inserted, deleted
+}
+
+func benchmarkLiveOrderedWindowRow(rank, totalRows int, keyColumns int) types.ProductValue {
+	switch keyColumns {
+	case 1:
+		return types.ProductValue{
+			types.NewUint64(uint64(rank)),
+			types.NewUint64(uint64((rank*31+7)%(totalRows+1) + 1)),
+		}
+	case 2:
+		return types.ProductValue{
+			types.NewUint64(uint64(rank/16 + 1)),
+			types.NewUint64(uint64(rank%16 + 1)),
+		}
+	default:
+		panic(fmt.Sprintf("unsupported key column count %d", keyColumns))
+	}
+}
+
+func benchmarkRowsWithoutOne(rows []types.ProductValue, remove types.ProductValue) []types.ProductValue {
+	for i, row := range rows {
+		if row.Equal(remove) {
+			return append(rows[:i], rows[i+1:]...)
+		}
+	}
+	panic(fmt.Sprintf("benchmark row not found: %v", remove))
 }
 
 // BenchmarkJoinFragmentEval measures end-to-end EvalAndBroadcast cost for one
