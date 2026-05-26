@@ -116,6 +116,62 @@ func BenchmarkRegisterSetInitialQueryAllRows(b *testing.B) {
 	}
 }
 
+func BenchmarkRegisterSetOrderedInitialRows(b *testing.B) {
+	cases := []struct {
+		totalRows  int
+		limitRows  uint64
+		offsetRows uint64
+		inputOrder string
+		keyColumns int
+	}{
+		{totalRows: 128, limitRows: 10, inputOrder: "ascending", keyColumns: 1},
+		{totalRows: 1024, limitRows: 100, inputOrder: "descending", keyColumns: 1},
+		{totalRows: 1024, limitRows: 100, offsetRows: 25, inputOrder: "shuffled", keyColumns: 2},
+		{totalRows: 4096, limitRows: 100, inputOrder: "descending", keyColumns: 2},
+		{totalRows: 4096, limitRows: 1000, inputOrder: "shuffled", keyColumns: 1},
+	}
+
+	for _, tc := range cases {
+		name := fmt.Sprintf("rows_%d/limit_%d/offset_%d/%s/%dcol", tc.totalRows, tc.limitRows, tc.offsetRows, tc.inputOrder, tc.keyColumns)
+		b.Run(name, func(b *testing.B) {
+			s := benchmarkOrderedInitialRowSchema()
+			rows := benchmarkOrderedInitialRows(tc.totalRows, tc.inputOrder, tc.keyColumns)
+			committed := buildMockCommitted(s, map[TableID][]types.ProductValue{1: rows})
+			orderBy := benchmarkInitialRowOrderBy(tc.keyColumns)
+			pred := AllRows{Table: 1}
+			limitRows := tc.limitRows
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			returnedRows := 0
+			for i := 0; i < b.N; i++ {
+				mgr := NewManager(s, s)
+				req := SubscriptionSetRegisterRequest{
+					ConnID:         types.ConnectionID{1},
+					QueryID:        uint32(i),
+					Predicates:     []Predicate{pred},
+					OrderByColumns: [][]OrderByColumn{orderBy},
+					Limits:         []*uint64{&limitRows},
+				}
+				if tc.offsetRows > 0 {
+					offsetRows := tc.offsetRows
+					req.Offsets = []*uint64{&offsetRows}
+				}
+				res, err := mgr.RegisterSet(req, committed)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(res.Update) != 0 {
+					returnedRows += len(res.Update[0].Inserts)
+				}
+			}
+			if returnedRows == 0 {
+				b.Fatal("ordered RegisterSet returned no rows")
+			}
+		})
+	}
+}
+
 func BenchmarkBoundedOrderedInitialRowsAdd(b *testing.B) {
 	cases := []struct {
 		totalRows  int
@@ -150,7 +206,7 @@ func BenchmarkBoundedOrderedInitialRowsAdd(b *testing.B) {
 						b.Fatal(err)
 					}
 				}
-				kept += len(bounded.productRows())
+				kept += len(bounded.rows)
 			}
 			if kept == 0 {
 				b.Fatal("bounded ordered rows kept no rows")
@@ -185,6 +241,12 @@ func BenchmarkOrderWindowRows(b *testing.B) {
 			}
 		}
 	}
+}
+
+func benchmarkOrderedInitialRowSchema() *fakeSchema {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 0)
+	return s
 }
 
 func benchmarkInitialRowOrderBy(keyColumns int) []OrderByColumn {
