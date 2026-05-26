@@ -291,7 +291,7 @@ func checkRowIDValueAvailable(next types.RowID) error {
 }
 
 func (t *Transaction) checkCommittedUnique(tableID schema.TableID, table *Table, idx *Index, key IndexKey) error {
-	for _, rid := range idx.btree.Seek(key) {
+	for _, rid := range idx.btree.rowIDs(key) {
 		if t.tx.IsDeleted(tableID, rid) {
 			continue
 		}
@@ -302,7 +302,8 @@ func (t *Transaction) checkCommittedUnique(tableID schema.TableID, table *Table,
 
 func (t *Transaction) checkTxUnique(tableID schema.TableID, table *Table, idxOrdinal int, idx *Index, key IndexKey) error {
 	entries := t.ensureTxUniqueIndex(tableID, idxOrdinal, idx)
-	for _, entry := range entries[key.hash64()] {
+	hash := key.hash64()
+	for _, entry := range entries[hash] {
 		if key.Equal(entry.key) {
 			return uniqueViolationError(table, idx, key)
 		}
@@ -322,7 +323,8 @@ func (t *Transaction) ensureTxUniqueIndex(tableID schema.TableID, idxOrdinal int
 	entries := make(map[uint64][]txUniqueEntry, len(rows))
 	for rowID, row := range rows {
 		key := idx.ExtractKey(row)
-		entries[key.hash64()] = append(entries[key.hash64()], txUniqueEntry{rowID: rowID, key: key})
+		hash := key.hash64()
+		entries[hash] = append(entries[hash], txUniqueEntry{rowID: rowID, key: key})
 	}
 	t.txUniqueIndexes[ref] = entries
 	return entries
@@ -330,7 +332,8 @@ func (t *Transaction) ensureTxUniqueIndex(tableID schema.TableID, idxOrdinal int
 
 func (t *Transaction) hasTxDuplicateRow(tableID schema.TableID, row types.ProductValue) bool {
 	entries := t.ensureTxRowIndex(tableID)
-	for _, entry := range entries[row.Hash64()] {
+	hash := row.Hash64()
+	for _, entry := range entries[hash] {
 		if entry.row.Equal(row) {
 			return true
 		}
@@ -348,7 +351,8 @@ func (t *Transaction) ensureTxRowIndex(tableID schema.TableID) map[uint64][]txRo
 	rows := t.tx.tableInserts(tableID)
 	entries := make(map[uint64][]txRowEntry, len(rows))
 	for rowID, row := range rows {
-		entries[row.Hash64()] = append(entries[row.Hash64()], txRowEntry{rowID: rowID, row: row})
+		hash := row.Hash64()
+		entries[hash] = append(entries[hash], txRowEntry{rowID: rowID, row: row})
 	}
 	t.txRowIndexes[tableID] = entries
 	return entries

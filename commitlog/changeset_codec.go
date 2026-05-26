@@ -22,9 +22,17 @@ func EncodeChangeset(cs *store.Changeset) ([]byte, error) {
 
 func encodeChangesetWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecordPayloadBytes uint32) ([]byte, error) {
 	// Sort table IDs for deterministic output.
-	tableIDs := make([]schema.TableID, 0, len(cs.Tables))
-	for id := range cs.Tables {
-		tableIDs = append(tableIDs, id)
+	tableCap := 0
+	if cs != nil {
+		tableCap = len(cs.Tables)
+	}
+	tableIDs := make([]schema.TableID, 0, tableCap)
+	if cs != nil {
+		for id, tc := range cs.Tables {
+			if tc != nil {
+				tableIDs = append(tableIDs, id)
+			}
+		}
 	}
 	slices.Sort(tableIDs)
 

@@ -1177,6 +1177,21 @@ func TestCommitNetEffectInsertDelete(t *testing.T) {
 	}
 }
 
+func TestChangesetHelpersTreatNilAsEmpty(t *testing.T) {
+	var changeset *Changeset
+	if !changeset.IsEmpty() {
+		t.Fatal("nil changeset should be empty")
+	}
+	if got := changeset.TableChanges(0); got != nil {
+		t.Fatalf("nil changeset TableChanges = %#v, want nil", got)
+	}
+
+	changeset = &Changeset{Tables: map[schema.TableID]*TableChangeset{0: nil}}
+	if !changeset.IsEmpty() {
+		t.Fatal("changeset with nil table entry should be empty")
+	}
+}
+
 func TestCommitProducesLocalChangesetsAcrossTransactions(t *testing.T) {
 	cs, reg := buildTestState()
 

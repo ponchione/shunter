@@ -57,7 +57,7 @@ func (b *BTreeIndex) splitPage(pageIdx int) {
 	}
 	mid := len(p.entries) / 2
 	rightEntries := slices.Clone(p.entries[mid:])
-	p.entries = p.entries[:mid]
+	p.entries = slices.Clip(p.entries[:mid])
 	right := &btreePage{entries: rightEntries}
 	b.pages = slices.Insert(b.pages, pageIdx+1, right)
 }
@@ -155,11 +155,19 @@ func (b *BTreeIndex) Remove(key IndexKey, rowID types.RowID) {
 
 // Seek returns all RowIDs for an exact key match, or nil.
 func (b *BTreeIndex) Seek(key IndexKey) []types.RowID {
+	rowIDs := b.rowIDs(key)
+	if len(rowIDs) == 0 {
+		return nil
+	}
+	return slices.Clone(rowIDs)
+}
+
+func (b *BTreeIndex) rowIDs(key IndexKey) []types.RowID {
 	pageIdx, entryIdx, found := b.lowerBound(key)
 	if !found {
 		return nil
 	}
-	return slices.Clone(b.pages[pageIdx].entries[entryIdx].rowIDs)
+	return b.pages[pageIdx].entries[entryIdx].rowIDs
 }
 
 // Len returns the total number of key->RowID mappings.

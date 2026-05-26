@@ -195,7 +195,7 @@ func (t *Table) insertIntoIndexes(id types.RowID, row types.ProductValue) error 
 
 		// Unique constraint check.
 		if idx.schema.Unique {
-			if existing := idx.btree.Seek(key); existing != nil {
+			if len(idx.btree.rowIDs(key)) != 0 {
 				// Rollback previously inserted indexes.
 				for j := 0; j < i; j++ {
 					rk := t.indexes[j].ExtractKey(row)

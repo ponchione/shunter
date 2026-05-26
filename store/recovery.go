@@ -93,7 +93,7 @@ func applyChangesetToTable(table *Table, tc *TableChangeset) error {
 func findReplayDeleteRowID(table *Table, row types.ProductValue) (types.RowID, bool) {
 	if pk := table.PrimaryIndex(); pk != nil {
 		key := pk.ExtractKey(row)
-		for _, rid := range pk.Seek(key) {
+		for _, rid := range pk.btree.rowIDs(key) {
 			committedRow, ok := table.rowView(rid)
 			if ok && committedRow.Equal(row) {
 				return rid, true

@@ -417,6 +417,22 @@ func TestChangesetCodecDeterministicOrderingAndLengthPrefixes(t *testing.T) {
 		t.Fatalf("empty changeset bytes = %v", empty)
 	}
 
+	nilChangeset, err := EncodeChangeset(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(nilChangeset, empty) {
+		t.Fatalf("nil changeset bytes = %v, want empty encoding %v", nilChangeset, empty)
+	}
+
+	nilTableEntry, err := EncodeChangeset(&store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{0: nil}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(nilTableEntry, empty) {
+		t.Fatalf("nil table changeset bytes = %v, want empty encoding %v", nilTableEntry, empty)
+	}
+
 	zeroCounts, err := EncodeChangeset(&store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{0: {TableID: 0, TableName: "players"}}})
 	if err != nil {
 		t.Fatal(err)

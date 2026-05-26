@@ -219,7 +219,7 @@ func revalidateInsertAgainstCommitted(tableID schema.TableID, table *Table, row 
 			continue
 		}
 		key := idx.ExtractKey(row)
-		for _, rid := range idx.btree.Seek(key) {
+		for _, rid := range idx.btree.rowIDs(key) {
 			if txState.IsDeleted(tableID, rid) {
 				continue
 			}
