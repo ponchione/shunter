@@ -318,7 +318,7 @@ func renderLiteralSourceText(lit Literal) (string, bool) {
 // columns. Decode errors are returned for the caller to wrap.
 func decodeReferenceHex(text string) ([]byte, error) {
 	body := strings.TrimPrefix(text, "0x")
-	return hex.DecodeString(body)
+	return decodeHexPad(body)
 }
 
 // isIntegerKind reports whether k is any signed or unsigned integer kind.
@@ -646,12 +646,19 @@ func parseHexLiteral(text string) ([]byte, error) {
 	} else if len(body) >= 3 && (body[0] == 'X' || body[0] == 'x') && body[1] == '\'' && body[len(body)-1] == '\'' {
 		body = body[2 : len(body)-1]
 	}
-	if len(body) == 0 || len(body)%2 != 0 {
+	if len(body) == 0 {
 		return nil, fmt.Errorf("%w: malformed hex literal %q", ErrUnsupportedSQL, text)
 	}
-	decoded, err := hex.DecodeString(body)
+	decoded, err := decodeHexPad(body)
 	if err != nil {
 		return nil, fmt.Errorf("%w: malformed hex literal %q", ErrUnsupportedSQL, text)
 	}
 	return decoded, nil
+}
+
+func decodeHexPad(body string) ([]byte, error) {
+	if len(body)%2 != 0 {
+		body = "0" + body
+	}
+	return hex.DecodeString(body)
 }

@@ -1172,49 +1172,30 @@ func TestCoerceParserPreservedSourceTextWidensOntoString(t *testing.T) {
 // TestCoerceParserStrNumHexOnBytesViaFromHexPad pins the reference
 // `parse(value, AlgebraicType::Bytes)` arm at expr/src/lib.rs:218 onto the
 // parser-driven `KindBytes` path. `from_hex_pad` strips an optional `0x`
-// prefix and decodes even-length hex digit pairs; Str / Num / Hex source
-// text all flow through the same routing. Decode failure folds to
+// prefix, left-pads odd-length hex text, and decodes digit pairs; Str / Num /
+// Hex source text all flow through the same routing. Decode failure folds to
 // `InvalidLiteral` with `Type = "Array<U8>"`.
 func TestCoerceParserStrNumHexOnBytesViaFromHexPad(t *testing.T) {
-	t.Run("string_with_0x_prefix_binds", func(t *testing.T) {
-		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = '0x0102'")
-		v, err := Coerce(lit, types.KindBytes)
-		if err != nil {
-			t.Fatalf("Coerce error: %v", err)
-		}
-		got := v.AsBytes()
-		if len(got) != 2 || got[0] != 0x01 || got[1] != 0x02 {
-			t.Fatalf("AsBytes = %x, want 0102", got)
-		}
-	})
-	t.Run("numeric_token_binds_as_hex", func(t *testing.T) {
-		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = 42")
-		v, err := Coerce(lit, types.KindBytes)
-		if err != nil {
-			t.Fatalf("Coerce error: %v", err)
-		}
-		got := v.AsBytes()
-		if len(got) != 1 || got[0] != 0x42 {
-			t.Fatalf("AsBytes = %x, want 42", got)
-		}
-	})
-	t.Run("hex_token_binds_via_decoded_bytes", func(t *testing.T) {
-		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = 0xDEADBEEF")
-		v, err := Coerce(lit, types.KindBytes)
-		if err != nil {
-			t.Fatalf("Coerce error: %v", err)
-		}
-		got := v.AsBytes()
-		want := []byte{0xde, 0xad, 0xbe, 0xef}
-		if len(got) != len(want) {
-			t.Fatalf("AsBytes len = %d, want %d", len(got), len(want))
-		}
-		for i, b := range want {
-			if got[i] != b {
-				t.Fatalf("AsBytes[%d] = %x, want %x", i, got[i], b)
+	assertBytes := func(name, query string, want []byte) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			lit := parseFilterLiteral(t, query)
+			v, err := Coerce(lit, types.KindBytes)
+			if err != nil {
+				t.Fatalf("Coerce error: %v", err)
 			}
-		}
-	})
+			if got := v.AsBytes(); !bytes.Equal(got, want) {
+				t.Fatalf("AsBytes = %x, want %x", got, want)
+			}
+		})
+	}
+	assertBytes("string_with_0x_prefix_binds", "SELECT * FROM t WHERE bytes = '0x0102'", []byte{0x01, 0x02})
+	assertBytes("string_with_odd_0x_prefix_binds", "SELECT * FROM t WHERE bytes = '0x1'", []byte{0x01})
+	assertBytes("numeric_token_binds_as_hex", "SELECT * FROM t WHERE bytes = 42", []byte{0x42})
+	assertBytes("odd_numeric_token_binds_as_padded_hex", "SELECT * FROM t WHERE bytes = 1", []byte{0x01})
+	assertBytes("hex_token_binds_via_decoded_bytes", "SELECT * FROM t WHERE bytes = 0xDEADBEEF", []byte{0xde, 0xad, 0xbe, 0xef})
+	assertBytes("odd_hex_token_binds_via_decoded_bytes", "SELECT * FROM t WHERE bytes = 0xF", []byte{0x0f})
+	assertBytes("odd_x_quoted_hex_token_binds_via_decoded_bytes", "SELECT * FROM t WHERE bytes = X'F'", []byte{0x0f})
 	t.Run("non_hex_string_emits_invalid_literal_array_u8", func(t *testing.T) {
 		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = 'not-hex'")
 		_, err := Coerce(lit, types.KindBytes)
