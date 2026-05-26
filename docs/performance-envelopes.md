@@ -116,6 +116,49 @@ Every row is advisory.
 | Delta indexes | `DeltaIndexConstruction-24` | 100 changed rows, 5 indexed columns | 33.96us +/- 0% | 3.965Ki +/- 0% | 501 | advisory |
 | Candidate collection | `CandidateCollection-24` | 1,000 equality subscriptions, 10 changed rows | 1.003us +/- 1% | 528 B +/- 0% | 3 | advisory |
 
+## Focused Ordered Subscription Window Baseline
+
+This focused snapshot records the ordered subscription window benchmarks added
+after the broad v1.1.0 envelope above. It is advisory and should be refreshed
+with before/after `benchstat` output when changing ordered initial-row
+collection, bounded ordered windows, live ordered/limited deltas, or
+ORDER BY comparator behavior.
+
+- Date: 2026-05-26
+- Shunter commit: `9c88c7ddc4153d6f33dea3f9bb2fb032f40deab3`
+- Host: `Linux gernsback 6.17.0-29-generic`, linux/amd64
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`, 12 cores, 24 logical CPUs
+- Raw sample: 47 sub-benchmarks, `-count=10`, 470 benchmark rows, total
+  package benchmark time 634.469s
+
+Command:
+
+```bash
+go test -run '^$' -bench 'Benchmark(RegisterSetOrderedInitialRows|InitialRowsForTableOrderedWindow|BoundedOrderedInitialRowsAdd|OrderWindowRows|OrderedInitialRowsComparatorShapes|EvalOrderedLimitedWindowDelta)' -benchmem -count=10 ./subscription > /tmp/shunter-ordered-subscription-bench-raw.txt 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-ordered-subscription-bench-raw.txt > /tmp/shunter-ordered-subscription-benchstat.txt 2>&1
+```
+
+Representative standings:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Ordered register | `RegisterSetOrderedInitialRows/rows_128/limit_10/offset_0/ascending/1col-24` | 128 rows, top 10, ascending one-column key | 24.67us +/- 1% | 38.44Ki +/- 0% | 494 | advisory |
+| Ordered register | `RegisterSetOrderedInitialRows/rows_1024/limit_100/offset_0/descending/1col-24` | 1,024 rows, top 100, descending one-column key | 291.8us +/- 2% | 291.9Ki +/- 0% | 3.454k | advisory |
+| Ordered register | `RegisterSetOrderedInitialRows/rows_4096/limit_1000/offset_0/shuffled/1col-24` | 4,096 rows, top 1,000, shuffled one-column key | 1.772ms +/- 1% | 1.398Mi +/- 0% | 15.38k | advisory |
+| Initial row collection | `InitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24` | table scan, 1,024 rows, top 100 | 252.4us +/- 5% | 255.6Ki +/- 0% | 3.085k | advisory |
+| Initial row collection | `InitialRowsForTableOrderedWindow/index_range/rows_4096/limit_100/offset_0/shuffled/2col-24` | indexed range, 4,096 rows, top 100, two-column key | 1.330ms +/- 6% | 1.623Mi +/- 0% | 12.31k | advisory |
+| Bounded ordered window | `BoundedOrderedInitialRowsAdd/rows_1024/keep_100/shuffled/1col-24` | bounded add, 1,024 rows, keep 100 | 193.3us +/- 6% | 244.5Ki +/- 0% | 3.074k | advisory |
+| Bounded ordered window | `BoundedOrderedInitialRowsAdd/rows_4096/keep_1000/shuffled/2col-24` | bounded add, 4,096 rows, keep 1,000, two-column key | 1.487ms +/- 10% | 1.726Mi +/- 0% | 12.29k | advisory |
+| Full ordering | `OrderWindowRows/rows_4096/shuffled/2col-24` | full sort, 4,096 shuffled rows, two-column key | 1.484ms +/- 6% | 1.912Mi +/- 0% | 12.29k | advisory |
+| Comparator shape | `OrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24` | bounded DESC with tie-heavy keys | 1.597ms +/- 2% | 1.129Mi +/- 0% | 12.29k | advisory |
+| Comparator shape | `OrderedInitialRowsComparatorShapes/full/rows_4096/descending/2col/mixed/ties-24` | full sort, mixed direction, tie-heavy two-column key | 2.114ms +/- 7% | 2.006Mi +/- 0% | 12.29k | advisory |
+| Live ordered window delta | `EvalOrderedLimitedWindowDelta/rows_128/limit_10/ascending/1col/insert_head-24` | live top-10 insert into window head | 55.10us +/- 4% | 107.4Ki +/- 0% | 1.119k | advisory |
+| Live ordered window delta | `EvalOrderedLimitedWindowDelta/rows_1024/limit_100/shuffled/2col/insert_outside-24` | live top-100 insert outside window, shuffled two-column key | 959.4us +/- 1% | 1.179Mi +/- 0% | 8.668k | advisory |
+| Live ordered window delta | `EvalOrderedLimitedWindowDelta/rows_4096/limit_100/descending/2col/insert_head-24` | live top-100 insert into window head, two-column key | 3.737ms +/- 2% | 4.828Mi +/- 0% | 33.28k | advisory |
+| Live ordered window delta | `EvalOrderedLimitedWindowDelta/rows_4096/limit_1000/shuffled/1col/delete_head-24` | live top-1,000 delete from window head | 3.146ms +/- 4% | 3.554Mi +/- 0% | 28.69k | advisory |
+| Ordered suite geomean | all focused ordered subscription window benchmarks | 47 sub-benchmark geomean | 310.2us | 431.0Ki | 3.724k | advisory |
+
 ## Current Read
 
 - Existing equality subscription evaluation and candidate collection remain the
@@ -126,6 +169,9 @@ Every row is advisory.
 - Subscription fanout coverage now includes same-query, varied single-table,
   skewed hot-key, and varied two-table fixtures. Workload-derived product-app
   and external-canary distributions remain outside the local benchmark envelope.
+- Ordered subscription window coverage now has a focused `-count=10` baseline
+  across bounded initial rows, full ordering, initial row collection,
+  registration, comparator shape, and live ordered/limited delta fixtures.
 - Executor reducer commit coverage now includes one-at-a-time round trips and
   a queued 64-command burst fixture. These are internal executor fixtures, not
   public app or canary throughput measurements.
