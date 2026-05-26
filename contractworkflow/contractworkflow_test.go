@@ -567,6 +567,57 @@ func TestProductValueFromJSONDecodesSchemaOrderedValues(t *testing.T) {
 	}
 }
 
+func TestProductValueFromJSONDecodesStringEncodedIntegerRows(t *testing.T) {
+	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+		{Name: "i64", Type: "int64"},
+		{Name: "u64", Type: "uint64"},
+		{Name: "i128", Type: "int128"},
+		{Name: "u128", Type: "uint128"},
+		{Name: "i256", Type: "int256"},
+		{Name: "u256", Type: "uint256"},
+		{Name: "at", Type: "timestamp"},
+		{Name: "duration", Type: "duration"},
+	}}
+	row := types.ProductValue{
+		types.NewInt64(-1 << 63),
+		types.NewUint64(^uint64(0)),
+		types.NewInt128(-1, 0),
+		types.NewUint128(1, 0),
+		types.NewInt256(-1, 0, 0, 0),
+		types.NewUint256(1, 0, 0, 0),
+		types.NewTimestamp(42),
+		types.NewDuration(-123),
+	}
+	jsonRow, err := ProductValueToJSONRow(product, row)
+	if err != nil {
+		t.Fatalf("ProductValueToJSONRow returned error: %v", err)
+	}
+	data, err := json.Marshal(jsonRow)
+	if err != nil {
+		t.Fatalf("Marshal JSON row returned error: %v", err)
+	}
+
+	decoded, err := ProductValueFromJSON(product, data)
+	if err != nil {
+		t.Fatalf("ProductValueFromJSON returned error: %v", err)
+	}
+	for i := range row {
+		if !decoded[i].Equal(row[i]) {
+			t.Fatalf("decoded[%d] = %+v, want %+v (json=%s)", i, decoded[i], row[i], data)
+		}
+	}
+}
+
+func TestProductValueFromJSONRejectsWideIntegerOverflow(t *testing.T) {
+	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+		{Name: "wide", Type: "uint128"},
+	}}
+	_, err := ProductValueFromJSON(product, []byte(`{"wide": "340282366920938463463374607431768211456"}`))
+	if !errors.Is(err, ErrInvalidArgumentJSON) {
+		t.Fatalf("ProductValueFromJSON overflow error = %v, want ErrInvalidArgumentJSON", err)
+	}
+}
+
 func TestProductValueFromJSONRejectsInvalidArgumentObjects(t *testing.T) {
 	product := schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
 		{Name: "id", Type: "uint8"},

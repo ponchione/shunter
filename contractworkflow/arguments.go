@@ -3,11 +3,13 @@ package contractworkflow
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 
@@ -21,6 +23,15 @@ var (
 	ErrInvalidArgumentJSON     = errors.New("invalid argument JSON")
 	ErrUnsupportedArgumentType = errors.New("unsupported argument type")
 	ErrUnsupportedSurfaceKind  = errors.New("unsupported contract argument surface kind")
+)
+
+var (
+	argumentUint128Limit = new(big.Int).Lsh(big.NewInt(1), 128)
+	argumentUint256Limit = new(big.Int).Lsh(big.NewInt(1), 256)
+	argumentInt128Max    = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 127), big.NewInt(1))
+	argumentInt128Min    = new(big.Int).Neg(new(big.Int).Lsh(big.NewInt(1), 127))
+	argumentInt256Max    = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(1))
+	argumentInt256Min    = new(big.Int).Neg(new(big.Int).Lsh(big.NewInt(1), 255))
 )
 
 // ArgumentSurfaceKind identifies a contract surface that accepts BSATN product arguments.
@@ -361,17 +372,13 @@ func argumentValueFromJSON(column schema.ProductColumnExport, raw json.RawMessag
 		}
 		return types.NewBytesOwned(decoded), nil
 	case types.KindInt128:
-		v, err := decodeArgumentInt(column.Name, raw, 64)
-		return types.NewInt128FromInt64(v), err
+		return decodeArgumentWideSigned(column.Name, raw, "int128", argumentInt128Min, argumentInt128Max, int128FromBig)
 	case types.KindUint128:
-		v, err := decodeArgumentUint(column.Name, raw, 64)
-		return types.NewUint128FromUint64(v), err
+		return decodeArgumentWideUnsigned(column.Name, raw, "uint128", argumentUint128Limit, uint128FromBig)
 	case types.KindInt256:
-		v, err := decodeArgumentInt(column.Name, raw, 64)
-		return types.NewInt256FromInt64(v), err
+		return decodeArgumentWideSigned(column.Name, raw, "int256", argumentInt256Min, argumentInt256Max, int256FromBig)
 	case types.KindUint256:
-		v, err := decodeArgumentUint(column.Name, raw, 64)
-		return types.NewUint256FromUint64(v), err
+		return decodeArgumentWideUnsigned(column.Name, raw, "uint256", argumentUint256Limit, uint256FromBig)
 	case types.KindTimestamp:
 		v, err := decodeArgumentInt(column.Name, raw, 64)
 		return types.NewTimestamp(v), err
@@ -424,11 +431,11 @@ func decodeArgumentString(columnName string, raw json.RawMessage) (string, error
 }
 
 func decodeArgumentInt(columnName string, raw json.RawMessage, bitSize int) (int64, error) {
-	var n json.Number
-	if err := decodeArgumentRaw(columnName, raw, &n); err != nil {
+	text, err := decodeArgumentDecimalText(columnName, raw, fmt.Sprintf("int%d", bitSize))
+	if err != nil {
 		return 0, err
 	}
-	v, err := strconv.ParseInt(n.String(), 10, bitSize)
+	v, err := strconv.ParseInt(text, 10, bitSize)
 	if err != nil {
 		return 0, fmt.Errorf("%w: field %q must be an int%d: %v", ErrInvalidArgumentJSON, columnName, bitSize, err)
 	}
@@ -436,11 +443,11 @@ func decodeArgumentInt(columnName string, raw json.RawMessage, bitSize int) (int
 }
 
 func decodeArgumentUint(columnName string, raw json.RawMessage, bitSize int) (uint64, error) {
-	var n json.Number
-	if err := decodeArgumentRaw(columnName, raw, &n); err != nil {
+	text, err := decodeArgumentDecimalText(columnName, raw, fmt.Sprintf("uint%d", bitSize))
+	if err != nil {
 		return 0, err
 	}
-	v, err := strconv.ParseUint(n.String(), 10, bitSize)
+	v, err := strconv.ParseUint(text, 10, bitSize)
 	if err != nil {
 		return 0, fmt.Errorf("%w: field %q must be a uint%d: %v", ErrInvalidArgumentJSON, columnName, bitSize, err)
 	}
@@ -457,6 +464,100 @@ func decodeArgumentFloat(columnName string, raw json.RawMessage, bitSize int) (f
 		return 0, fmt.Errorf("%w: field %q must be a float%d: %v", ErrInvalidArgumentJSON, columnName, bitSize, err)
 	}
 	return v, nil
+}
+
+func decodeArgumentDecimalText(columnName string, raw json.RawMessage, typeName string) (string, error) {
+	var n json.Number
+	if err := decodeArgumentRaw(columnName, raw, &n); err == nil {
+		return n.String(), nil
+	}
+	var s string
+	if err := decodeArgumentRaw(columnName, raw, &s); err == nil {
+		return s, nil
+	}
+	return "", fmt.Errorf("%w: field %q must be a %s", ErrInvalidArgumentJSON, columnName, typeName)
+}
+
+func decodeArgumentBigInt(columnName string, raw json.RawMessage, typeName string) (*big.Int, error) {
+	text, err := decodeArgumentDecimalText(columnName, raw, typeName)
+	if err != nil {
+		return nil, err
+	}
+	n, ok := new(big.Int).SetString(text, 10)
+	if !ok {
+		return nil, fmt.Errorf("%w: field %q must be a %s", ErrInvalidArgumentJSON, columnName, typeName)
+	}
+	return n, nil
+}
+
+func decodeArgumentWideSigned(columnName string, raw json.RawMessage, typeName string, min, max *big.Int, mk func(*big.Int) types.Value) (types.Value, error) {
+	n, err := decodeArgumentBigInt(columnName, raw, typeName)
+	if err != nil {
+		return types.Value{}, err
+	}
+	if n.Cmp(min) < 0 || n.Cmp(max) > 0 {
+		return types.Value{}, fmt.Errorf("%w: field %q must be a %s", ErrInvalidArgumentJSON, columnName, typeName)
+	}
+	return mk(n), nil
+}
+
+func decodeArgumentWideUnsigned(columnName string, raw json.RawMessage, typeName string, limit *big.Int, mk func(*big.Int) types.Value) (types.Value, error) {
+	n, err := decodeArgumentBigInt(columnName, raw, typeName)
+	if err != nil {
+		return types.Value{}, err
+	}
+	if n.Sign() < 0 || n.Cmp(limit) >= 0 {
+		return types.Value{}, fmt.Errorf("%w: field %q must be a %s", ErrInvalidArgumentJSON, columnName, typeName)
+	}
+	return mk(n), nil
+}
+
+func int128FromBig(n *big.Int) types.Value {
+	var buf [16]byte
+	fillSignedWide(buf[:], n, argumentUint128Limit)
+	return types.NewInt128(
+		int64(binary.BigEndian.Uint64(buf[0:8])),
+		binary.BigEndian.Uint64(buf[8:16]),
+	)
+}
+
+func uint128FromBig(n *big.Int) types.Value {
+	var buf [16]byte
+	n.FillBytes(buf[:])
+	return types.NewUint128(
+		binary.BigEndian.Uint64(buf[0:8]),
+		binary.BigEndian.Uint64(buf[8:16]),
+	)
+}
+
+func int256FromBig(n *big.Int) types.Value {
+	var buf [32]byte
+	fillSignedWide(buf[:], n, argumentUint256Limit)
+	return types.NewInt256(
+		int64(binary.BigEndian.Uint64(buf[0:8])),
+		binary.BigEndian.Uint64(buf[8:16]),
+		binary.BigEndian.Uint64(buf[16:24]),
+		binary.BigEndian.Uint64(buf[24:32]),
+	)
+}
+
+func uint256FromBig(n *big.Int) types.Value {
+	var buf [32]byte
+	n.FillBytes(buf[:])
+	return types.NewUint256(
+		binary.BigEndian.Uint64(buf[0:8]),
+		binary.BigEndian.Uint64(buf[8:16]),
+		binary.BigEndian.Uint64(buf[16:24]),
+		binary.BigEndian.Uint64(buf[24:32]),
+	)
+}
+
+func fillSignedWide(dst []byte, n, limit *big.Int) {
+	t := new(big.Int).Set(n)
+	if t.Sign() < 0 {
+		t.Add(t, limit)
+	}
+	t.FillBytes(dst)
 }
 
 func argumentValueKind(value string) (types.ValueKind, bool) {

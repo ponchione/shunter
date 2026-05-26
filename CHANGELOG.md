@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Contract workflow JSON argument decoding now accepts the decimal-string
+  integer forms emitted by contract-aware JSON row rendering, including full
+  128-bit and 256-bit integer values.
 - Store index-key copies now reuse `types.Value.Copy`, avoiding redundant JSON
   reparse/canonicalization while preserving defensive-copy isolation.
 - Declared live views now support the bounded multi-way inner-join projection
