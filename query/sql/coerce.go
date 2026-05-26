@@ -318,6 +318,7 @@ func renderLiteralSourceText(lit Literal) (string, bool) {
 // columns. Decode errors are returned for the caller to wrap.
 func decodeReferenceHex(text string) ([]byte, error) {
 	body := strings.TrimPrefix(text, "0x")
+	body = strings.TrimPrefix(body, "0X")
 	return decodeHexPad(body)
 }
 

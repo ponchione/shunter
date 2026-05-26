@@ -1190,6 +1190,7 @@ func TestCoerceParserStrNumHexOnBytesViaFromHexPad(t *testing.T) {
 		})
 	}
 	assertBytes("string_with_0x_prefix_binds", "SELECT * FROM t WHERE bytes = '0x0102'", []byte{0x01, 0x02})
+	assertBytes("string_with_0X_prefix_binds", "SELECT * FROM t WHERE bytes = '0X0102'", []byte{0x01, 0x02})
 	assertBytes("string_with_odd_0x_prefix_binds", "SELECT * FROM t WHERE bytes = '0x1'", []byte{0x01})
 	assertBytes("numeric_token_binds_as_hex", "SELECT * FROM t WHERE bytes = 42", []byte{0x42})
 	assertBytes("odd_numeric_token_binds_as_padded_hex", "SELECT * FROM t WHERE bytes = 1", []byte{0x01})
