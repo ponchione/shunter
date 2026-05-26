@@ -186,11 +186,12 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 	if err := ValidateRow(table.Schema(), row); err != nil {
 		return 0, err
 	}
-	if err := checkRowIDAvailable(table); err != nil {
-		return 0, err
-	}
+	rowIDErr := checkRowIDAvailable(table)
 	row, sequenceValue, advanceSequence, err := t.applyAutoIncrement(tableID, table, row)
 	if err != nil {
+		if rowIDErr != nil {
+			return 0, rowIDErr
+		}
 		return 0, err
 	}
 
@@ -200,6 +201,9 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 		} else if undeleted {
 			return rowID, nil
 		}
+	}
+	if rowIDErr != nil {
+		return 0, rowIDErr
 	}
 
 	for idxOrdinal, idx := range table.indexes {

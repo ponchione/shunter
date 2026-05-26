@@ -194,6 +194,38 @@ func TestTransactionInsertUndeletesCommittedPrimaryKey(t *testing.T) {
 	}
 }
 
+func TestTransactionInsertUndeletesCommittedPrimaryKeyWithExhaustedRowIDAllocator(t *testing.T) {
+	cs, reg := buildTestState()
+	tbl, _ := cs.Table(0)
+	originalID := tbl.AllocRowID()
+	row := mkRow(1, "alice")
+	if err := tbl.InsertRow(originalID, row); err != nil {
+		t.Fatal(err)
+	}
+	tbl.SetNextID(^types.RowID(0))
+
+	tx := NewTransaction(cs, reg)
+	if err := tx.Delete(0, originalID); err != nil {
+		t.Fatal(err)
+	}
+	returnedID, err := tx.Insert(0, row)
+	if err != nil {
+		t.Fatalf("insert should undelete without allocating a RowID: %v", err)
+	}
+	if returnedID != originalID {
+		t.Fatalf("undelete returned RowID %d, want original %d", returnedID, originalID)
+	}
+	if tx.tx.IsDeleted(0, originalID) {
+		t.Fatal("undelete should cancel pending delete")
+	}
+	if tx.tx.IsInserted(0, returnedID) {
+		t.Fatal("undelete should not leave a tx-local insert")
+	}
+	if next := tbl.NextID(); next != ^types.RowID(0) {
+		t.Fatalf("undelete changed exhausted NextID = %d, want max RowID", next)
+	}
+}
+
 func TestTransactionUndeleteRejectsTxLocalPrimaryKeyConflict(t *testing.T) {
 	cs, reg := buildTestState()
 	tbl, _ := cs.Table(0)
