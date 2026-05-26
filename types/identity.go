@@ -22,10 +22,8 @@ var ErrInvalidIdentityHex = errors.New("types: invalid identity hex")
 // failure.
 func ParseIdentityHex(s string) (Identity, error) {
 	var id Identity
-	b, err := parseFixedHex(s, 64, ErrInvalidIdentityHex)
-	if err != nil {
+	if err := parseFixedHex(id[:], s, ErrInvalidIdentityHex); err != nil {
 		return id, err
 	}
-	copy(id[:], b)
 	return id, nil
 }

@@ -51,6 +51,27 @@ func TestValueKindExportStringInvalid(t *testing.T) {
 	}
 }
 
+func TestParseValueKindExportStringRoundTrip(t *testing.T) {
+	for k := KindBool; k <= KindJSON; k++ {
+		text := ValueKindExportString(k)
+		got, ok := ParseValueKindExportString(text)
+		if !ok {
+			t.Fatalf("ParseValueKindExportString(%q) ok = false", text)
+		}
+		if got != k {
+			t.Fatalf("ParseValueKindExportString(%q) = %v, want %v", text, got, k)
+		}
+	}
+}
+
+func TestParseValueKindExportStringInvalid(t *testing.T) {
+	for _, text := range []string{"", "Bool", "array_string", "unknown"} {
+		if got, ok := ParseValueKindExportString(text); ok {
+			t.Fatalf("ParseValueKindExportString(%q) = (%v, true), want ok=false", text, got)
+		}
+	}
+}
+
 func TestAutoIncrementBoundsInt8(t *testing.T) {
 	min, max, ok := AutoIncrementBounds(KindInt8)
 	if !ok {

@@ -221,7 +221,7 @@ func tableSchemaFromExport(table schema.TableExport) (schema.TableSchema, error)
 		Indexes:    make([]schema.IndexSchema, len(table.Indexes)),
 	}
 	for i, column := range table.Columns {
-		kind, ok := argumentValueKind(column.Type)
+		kind, ok := schema.ParseValueKindExportString(column.Type)
 		if !ok {
 			return schema.TableSchema{}, fmt.Errorf("%w: table %q column %q has type %q", ErrUnsupportedArgumentType, table.Name, column.Name, column.Type)
 		}

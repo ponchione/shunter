@@ -94,6 +94,15 @@ func fixedHexParserFuzzSeeds() []string {
 	return seeds
 }
 
+func TestParseFixedHexInvalidReturnsZeroValue(t *testing.T) {
+	if id, err := ParseIdentityHex(fixedHexIdentitySeed[:63] + "z"); err == nil || id != (Identity{}) {
+		t.Fatalf("ParseIdentityHex invalid = (%x, %v), want zero identity and error", id, err)
+	}
+	if connID, err := ParseConnectionIDHex(fixedHexConnectionIDSeed[:31] + "z"); err == nil || connID != (ConnectionID{}) {
+		t.Fatalf("ParseConnectionIDHex invalid = (%x, %v), want zero connection ID and error", connID, err)
+	}
+}
+
 func checkFixedHexParserBoundary(tc fixedHexParserCase, input string) error {
 	got, err := tc.parse(input)
 	if err != nil {

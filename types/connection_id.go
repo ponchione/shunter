@@ -21,10 +21,8 @@ var ErrInvalidConnectionIDHex = errors.New("types: invalid connection_id hex")
 // ConnectionID.Hex.
 func ParseConnectionIDHex(s string) (ConnectionID, error) {
 	var c ConnectionID
-	b, err := parseFixedHex(s, 32, ErrInvalidConnectionIDHex)
-	if err != nil {
+	if err := parseFixedHex(c[:], s, ErrInvalidConnectionIDHex); err != nil {
 		return c, err
 	}
-	copy(c[:], b)
 	return c, nil
 }

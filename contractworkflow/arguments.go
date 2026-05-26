@@ -241,7 +241,7 @@ func EncodeSurfaceArguments(contract shunter.ModuleContract, kind ArgumentSurfac
 func productColumnsForBSATN(product schema.ProductSchemaExport) ([]schema.ColumnSchema, error) {
 	columns := make([]schema.ColumnSchema, len(product.Columns))
 	for i, column := range product.Columns {
-		kind, ok := argumentValueKind(column.Type)
+		kind, ok := schema.ParseValueKindExportString(column.Type)
 		if !ok {
 			return nil, fmt.Errorf("%w: field %q has type %q", ErrUnsupportedArgumentType, column.Name, column.Type)
 		}
@@ -301,7 +301,7 @@ func decodeArgumentObject(data []byte) (map[string]json.RawMessage, error) {
 }
 
 func argumentValueFromJSON(column schema.ProductColumnExport, raw json.RawMessage) (types.Value, error) {
-	kind, ok := argumentValueKind(column.Type)
+	kind, ok := schema.ParseValueKindExportString(column.Type)
 	if !ok {
 		return types.Value{}, fmt.Errorf("%w: field %q has type %q", ErrUnsupportedArgumentType, column.Name, column.Type)
 	}
@@ -558,55 +558,4 @@ func fillSignedWide(dst []byte, n, limit *big.Int) {
 		t.Add(t, limit)
 	}
 	t.FillBytes(dst)
-}
-
-func argumentValueKind(value string) (types.ValueKind, bool) {
-	switch value {
-	case "bool":
-		return types.KindBool, true
-	case "int8":
-		return types.KindInt8, true
-	case "uint8":
-		return types.KindUint8, true
-	case "int16":
-		return types.KindInt16, true
-	case "uint16":
-		return types.KindUint16, true
-	case "int32":
-		return types.KindInt32, true
-	case "uint32":
-		return types.KindUint32, true
-	case "int64":
-		return types.KindInt64, true
-	case "uint64":
-		return types.KindUint64, true
-	case "float32":
-		return types.KindFloat32, true
-	case "float64":
-		return types.KindFloat64, true
-	case "string":
-		return types.KindString, true
-	case "bytes":
-		return types.KindBytes, true
-	case "int128":
-		return types.KindInt128, true
-	case "uint128":
-		return types.KindUint128, true
-	case "int256":
-		return types.KindInt256, true
-	case "uint256":
-		return types.KindUint256, true
-	case "timestamp":
-		return types.KindTimestamp, true
-	case "arrayString":
-		return types.KindArrayString, true
-	case "uuid":
-		return types.KindUUID, true
-	case "duration":
-		return types.KindDuration, true
-	case "json":
-		return types.KindJSON, true
-	default:
-		return 0, false
-	}
 }

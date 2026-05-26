@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Schema export type parsing now shares the same canonical mapping used for
+  export formatting, and fixed-size identity/connection ID hex parsing now
+  decodes directly into destination arrays without changing invalid-input
+  zero-value behavior.
 - JWT validation now parses each token's unverified header and issuer in one
   pass before signature verification.
 - Non-caller transaction-update fanout now treats connections that disappear

@@ -29,12 +29,29 @@ var exportStrings = [...]string{
 	KindJSON:        "json",
 }
 
+var exportKinds = func() map[string]ValueKind {
+	out := make(map[string]ValueKind, len(exportStrings))
+	for kind, text := range exportStrings {
+		if text != "" {
+			out[text] = ValueKind(kind)
+		}
+	}
+	return out
+}()
+
 // ValueKindExportString returns the lowercase export name for a ValueKind.
 func ValueKindExportString(k ValueKind) string {
 	if k >= 0 && int(k) < len(exportStrings) {
 		return exportStrings[k]
 	}
 	return ""
+}
+
+// ParseValueKindExportString returns the ValueKind named by an exported schema
+// type string.
+func ParseValueKindExportString(s string) (ValueKind, bool) {
+	k, ok := exportKinds[s]
+	return k, ok
 }
 
 type intBounds struct {
