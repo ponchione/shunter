@@ -247,16 +247,15 @@ func (m *Manager) handleEvalError(txID types.TxID, qs *queryState, err error, ou
 // scanning the transaction's inserted/deleted rows directly, so indexing those
 // columns would add per-commit work without a reader.
 func (m *Manager) collectDeltaIndexColumns() map[TableID][]ColID {
+	if len(m.deltaIndexColumns) == 0 {
+		return nil
+	}
 	out := make(map[TableID][]ColID, len(m.deltaIndexColumns))
 	for table, cols := range m.deltaIndexColumns {
 		if len(cols) == 0 {
 			continue
 		}
-		list := make([]ColID, 0, len(cols))
-		for col := range cols {
-			list = append(list, col)
-		}
-		out[table] = list
+		out[table] = mapKeys(cols)
 	}
 	return out
 }
