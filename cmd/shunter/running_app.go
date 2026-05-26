@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -676,9 +675,9 @@ func writeRunningAppError(stderr io.Writer, format string, err runningAppError) 
 	err.Status = "error"
 	err.Scope = "running_app"
 	if strings.EqualFold(strings.TrimSpace(format), contractworkflow.FormatJSON) {
-		data, marshalErr := json.MarshalIndent(err, "", "  ")
+		data, marshalErr := marshalIndentedJSON(err)
 		if marshalErr == nil {
-			_, _ = stderr.Write(append(data, '\n'))
+			_, _ = stderr.Write(data)
 			return
 		}
 	}
@@ -852,10 +851,10 @@ func writeSQLQuerySuccess(stdout io.Writer, format string, contract shunter.Modu
 }
 
 func writeJSON(w io.Writer, value any) error {
-	data, err := json.MarshalIndent(value, "", "  ")
+	data, err := marshalIndentedJSON(value)
 	if err != nil {
 		return err
 	}
-	_, err = w.Write(append(data, '\n'))
+	_, err = w.Write(data)
 	return err
 }

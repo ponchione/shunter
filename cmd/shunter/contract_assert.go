@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -239,18 +238,7 @@ func intPtr(value int) *int {
 }
 
 func formatContractAssertReport(report contractAssertReport, format string) ([]byte, error) {
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "", contractworkflow.FormatText:
-		return []byte(report.Text()), nil
-	case contractworkflow.FormatJSON:
-		out, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			return nil, err
-		}
-		return append(out, '\n'), nil
-	default:
-		return nil, fmt.Errorf("%w %q", contractworkflow.ErrUnsupportedFormat, format)
-	}
+	return formatTextOrJSON(format, report.Text, report)
 }
 
 func (r contractAssertReport) Text() string {

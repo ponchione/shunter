@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -152,19 +151,7 @@ func normalizeDescribeSection(section string) string {
 func formatDescribeContract(contract shunter.ModuleContract, format, section string) ([]byte, error) {
 	summary := describeContractSummary(contract)
 	summary.Section = normalizeDescribeSection(section)
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "", contractworkflow.FormatText:
-		return []byte(summary.Text()), nil
-	case contractworkflow.FormatJSON:
-		summary = summary.filteredSection()
-		out, err := json.MarshalIndent(summary, "", "  ")
-		if err != nil {
-			return nil, err
-		}
-		return append(out, '\n'), nil
-	default:
-		return nil, fmt.Errorf("%w %q", contractworkflow.ErrUnsupportedFormat, format)
-	}
+	return formatTextOrJSON(format, summary.Text, summary.filteredSection())
 }
 
 type describeSummary struct {
@@ -372,34 +359,27 @@ func formatRunningDescribe(description shunter.RuntimeDescription, target, forma
 		RunningServerChecked: true,
 		Runtime:              description,
 	}
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "", contractworkflow.FormatText:
-		var b strings.Builder
-		fmt.Fprintf(&b, "Status: %s\n", report.Status)
-		fmt.Fprintf(&b, "Scope: %s\n", report.Scope)
-		fmt.Fprintf(&b, "Command: %s\n", report.Command)
-		fmt.Fprintf(&b, "Target: %s\n", report.TargetURL)
-		fmt.Fprintf(&b, "Running server checked: %t\n", report.RunningServerChecked)
-		fmt.Fprintf(&b, "Module: %s", description.Module.Name)
-		if description.Module.Version != "" {
-			fmt.Fprintf(&b, " %s", description.Module.Version)
-		}
-		fmt.Fprintf(&b, "\nRuntime state: %s\n", description.Health.State)
-		fmt.Fprintf(&b, "Ready: %t\n", description.Health.Ready)
-		fmt.Fprintf(&b, "Degraded: %t\n", description.Health.Degraded)
-		fmt.Fprintf(&b, "Queries: %d\n", len(description.Module.Queries))
-		fmt.Fprintf(&b, "Views: %d\n", len(description.Module.Views))
-		fmt.Fprintf(&b, "Visibility filters: %d\n", len(description.Module.VisibilityFilters))
-		return []byte(b.String()), nil
-	case contractworkflow.FormatJSON:
-		out, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			return nil, err
-		}
-		return append(out, '\n'), nil
-	default:
-		return nil, fmt.Errorf("%w %q", contractworkflow.ErrUnsupportedFormat, format)
+	return formatTextOrJSON(format, report.Text, report)
+}
+
+func (r runningDescribeReport) Text() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Status: %s\n", r.Status)
+	fmt.Fprintf(&b, "Scope: %s\n", r.Scope)
+	fmt.Fprintf(&b, "Command: %s\n", r.Command)
+	fmt.Fprintf(&b, "Target: %s\n", r.TargetURL)
+	fmt.Fprintf(&b, "Running server checked: %t\n", r.RunningServerChecked)
+	fmt.Fprintf(&b, "Module: %s", r.Runtime.Module.Name)
+	if r.Runtime.Module.Version != "" {
+		fmt.Fprintf(&b, " %s", r.Runtime.Module.Version)
 	}
+	fmt.Fprintf(&b, "\nRuntime state: %s\n", r.Runtime.Health.State)
+	fmt.Fprintf(&b, "Ready: %t\n", r.Runtime.Health.Ready)
+	fmt.Fprintf(&b, "Degraded: %t\n", r.Runtime.Health.Degraded)
+	fmt.Fprintf(&b, "Queries: %d\n", len(r.Runtime.Module.Queries))
+	fmt.Fprintf(&b, "Views: %d\n", len(r.Runtime.Module.Views))
+	fmt.Fprintf(&b, "Visibility filters: %d\n", len(r.Runtime.Module.VisibilityFilters))
+	return b.String()
 }
 
 func (s describeSummary) Text() string {

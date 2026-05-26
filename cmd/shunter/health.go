@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -104,18 +103,7 @@ func formatHealthContract(contract shunter.ModuleContract, format string) ([]byt
 		Message:              "local contract artifact is valid; no running server was checked",
 		Describe:             describe,
 	}
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "", contractworkflow.FormatText:
-		return []byte(report.Text()), nil
-	case contractworkflow.FormatJSON:
-		out, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			return nil, err
-		}
-		return append(out, '\n'), nil
-	default:
-		return nil, fmt.Errorf("%w %q", contractworkflow.ErrUnsupportedFormat, format)
-	}
+	return formatTextOrJSON(format, report.Text, report)
 }
 
 type healthContractReport struct {
@@ -154,26 +142,19 @@ func formatRunningHealth(inspection shunter.RuntimeHealthInspection, target, for
 		RunningServerChecked: true,
 		Runtime:              inspection,
 	}
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "", contractworkflow.FormatText:
-		var b strings.Builder
-		fmt.Fprintf(&b, "Status: %s\n", report.Status)
-		fmt.Fprintf(&b, "Scope: %s\n", report.Scope)
-		fmt.Fprintf(&b, "Command: %s\n", report.Command)
-		fmt.Fprintf(&b, "Target: %s\n", report.TargetURL)
-		fmt.Fprintf(&b, "Running server checked: %t\n", report.RunningServerChecked)
-		fmt.Fprintf(&b, "Runtime state: %s\n", inspection.Runtime.State)
-		fmt.Fprintf(&b, "Ready: %t\n", inspection.Runtime.Ready)
-		fmt.Fprintf(&b, "Degraded: %t\n", inspection.Runtime.Degraded)
-		fmt.Fprintf(&b, "Protocol ready: %t\n", inspection.Runtime.Protocol.Ready)
-		return []byte(b.String()), nil
-	case contractworkflow.FormatJSON:
-		out, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			return nil, err
-		}
-		return append(out, '\n'), nil
-	default:
-		return nil, fmt.Errorf("%w %q", contractworkflow.ErrUnsupportedFormat, format)
-	}
+	return formatTextOrJSON(format, report.Text, report)
+}
+
+func (r runningHealthReport) Text() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Status: %s\n", r.Status)
+	fmt.Fprintf(&b, "Scope: %s\n", r.Scope)
+	fmt.Fprintf(&b, "Command: %s\n", r.Command)
+	fmt.Fprintf(&b, "Target: %s\n", r.TargetURL)
+	fmt.Fprintf(&b, "Running server checked: %t\n", r.RunningServerChecked)
+	fmt.Fprintf(&b, "Runtime state: %s\n", r.Runtime.Runtime.State)
+	fmt.Fprintf(&b, "Ready: %t\n", r.Runtime.Runtime.Ready)
+	fmt.Fprintf(&b, "Degraded: %t\n", r.Runtime.Runtime.Degraded)
+	fmt.Fprintf(&b, "Protocol ready: %t\n", r.Runtime.Runtime.Protocol.Ready)
+	return b.String()
 }
