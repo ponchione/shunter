@@ -8,51 +8,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"path"
-	"strings"
 	"time"
 )
 
 const maxRunningAppDiagnosticsResponseBytes = 4 << 20
 
 func normalizeRunningAppDiagnosticsURL(raw, endpoint string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", fmt.Errorf("URL is required")
-	}
-	parsed, err := url.Parse(raw)
+	parsed, err := parseRunningAppURL(raw, fmt.Errorf("URL is required"))
 	if err != nil {
 		return "", err
 	}
-	switch parsed.Scheme {
-	case "http", "https":
-	case "ws":
-		parsed.Scheme = "http"
-	case "wss":
-		parsed.Scheme = "https"
-	default:
-		return "", fmt.Errorf("unsupported URL scheme %q", parsed.Scheme)
+	if err := useRunningAppHTTPScheme(parsed); err != nil {
+		return "", err
 	}
-	if parsed.Host == "" {
-		return "", fmt.Errorf("URL host is required")
-	}
-	endpoint = "/" + strings.TrimPrefix(endpoint, "/")
-	switch cleanPath := path.Clean(parsed.Path); cleanPath {
-	case ".", "/", endpoint:
-		parsed.Path = endpoint
-	default:
-		if strings.HasSuffix(cleanPath, endpoint) {
-			parsed.Path = cleanPath
-		} else if strings.HasSuffix(cleanPath, "/subscribe") {
-			base := strings.TrimSuffix(cleanPath, "/subscribe")
-			parsed.Path = path.Join(base, endpoint)
-		} else {
-			parsed.Path = path.Join(cleanPath, endpoint)
-		}
-	}
-	parsed.RawQuery = ""
-	parsed.Fragment = ""
+	normalizeRunningAppEndpointPath(parsed, endpoint, true)
 	return parsed.String(), nil
 }
 

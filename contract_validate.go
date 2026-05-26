@@ -7,7 +7,6 @@ import (
 
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
-	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -272,26 +271,9 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 			continue
 		}
 		validateDeclaredReadMetadata("views."+view.Name, compiled, lookup, view.RowSchema, view.ResultShape, errs)
-		if aggregate := compiled.SubscriptionAggregate(); aggregate != nil {
-			appendViewSQLValidationError(errs, view.Name, subscription.ValidateAggregate(compiled.Predicate(), aggregate, lookup))
-			if compiled.HasOrderBy() {
-				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, fmt.Errorf("%w: live ORDER BY views do not support aggregate views", subscription.ErrInvalidPredicate)))
-			}
-			if compiled.HasLimit() {
-				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, fmt.Errorf("%w: live LIMIT views do not support aggregate views", subscription.ErrInvalidPredicate)))
-			}
-			if compiled.HasOffset() {
-				*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, fmt.Errorf("%w: live OFFSET views do not support aggregate views", subscription.ErrInvalidPredicate)))
-			}
-			appendViewSQLValidationError(errs, view.Name, subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), aggregate, lookup))
-			appendViewSQLValidationError(errs, view.Name, subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), aggregate, lookup))
-			appendViewSQLValidationError(errs, view.Name, subscription.ValidateOffset(compiled.Predicate(), compiled.SubscriptionOffset(), aggregate, lookup))
-			continue
+		for _, err := range validateDeclaredViewSQLErrors(compiled, lookup) {
+			appendViewSQLValidationError(errs, view.Name, err)
 		}
-		appendViewSQLValidationError(errs, view.Name, subscription.ValidateProjection(compiled.Predicate(), compiled.SubscriptionProjection(), lookup))
-		appendViewSQLValidationError(errs, view.Name, subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), compiled.SubscriptionAggregate(), lookup))
-		appendViewSQLValidationError(errs, view.Name, subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), compiled.SubscriptionAggregate(), lookup))
-		appendViewSQLValidationError(errs, view.Name, subscription.ValidateOffset(compiled.Predicate(), compiled.SubscriptionOffset(), compiled.SubscriptionAggregate(), lookup))
 	}
 }
 

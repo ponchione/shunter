@@ -164,34 +164,51 @@ type declaredViewSQLSource interface {
 }
 
 func validateDeclaredViewSQL(compiled declaredViewSQLSource, sl protocol.SchemaLookup) error {
-	if aggregate := compiled.SubscriptionAggregate(); aggregate != nil {
-		if err := subscription.ValidateAggregate(compiled.Predicate(), aggregate, sl); err != nil {
-			return err
-		}
-		if compiled.HasOrderBy() {
-			return fmt.Errorf("%w: live ORDER BY views do not support aggregate views", subscription.ErrInvalidPredicate)
-		}
-		if compiled.HasLimit() {
-			return fmt.Errorf("%w: live LIMIT views do not support aggregate views", subscription.ErrInvalidPredicate)
-		}
-		if compiled.HasOffset() {
-			return fmt.Errorf("%w: live OFFSET views do not support aggregate views", subscription.ErrInvalidPredicate)
-		}
-		return nil
-	}
-	if err := subscription.ValidateProjection(compiled.Predicate(), compiled.SubscriptionProjection(), sl); err != nil {
-		return err
-	}
-	if err := subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), compiled.SubscriptionAggregate(), sl); err != nil {
-		return err
-	}
-	if err := subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), compiled.SubscriptionAggregate(), sl); err != nil {
-		return err
-	}
-	if err := subscription.ValidateOffset(compiled.Predicate(), compiled.SubscriptionOffset(), compiled.SubscriptionAggregate(), sl); err != nil {
+	for _, err := range validateDeclaredViewSQLErrors(compiled, sl) {
 		return err
 	}
 	return nil
+}
+
+func validateDeclaredViewSQLErrors(compiled declaredViewSQLSource, sl protocol.SchemaLookup) []error {
+	var errs []error
+	if aggregate := compiled.SubscriptionAggregate(); aggregate != nil {
+		if err := subscription.ValidateAggregate(compiled.Predicate(), aggregate, sl); err != nil {
+			errs = append(errs, err)
+		}
+		if compiled.HasOrderBy() {
+			errs = append(errs, fmt.Errorf("%w: live ORDER BY views do not support aggregate views", subscription.ErrInvalidPredicate))
+		}
+		if compiled.HasLimit() {
+			errs = append(errs, fmt.Errorf("%w: live LIMIT views do not support aggregate views", subscription.ErrInvalidPredicate))
+		}
+		if compiled.HasOffset() {
+			errs = append(errs, fmt.Errorf("%w: live OFFSET views do not support aggregate views", subscription.ErrInvalidPredicate))
+		}
+		if err := subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), aggregate, sl); err != nil {
+			errs = append(errs, err)
+		}
+		if err := subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), aggregate, sl); err != nil {
+			errs = append(errs, err)
+		}
+		if err := subscription.ValidateOffset(compiled.Predicate(), compiled.SubscriptionOffset(), aggregate, sl); err != nil {
+			errs = append(errs, err)
+		}
+		return errs
+	}
+	if err := subscription.ValidateProjection(compiled.Predicate(), compiled.SubscriptionProjection(), sl); err != nil {
+		errs = append(errs, err)
+	}
+	if err := subscription.ValidateOrderBy(compiled.Predicate(), compiled.SubscriptionOrderBy(), compiled.SubscriptionAggregate(), sl); err != nil {
+		errs = append(errs, err)
+	}
+	if err := subscription.ValidateLimit(compiled.Predicate(), compiled.SubscriptionLimit(), compiled.SubscriptionAggregate(), sl); err != nil {
+		errs = append(errs, err)
+	}
+	if err := subscription.ValidateOffset(compiled.Predicate(), compiled.SubscriptionOffset(), compiled.SubscriptionAggregate(), sl); err != nil {
+		errs = append(errs, err)
+	}
+	return errs
 }
 
 func declaredReadHasAppParameters(parameters *ProductSchema) bool {

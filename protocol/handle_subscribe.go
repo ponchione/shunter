@@ -1591,32 +1591,74 @@ func (c runtimeSQLLiteralCompiler) compileSQLLiteral(lit sql.Literal, kind types
 	return sql.Coerce(lit, kind)
 }
 
+type sqlParameterUsage struct {
+	order []string
+	used  map[string]struct{}
+}
+
+func newSQLParameterUsage(size int) sqlParameterUsage {
+	return sqlParameterUsage{
+		order: make([]string, 0, size),
+		used:  make(map[string]struct{}, size),
+	}
+}
+
+func validateSQLParameterDefinition(name, duplicateVerb string, exists bool) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("%w: SQL parameter name must not be empty", sql.ErrUnsupportedSQL)
+	}
+	if name == "sender" {
+		return fmt.Errorf("%w: SQL parameter :sender is reserved for caller identity", sql.ErrUnsupportedSQL)
+	}
+	if exists {
+		return fmt.Errorf("%w: SQL parameter :%s is %s more than once", sql.ErrUnsupportedSQL, name, duplicateVerb)
+	}
+	return nil
+}
+
+func (u *sqlParameterUsage) add(name string) {
+	u.order = append(u.order, name)
+}
+
+func (u *sqlParameterUsage) markUsed(name string) {
+	u.used[name] = struct{}{}
+}
+
+func (u sqlParameterUsage) validateUsed(verb string) error {
+	for _, name := range u.order {
+		if _, ok := u.used[name]; !ok {
+			return fmt.Errorf("%w: SQL parameter :%s is %s but not used", sql.ErrUnsupportedSQL, name, verb)
+		}
+	}
+	return nil
+}
+
+func sqlLiteralParameterName(lit sql.Literal) string {
+	if lit.Param != "" {
+		return lit.Param
+	}
+	return strings.TrimPrefix(lit.Text, ":")
+}
+
 type templateSQLLiteralCompiler struct {
 	runtimeSQLLiteralCompiler
 	byName map[string]SQLQueryParameter
-	order  []string
-	used   map[string]struct{}
+	usage  sqlParameterUsage
 }
 
 func newTemplateSQLLiteralCompiler(caller *types.Identity, parameters []SQLQueryParameter) (*templateSQLLiteralCompiler, error) {
 	compiler := &templateSQLLiteralCompiler{
 		runtimeSQLLiteralCompiler: runtimeSQLLiteralCompiler{caller: caller},
 		byName:                    make(map[string]SQLQueryParameter, len(parameters)),
-		order:                     make([]string, 0, len(parameters)),
-		used:                      make(map[string]struct{}, len(parameters)),
+		usage:                     newSQLParameterUsage(len(parameters)),
 	}
 	for _, parameter := range parameters {
-		if strings.TrimSpace(parameter.Name) == "" {
-			return nil, fmt.Errorf("%w: SQL parameter name must not be empty", sql.ErrUnsupportedSQL)
-		}
-		if parameter.Name == "sender" {
-			return nil, fmt.Errorf("%w: SQL parameter :sender is reserved for caller identity", sql.ErrUnsupportedSQL)
-		}
-		if _, exists := compiler.byName[parameter.Name]; exists {
-			return nil, fmt.Errorf("%w: SQL parameter :%s is declared more than once", sql.ErrUnsupportedSQL, parameter.Name)
+		_, exists := compiler.byName[parameter.Name]
+		if err := validateSQLParameterDefinition(parameter.Name, "declared", exists); err != nil {
+			return nil, err
 		}
 		compiler.byName[parameter.Name] = parameter
-		compiler.order = append(compiler.order, parameter.Name)
+		compiler.usage.add(parameter.Name)
 	}
 	return compiler, nil
 }
@@ -1625,10 +1667,7 @@ func (c *templateSQLLiteralCompiler) compileSQLLiteral(lit sql.Literal, kind typ
 	if lit.Kind != sql.LitParameter {
 		return c.runtimeSQLLiteralCompiler.compileSQLLiteral(lit, kind, columnName)
 	}
-	name := lit.Param
-	if name == "" {
-		name = strings.TrimPrefix(lit.Text, ":")
-	}
+	name := sqlLiteralParameterName(lit)
 	parameter, ok := c.byName[name]
 	if !ok {
 		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s is not declared", sql.ErrUnsupportedSQL, name)
@@ -1636,45 +1675,33 @@ func (c *templateSQLLiteralCompiler) compileSQLLiteral(lit sql.Literal, kind typ
 	if parameter.Type != kind {
 		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s type %s is incompatible with column %q type %s", sql.ErrUnsupportedSQL, name, sql.AlgebraicName(parameter.Type), columnName, sql.AlgebraicName(kind))
 	}
-	c.used[name] = struct{}{}
+	c.usage.markUsed(name)
 	return types.NewNull(kind), nil
 }
 
 func (c *templateSQLLiteralCompiler) validateUsed() error {
-	for _, name := range c.order {
-		if _, ok := c.used[name]; !ok {
-			return fmt.Errorf("%w: SQL parameter :%s is declared but not used", sql.ErrUnsupportedSQL, name)
-		}
-	}
-	return nil
+	return c.usage.validateUsed("declared")
 }
 
 type boundSQLLiteralCompiler struct {
 	runtimeSQLLiteralCompiler
 	byName map[string]types.Value
-	order  []string
-	used   map[string]struct{}
+	usage  sqlParameterUsage
 }
 
 func newBoundSQLLiteralCompiler(caller *types.Identity, parameters []SQLQueryParameterValue) (*boundSQLLiteralCompiler, error) {
 	compiler := &boundSQLLiteralCompiler{
 		runtimeSQLLiteralCompiler: runtimeSQLLiteralCompiler{caller: caller},
 		byName:                    make(map[string]types.Value, len(parameters)),
-		order:                     make([]string, 0, len(parameters)),
-		used:                      make(map[string]struct{}, len(parameters)),
+		usage:                     newSQLParameterUsage(len(parameters)),
 	}
 	for _, parameter := range parameters {
-		if strings.TrimSpace(parameter.Name) == "" {
-			return nil, fmt.Errorf("%w: SQL parameter name must not be empty", sql.ErrUnsupportedSQL)
-		}
-		if parameter.Name == "sender" {
-			return nil, fmt.Errorf("%w: SQL parameter :sender is reserved for caller identity", sql.ErrUnsupportedSQL)
-		}
-		if _, exists := compiler.byName[parameter.Name]; exists {
-			return nil, fmt.Errorf("%w: SQL parameter :%s is bound more than once", sql.ErrUnsupportedSQL, parameter.Name)
+		_, exists := compiler.byName[parameter.Name]
+		if err := validateSQLParameterDefinition(parameter.Name, "bound", exists); err != nil {
+			return nil, err
 		}
 		compiler.byName[parameter.Name] = parameter.Value.Copy()
-		compiler.order = append(compiler.order, parameter.Name)
+		compiler.usage.add(parameter.Name)
 	}
 	return compiler, nil
 }
@@ -1683,10 +1710,7 @@ func (c *boundSQLLiteralCompiler) compileSQLLiteral(lit sql.Literal, kind types.
 	if lit.Kind != sql.LitParameter {
 		return c.runtimeSQLLiteralCompiler.compileSQLLiteral(lit, kind, columnName)
 	}
-	name := lit.Param
-	if name == "" {
-		name = strings.TrimPrefix(lit.Text, ":")
-	}
+	name := sqlLiteralParameterName(lit)
 	value, ok := c.byName[name]
 	if !ok {
 		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s has no bound value", sql.ErrUnsupportedSQL, name)
@@ -1694,17 +1718,12 @@ func (c *boundSQLLiteralCompiler) compileSQLLiteral(lit sql.Literal, kind types.
 	if value.Kind() != kind {
 		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s type %s is incompatible with column %q type %s", sql.ErrUnsupportedSQL, name, sql.AlgebraicName(value.Kind()), columnName, sql.AlgebraicName(kind))
 	}
-	c.used[name] = struct{}{}
+	c.usage.markUsed(name)
 	return value, nil
 }
 
 func (c *boundSQLLiteralCompiler) validateUsed() error {
-	for _, name := range c.order {
-		if _, ok := c.used[name]; !ok {
-			return fmt.Errorf("%w: SQL parameter :%s is bound but not used", sql.ErrUnsupportedSQL, name)
-		}
-	}
-	return nil
+	return c.usage.validateUsed("bound")
 }
 
 func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]relationSchema, aliasTag func(string) uint8, literalCompiler sqlLiteralCompiler, allowColumnComparisons bool) (subscription.Predicate, error) {

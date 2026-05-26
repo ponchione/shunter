@@ -21,6 +21,7 @@ import (
 const defaultRunningAppTimeout = 10 * time.Second
 
 func runCall(stdout, stderr io.Writer, args []string) int {
+	const command = "call"
 	fs := newFlagSet(stderr, "shunter call")
 	flags := newRunningAppFlags(fs)
 	if code, stop := parseFlags(fs, args); stop {
@@ -30,94 +31,42 @@ func runCall(stdout, stderr io.Writer, args []string) int {
 		return code
 	}
 	if fs.NArg() < 1 || fs.NArg() > 2 {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "call",
-			TargetURL: flags.urlValue(),
-			Code:      "invalid_arguments",
-			Message:   "call requires reducer name and optional JSON arguments",
-		})
+		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), "", "invalid_arguments", "call requires reducer name and optional JSON arguments")
 		return 2
 	}
 
 	name := strings.TrimSpace(fs.Arg(0))
 	rawArgs, err := flags.argumentBytes(fs.Args()[1:])
 	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "call",
-			TargetURL: flags.urlValue(),
-			Surface:   name,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
+		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), name, classifyRunningAppErrorCode(err), err.Error())
 		return 2
 	}
 
-	contract, err := readContractFile(flags.contractValue(), "call contract")
-	if err != nil {
-		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
-			Command:   "call",
-			TargetURL: flags.urlValue(),
-			Surface:   name,
-			Code:      "contract_error",
-			Message:   err.Error(),
-		})
-		return 1
+	contract, code, ok := readRunningAppCommandContract(stderr, flags, command, "call contract", name)
+	if !ok {
+		return code
 	}
 	request, err := prepareReducerCall(contract, name, rawArgs, flags.argsHexValue() != "")
 	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "call",
-			TargetURL: flags.urlValue(),
-			Surface:   name,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
+		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), name, classifyRunningAppErrorCode(err), err.Error())
 		return 2
 	}
-	token, err := flags.token()
-	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "call",
-			TargetURL: flags.urlValue(),
-			Surface:   request.Name,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
-		return 2
-	}
-	target, err := normalizeRunningAppURL(flags.urlValue())
-	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "call",
-			TargetURL: flags.urlValue(),
-			Surface:   request.Name,
-			Code:      "invalid_url",
-			Message:   err.Error(),
-		})
-		return 2
+	reqCtx, code, ok := newRunningAppRequestContext(stderr, flags, command, request.Name)
+	if !ok {
+		return code
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), flags.timeoutValue())
+	ctx, cancel := runningAppTimeoutContext(flags)
 	defer cancel()
-	identity, update, err := protocolclient.DialAndCallReducer(ctx, protocolclient.Options{
-		URL:            target,
-		Token:          token,
-		AllowAnonymous: flags.allowDevAnonymousValue(),
-	}, protocolclient.ReducerCallRequest{
+	identity, update, err := protocolclient.DialAndCallReducer(ctx, reqCtx.options, protocolclient.ReducerCallRequest{
 		Name:      request.Name,
 		Arguments: request.Arguments,
 	})
 	if err != nil {
-		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
-			Command:   "call",
-			TargetURL: target,
-			Surface:   request.Name,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
+		reportRunningAppRuntimeError(stderr, flags, command, reqCtx.target, request.Name, classifyRunningAppErrorCode(err), err.Error())
 		return 1
 	}
-	if err := writeCallSuccess(stdout, flags.formatValue(), contract, target, identity, update); err != nil {
+	if err := writeCallSuccess(stdout, flags.formatValue(), contract, reqCtx.target, identity, update); err != nil {
 		writeCLIError(stderr, err)
 		return 1
 	}
@@ -125,6 +74,7 @@ func runCall(stdout, stderr io.Writer, args []string) int {
 }
 
 func runQuery(stdout, stderr io.Writer, args []string) int {
+	const command = "query"
 	fs := newFlagSet(stderr, "shunter query")
 	flags := newRunningAppFlags(fs)
 	sqlText := fs.String("sql", "", "raw read-only SQL query to execute instead of a declared query name")
@@ -136,186 +86,84 @@ func runQuery(stdout, stderr io.Writer, args []string) int {
 	}
 	if strings.TrimSpace(*sqlText) != "" {
 		if fs.NArg() != 0 {
-			writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-				Command:   "query",
-				TargetURL: flags.urlValue(),
-				Code:      "invalid_arguments",
-				Message:   "query --sql does not accept positional query name or arguments",
-			})
+			reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), "", "invalid_arguments", "query --sql does not accept positional query name or arguments")
 			return 2
 		}
 		return runSQLQuery(stdout, stderr, flags, strings.TrimSpace(*sqlText))
 	}
 	if fs.NArg() < 1 || fs.NArg() > 2 {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "query",
-			TargetURL: flags.urlValue(),
-			Code:      "invalid_arguments",
-			Message:   "query requires query name and optional JSON arguments",
-		})
+		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), "", "invalid_arguments", "query requires query name and optional JSON arguments")
 		return 2
 	}
 
 	name := strings.TrimSpace(fs.Arg(0))
 	rawArgs, hasArgs, err := flags.optionalArgumentBytes(fs.Args()[1:])
 	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "query",
-			TargetURL: flags.urlValue(),
-			Surface:   name,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
+		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), name, classifyRunningAppErrorCode(err), err.Error())
 		return 2
 	}
 
-	contract, err := readContractFile(flags.contractValue(), "query contract")
-	if err != nil {
-		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
-			Command:   "query",
-			TargetURL: flags.urlValue(),
-			Surface:   name,
-			Code:      "contract_error",
-			Message:   err.Error(),
-		})
-		return 1
+	contract, code, ok := readRunningAppCommandContract(stderr, flags, command, "query contract", name)
+	if !ok {
+		return code
 	}
 	request, err := prepareDeclaredQuery(contract, name, rawArgs, hasArgs, flags.argsHexValue() != "")
 	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "query",
-			TargetURL: flags.urlValue(),
-			Surface:   name,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
+		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), name, classifyRunningAppErrorCode(err), err.Error())
 		return 2
 	}
-	token, err := flags.token()
-	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "query",
-			TargetURL: flags.urlValue(),
-			Surface:   request.Name,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
-		return 2
-	}
-	target, err := normalizeRunningAppURL(flags.urlValue())
-	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "query",
-			TargetURL: flags.urlValue(),
-			Surface:   request.Name,
-			Code:      "invalid_url",
-			Message:   err.Error(),
-		})
-		return 2
+	reqCtx, code, ok := newRunningAppRequestContext(stderr, flags, command, request.Name)
+	if !ok {
+		return code
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), flags.timeoutValue())
+	ctx, cancel := runningAppTimeoutContext(flags)
 	defer cancel()
-	identity, response, err := protocolclient.DialAndExecuteDeclaredQuery(ctx, protocolclient.Options{
-		URL:            target,
-		Token:          token,
-		AllowAnonymous: flags.allowDevAnonymousValue(),
-	}, protocolclient.DeclaredQueryRequest{
+	identity, response, err := protocolclient.DialAndExecuteDeclaredQuery(ctx, reqCtx.options, protocolclient.DeclaredQueryRequest{
 		Name:          request.Name,
 		Parameters:    request.Parameters,
 		HasParameters: request.HasParameters,
 	})
 	if err != nil {
-		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
-			Command:   "query",
-			TargetURL: target,
-			Surface:   request.Name,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
+		reportRunningAppRuntimeError(stderr, flags, command, reqCtx.target, request.Name, classifyRunningAppErrorCode(err), err.Error())
 		return 1
 	}
-	if err := writeQuerySuccess(stdout, flags.formatValue(), contract, target, identity, response, request.Name); err != nil {
-		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
-			Command:   "query",
-			TargetURL: target,
-			Surface:   request.Name,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
+	if err := writeQuerySuccess(stdout, flags.formatValue(), contract, reqCtx.target, identity, response, request.Name); err != nil {
+		reportRunningAppRuntimeError(stderr, flags, command, reqCtx.target, request.Name, classifyRunningAppErrorCode(err), err.Error())
 		return 1
 	}
 	return 0
 }
 
 func runSQLQuery(stdout, stderr io.Writer, flags runningAppFlags, sqlText string) int {
-	contract, err := readContractFile(flags.contractValue(), "query contract")
-	if err != nil {
-		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
-			Command:   "query",
-			TargetURL: flags.urlValue(),
-			Surface:   sqlText,
-			Code:      "contract_error",
-			Message:   err.Error(),
-		})
-		return 1
+	const command = "query"
+	contract, code, ok := readRunningAppCommandContract(stderr, flags, command, "query contract", sqlText)
+	if !ok {
+		return code
 	}
-	token, err := flags.token()
-	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "query",
-			TargetURL: flags.urlValue(),
-			Surface:   sqlText,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
-		return 2
-	}
-	target, err := normalizeRunningAppURL(flags.urlValue())
-	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "query",
-			TargetURL: flags.urlValue(),
-			Surface:   sqlText,
-			Code:      "invalid_url",
-			Message:   err.Error(),
-		})
-		return 2
+	reqCtx, code, ok := newRunningAppRequestContext(stderr, flags, command, sqlText)
+	if !ok {
+		return code
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), flags.timeoutValue())
+	ctx, cancel := runningAppTimeoutContext(flags)
 	defer cancel()
-	identity, response, err := protocolclient.DialAndExecuteSQLQuery(ctx, protocolclient.Options{
-		URL:            target,
-		Token:          token,
-		AllowAnonymous: flags.allowDevAnonymousValue(),
-	}, protocolclient.SQLQueryRequest{
+	identity, response, err := protocolclient.DialAndExecuteSQLQuery(ctx, reqCtx.options, protocolclient.SQLQueryRequest{
 		QueryString: sqlText,
 	})
 	if err != nil {
-		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
-			Command:   "query",
-			TargetURL: target,
-			Surface:   sqlText,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
+		reportRunningAppRuntimeError(stderr, flags, command, reqCtx.target, sqlText, classifyRunningAppErrorCode(err), err.Error())
 		return 1
 	}
-	if err := writeSQLQuerySuccess(stdout, flags.formatValue(), contract, target, identity, response, sqlText); err != nil {
-		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
-			Command:   "query",
-			TargetURL: target,
-			Surface:   sqlText,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
+	if err := writeSQLQuerySuccess(stdout, flags.formatValue(), contract, reqCtx.target, identity, response, sqlText); err != nil {
+		reportRunningAppRuntimeError(stderr, flags, command, reqCtx.target, sqlText, classifyRunningAppErrorCode(err), err.Error())
 		return 1
 	}
 	return 0
 }
 
 func runProcedure(stdout, stderr io.Writer, args []string) int {
+	const command = "procedure"
 	fs := newFlagSet(stderr, "shunter procedure")
 	flags := newRunningAppFlags(fs)
 	if code, stop := parseFlags(fs, args); stop {
@@ -325,91 +173,39 @@ func runProcedure(stdout, stderr io.Writer, args []string) int {
 		return code
 	}
 	if fs.NArg() < 1 || fs.NArg() > 2 {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "procedure",
-			TargetURL: flags.urlValue(),
-			Code:      "invalid_arguments",
-			Message:   "procedure requires procedure name and optional JSON arguments",
-		})
+		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), "", "invalid_arguments", "procedure requires procedure name and optional JSON arguments")
 		return 2
 	}
 	name := strings.TrimSpace(fs.Arg(0))
 	rawArgs, err := flags.argumentBytes(fs.Args()[1:])
 	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "procedure",
-			TargetURL: flags.urlValue(),
-			Surface:   name,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
+		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), name, classifyRunningAppErrorCode(err), err.Error())
 		return 2
 	}
-	contract, err := readContractFile(flags.contractValue(), "procedure contract")
-	if err != nil {
-		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
-			Command:   "procedure",
-			TargetURL: flags.urlValue(),
-			Surface:   name,
-			Code:      "contract_error",
-			Message:   err.Error(),
-		})
-		return 1
+	contract, code, ok := readRunningAppCommandContract(stderr, flags, command, "procedure contract", name)
+	if !ok {
+		return code
 	}
 	request, err := prepareProcedureCall(contract, name, rawArgs, flags.argsHexValue() != "")
 	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "procedure",
-			TargetURL: flags.urlValue(),
-			Surface:   name,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
+		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), name, classifyRunningAppErrorCode(err), err.Error())
 		return 2
 	}
-	token, err := flags.token()
-	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "procedure",
-			TargetURL: flags.urlValue(),
-			Surface:   request.Name,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
-		return 2
+	reqCtx, code, ok := newRunningAppRequestContext(stderr, flags, command, request.Name)
+	if !ok {
+		return code
 	}
-	target, err := normalizeRunningAppURL(flags.urlValue())
-	if err != nil {
-		writeRunningAppUsageError(stderr, flags.formatValue(), runningAppError{
-			Command:   "procedure",
-			TargetURL: flags.urlValue(),
-			Surface:   request.Name,
-			Code:      "invalid_url",
-			Message:   err.Error(),
-		})
-		return 2
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), flags.timeoutValue())
+	ctx, cancel := runningAppTimeoutContext(flags)
 	defer cancel()
-	identity, response, err := protocolclient.DialAndCallProcedure(ctx, protocolclient.Options{
-		URL:            target,
-		Token:          token,
-		AllowAnonymous: flags.allowDevAnonymousValue(),
-	}, protocolclient.ProcedureCallRequest{
+	identity, response, err := protocolclient.DialAndCallProcedure(ctx, reqCtx.options, protocolclient.ProcedureCallRequest{
 		Name:      request.Name,
 		Arguments: request.Arguments,
 	})
 	if err != nil {
-		writeRunningAppRuntimeError(stderr, flags.formatValue(), runningAppError{
-			Command:   "procedure",
-			TargetURL: target,
-			Surface:   request.Name,
-			Code:      classifyRunningAppErrorCode(err),
-			Message:   err.Error(),
-		})
+		reportRunningAppRuntimeError(stderr, flags, command, reqCtx.target, request.Name, classifyRunningAppErrorCode(err), err.Error())
 		return 1
 	}
-	if err := writeProcedureSuccess(stdout, flags.formatValue(), contract, target, identity, response, request.Name); err != nil {
+	if err := writeProcedureSuccess(stdout, flags.formatValue(), contract, reqCtx.target, identity, response, request.Name); err != nil {
 		writeCLIError(stderr, err)
 		return 1
 	}
@@ -464,6 +260,45 @@ func validateRunningAppCommon(stderr io.Writer, flags runningAppFlags) int {
 		return 2
 	}
 	return 0
+}
+
+type runningAppRequestContext struct {
+	target  string
+	options protocolclient.Options
+}
+
+func readRunningAppCommandContract(stderr io.Writer, flags runningAppFlags, command, label, surface string) (shunter.ModuleContract, int, bool) {
+	contract, err := readContractFile(flags.contractValue(), label)
+	if err != nil {
+		reportRunningAppRuntimeError(stderr, flags, command, flags.urlValue(), surface, "contract_error", err.Error())
+		return shunter.ModuleContract{}, 1, false
+	}
+	return contract, 0, true
+}
+
+func newRunningAppRequestContext(stderr io.Writer, flags runningAppFlags, command, surface string) (runningAppRequestContext, int, bool) {
+	token, err := flags.token()
+	if err != nil {
+		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), surface, classifyRunningAppErrorCode(err), err.Error())
+		return runningAppRequestContext{}, 2, false
+	}
+	target, err := normalizeRunningAppURL(flags.urlValue())
+	if err != nil {
+		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), surface, "invalid_url", err.Error())
+		return runningAppRequestContext{}, 2, false
+	}
+	return runningAppRequestContext{
+		target: target,
+		options: protocolclient.Options{
+			URL:            target,
+			Token:          token,
+			AllowAnonymous: flags.allowDevAnonymousValue(),
+		},
+	}, 0, true
+}
+
+func runningAppTimeoutContext(flags runningAppFlags) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), flags.timeoutValue())
 }
 
 func (f runningAppFlags) urlValue() string {
@@ -612,14 +447,33 @@ func prepareDeclaredQuery(contract shunter.ModuleContract, name string, data []b
 }
 
 func normalizeRunningAppURL(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", protocolclient.ErrURLRequired
-	}
-	parsed, err := url.Parse(raw)
+	parsed, err := parseRunningAppURL(raw, protocolclient.ErrURLRequired)
 	if err != nil {
 		return "", err
 	}
+	if err := useRunningAppWebSocketScheme(parsed); err != nil {
+		return "", err
+	}
+	normalizeRunningAppEndpointPath(parsed, "/subscribe", false)
+	return parsed.String(), nil
+}
+
+func parseRunningAppURL(raw string, requiredErr error) (*url.URL, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, requiredErr
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Host == "" {
+		return nil, fmt.Errorf("URL host is required")
+	}
+	return parsed, nil
+}
+
+func useRunningAppWebSocketScheme(parsed *url.URL) error {
 	switch parsed.Scheme {
 	case "http":
 		parsed.Scheme = "ws"
@@ -627,24 +481,42 @@ func normalizeRunningAppURL(raw string) (string, error) {
 		parsed.Scheme = "wss"
 	case "ws", "wss":
 	default:
-		return "", fmt.Errorf("unsupported URL scheme %q", parsed.Scheme)
+		return fmt.Errorf("unsupported URL scheme %q", parsed.Scheme)
 	}
-	if parsed.Host == "" {
-		return "", fmt.Errorf("URL host is required")
-	}
-	switch cleanPath := path.Clean(parsed.Path); cleanPath {
-	case ".", "/":
-		parsed.Path = "/subscribe"
+	return nil
+}
+
+func useRunningAppHTTPScheme(parsed *url.URL) error {
+	switch parsed.Scheme {
+	case "http", "https":
+	case "ws":
+		parsed.Scheme = "http"
+	case "wss":
+		parsed.Scheme = "https"
 	default:
-		if strings.HasSuffix(cleanPath, "/subscribe") {
+		return fmt.Errorf("unsupported URL scheme %q", parsed.Scheme)
+	}
+	return nil
+}
+
+func normalizeRunningAppEndpointPath(parsed *url.URL, endpoint string, stripSubscribe bool) {
+	endpoint = "/" + strings.TrimPrefix(endpoint, "/")
+	switch cleanPath := path.Clean(parsed.Path); cleanPath {
+	case ".", "/", endpoint:
+		parsed.Path = endpoint
+	default:
+		switch {
+		case strings.HasSuffix(cleanPath, endpoint):
 			parsed.Path = cleanPath
-		} else {
-			parsed.Path = path.Join(cleanPath, "/subscribe")
+		case stripSubscribe && strings.HasSuffix(cleanPath, "/subscribe"):
+			base := strings.TrimSuffix(cleanPath, "/subscribe")
+			parsed.Path = path.Join(base, endpoint)
+		default:
+			parsed.Path = path.Join(cleanPath, endpoint)
 		}
 	}
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
-	return parsed.String(), nil
 }
 
 type runningAppError struct {
@@ -669,6 +541,24 @@ func writeRunningAppUsageError(stderr io.Writer, format string, err runningAppEr
 
 func writeRunningAppRuntimeError(stderr io.Writer, format string, err runningAppError) {
 	writeRunningAppError(stderr, format, err)
+}
+
+func reportRunningAppUsageError(stderr io.Writer, flags runningAppFlags, command, targetURL, surface, code, message string) {
+	writeRunningAppUsageError(stderr, flags.formatValue(), newRunningAppError(command, targetURL, surface, code, message))
+}
+
+func reportRunningAppRuntimeError(stderr io.Writer, flags runningAppFlags, command, targetURL, surface, code, message string) {
+	writeRunningAppRuntimeError(stderr, flags.formatValue(), newRunningAppError(command, targetURL, surface, code, message))
+}
+
+func newRunningAppError(command, targetURL, surface, code, message string) runningAppError {
+	return runningAppError{
+		Command:   command,
+		TargetURL: targetURL,
+		Surface:   surface,
+		Code:      code,
+		Message:   message,
+	}
 }
 
 func writeRunningAppError(stderr io.Writer, format string, err runningAppError) {
