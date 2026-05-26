@@ -150,18 +150,18 @@ func DecodeRowList(data []byte) ([][]byte, error) {
 		return nil, fmt.Errorf("%w: rowlist trailing bytes at offset %d", ErrMalformedMessage, off)
 	}
 
-	rows := make([][]byte, 0, count)
+	rows := make([][]byte, int(count))
 	payload := make([]byte, totalRowBytes)
 	off = 4
 	payloadOff := 0
-	for range count {
+	for i := range rows {
 		rowLen := int(binary.LittleEndian.Uint32(data[off : off+4]))
 		off += 4
 		row := payload[payloadOff : payloadOff+rowLen : payloadOff+rowLen]
 		copy(row, data[off:off+rowLen])
 		off += rowLen
 		payloadOff += rowLen
-		rows = append(rows, row)
+		rows[i] = row
 	}
 	return rows, nil
 }

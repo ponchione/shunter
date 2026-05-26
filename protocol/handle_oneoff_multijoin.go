@@ -92,9 +92,7 @@ func visitOneOffMultiJoinTuples(ctx context.Context, view store.CommittedReadVie
 	walk = func(depth int) (bool, error) {
 		if depth == len(multi.Relations) {
 			if matchCompiledSQLMultiPredicate(multi.Filter, tuple) {
-				copied := make([]types.ProductValue, len(tuple))
-				copy(copied, tuple)
-				return visit(copied), nil
+				return visit(tuple), nil
 			}
 			return true, nil
 		}

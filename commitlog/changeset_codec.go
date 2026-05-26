@@ -194,7 +194,7 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 	}
 
 	cs := &store.Changeset{
-		Tables: make(map[schema.TableID]*store.TableChangeset),
+		Tables: make(map[schema.TableID]*store.TableChangeset, int(tableCount)),
 	}
 
 	for range tableCount {
@@ -223,12 +223,13 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 		if err := requireChangesetCountFitsRemaining("insert count", insertCount, data, pos); err != nil {
 			return nil, err
 		}
-		for range insertCount {
+		tc.Inserts = make([]types.ProductValue, int(insertCount))
+		for i := range tc.Inserts {
 			row, n, err := decodeRow(data[pos:], ts, maxRowBytes)
 			if err != nil {
 				return nil, changesetDecodeErrorf("commitlog: decode insert row for table %d: %w", tableID, err)
 			}
-			tc.Inserts = append(tc.Inserts, row)
+			tc.Inserts[i] = row
 			pos += n
 		}
 
@@ -241,12 +242,13 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 		if err := requireChangesetCountFitsRemaining("delete count", deleteCount, data, pos); err != nil {
 			return nil, err
 		}
-		for range deleteCount {
+		tc.Deletes = make([]types.ProductValue, int(deleteCount))
+		for i := range tc.Deletes {
 			row, n, err := decodeRow(data[pos:], ts, maxRowBytes)
 			if err != nil {
 				return nil, changesetDecodeErrorf("commitlog: decode delete row for table %d: %w", tableID, err)
 			}
-			tc.Deletes = append(tc.Deletes, row)
+			tc.Deletes[i] = row
 			pos += n
 		}
 

@@ -402,14 +402,14 @@ func decodeSubscribeMulti(body []byte) (SubscribeMultiMsg, error) {
 	if err := requireCountFitsRemaining("SubscribeMulti query_strings", count, body, off, 4); err != nil {
 		return m, err
 	}
-	m.QueryStrings = make([]string, 0, count)
-	for i := uint32(0); i < count; i++ {
+	m.QueryStrings = make([]string, int(count))
+	for i := range m.QueryStrings {
 		s, next, serr := readString(body, off)
 		if serr != nil {
 			return m, serr
 		}
 		off = next
-		m.QueryStrings = append(m.QueryStrings, s)
+		m.QueryStrings[i] = s
 	}
 	if err := requireFullyConsumed(body, off, "SubscribeMulti"); err != nil {
 		return m, err
