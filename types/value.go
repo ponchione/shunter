@@ -485,6 +485,24 @@ func (v Value) JSONView() []byte {
 	return v.buf
 }
 
+// Copy returns a deep copy of v. Slice-backed values get their own slices;
+// strings share underlying memory because Go strings are immutable.
+func (v Value) Copy() Value {
+	if v.isNull {
+		return v
+	}
+	switch v.kind {
+	case KindBytes:
+		return NewBytes(v.buf)
+	case KindJSON:
+		return Value{kind: KindJSON, buf: slices.Clone(v.buf)}
+	case KindArrayString:
+		return NewArrayString(v.strArr)
+	default:
+		return v
+	}
+}
+
 func (v Value) mustKind(want ValueKind) {
 	if v.kind != want {
 		panic(fmt.Sprintf("shunter: Value.As%s called on %s value", want, v.kind))

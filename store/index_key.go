@@ -11,7 +11,7 @@ type IndexKey struct {
 func NewIndexKey(parts ...types.Value) IndexKey {
 	out := make([]types.Value, len(parts))
 	for i, part := range parts {
-		out[i] = copyIndexValue(part)
+		out[i] = part.Copy()
 	}
 	return IndexKey{parts: out}
 }
@@ -20,7 +20,7 @@ func NewIndexKey(parts ...types.Value) IndexKey {
 func (k IndexKey) Len() int { return len(k.parts) }
 
 // Part returns the i-th part.
-func (k IndexKey) Part(i int) types.Value { return copyIndexValue(k.parts[i]) }
+func (k IndexKey) Part(i int) types.Value { return k.parts[i].Copy() }
 
 // Compare returns -1, 0, or +1. Lexicographic by position.
 // Shorter key is less when it is a prefix of a longer key.
@@ -76,35 +76,7 @@ func Exclusive(v types.Value) Bound {
 func ExtractKey(row types.ProductValue, columns []int) IndexKey {
 	parts := make([]types.Value, len(columns))
 	for i, col := range columns {
-		parts[i] = copyIndexValue(row[col])
+		parts[i] = row[col].Copy()
 	}
 	return IndexKey{parts: parts}
-}
-
-func copyIndexValue(v types.Value) types.Value {
-	if v.IsNull() {
-		return v
-	}
-	switch v.Kind() {
-	case types.KindBytes:
-		return types.NewBytes(v.BytesView())
-	case types.KindJSON:
-		return copyJSONValue(v)
-	case types.KindArrayString:
-		return types.NewArrayString(v.ArrayStringView())
-	default:
-		return v
-	}
-}
-
-func copyJSONValue(v types.Value) types.Value {
-	return mustJSONValue(v.JSONView())
-}
-
-func mustJSONValue(raw []byte) types.Value {
-	out, err := types.NewJSON(raw)
-	if err != nil {
-		panic(err)
-	}
-	return out
 }

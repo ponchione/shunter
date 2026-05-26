@@ -694,6 +694,29 @@ func TestJSONAccessorsDoNotExposeMutableAliases(t *testing.T) {
 	}
 }
 
+func TestValueCopyDetachesSliceBackedValues(t *testing.T) {
+	bytesValue := NewBytesOwned([]byte{1, 2, 3})
+	bytesCopy := bytesValue.Copy()
+	bytesValue.buf[0] = 9
+	if got := bytesCopy.AsBytes(); !bytes.Equal(got, []byte{1, 2, 3}) {
+		t.Fatalf("copied bytes value = %v, want [1 2 3]", got)
+	}
+
+	arrayValue := NewArrayStringOwned([]string{"alpha", "beta"})
+	arrayCopy := arrayValue.Copy()
+	arrayValue.strArr[0] = "mutated"
+	if got := arrayCopy.AsArrayString(); got[0] != "alpha" {
+		t.Fatalf("copied array-string value = %v, want alpha first", got)
+	}
+
+	jsonValue := mustJSON(t, `{"b":2,"a":1}`)
+	jsonCopy := jsonValue.Copy()
+	jsonValue.buf[1] = 'z'
+	if got := string(jsonCopy.AsJSON()); got != `{"a":1,"b":2}` {
+		t.Fatalf("copied JSON value = %s, want canonical payload", got)
+	}
+}
+
 func TestJSONEqualCompareAndHash(t *testing.T) {
 	a := mustJSON(t, `{"b":2,"a":1}`)
 	a2 := mustJSON(t, `{"a":1,"b":2}`)

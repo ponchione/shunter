@@ -60,20 +60,7 @@ func (pv ProductValue) Copy() ProductValue {
 	}
 	cp := make(ProductValue, len(pv))
 	for i, v := range pv {
-		if v.IsNull() {
-			cp[i] = v
-			continue
-		}
-		switch v.kind {
-		case KindBytes:
-			cp[i] = NewBytes(v.buf)
-		case KindJSON:
-			cp[i] = Value{kind: KindJSON, buf: slices.Clone(v.buf)}
-		case KindArrayString:
-			cp[i] = NewArrayString(v.strArr)
-		default:
-			cp[i] = v
-		}
+		cp[i] = v.Copy()
 	}
 	return cp
 }
