@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- JWT validation now parses each token's unverified header and issuer in one
+  pass before signature verification.
+- Non-caller transaction-update fanout now treats connections that disappear
+  during delivery as skipped, matching the documented missing-connection
+  behavior while avoiding a duplicate manager lookup.
 - Scheduler ID allocation now atomically consumes the last non-zero ID and
   reports exhaustion without ever inserting `schedule_id = 0`.
 - Recovery `ApplyChangeset` now treats a nil changeset as an empty no-op,

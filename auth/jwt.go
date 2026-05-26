@@ -137,11 +137,7 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	if err != nil {
 		return nil, err
 	}
-	alg, keyID, err := jwtHeaderAlgorithmAndKeyID(tokenString)
-	if err != nil {
-		return nil, errors.Join(ErrJWTInvalid, err)
-	}
-	tokenIssuer, err := jwtUnverifiedIssuer(tokenString)
+	alg, keyID, tokenIssuer, err := jwtUnverifiedHeaderAndIssuer(tokenString)
 	if err != nil {
 		return nil, errors.Join(ErrJWTInvalid, err)
 	}
@@ -185,20 +181,31 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	return nil, fmt.Errorf("%w: token reported invalid", ErrJWTInvalid)
 }
 
-func jwtUnverifiedIssuer(tokenString string) (string, error) {
+func jwtUnverifiedHeaderAndIssuer(tokenString string) (JWTAlgorithm, string, string, error) {
 	parsed, _, err := jwt.NewParser().ParseUnverified(tokenString, jwt.MapClaims{})
 	if err != nil {
-		return "", err
+		return "", "", "", err
 	}
 	if parsed == nil {
-		return "", fmt.Errorf("token claims missing")
+		return "", "", "", fmt.Errorf("token header missing")
+	}
+	alg, ok := parsed.Header["alg"].(string)
+	if !ok || alg == "" {
+		return "", "", "", fmt.Errorf("%w: missing alg", ErrJWTUnsupportedAlg)
+	}
+	var keyID string
+	if raw, ok := parsed.Header["kid"]; ok {
+		keyID, ok = raw.(string)
+		if !ok {
+			return "", "", "", fmt.Errorf("kid header must be a string")
+		}
 	}
 	mc, ok := parsed.Claims.(jwt.MapClaims)
 	if !ok {
-		return "", fmt.Errorf("unexpected claims type %T", parsed.Claims)
+		return "", "", "", fmt.Errorf("unexpected claims type %T", parsed.Claims)
 	}
 	iss, _ := mc["iss"].(string)
-	return iss, nil
+	return JWTAlgorithm(alg), keyID, iss, nil
 }
 
 // ValidateJWTConfig validates configured local verification keys without
@@ -275,28 +282,6 @@ func resolveJWTVerificationKey(spec JWTVerificationKey) (resolvedJWTVerification
 		}
 		return resolvedJWTVerificationKey{}, fmt.Errorf("%w: %s", ErrJWTUnsupportedAlg, spec.Algorithm)
 	}
-}
-
-func jwtHeaderAlgorithmAndKeyID(tokenString string) (JWTAlgorithm, string, error) {
-	parsed, _, err := jwt.NewParser().ParseUnverified(tokenString, jwt.MapClaims{})
-	if err != nil {
-		return "", "", err
-	}
-	if parsed == nil {
-		return "", "", fmt.Errorf("token header missing")
-	}
-	alg, ok := parsed.Header["alg"].(string)
-	if !ok || alg == "" {
-		return "", "", fmt.Errorf("%w: missing alg", ErrJWTUnsupportedAlg)
-	}
-	var keyID string
-	if raw, ok := parsed.Header["kid"]; ok {
-		keyID, ok = raw.(string)
-		if !ok {
-			return "", "", fmt.Errorf("kid header must be a string")
-		}
-	}
-	return JWTAlgorithm(alg), keyID, nil
 }
 
 func selectJWTVerificationKeys(keys []resolvedJWTVerificationKey, alg JWTAlgorithm, keyID string) []resolvedJWTVerificationKey {

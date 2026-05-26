@@ -1,6 +1,8 @@
 package protocol
 
 import (
+	"errors"
+
 	"github.com/ponchione/shunter/types"
 )
 
@@ -25,11 +27,11 @@ func DeliverTransactionUpdateLight(
 		if len(updates) == 0 {
 			continue
 		}
-		if mgr.Get(connID) == nil {
-			continue
-		}
 		msg := &TransactionUpdateLight{RequestID: requestID, Update: updates}
 		if err := sender.SendTransactionUpdateLight(connID, msg); err != nil {
+			if errors.Is(err, ErrConnNotFound) {
+				continue
+			}
 			errs = append(errs, DeliveryError{ConnID: connID, Err: err})
 		}
 	}
