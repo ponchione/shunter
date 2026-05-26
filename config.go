@@ -154,7 +154,7 @@ func parseOIDCIssuerEnv(value string) ([]AuthOIDCIssuer, error) {
 		if entry == "" {
 			continue
 		}
-		parts := strings.Split(entry, ",")
+		parts := strings.SplitN(entry, ",", 2)
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("entry %q must be issuer,jwks-url", entry)
 		}

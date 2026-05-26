@@ -272,6 +272,21 @@ func TestConfigFromEnvParsesOIDCIssuers(t *testing.T) {
 	}
 }
 
+func TestConfigFromEnvParsesOIDCIssuerURLWithComma(t *testing.T) {
+	t.Setenv("SHUNTER_AUTH_OIDC_ISSUERS", "https://issuer.example,https://issuer.example/jwks.json?keys=a,b")
+
+	cfg, err := ConfigFromEnvE()
+	if err != nil {
+		t.Fatalf("ConfigFromEnvE returned error: %v", err)
+	}
+	if len(cfg.AuthOIDCIssuers) != 1 {
+		t.Fatalf("AuthOIDCIssuers = %#v, want one entry", cfg.AuthOIDCIssuers)
+	}
+	if got, want := cfg.AuthOIDCIssuers[0].JWKSURL, "https://issuer.example/jwks.json?keys=a,b"; got != want {
+		t.Fatalf("JWKSURL = %q, want %q", got, want)
+	}
+}
+
 func TestConfigFromEnvRejectsMalformedOIDCIssuer(t *testing.T) {
 	t.Setenv("SHUNTER_AUTH_OIDC_ISSUERS", "https://issuer.example")
 

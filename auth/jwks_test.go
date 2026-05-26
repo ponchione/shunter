@@ -128,6 +128,30 @@ func TestValidateJWTJWKSIssuerMustMatchSource(t *testing.T) {
 	}
 }
 
+func TestValidateJWTJWKSTrimsSourceIssuerForMatch(t *testing.T) {
+	privateKey, jwk := generateRS256JWK(t, "rsa-1")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJWKS(t, w, jwk)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &JWTConfig{
+		JWKS: []JWKSConfig{{
+			Issuer:  " issuer ",
+			JWKSURL: srv.URL,
+		}},
+		Issuers:  []string{"issuer"},
+		AuthMode: AuthModeStrict,
+	}
+	claims, err := ValidateJWT(mintRS256Token(t, privateKey, "rsa-1", "issuer"), cfg)
+	if err != nil {
+		t.Fatalf("ValidateJWT with trimmed JWKS issuer failed: %v", err)
+	}
+	if claims.Issuer != "issuer" {
+		t.Fatalf("claims issuer = %q, want issuer", claims.Issuer)
+	}
+}
+
 func TestValidateJWTJWKSCacheIsScopedBySourceAlgorithmPolicy(t *testing.T) {
 	rsaPrivateKey, rsaJWK := generateRS256JWK(t, "rsa-1")
 	esPrivateKey, esJWK := generateES256JWK(t, "ec-1")

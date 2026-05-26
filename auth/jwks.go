@@ -118,7 +118,7 @@ func resolveJWKSVerificationKeys(config *JWTConfig, alg JWTAlgorithm, keyID, tok
 	var out []resolvedJWTVerificationKey
 	var lastErr error
 	for _, source := range config.JWKS {
-		if source.Issuer != tokenIssuer {
+		if strings.TrimSpace(source.Issuer) != tokenIssuer {
 			continue
 		}
 		if !jwksSourceAllowsAlgorithm(source, alg) {
