@@ -25,20 +25,9 @@ func (ji *JoinRangeEdgeIndex) Add(edge JoinEdge, lower, upper Bound, hash QueryH
 		byRange = make(map[rangeKey]*rangeBucket)
 		ji.edges[edge] = byRange
 	}
-	key := makeRangeKey(lower, upper)
-	bucket, ok := byRange[key]
-	if !ok {
-		bucket = &rangeBucket{
-			lower:  lower,
-			upper:  upper,
-			hashes: make(map[QueryHash]struct{}),
-		}
-		byRange[key] = bucket
-	}
-	if _, exists := bucket.hashes[hash]; exists {
+	if !addRangeHash(byRange, lower, upper, hash) {
 		return
 	}
-	bucket.hashes[hash] = struct{}{}
 	ji.byTable.add(edge)
 }
 
@@ -48,17 +37,8 @@ func (ji *JoinRangeEdgeIndex) Remove(edge JoinEdge, lower, upper Bound, hash Que
 	if !ok {
 		return
 	}
-	key := makeRangeKey(lower, upper)
-	bucket, ok := byRange[key]
-	if !ok {
+	if !removeRangeHash(byRange, lower, upper, hash) {
 		return
-	}
-	if _, ok := bucket.hashes[hash]; !ok {
-		return
-	}
-	delete(bucket.hashes, hash)
-	if len(bucket.hashes) == 0 {
-		delete(byRange, key)
 	}
 	if len(byRange) == 0 {
 		delete(ji.edges, edge)
@@ -68,19 +48,11 @@ func (ji *JoinRangeEdgeIndex) Remove(edge JoinEdge, lower, upper Bound, hash Que
 
 // Lookup returns query hashes for registered ranges containing filterValue.
 func (ji *JoinRangeEdgeIndex) Lookup(edge JoinEdge, filterValue Value) []QueryHash {
-	var out []QueryHash
-	seen := make(map[QueryHash]struct{})
-	ji.ForEachHash(edge, filterValue, func(h QueryHash) {
-		if _, ok := seen[h]; ok {
-			return
-		}
-		seen[h] = struct{}{}
-		out = append(out, h)
-	})
-	if out == nil {
+	byRange, ok := ji.edges[edge]
+	if !ok {
 		return []QueryHash{}
 	}
-	return out
+	return lookupRangeHashes(byRange, filterValue)
 }
 
 // ForEachHash calls fn for every query hash registered for a range containing
@@ -90,14 +62,7 @@ func (ji *JoinRangeEdgeIndex) ForEachHash(edge JoinEdge, filterValue Value, fn f
 	if !ok {
 		return
 	}
-	for _, bucket := range byRange {
-		if !matchBounds(filterValue, bucket.lower, bucket.upper) {
-			continue
-		}
-		for h := range bucket.hashes {
-			fn(h)
-		}
-	}
+	forEachRangeHash(byRange, filterValue, fn)
 }
 
 // EdgesForTable returns all range-filter edges where LHSTable matches.

@@ -35,16 +35,9 @@ func (v *ValueIndex) argsMap(t TableID, c ColID) map[valueKey]map[QueryHash]stru
 // Add registers a (table, column, value) → hash mapping.
 func (v *ValueIndex) Add(table TableID, col ColID, value Value, hash QueryHash) {
 	byVal := v.argsMap(table, col)
-	key := encodeValueKey(value)
-	set, ok := byVal[key]
-	if !ok {
-		set = make(map[QueryHash]struct{})
-		byVal[key] = set
-	}
-	if _, exists := set[hash]; exists {
+	if !addValueHash(byVal, value, hash) {
 		return
 	}
-	set[hash] = struct{}{}
 	v.cols.add(table, col)
 }
 
@@ -59,17 +52,8 @@ func (v *ValueIndex) Remove(table TableID, col ColID, value Value, hash QueryHas
 	if !ok {
 		return
 	}
-	key := encodeValueKey(value)
-	set, ok := byVal[key]
-	if !ok {
+	if !removeValueHash(byVal, value, hash) {
 		return
-	}
-	if _, ok := set[hash]; !ok {
-		return
-	}
-	delete(set, hash)
-	if len(set) == 0 {
-		delete(byVal, key)
 	}
 	if len(byVal) == 0 {
 		delete(byCol, col)
@@ -93,11 +77,7 @@ func (v *ValueIndex) Lookup(table TableID, col ColID, value Value) []QueryHash {
 	if !ok {
 		return []QueryHash{}
 	}
-	set, ok := byVal[encodeValueKey(value)]
-	if !ok {
-		return []QueryHash{}
-	}
-	return mapKeys(set)
+	return lookupValueHashes(byVal, value)
 }
 
 // ForEachHash calls fn for every query hash registered for (table, col, value).
@@ -110,13 +90,7 @@ func (v *ValueIndex) ForEachHash(table TableID, col ColID, value Value, fn func(
 	if !ok {
 		return
 	}
-	set, ok := byVal[encodeValueKey(value)]
-	if !ok {
-		return
-	}
-	for h := range set {
-		fn(h)
-	}
+	forEachValueHash(byVal, value, fn)
 }
 
 // TrackedColumns returns the columns that have at least one subscription

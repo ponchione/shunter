@@ -48,20 +48,9 @@ func (r *RangeIndex) bucketMap(t TableID, c ColID) map[rangeKey]*rangeBucket {
 // Add registers a (table, column, range) -> hash mapping.
 func (r *RangeIndex) Add(table TableID, col ColID, lower, upper Bound, hash QueryHash) {
 	byRange := r.bucketMap(table, col)
-	key := makeRangeKey(lower, upper)
-	bucket, ok := byRange[key]
-	if !ok {
-		bucket = &rangeBucket{
-			lower:  lower,
-			upper:  upper,
-			hashes: make(map[QueryHash]struct{}),
-		}
-		byRange[key] = bucket
-	}
-	if _, exists := bucket.hashes[hash]; exists {
+	if !addRangeHash(byRange, lower, upper, hash) {
 		return
 	}
-	bucket.hashes[hash] = struct{}{}
 	r.cols.add(table, col)
 }
 
@@ -75,17 +64,8 @@ func (r *RangeIndex) Remove(table TableID, col ColID, lower, upper Bound, hash Q
 	if !ok {
 		return
 	}
-	key := makeRangeKey(lower, upper)
-	bucket, ok := byRange[key]
-	if !ok {
+	if !removeRangeHash(byRange, lower, upper, hash) {
 		return
-	}
-	if _, ok := bucket.hashes[hash]; !ok {
-		return
-	}
-	delete(bucket.hashes, hash)
-	if len(bucket.hashes) == 0 {
-		delete(byRange, key)
 	}
 	if len(byRange) == 0 {
 		delete(byCol, col)
@@ -99,22 +79,15 @@ func (r *RangeIndex) Remove(table TableID, col ColID, lower, upper Bound, hash Q
 
 // Lookup returns query hashes whose registered range contains value.
 func (r *RangeIndex) Lookup(table TableID, col ColID, value Value) []QueryHash {
-	var out []QueryHash
-	var seen map[QueryHash]struct{}
-	r.ForEachHash(table, col, value, func(h QueryHash) {
-		if seen == nil {
-			seen = make(map[QueryHash]struct{})
-		}
-		if _, ok := seen[h]; ok {
-			return
-		}
-		seen[h] = struct{}{}
-		out = append(out, h)
-	})
-	if out == nil {
+	byCol, ok := r.ranges[table]
+	if !ok {
 		return []QueryHash{}
 	}
-	return out
+	byRange, ok := byCol[col]
+	if !ok {
+		return []QueryHash{}
+	}
+	return lookupRangeHashes(byRange, value)
 }
 
 // ForEachHash calls fn for every query hash registered for a range containing
@@ -128,14 +101,7 @@ func (r *RangeIndex) ForEachHash(table TableID, col ColID, value Value, fn func(
 	if !ok {
 		return
 	}
-	for _, bucket := range byRange {
-		if !matchBounds(value, bucket.lower, bucket.upper) {
-			continue
-		}
-		for h := range bucket.hashes {
-			fn(h)
-		}
-	}
+	forEachRangeHash(byRange, value, fn)
 }
 
 // TrackedColumns returns columns with at least one registered range.

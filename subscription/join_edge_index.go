@@ -86,16 +86,9 @@ func (ji *JoinEdgeIndex) Add(edge JoinEdge, filterValue Value, hash QueryHash) {
 		byVal = make(map[valueKey]map[QueryHash]struct{})
 		ji.edges[edge] = byVal
 	}
-	key := encodeValueKey(filterValue)
-	set, ok := byVal[key]
-	if !ok {
-		set = make(map[QueryHash]struct{})
-		byVal[key] = set
-	}
-	if _, exists := set[hash]; exists {
+	if !addValueHash(byVal, filterValue, hash) {
 		return
 	}
-	set[hash] = struct{}{}
 	ji.byTable.add(edge)
 }
 
@@ -119,17 +112,8 @@ func (ji *JoinEdgeIndex) Remove(edge JoinEdge, filterValue Value, hash QueryHash
 	if !ok {
 		return
 	}
-	key := encodeValueKey(filterValue)
-	set, ok := byVal[key]
-	if !ok {
+	if !removeValueHash(byVal, filterValue, hash) {
 		return
-	}
-	if _, ok := set[hash]; !ok {
-		return
-	}
-	delete(set, hash)
-	if len(set) == 0 {
-		delete(byVal, key)
 	}
 	if len(byVal) == 0 {
 		delete(ji.edges, edge)
@@ -161,11 +145,7 @@ func (ji *JoinEdgeIndex) Lookup(edge JoinEdge, filterValue Value) []QueryHash {
 	if !ok {
 		return []QueryHash{}
 	}
-	set, ok := byVal[encodeValueKey(filterValue)]
-	if !ok {
-		return []QueryHash{}
-	}
-	return mapKeys(set)
+	return lookupValueHashes(byVal, filterValue)
 }
 
 // ForEachHash calls fn for every query hash registered for (edge, filterValue).
@@ -174,13 +154,7 @@ func (ji *JoinEdgeIndex) ForEachHash(edge JoinEdge, filterValue Value, fn func(Q
 	if !ok {
 		return
 	}
-	set, ok := byVal[encodeValueKey(filterValue)]
-	if !ok {
-		return
-	}
-	for h := range set {
-		fn(h)
-	}
+	forEachValueHash(byVal, filterValue, fn)
 }
 
 // ForEachExistenceHash calls fn for every query hash registered for edge-level

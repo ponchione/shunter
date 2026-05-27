@@ -54,16 +54,9 @@ func (ji *joinPathTraversalIndex) Add(edge joinPathTraversalEdge, filterValue Va
 		byVal = make(map[valueKey]map[QueryHash]struct{})
 		ji.edges[edge] = byVal
 	}
-	key := encodeValueKey(filterValue)
-	set, ok := byVal[key]
-	if !ok {
-		set = make(map[QueryHash]struct{})
-		byVal[key] = set
-	}
-	if _, exists := set[hash]; exists {
+	if !addValueHash(byVal, filterValue, hash) {
 		return
 	}
-	set[hash] = struct{}{}
 	ji.byTable.add(edge)
 }
 
@@ -72,17 +65,8 @@ func (ji *joinPathTraversalIndex) Remove(edge joinPathTraversalEdge, filterValue
 	if !ok {
 		return
 	}
-	key := encodeValueKey(filterValue)
-	set, ok := byVal[key]
-	if !ok {
+	if !removeValueHash(byVal, filterValue, hash) {
 		return
-	}
-	if _, ok := set[hash]; !ok {
-		return
-	}
-	delete(set, hash)
-	if len(set) == 0 {
-		delete(byVal, key)
 	}
 	if len(byVal) == 0 {
 		delete(ji.edges, edge)
@@ -95,11 +79,7 @@ func (ji *joinPathTraversalIndex) Lookup(edge joinPathTraversalEdge, filterValue
 	if !ok {
 		return []QueryHash{}
 	}
-	set, ok := byVal[encodeValueKey(filterValue)]
-	if !ok {
-		return []QueryHash{}
-	}
-	return mapKeys(set)
+	return lookupValueHashes(byVal, filterValue)
 }
 
 func (ji *joinPathTraversalIndex) ForEachHash(edge joinPathTraversalEdge, filterValue Value, fn func(QueryHash)) {
@@ -107,13 +87,7 @@ func (ji *joinPathTraversalIndex) ForEachHash(edge joinPathTraversalEdge, filter
 	if !ok {
 		return
 	}
-	set, ok := byVal[encodeValueKey(filterValue)]
-	if !ok {
-		return
-	}
-	for h := range set {
-		fn(h)
-	}
+	forEachValueHash(byVal, filterValue, fn)
 }
 
 func (ji *joinPathTraversalIndex) ForEachEdge(table TableID, fn func(joinPathTraversalEdge)) {
@@ -138,20 +112,9 @@ func (ji *joinRangePathTraversalIndex) Add(edge joinPathTraversalEdge, lower, up
 		byRange = make(map[rangeKey]*rangeBucket)
 		ji.edges[edge] = byRange
 	}
-	key := makeRangeKey(lower, upper)
-	bucket, ok := byRange[key]
-	if !ok {
-		bucket = &rangeBucket{
-			lower:  lower,
-			upper:  upper,
-			hashes: make(map[QueryHash]struct{}),
-		}
-		byRange[key] = bucket
-	}
-	if _, exists := bucket.hashes[hash]; exists {
+	if !addRangeHash(byRange, lower, upper, hash) {
 		return
 	}
-	bucket.hashes[hash] = struct{}{}
 	ji.byTable.add(edge)
 }
 
@@ -160,17 +123,8 @@ func (ji *joinRangePathTraversalIndex) Remove(edge joinPathTraversalEdge, lower,
 	if !ok {
 		return
 	}
-	key := makeRangeKey(lower, upper)
-	bucket, ok := byRange[key]
-	if !ok {
+	if !removeRangeHash(byRange, lower, upper, hash) {
 		return
-	}
-	if _, ok := bucket.hashes[hash]; !ok {
-		return
-	}
-	delete(bucket.hashes, hash)
-	if len(bucket.hashes) == 0 {
-		delete(byRange, key)
 	}
 	if len(byRange) == 0 {
 		delete(ji.edges, edge)
@@ -179,19 +133,11 @@ func (ji *joinRangePathTraversalIndex) Remove(edge joinPathTraversalEdge, lower,
 }
 
 func (ji *joinRangePathTraversalIndex) Lookup(edge joinPathTraversalEdge, filterValue Value) []QueryHash {
-	var out []QueryHash
-	seen := make(map[QueryHash]struct{})
-	ji.ForEachHash(edge, filterValue, func(h QueryHash) {
-		if _, ok := seen[h]; ok {
-			return
-		}
-		seen[h] = struct{}{}
-		out = append(out, h)
-	})
-	if out == nil {
+	byRange, ok := ji.edges[edge]
+	if !ok {
 		return []QueryHash{}
 	}
-	return out
+	return lookupRangeHashes(byRange, filterValue)
 }
 
 func (ji *joinRangePathTraversalIndex) ForEachHash(edge joinPathTraversalEdge, filterValue Value, fn func(QueryHash)) {
@@ -199,14 +145,7 @@ func (ji *joinRangePathTraversalIndex) ForEachHash(edge joinPathTraversalEdge, f
 	if !ok {
 		return
 	}
-	for _, bucket := range byRange {
-		if !matchBounds(filterValue, bucket.lower, bucket.upper) {
-			continue
-		}
-		for h := range bucket.hashes {
-			fn(h)
-		}
-	}
+	forEachRangeHash(byRange, filterValue, fn)
 }
 
 func (ji *joinRangePathTraversalIndex) ForEachEdge(table TableID, fn func(joinPathTraversalEdge)) {
