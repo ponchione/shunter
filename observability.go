@@ -726,7 +726,7 @@ func (o *runtimeObservability) TraceReducerCall(reducer, result string, err erro
 }
 
 func (o *runtimeObservability) TraceStoreCommit(txID types.TxID, result string, err error) {
-	result = okErrorTraceResult(result)
+	result = okErrorMetricResult(result)
 	o.traceSpan(traceSpanStoreCommit, "store", safeTraceError(result, err),
 		TraceAttr{Key: "tx_id", Value: uint64(txID)},
 		TraceAttr{Key: "result", Value: result},
@@ -734,7 +734,7 @@ func (o *runtimeObservability) TraceStoreCommit(txID types.TxID, result string, 
 }
 
 func (o *runtimeObservability) TraceDurabilityBatch(txID types.TxID, result string, err error) {
-	result = okErrorTraceResult(result)
+	result = okErrorMetricResult(result)
 	o.traceSpan(traceSpanDurabilityBatch, "commitlog", safeTraceError(result, err),
 		TraceAttr{Key: "tx_id", Value: uint64(txID)},
 		TraceAttr{Key: "result", Value: result},
@@ -750,7 +750,7 @@ func (o *runtimeObservability) TraceSubscriptionEval(txID types.TxID, result str
 }
 
 func (o *runtimeObservability) TraceSubscriptionFanout(result, reason string, err error) {
-	result = okErrorTraceResult(result)
+	result = okErrorMetricResult(result)
 	attrs := []TraceAttr{{Key: "result", Value: result}}
 	if result != "ok" {
 		attrs = append(attrs, TraceAttr{Key: "reason", Value: subscriptionFanoutMetricReason(reason)})
@@ -1201,13 +1201,6 @@ func safeTraceError(result string, err error) error {
 	default:
 		return errors.New(result)
 	}
-}
-
-func okErrorTraceResult(result string) string {
-	if result == "ok" {
-		return "ok"
-	}
-	return "error"
 }
 
 func reducerTraceName(reducer string) string {

@@ -18,11 +18,6 @@ type namedTypeScriptIdentifier struct {
 	sql        string
 }
 
-type typeScriptTableDecoder struct {
-	columnsIdentifier string
-	decoderIdentifier string
-}
-
 type typeScriptGenerationOptions struct {
 	runtimeImport string
 }
@@ -80,6 +75,28 @@ type typeScriptViewFacade struct {
 	subscribeFunction string
 	handleFunction    string
 	rowType           string
+}
+
+type typeScriptColumns interface {
+	Len() int
+	At(i int) (name, kind string, nullable bool)
+}
+
+type typeScriptTableColumns []schema.ColumnExport
+type typeScriptProductColumns []schema.ProductColumnExport
+
+func (columns typeScriptTableColumns) Len() int { return len(columns) }
+
+func (columns typeScriptTableColumns) At(i int) (string, string, bool) {
+	column := columns[i]
+	return column.Name, column.Type, column.Nullable
+}
+
+func (columns typeScriptProductColumns) Len() int { return len(columns) }
+
+func (columns typeScriptProductColumns) At(i int) (string, string, bool) {
+	column := columns[i]
+	return column.Name, column.Type, column.Nullable
 }
 
 func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerationOptions) ([]byte, error) {
@@ -140,29 +157,15 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	tableRowTypes := typeScriptTableRowTypes(tableTypes, topLevelValueNames)
 	for i, table := range contract.Schema.Tables {
 		rowType := tableRowTypes[i]
-		fmt.Fprintf(&b, "export interface %s {\n", rowType)
-		columnNames := make([]string, len(table.Columns))
-		for j, column := range table.Columns {
-			columnNames[j] = column.Name
+		if _, err := writeTypeScriptInterface(&b, rowType, typeScriptTableColumns(table.Columns)); err != nil {
+			return nil, err
 		}
-		columnIdentifiers := uniqueTypeScriptIdentifiers(columnNames, typeScriptCamelIdentifier)
-		for j, column := range table.Columns {
-			tsType, err := typeScriptColumnType(column.Type)
-			if err != nil {
-				return nil, err
-			}
-			if column.Nullable {
-				tsType += " | null"
-			}
-			fmt.Fprintf(&b, "  %s: %s;\n", columnIdentifiers[j].identifier, tsType)
-		}
-		b.WriteString("}\n\n")
 	}
 
 	writeTypeScriptConstMap(&b, "tables", tableConstants)
 	b.WriteString("export type TableName = (typeof tables)[keyof typeof tables];\n\n")
 	writeTypeScriptTableRows(&b, contract.Schema.Tables, tableRowTypes)
-	if _, err := writeTypeScriptTableRowDecoders(&b, contract.Schema.Tables, tableRowTypes, topLevelValueNames); err != nil {
+	if err := writeTypeScriptTableRowDecoders(&b, contract.Schema.Tables, tableRowTypes, topLevelValueNames); err != nil {
 		return nil, err
 	}
 	writeTypeScriptTableReadPolicies(&b, contract.Schema.Tables, tableConstants)
@@ -740,47 +743,24 @@ func writeTypeScriptTableRows(b *bytes.Buffer, tables []schema.TableExport, rowT
 	b.WriteString("};\n\n")
 }
 
-func writeTypeScriptTableRowDecoders(b *bytes.Buffer, tables []schema.TableExport, rowTypes []string, topLevelValueNames map[string]int) ([]typeScriptTableDecoder, error) {
-	decoders := make([]typeScriptTableDecoder, len(tables))
+func writeTypeScriptTableRowDecoders(b *bytes.Buffer, tables []schema.TableExport, rowTypes []string, topLevelValueNames map[string]int) error {
+	decoders := make([]string, len(tables))
 	for i, table := range tables {
 		rowName := rowTypes[i]
 		rowBaseName := strings.TrimSuffix(rowName, "Row")
 		columnsName := uniqueTypeScriptIdentifier(lowerFirst(rowBaseName)+"Columns", topLevelValueNames)
 		decoderName := uniqueTypeScriptIdentifier("decode"+rowName, topLevelValueNames)
-		decoders[i] = typeScriptTableDecoder{
-			columnsIdentifier: columnsName,
-			decoderIdentifier: decoderName,
-		}
+		columns := typeScriptTableColumns(table.Columns)
+		columnIdentifiers := typeScriptColumnIdentifiers(columns)
+		decoders[i] = decoderName
 
-		fmt.Fprintf(b, "const %s = [\n", columnsName)
-		for _, column := range table.Columns {
-			if _, err := typeScriptColumnType(column.Type); err != nil {
-				return nil, err
-			}
-			fmt.Fprintf(b, "  { name: %s, kind: %s", strconv.Quote(column.Name), strconv.Quote(column.Type))
-			if column.Nullable {
-				b.WriteString(", nullable: true")
-			}
-			b.WriteString(" },\n")
+		if err := writeTypeScriptBsatnColumns(b, columnsName, columns); err != nil {
+			return err
 		}
-		b.WriteString("] as const satisfies readonly ShunterBsatnColumn[];\n\n")
-
-		columnNames := make([]string, len(table.Columns))
-		for j, column := range table.Columns {
-			columnNames[j] = column.Name
-		}
-		columnIdentifiers := uniqueTypeScriptIdentifiers(columnNames, typeScriptCamelIdentifier)
 		fmt.Fprintf(b, "export function %s(row: Uint8Array): %s {\n", decoderName, rowName)
 		fmt.Fprintf(b, "  return shunterDecodeBsatnProduct(row, %s, (values) => ({\n", columnsName)
-		for j, column := range table.Columns {
-			tsType, err := typeScriptColumnType(column.Type)
-			if err != nil {
-				return nil, err
-			}
-			if column.Nullable {
-				tsType += " | null"
-			}
-			fmt.Fprintf(b, "    %s: values[%d] as %s,\n", columnIdentifiers[j].identifier, j, tsType)
+		if err := writeTypeScriptDecodedObject(b, columns, columnIdentifiers); err != nil {
+			return err
 		}
 		b.WriteString("  }));\n")
 		b.WriteString("}\n\n")
@@ -788,44 +768,21 @@ func writeTypeScriptTableRowDecoders(b *bytes.Buffer, tables []schema.TableExpor
 
 	b.WriteString("export const tableRowDecoders = {\n")
 	for i := range tables {
-		fmt.Fprintf(b, "  %s: %s,\n", strconv.Quote(tables[i].Name), decoders[i].decoderIdentifier)
+		fmt.Fprintf(b, "  %s: %s,\n", strconv.Quote(tables[i].Name), decoders[i])
 	}
 	b.WriteString("} as const satisfies TableRowDecoders;\n\n")
-	return decoders, nil
+	return nil
 }
 
 func writeTypeScriptProductCodec(b *bytes.Buffer, typeName, columnsName, encoderName, decoderName string, product schema.ProductSchemaExport, writeEncoder bool, writeDecoder bool) error {
-	columnNames := make([]string, len(product.Columns))
-	for i, column := range product.Columns {
-		columnNames[i] = column.Name
+	columns := typeScriptProductColumns(product.Columns)
+	columnIdentifiers, err := writeTypeScriptInterface(b, typeName, columns)
+	if err != nil {
+		return err
 	}
-	columnIdentifiers := uniqueTypeScriptIdentifiers(columnNames, typeScriptCamelIdentifier)
-
-	fmt.Fprintf(b, "export interface %s {\n", typeName)
-	for i, column := range product.Columns {
-		tsType, err := typeScriptColumnType(column.Type)
-		if err != nil {
-			return err
-		}
-		if column.Nullable {
-			tsType += " | null"
-		}
-		fmt.Fprintf(b, "  %s: %s;\n", columnIdentifiers[i].identifier, tsType)
+	if err := writeTypeScriptBsatnColumns(b, columnsName, columns); err != nil {
+		return err
 	}
-	b.WriteString("}\n\n")
-
-	fmt.Fprintf(b, "const %s = [\n", columnsName)
-	for _, column := range product.Columns {
-		if _, err := typeScriptColumnType(column.Type); err != nil {
-			return err
-		}
-		fmt.Fprintf(b, "  { name: %s, kind: %s", strconv.Quote(column.Name), strconv.Quote(column.Type))
-		if column.Nullable {
-			b.WriteString(", nullable: true")
-		}
-		b.WriteString(" },\n")
-	}
-	b.WriteString("] as const satisfies readonly ShunterBsatnColumn[];\n\n")
 
 	if writeEncoder {
 		fmt.Fprintf(b, "export function %s(value: %s): Uint8Array {\n", encoderName, typeName)
@@ -840,20 +797,77 @@ func writeTypeScriptProductCodec(b *bytes.Buffer, typeName, columnsName, encoder
 	if writeDecoder {
 		fmt.Fprintf(b, "export function %s(row: Uint8Array): %s {\n", decoderName, typeName)
 		fmt.Fprintf(b, "  return shunterDecodeBsatnProduct(row, %s, (values) => ({\n", columnsName)
-		for i, column := range product.Columns {
-			tsType, err := typeScriptColumnType(column.Type)
-			if err != nil {
-				return err
-			}
-			if column.Nullable {
-				tsType += " | null"
-			}
-			fmt.Fprintf(b, "    %s: values[%d] as %s,\n", columnIdentifiers[i].identifier, i, tsType)
+		if err := writeTypeScriptDecodedObject(b, columns, columnIdentifiers); err != nil {
+			return err
 		}
 		b.WriteString("  }));\n")
 		b.WriteString("}\n\n")
 	}
 
+	return nil
+}
+
+func typeScriptColumnIdentifiers(columns typeScriptColumns) []namedTypeScriptIdentifier {
+	names := make([]string, columns.Len())
+	for i := range names {
+		name, _, _ := columns.At(i)
+		names[i] = name
+	}
+	return uniqueTypeScriptIdentifiers(names, typeScriptCamelIdentifier)
+}
+
+func typeScriptColumnValueType(kind string, nullable bool) (string, error) {
+	tsType, err := typeScriptColumnType(kind)
+	if err != nil {
+		return "", err
+	}
+	if nullable {
+		tsType += " | null"
+	}
+	return tsType, nil
+}
+
+func writeTypeScriptInterface(b *bytes.Buffer, typeName string, columns typeScriptColumns) ([]namedTypeScriptIdentifier, error) {
+	columnIdentifiers := typeScriptColumnIdentifiers(columns)
+	fmt.Fprintf(b, "export interface %s {\n", typeName)
+	for i := range columns.Len() {
+		_, kind, nullable := columns.At(i)
+		tsType, err := typeScriptColumnValueType(kind, nullable)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(b, "  %s: %s;\n", columnIdentifiers[i].identifier, tsType)
+	}
+	b.WriteString("}\n\n")
+	return columnIdentifiers, nil
+}
+
+func writeTypeScriptBsatnColumns(b *bytes.Buffer, columnsName string, columns typeScriptColumns) error {
+	fmt.Fprintf(b, "const %s = [\n", columnsName)
+	for i := range columns.Len() {
+		name, kind, nullable := columns.At(i)
+		if _, err := typeScriptColumnType(kind); err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  { name: %s, kind: %s", strconv.Quote(name), strconv.Quote(kind))
+		if nullable {
+			b.WriteString(", nullable: true")
+		}
+		b.WriteString(" },\n")
+	}
+	b.WriteString("] as const satisfies readonly ShunterBsatnColumn[];\n\n")
+	return nil
+}
+
+func writeTypeScriptDecodedObject(b *bytes.Buffer, columns typeScriptColumns, identifiers []namedTypeScriptIdentifier) error {
+	for i := range columns.Len() {
+		_, kind, nullable := columns.At(i)
+		tsType, err := typeScriptColumnValueType(kind, nullable)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "    %s: values[%d] as %s,\n", identifiers[i].identifier, i, tsType)
+	}
 	return nil
 }
 
