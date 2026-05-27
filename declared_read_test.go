@@ -180,23 +180,23 @@ func TestDeclaredViewAdmissionPlanRecordsJoinGraph(t *testing.T) {
 	if len(plan.relations) != 2 {
 		t.Fatalf("len(relations) = %d, want 2", len(plan.relations))
 	}
-	if plan.relations[0].table != 0 || plan.relations[1].table != 0 {
+	if plan.relations[0].Table != 0 || plan.relations[1].Table != 0 {
 		t.Fatalf("relations = %+v, want two messages relation instances", plan.relations)
 	}
-	if plan.relations[0].alias == plan.relations[1].alias {
+	if plan.relations[0].Alias == plan.relations[1].Alias {
 		t.Fatalf("relation aliases = %+v, want distinct self-join aliases", plan.relations)
 	}
 	if len(plan.joinConditions) != 1 {
 		t.Fatalf("len(joinConditions) = %d, want 1", len(plan.joinConditions))
 	}
 	condition := plan.joinConditions[0]
-	if condition.left.relation != 0 || condition.right.relation != 1 ||
-		condition.left.table != 0 || condition.right.table != 0 ||
-		condition.left.column != 0 || condition.right.column != 0 {
+	if condition.Left.Relation != 0 || condition.Right.Relation != 1 ||
+		condition.Left.Table != 0 || condition.Right.Table != 0 ||
+		condition.Left.Column != 0 || condition.Right.Column != 0 {
 		t.Fatalf("join condition = %+v, want relation 0 id = relation 1 id", condition)
 	}
-	if !condition.left.indexed || !condition.right.indexed {
-		t.Fatalf("join condition indexes = left %t right %t, want both indexed", condition.left.indexed, condition.right.indexed)
+	if !condition.Left.Indexed || !condition.Right.Indexed {
+		t.Fatalf("join condition indexes = left %t right %t, want both indexed", condition.Left.Indexed, condition.Right.Indexed)
 	}
 }
 

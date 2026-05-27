@@ -238,32 +238,13 @@ type declaredViewAdmissionPlan struct {
 	predicateHashIdentity *types.Identity
 	referencedTables      []schema.TableID
 	usesCallerIdentity    bool
-	relations             []declaredViewAdmissionRelation
-	joinConditions        []declaredViewAdmissionJoinCondition
+	relations             []protocol.AdmissionRelation
+	joinConditions        []protocol.AdmissionJoinCondition
 	projectedRelation     int
 }
 
-type declaredViewAdmissionRelation struct {
-	relation int
-	table    schema.TableID
-	alias    uint8
-}
-
-type declaredViewAdmissionColumnRef struct {
-	relation int
-	table    schema.TableID
-	column   types.ColID
-	alias    uint8
-	indexed  bool
-}
-
-type declaredViewAdmissionJoinCondition struct {
-	left  declaredViewAdmissionColumnRef
-	right declaredViewAdmissionColumnRef
-}
-
 func newDeclaredViewAdmissionPlan(entry declaredReadEntry, compiled protocol.CompiledSQLQuery, caller types.CallerContext, sl schema.SchemaLookup) declaredViewAdmissionPlan {
-	relations, joinConditions := declaredViewAdmissionJoinGraph(compiled.Predicate(), sl)
+	relations, joinConditions := protocol.AdmissionJoinGraph(compiled.Predicate(), sl)
 	return declaredViewAdmissionPlan{
 		name:                  entry.Name,
 		sqlText:               entry.SQL,
@@ -279,99 +260,7 @@ func newDeclaredViewAdmissionPlan(entry declaredReadEntry, compiled protocol.Com
 		usesCallerIdentity:    compiled.UsesCallerIdentity(),
 		relations:             relations,
 		joinConditions:        joinConditions,
-		projectedRelation:     declaredViewAdmissionProjectedRelation(compiled.Predicate()),
-	}
-}
-
-func declaredViewAdmissionProjectedRelation(pred subscription.Predicate) int {
-	switch p := pred.(type) {
-	case subscription.Join:
-		if p.ProjectRight {
-			return 1
-		}
-		return 0
-	case subscription.CrossJoin:
-		if p.ProjectRight {
-			return 1
-		}
-		return 0
-	case subscription.MultiJoin:
-		return p.ProjectedRelation
-	default:
-		if pred == nil || len(pred.Tables()) == 0 {
-			return -1
-		}
-		return 0
-	}
-}
-
-func declaredViewAdmissionJoinGraph(pred subscription.Predicate, sl schema.SchemaLookup) ([]declaredViewAdmissionRelation, []declaredViewAdmissionJoinCondition) {
-	if pred == nil {
-		return nil, nil
-	}
-	switch p := pred.(type) {
-	case subscription.Join:
-		return []declaredViewAdmissionRelation{
-				{relation: 0, table: p.Left, alias: p.LeftAlias},
-				{relation: 1, table: p.Right, alias: p.RightAlias},
-			}, []declaredViewAdmissionJoinCondition{{
-				left: declaredViewAdmissionColumnRef{
-					relation: 0,
-					table:    p.Left,
-					column:   p.LeftCol,
-					alias:    p.LeftAlias,
-					indexed:  sl != nil && sl.HasIndex(p.Left, p.LeftCol),
-				},
-				right: declaredViewAdmissionColumnRef{
-					relation: 1,
-					table:    p.Right,
-					column:   p.RightCol,
-					alias:    p.RightAlias,
-					indexed:  sl != nil && sl.HasIndex(p.Right, p.RightCol),
-				},
-			}}
-	case subscription.CrossJoin:
-		return []declaredViewAdmissionRelation{
-			{relation: 0, table: p.Left, alias: p.LeftAlias},
-			{relation: 1, table: p.Right, alias: p.RightAlias},
-		}, nil
-	case subscription.MultiJoin:
-		relations := make([]declaredViewAdmissionRelation, len(p.Relations))
-		for i, relation := range p.Relations {
-			relations[i] = declaredViewAdmissionRelation{
-				relation: i,
-				table:    relation.Table,
-				alias:    relation.Alias,
-			}
-		}
-		conditions := make([]declaredViewAdmissionJoinCondition, len(p.Conditions))
-		for i, condition := range p.Conditions {
-			conditions[i] = declaredViewAdmissionJoinCondition{
-				left:  declaredViewAdmissionColumnRefFromMultiJoin(condition.Left, sl),
-				right: declaredViewAdmissionColumnRefFromMultiJoin(condition.Right, sl),
-			}
-		}
-		return relations, conditions
-	default:
-		tables := pred.Tables()
-		relations := make([]declaredViewAdmissionRelation, len(tables))
-		for i, table := range tables {
-			relations[i] = declaredViewAdmissionRelation{
-				relation: i,
-				table:    table,
-			}
-		}
-		return relations, nil
-	}
-}
-
-func declaredViewAdmissionColumnRefFromMultiJoin(ref subscription.MultiJoinColumnRef, sl schema.SchemaLookup) declaredViewAdmissionColumnRef {
-	return declaredViewAdmissionColumnRef{
-		relation: ref.Relation,
-		table:    ref.Table,
-		column:   ref.Column,
-		alias:    ref.Alias,
-		indexed:  sl != nil && sl.HasIndex(ref.Table, ref.Column),
+		projectedRelation:     protocol.AdmissionProjectedRelation(compiled.Predicate()),
 	}
 }
 

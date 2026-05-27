@@ -42,29 +42,10 @@ type rawSubscribeAdmissionPlanQuery struct {
 	predicateHashIdentity *types.Identity
 	usesCallerIdentity    bool
 	referencedTables      []schema.TableID
-	relations             []rawSubscribeAdmissionRelation
-	joinConditions        []rawSubscribeAdmissionJoinCondition
+	relations             []AdmissionRelation
+	joinConditions        []AdmissionJoinCondition
 	projectedRelation     int
 	resultShape           rawSubscribeAdmissionResultShape
-}
-
-type rawSubscribeAdmissionRelation struct {
-	relation int
-	table    schema.TableID
-	alias    uint8
-}
-
-type rawSubscribeAdmissionColumnRef struct {
-	relation int
-	table    schema.TableID
-	column   types.ColID
-	alias    uint8
-	indexed  bool
-}
-
-type rawSubscribeAdmissionJoinCondition struct {
-	left  rawSubscribeAdmissionColumnRef
-	right rawSubscribeAdmissionColumnRef
 }
 
 type rawSubscribeAdmissionResultShape struct {
@@ -119,7 +100,7 @@ func compileRawSubscribeAdmissionPlan(
 		if err != nil {
 			return rawSubscribeAdmissionPlan{}, qs, err
 		}
-		relations, joinConditions := rawSubscribeAdmissionJoinGraph(compiled.Predicate(), sl)
+		relations, joinConditions := AdmissionJoinGraph(compiled.Predicate(), sl)
 		plan.queries = append(plan.queries, rawSubscribeAdmissionPlanQuery{
 			sqlText:               qs,
 			predicate:             compiled.Predicate(),
@@ -128,7 +109,7 @@ func compileRawSubscribeAdmissionPlan(
 			referencedTables:      compiled.ReferencedTables(),
 			relations:             relations,
 			joinConditions:        joinConditions,
-			projectedRelation:     rawSubscribeAdmissionProjectedRelation(compiled.Predicate()),
+			projectedRelation:     AdmissionProjectedRelation(compiled.Predicate()),
 			resultShape: rawSubscribeAdmissionResultShape{
 				tableName:  compiled.TableName(),
 				projection: compiled.SubscriptionProjection(),
@@ -141,101 +122,6 @@ func compileRawSubscribeAdmissionPlan(
 		})
 	}
 	return plan, "", nil
-}
-
-func rawSubscribeAdmissionProjectedRelation(pred subscription.Predicate) int {
-	switch p := pred.(type) {
-	case subscription.Join:
-		if p.ProjectRight {
-			return 1
-		}
-		return 0
-	case subscription.CrossJoin:
-		if p.ProjectRight {
-			return 1
-		}
-		return 0
-	case subscription.MultiJoin:
-		return p.ProjectedRelation
-	default:
-		if pred == nil || len(pred.Tables()) == 0 {
-			return -1
-		}
-		return 0
-	}
-}
-
-func rawSubscribeAdmissionJoinGraph(pred subscription.Predicate, sl SchemaLookup) ([]rawSubscribeAdmissionRelation, []rawSubscribeAdmissionJoinCondition) {
-	if pred == nil {
-		return nil, nil
-	}
-	switch p := pred.(type) {
-	case subscription.Join:
-		relations := []rawSubscribeAdmissionRelation{
-			{relation: 0, table: p.Left, alias: p.LeftAlias},
-			{relation: 1, table: p.Right, alias: p.RightAlias},
-		}
-		return relations, []rawSubscribeAdmissionJoinCondition{
-			{
-				left: rawSubscribeAdmissionColumnRef{
-					relation: 0,
-					table:    p.Left,
-					column:   p.LeftCol,
-					alias:    p.LeftAlias,
-					indexed:  sl != nil && sl.HasIndex(p.Left, p.LeftCol),
-				},
-				right: rawSubscribeAdmissionColumnRef{
-					relation: 1,
-					table:    p.Right,
-					column:   p.RightCol,
-					alias:    p.RightAlias,
-					indexed:  sl != nil && sl.HasIndex(p.Right, p.RightCol),
-				},
-			},
-		}
-	case subscription.CrossJoin:
-		return []rawSubscribeAdmissionRelation{
-			{relation: 0, table: p.Left, alias: p.LeftAlias},
-			{relation: 1, table: p.Right, alias: p.RightAlias},
-		}, nil
-	case subscription.MultiJoin:
-		relations := make([]rawSubscribeAdmissionRelation, len(p.Relations))
-		for i, relation := range p.Relations {
-			relations[i] = rawSubscribeAdmissionRelation{
-				relation: i,
-				table:    relation.Table,
-				alias:    relation.Alias,
-			}
-		}
-		conditions := make([]rawSubscribeAdmissionJoinCondition, len(p.Conditions))
-		for i, condition := range p.Conditions {
-			conditions[i] = rawSubscribeAdmissionJoinCondition{
-				left:  rawSubscribeAdmissionColumnRefFromMultiJoin(condition.Left, sl),
-				right: rawSubscribeAdmissionColumnRefFromMultiJoin(condition.Right, sl),
-			}
-		}
-		return relations, conditions
-	default:
-		tables := pred.Tables()
-		relations := make([]rawSubscribeAdmissionRelation, len(tables))
-		for i, table := range tables {
-			relations[i] = rawSubscribeAdmissionRelation{
-				relation: i,
-				table:    table,
-			}
-		}
-		return relations, nil
-	}
-}
-
-func rawSubscribeAdmissionColumnRefFromMultiJoin(ref subscription.MultiJoinColumnRef, sl SchemaLookup) rawSubscribeAdmissionColumnRef {
-	return rawSubscribeAdmissionColumnRef{
-		relation: ref.Relation,
-		table:    ref.Table,
-		column:   ref.Column,
-		alias:    ref.Alias,
-		indexed:  sl != nil && sl.HasIndex(ref.Table, ref.Column),
-	}
 }
 
 func handleSubscribeSetWithVisibility(

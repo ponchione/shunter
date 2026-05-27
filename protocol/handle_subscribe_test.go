@@ -2813,8 +2813,8 @@ func TestCompileRawSubscribeAdmissionPlanRecordsIndexedJoinGraph(t *testing.T) {
 	if len(query.relations) != 2 {
 		t.Fatalf("len(relations) = %d, want 2", len(query.relations))
 	}
-	if query.relations[0] != (rawSubscribeAdmissionRelation{relation: 0, table: tID}) ||
-		query.relations[1] != (rawSubscribeAdmissionRelation{relation: 1, table: sID}) {
+	if query.relations[0] != (AdmissionRelation{Relation: 0, Table: tID}) ||
+		query.relations[1] != (AdmissionRelation{Relation: 1, Table: sID}) {
 		t.Fatalf("relations = %+v, want t then s relation instances", query.relations)
 	}
 	if len(query.joinConditions) != 1 {
@@ -2824,9 +2824,9 @@ func TestCompileRawSubscribeAdmissionPlanRecordsIndexedJoinGraph(t *testing.T) {
 		t.Fatalf("projectedRelation = %d, want 0 for SELECT t.*", query.projectedRelation)
 	}
 	condition := query.joinConditions[0]
-	wantLeft := rawSubscribeAdmissionColumnRef{relation: 0, table: tID, column: 1, indexed: true}
-	wantRight := rawSubscribeAdmissionColumnRef{relation: 1, table: sID, column: 1, indexed: false}
-	if condition.left != wantLeft || condition.right != wantRight {
+	wantLeft := AdmissionColumnRef{Relation: 0, Table: tID, Column: 1, Indexed: true}
+	wantRight := AdmissionColumnRef{Relation: 1, Table: sID, Column: 1, Indexed: false}
+	if condition.Left != wantLeft || condition.Right != wantRight {
 		t.Fatalf("join condition = %+v, want %+v = %+v", condition, wantLeft, wantRight)
 	}
 }
@@ -2876,7 +2876,7 @@ func TestCompileRawSubscribeAdmissionPlanRecordsProjectedJoinRelation(t *testing
 	if query.resultShape.tableName != "s" {
 		t.Fatalf("resultShape.tableName = %q, want s", query.resultShape.tableName)
 	}
-	if len(query.relations) != 2 || query.relations[query.projectedRelation].table != sID {
+	if len(query.relations) != 2 || query.relations[query.projectedRelation].Table != sID {
 		t.Fatalf("relations/projectedRelation = %+v/%d, want projected s relation", query.relations, query.projectedRelation)
 	}
 }
