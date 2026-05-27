@@ -61,26 +61,36 @@ func ValidateAggregate(pred Predicate, aggregate *Aggregate, s SchemaLookup) err
 		return err
 	}
 	if join, ok := pred.(Join); ok {
-		return validateJoinAggregate(join, aggregate, s)
+		if err := validateJoin(join, s, validateOptions{requireJoinIndex: true}); err != nil {
+			return err
+		}
+		return validateAggregateWithArgument(aggregate, func(label string, arg *AggregateColumn) error {
+			return validateJoinAggregateArgument(join, label, arg, s)
+		})
 	}
 	if cross, ok := pred.(CrossJoin); ok {
-		return validateCrossJoinAggregate(cross, aggregate, s)
+		if err := validateCrossJoin(cross, s, validateOptions{requireJoinIndex: true}); err != nil {
+			return err
+		}
+		return validateAggregateWithArgument(aggregate, func(label string, arg *AggregateColumn) error {
+			return validateCrossJoinAggregateArgument(cross, label, arg, s)
+		})
 	}
 	if multi, ok := pred.(MultiJoin); ok {
-		return validateMultiJoinAggregate(multi, aggregate, s)
+		if err := validateMultiJoin(multi, s, validateOptions{requireJoinIndex: true}); err != nil {
+			return err
+		}
+		return validateAggregateWithArgument(aggregate, func(label string, arg *AggregateColumn) error {
+			return validateMultiJoinAggregateArgument(multi, label, arg, s)
+		})
 	}
 	table, ok := aggregatePredicateTable(pred)
 	if !ok {
 		return fmt.Errorf("%w: live aggregate views require one referenced table", ErrInvalidPredicate)
 	}
-	switch aggregate.Func {
-	case AggregateCount:
-		return validateCountAggregate(table, aggregate, s)
-	case AggregateSum:
-		return validateSumAggregate(table, aggregate, s)
-	default:
-		return fmt.Errorf("%w: live aggregate views support COUNT and SUM only", ErrInvalidPredicate)
-	}
+	return validateAggregateWithArgument(aggregate, func(label string, arg *AggregateColumn) error {
+		return validateAggregateArgument(table, label, arg, s)
+	})
 }
 
 func validateAggregateResultColumn(aggregate *Aggregate) error {
@@ -93,70 +103,19 @@ func validateAggregateResultColumn(aggregate *Aggregate) error {
 	return nil
 }
 
-func validateJoinAggregate(join Join, aggregate *Aggregate, s SchemaLookup) error {
-	if err := validateJoin(join, s, validateOptions{requireJoinIndex: true}); err != nil {
-		return err
-	}
+func validateAggregateWithArgument(aggregate *Aggregate, validateArg func(string, *AggregateColumn) error) error {
 	switch aggregate.Func {
 	case AggregateCount:
-		return validateJoinCountAggregate(join, aggregate, s)
+		return validateCountAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
+			return validateArg("COUNT(column)", arg)
+		})
 	case AggregateSum:
-		return validateJoinSumAggregate(join, aggregate, s)
+		return validateSumAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
+			return validateArg("SUM(column)", arg)
+		})
 	default:
 		return fmt.Errorf("%w: live aggregate views support COUNT and SUM only", ErrInvalidPredicate)
 	}
-}
-
-func validateCrossJoinAggregate(cross CrossJoin, aggregate *Aggregate, s SchemaLookup) error {
-	if err := validateCrossJoin(cross, s, validateOptions{requireJoinIndex: true}); err != nil {
-		return err
-	}
-	switch aggregate.Func {
-	case AggregateCount:
-		return validateCrossJoinCountAggregate(cross, aggregate, s)
-	case AggregateSum:
-		return validateCrossJoinSumAggregate(cross, aggregate, s)
-	default:
-		return fmt.Errorf("%w: live aggregate views support COUNT and SUM only", ErrInvalidPredicate)
-	}
-}
-
-func validateMultiJoinAggregate(multi MultiJoin, aggregate *Aggregate, s SchemaLookup) error {
-	if err := validateMultiJoin(multi, s, validateOptions{requireJoinIndex: true}); err != nil {
-		return err
-	}
-	switch aggregate.Func {
-	case AggregateCount:
-		return validateMultiJoinCountAggregate(multi, aggregate, s)
-	case AggregateSum:
-		return validateMultiJoinSumAggregate(multi, aggregate, s)
-	default:
-		return fmt.Errorf("%w: live aggregate views support COUNT and SUM only", ErrInvalidPredicate)
-	}
-}
-
-func validateJoinCountAggregate(join Join, aggregate *Aggregate, s SchemaLookup) error {
-	return validateCountAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
-		return validateJoinAggregateArgument(join, "COUNT(column)", arg, s)
-	})
-}
-
-func validateCrossJoinCountAggregate(cross CrossJoin, aggregate *Aggregate, s SchemaLookup) error {
-	return validateCountAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
-		return validateCrossJoinAggregateArgument(cross, "COUNT(column)", arg, s)
-	})
-}
-
-func validateMultiJoinCountAggregate(multi MultiJoin, aggregate *Aggregate, s SchemaLookup) error {
-	return validateCountAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
-		return validateMultiJoinAggregateArgument(multi, "COUNT(column)", arg, s)
-	})
-}
-
-func validateCountAggregate(table TableID, aggregate *Aggregate, s SchemaLookup) error {
-	return validateCountAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
-		return validateAggregateArgument(table, "COUNT(column)", arg, s)
-	})
 }
 
 func validateCountAggregateWithArgument(aggregate *Aggregate, validateArg func(*AggregateColumn) error) error {
@@ -180,30 +139,6 @@ func validateCountResult(aggregate *Aggregate) error {
 		return fmt.Errorf("%w: COUNT aggregate result must be non-nullable", ErrInvalidPredicate)
 	}
 	return nil
-}
-
-func validateSumAggregate(table TableID, aggregate *Aggregate, s SchemaLookup) error {
-	return validateSumAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
-		return validateAggregateArgument(table, "SUM(column)", arg, s)
-	})
-}
-
-func validateJoinSumAggregate(join Join, aggregate *Aggregate, s SchemaLookup) error {
-	return validateSumAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
-		return validateJoinAggregateArgument(join, "SUM(column)", arg, s)
-	})
-}
-
-func validateCrossJoinSumAggregate(cross CrossJoin, aggregate *Aggregate, s SchemaLookup) error {
-	return validateSumAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
-		return validateCrossJoinAggregateArgument(cross, "SUM(column)", arg, s)
-	})
-}
-
-func validateMultiJoinSumAggregate(multi MultiJoin, aggregate *Aggregate, s SchemaLookup) error {
-	return validateSumAggregateWithArgument(aggregate, func(arg *AggregateColumn) error {
-		return validateMultiJoinAggregateArgument(multi, "SUM(column)", arg, s)
-	})
 }
 
 func validateSumAggregateWithArgument(aggregate *Aggregate, validateArg func(*AggregateColumn) error) error {
