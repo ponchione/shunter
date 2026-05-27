@@ -57,8 +57,8 @@ These commands target declared app surfaces:
 - `query` invokes a named declared query exported in the contract.
 - `health --url` checks the mounted runtime diagnostics `/healthz` endpoint.
 - `describe --url` reads the mounted runtime diagnostics debug snapshot.
-- Declared views remain subscription-oriented and should not be folded into
-  `query` unless a one-shot view read surface is deliberately added.
+- Declared views remain subscription-oriented. `query` targets declared
+  queries, not live view subscriptions.
 
 The contract path stays required for `call`, `procedure`, and `query` even
 when the app can expose its own contract. The CLI uses the local contract to
@@ -97,29 +97,28 @@ surface, not enabled implicitly by `shunter.Run`.
 
 ## Package Boundaries
 
-The package split is:
+The implemented package split is:
 
 - `protocolclient`: owns WebSocket dialing, subprotocol negotiation, bearer
   token presentation, request IDs, bounded waits for responses, protocol
   message encode/decode, and connection shutdown.
 - `cmd/shunter`: owns flags, environment fallback, terminal output, exit
   status, file reading, and command help.
-- `contractworkflow` or a narrow internal helper: owns loading and validating a
-  `ModuleContract` from JSON for CLI use.
-- A contract argument encoding helper: owns JSON object to `types.ProductValue`
-  conversion from exported product schemas, then delegates BSATN byte encoding
+- `contractworkflow`: owns loading and validating a `ModuleContract` from JSON
+  for CLI use, plus contract-aware JSON argument conversion.
+- contract argument encoding helpers: own JSON object to `types.ProductValue`
+  conversion from exported product schemas, then delegate BSATN byte encoding
   to existing runtime encoding code.
 
-Do not make `protocolclient` responsible for operator policy, interactive
-confirmation, local contract discovery, or command output. It should be a
-typed transport helper that can also support app-owned maintenance binaries
-later.
+`protocolclient` stays focused on typed transport. Operator policy,
+interactive confirmation, local contract discovery, and command output remain
+under `cmd/shunter` or contract workflow helpers.
 
-The existing `protocol` package should remain the shared wire-codec and server
-transport package. A client package can reuse exported message types and
+The existing `protocol` package remains the shared wire-codec and server
+transport package. The client package reuses exported message types and
 `EncodeClientMessage` / `DecodeServerMessage` rather than duplicating frame
-formats. Server admission, subscription fanout, and runtime lifecycle should
-stay out of the client package.
+formats. Server admission, subscription fanout, and runtime lifecycle stay out
+of the client package.
 
 ## Timeout Behavior
 
@@ -136,8 +135,8 @@ dial, write, and read waits.
   it must be explicit and limited to transport failures before the request is
   accepted.
 
-The client package should surface timeout errors distinctly enough for CLI tests
-to assert them without parsing human text.
+The client package surfaces timeout errors distinctly enough for CLI tests to
+assert them without parsing human text.
 
 ## Auth Requirements
 
@@ -151,12 +150,13 @@ on dev anonymous auth for operator writes.
 - `--allow-dev-anonymous` for explicit tokenless development connections only.
 
 When multiple sources are supplied, command-line token sources win over the
-environment, and any resolved token wins over `--allow-dev-anonymous`. Errors
-should say that a token is required for running-app admin commands.
+environment, and any resolved token wins over `--allow-dev-anonymous`.
+Missing-token errors state that a token is required for running-app admin
+commands.
 
 `cmd/shunter` resolves the credential source and passes only the selected token
 to the client package. The client package attaches the token using
-the same protocol authentication path expected by normal clients and should not
+the same protocol authentication path expected by normal clients and does not
 read environment variables itself.
 
 ## Encoding Rules
@@ -172,22 +172,21 @@ the contract's reducer, procedure, or query parameter schema.
 - Decode rows through contract row schemas when present.
 - Emit text by default and JSON with `--format json`.
 
-The CLI should not infer reducer or procedure argument formats when the
-contract does not declare them. In that case, operators must use raw bytes mode
-or the app should export product schemas.
+The CLI does not infer reducer or procedure argument formats when the contract
+does not declare them. In that case, operators must use raw bytes mode or the
+app should export product schemas.
 
 Generated TypeScript already provides the user-facing model for contract-aware
 encoding: helpers know the reducer, procedure, or declared-read schema, encode
 strongly typed arguments, and decode rows through contract metadata. The Go CLI
-should reuse the same contract semantics, but it should not depend on generated
-TypeScript artifacts at runtime.
+uses the same contract semantics without depending on generated TypeScript
+artifacts at runtime.
 
-For the CLI, prefer adding a Go helper that converts JSON values to
-`types.Value` / `types.ProductValue` using exported product schemas and then
-delegates binary encoding to `bsatn` or the existing protocol row encoders.
-This keeps the CLI independent of frontend builds while preserving the same
-field names, required fields, type checks, and row decoding rules that generated
-clients use.
+For the CLI, Go helpers convert JSON values to `types.Value` /
+`types.ProductValue` using exported product schemas and then delegate binary
+encoding to `bsatn` or the existing protocol row encoders. This keeps the CLI
+independent of frontend builds while preserving the same field names, required
+fields, type checks, and row decoding rules that generated clients use.
 
 Avoid CLI-specific BSATN writers. If a needed primitive cannot be represented
 through current `types.Value` or `bsatn` helpers, add the missing shared helper
@@ -224,8 +223,8 @@ Running-app commands use the same broad exit-code shape as the existing CLI:
   flag values, malformed JSON input, unknown reducer, procedure, or query
   names, missing token sources, and schema-less JSON argument mode.
 
-Text output can stay terse, but JSON output must be stable enough for operator
-automation. Failed JSON output should include:
+Text output can stay terse, but JSON output is stable enough for operator
+automation. Failed JSON output includes:
 
 - `status`: `"error"`.
 - `scope`: `"running_app"`.
@@ -312,5 +311,5 @@ When changing this surface, keep the coverage layered:
   address, export the matching contract, run one reducer call, one procedure
   call, and one declared query, then shut the server down cleanly.
 
-Tests should assert structured errors or JSON fields whenever practical. Human
-text can stay terse and should not be the only contract for automation.
+Keep tests asserting structured errors or JSON fields whenever practical. Human
+text can stay terse, but it should not be the only contract for automation.

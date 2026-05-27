@@ -1,10 +1,15 @@
 # Shunter Documentation
 
-This directory holds the current user-facing documentation for application
-authors and operators. Implementation plans, subsystem specs, audits,
-source-reading notes, and backlog trackers live under `../working-docs/`.
+This directory holds the supported app-author and operator documentation for
+Shunter. Use it to understand how a Go application embeds the runtime, exposes
+protocol traffic, exports contracts, generates clients, and operates a
+runtime-owned `DataDir`.
 
-## App-Author Learning Path
+Implementation plans, subsystem specs, audits, source-reading notes, and
+backlog trackers live under `../working-docs/`. They are repository-internal
+planning material, not the primary reader path for application authors.
+
+## Start Here
 
 1. [Getting started](getting-started.md) gives the shortest path for embedding
    Shunter in a Go application.
@@ -18,9 +23,9 @@ source-reading notes, and backlog trackers live under `../working-docs/`.
    explain.
 
 Use [authentication](authentication.md) for the full current auth contract,
-[operations](operations.md) for backup/restore and release runbooks, and
-[benchmark workflow](benchmarks.md) for repeatable before/after measurement.
-Use [performance envelopes](performance-envelopes.md) for the current advisory
+[operations](operations.md) for backup/restore and release runbooks,
+[benchmark workflow](benchmarks.md) for repeatable before/after measurement,
+and [performance envelopes](performance-envelopes.md) for the current advisory
 benchmark snapshot.
 
 ## Compatibility And Support
@@ -65,6 +70,15 @@ Runtime implementation packages such as `store`, `subscription`, `executor`,
   comparison rules, and PR reporting expectations.
 - [Performance envelopes](performance-envelopes.md) - current advisory
   benchmark snapshot, workload fixtures, and known measurement gaps.
+
+## Reader Expectations
+
+Shunter v1 is an embedded runtime and toolchain for self-hosted Go services. It
+does not provide managed hosting, dynamic module loading, distributed database
+behavior, broad SQL compatibility, or multi-language module execution. The
+stable reader path is the root Go API, documented contract format, generated
+client surface, Shunter-native protocol behavior, and the operations material
+in this directory.
 
 ## Working Docs
 

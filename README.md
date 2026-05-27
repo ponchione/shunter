@@ -1,17 +1,34 @@
 # Shunter
 
-Shunter is a Go-native hosted runtime for stateful realtime applications. It
-lets an application define schema, reducers, reads, lifecycle hooks, and
-protocol behavior in Go, then runs that module with embedded relational
-storage, durable commit logging, serialized reducer execution, subscription
-delta evaluation, and WebSocket delivery behind one runtime API.
+Shunter is a self-hosted Go runtime for stateful realtime applications. An
+application declares its schema, reducers, procedures, lifecycle hooks, reads,
+permissions, and protocol behavior in Go; Shunter builds that declaration into
+one runtime with embedded relational storage, durable commit logging,
+serialized reducer execution, subscription delta evaluation, and WebSocket
+delivery.
 
-The v1 line is designed for self-hosted Go services. Applications can link
-Shunter as a runtime library or run a Shunter-backed backend as a static Go
-binary. The repository contains the runtime implementation, CLI tooling,
-contract export and validation, TypeScript client generation, an end-to-end
-hosted example, and operational documentation for the current supported
-surface.
+A Shunter-backed service is a normal Go binary. Applications can link Shunter
+as an embedded runtime library, use `shunter.Run` as the backend entrypoint, or
+mount the runtime handler inside an app-owned HTTP server. This repository
+contains the runtime, CLI tooling, contract export and validation workflow,
+TypeScript client generation, an end-to-end hosted example, benchmarks, and
+operator documentation for the supported v1 surface.
+
+## At a Glance
+
+- Go module declarations for tables, reducers, procedures, declared queries,
+  declared live views, visibility filters, lifecycle hooks, permissions, and
+  migration metadata
+- runtime-owned durability through snapshots, segmented commit logs, recovery,
+  manual compaction, and offline backup/restore helpers
+- serialized reducer transactions with separate procedure handlers for
+  client-callable workflows that need external I/O before requesting commits
+- Shunter-native WebSocket protocol with JWT auth, declared-read parameters,
+  subscription deltas, bounded client helpers, and backpressure controls
+- contract JSON validation, compatibility review commands, and generated
+  TypeScript bindings backed by a local `@shunter/client` runtime package
+- operational runbooks, benchmark workflow guidance, and recorded advisory
+  performance envelopes
 
 ## Project Status
 

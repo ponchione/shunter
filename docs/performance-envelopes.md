@@ -110,11 +110,13 @@ Every row is advisory.
 | Multi-way join eval | `MultiWayLiveJoinEvalSizes/rows_128/count-24` | 128 rows per joined table, `COUNT(*)` | 1.532ms +/- 0% | 69.05Ki +/- 0% | 374 | advisory |
 | Multi-way join eval | `MultiWayLiveJoinEvalSizes/rows_512/table_shape-24` | 512 rows per joined table | 4.485ms +/- 1% | 282.9Ki +/- 0% | 1.153k | advisory |
 | Multi-way join eval | `MultiWayLiveJoinEvalSizes/rows_512/count-24` | 512 rows per joined table, `COUNT(*)` | 23.65ms +/- 0% | 282.9Ki +/- 0% | 1.155k | advisory |
-| Multi-way join eval | `MultiWayLiveJoinRelationShapes/chain3-24` | 128 rows per relation, three-table chain | pending refresh | pending refresh | pending refresh | advisory |
-| Multi-way join eval | `MultiWayLiveJoinRelationShapes/self_alias3-24` | 128 rows per relation, repeated table aliases | pending refresh | pending refresh | pending refresh | advisory |
-| Multi-way join eval | `MultiWayLiveJoinRelationShapes/chain4-24` | 128 rows per relation, four-table chain | pending refresh | pending refresh | pending refresh | advisory |
 | Delta indexes | `DeltaIndexConstruction-24` | 100 changed rows, 5 indexed columns | 33.96us +/- 0% | 3.965Ki +/- 0% | 501 | advisory |
 | Candidate collection | `CandidateCollection-24` | 1,000 equality subscriptions, 10 changed rows | 1.003us +/- 1% | 528 B +/- 0% | 3 | advisory |
+
+The benchmark suite also includes relation-shape fixtures for three-way
+chains, repeated-alias joins, and four-way chains. This snapshot does not
+publish those rows; refresh the envelope with fresh `benchstat` output before
+using relation-shape numbers for review or release evidence.
 
 ## Focused Ordered Subscription Window Baseline
 
@@ -179,9 +181,9 @@ Representative standings:
   declared live-view initial rows for projection/order/limit and count shapes.
 - Live multi-way joins now have opt-in production guardrails through
   `Config.SubscriptionMaxMultiJoinRelations` and
-  `Config.SubscriptionMaxMultiJoinRowsPerRelation`. The benchmark suite also
-  includes relation-shape fixtures for three-way chains, repeated-alias joins,
-  and four-way chains; refresh the pending rows when updating this envelope.
+  `Config.SubscriptionMaxMultiJoinRowsPerRelation`. The published snapshot
+  covers the relation-size fixtures above; refresh relation-shape fixture rows
+  when using those workloads for review or release evidence.
 - Offline backup/restore is covered for small and larger complete local
   DataDir fixtures and is expected to be I/O dominated; these rows do not
   replace production-scale backup/restore timing.
@@ -343,6 +345,8 @@ These remain outside the current benchmark envelope:
   in-process same-query, varied single-table, skewed hot-key, and varied
   two-table predicate fixtures
 - application workload timing, including production-scale backup/restore timing
+- published relation-shape results for the current multi-way join chain and
+  repeated-alias fixtures
 - memory profiles outside the current subscription, single-WebSocket,
   16/64/128-client WebSocket fanout, sender-level backpressure, executor
   reducer commit, and small/larger local backup/restore fixtures, including
