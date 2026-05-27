@@ -1,7 +1,6 @@
 package sql
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -10,18 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ponchione/shunter/internal/wideint"
 	"github.com/ponchione/shunter/types"
-)
-
-// Bound big integers for 128/256-bit coerce range checks. Computed once at
-// package init so the coerce hot path only does big.Int comparisons.
-var (
-	uint128Max = new(big.Int).Lsh(big.NewInt(1), 128)
-	uint256Max = new(big.Int).Lsh(big.NewInt(1), 256)
-	int128Max  = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 127), big.NewInt(1))
-	int128Min  = new(big.Int).Neg(new(big.Int).Lsh(big.NewInt(1), 127))
-	int256Max  = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(1))
-	int256Min  = new(big.Int).Neg(new(big.Int).Lsh(big.NewInt(1), 255))
 )
 
 // Coerce converts a parsed literal into a value for the target column kind.
@@ -567,69 +556,31 @@ func parseDurationLiteral(s string) (int64, bool) {
 
 // coerceBigIntToInt128 binds a big.Int literal to a 128-bit signed column.
 func coerceBigIntToInt128(lit Literal, kind types.ValueKind) (types.Value, error) {
-	var buf [16]byte
-	if err := fillSignedBigIntBytes(lit, kind, buf[:], int128Min, int128Max, uint128Max); err != nil {
-		return types.Value{}, err
+	if !wideint.IsInt128(lit.Big) {
+		return types.Value{}, invalidLiteralFromSource(lit, kind)
 	}
-	hi := int64(binary.BigEndian.Uint64(buf[0:8]))
-	lo := binary.BigEndian.Uint64(buf[8:16])
-	return types.NewInt128(hi, lo), nil
+	return wideint.Int128(lit.Big), nil
 }
 
 func coerceBigIntToUint128(lit Literal, kind types.ValueKind) (types.Value, error) {
-	var buf [16]byte
-	if err := fillUnsignedBigIntBytes(lit, kind, buf[:], uint128Max); err != nil {
-		return types.Value{}, err
+	if !wideint.IsUint128(lit.Big) {
+		return types.Value{}, invalidLiteralFromSource(lit, kind)
 	}
-	hi := binary.BigEndian.Uint64(buf[0:8])
-	lo := binary.BigEndian.Uint64(buf[8:16])
-	return types.NewUint128(hi, lo), nil
+	return wideint.Uint128(lit.Big), nil
 }
 
 func coerceBigIntToInt256(lit Literal, kind types.ValueKind) (types.Value, error) {
-	var buf [32]byte
-	if err := fillSignedBigIntBytes(lit, kind, buf[:], int256Min, int256Max, uint256Max); err != nil {
-		return types.Value{}, err
+	if !wideint.IsInt256(lit.Big) {
+		return types.Value{}, invalidLiteralFromSource(lit, kind)
 	}
-	w0 := int64(binary.BigEndian.Uint64(buf[0:8]))
-	w1 := binary.BigEndian.Uint64(buf[8:16])
-	w2 := binary.BigEndian.Uint64(buf[16:24])
-	w3 := binary.BigEndian.Uint64(buf[24:32])
-	return types.NewInt256(w0, w1, w2, w3), nil
+	return wideint.Int256(lit.Big), nil
 }
 
 func coerceBigIntToUint256(lit Literal, kind types.ValueKind) (types.Value, error) {
-	var buf [32]byte
-	if err := fillUnsignedBigIntBytes(lit, kind, buf[:], uint256Max); err != nil {
-		return types.Value{}, err
+	if !wideint.IsUint256(lit.Big) {
+		return types.Value{}, invalidLiteralFromSource(lit, kind)
 	}
-	w0 := binary.BigEndian.Uint64(buf[0:8])
-	w1 := binary.BigEndian.Uint64(buf[8:16])
-	w2 := binary.BigEndian.Uint64(buf[16:24])
-	w3 := binary.BigEndian.Uint64(buf[24:32])
-	return types.NewUint256(w0, w1, w2, w3), nil
-}
-
-func fillSignedBigIntBytes(lit Literal, kind types.ValueKind, dst []byte, min, max, modulus *big.Int) error {
-	x := lit.Big
-	if x.Cmp(max) > 0 || x.Cmp(min) < 0 {
-		return invalidLiteralFromSource(lit, kind)
-	}
-	if x.Sign() >= 0 {
-		x.FillBytes(dst)
-		return nil
-	}
-	new(big.Int).Add(x, modulus).FillBytes(dst)
-	return nil
-}
-
-func fillUnsignedBigIntBytes(lit Literal, kind types.ValueKind, dst []byte, maxExclusive *big.Int) error {
-	x := lit.Big
-	if x.Sign() < 0 || x.Cmp(maxExclusive) >= 0 {
-		return invalidLiteralFromSource(lit, kind)
-	}
-	x.FillBytes(dst)
-	return nil
+	return wideint.Uint256(lit.Big), nil
 }
 
 func parseHexLiteral(text string) ([]byte, error) {
