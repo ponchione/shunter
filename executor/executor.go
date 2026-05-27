@@ -295,36 +295,7 @@ func (e *Executor) rejectCommand(cmd ExecutorCommand, err error) {
 
 // Submit sends a command to the executor inbox.
 func (e *Executor) Submit(cmd ExecutorCommand) error {
-	if err := e.validateSubmitAdmission(cmd, false); err != nil {
-		e.recordExecutorCommand(cmd, "rejected")
-		return err
-	}
-	if !e.beginSubmit() {
-		e.recordExecutorCommand(cmd, "rejected")
-		return ErrExecutorShutdown
-	}
-	defer e.finishSubmit()
-	if e.rejectMode {
-		select {
-		case <-e.shutdownCh:
-			e.recordExecutorCommand(cmd, "rejected")
-			return ErrExecutorShutdown
-		case e.inbox <- cmd:
-			e.recordExecutorInboxDepth()
-			return nil
-		default:
-			e.recordExecutorCommand(cmd, "rejected")
-			return ErrExecutorBusy
-		}
-	}
-	select {
-	case <-e.shutdownCh:
-		e.recordExecutorCommand(cmd, "rejected")
-		return ErrExecutorShutdown
-	case e.inbox <- cmd:
-		e.recordExecutorInboxDepth()
-		return nil
-	}
+	return e.submit(context.Background(), cmd, false)
 }
 
 // SubmitWithContext sends a command respecting a caller context.
@@ -333,11 +304,15 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	return e.submit(ctx, cmd, true)
+}
+
+func (e *Executor) submit(ctx context.Context, cmd ExecutorCommand, requireExternalReady bool) error {
 	if err := ctx.Err(); err != nil {
 		e.recordExecutorCommand(cmd, "canceled")
 		return err
 	}
-	if err := e.validateSubmitAdmission(cmd, true); err != nil {
+	if err := e.validateSubmitAdmission(cmd, requireExternalReady); err != nil {
 		e.recordExecutorCommand(cmd, "rejected")
 		return err
 	}
@@ -350,12 +325,13 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 		e.recordExecutorCommand(cmd, "canceled")
 		return err
 	}
+	done := ctx.Done()
 	if e.rejectMode {
 		select {
 		case <-e.shutdownCh:
 			e.recordExecutorCommand(cmd, "rejected")
 			return ErrExecutorShutdown
-		case <-ctx.Done():
+		case <-done:
 			e.recordExecutorCommand(cmd, "canceled")
 			return ctx.Err()
 		case e.inbox <- cmd:
@@ -373,7 +349,7 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 	case e.inbox <- cmd:
 		e.recordExecutorInboxDepth()
 		return nil
-	case <-ctx.Done():
+	case <-done:
 		e.recordExecutorCommand(cmd, "canceled")
 		return ctx.Err()
 	}
