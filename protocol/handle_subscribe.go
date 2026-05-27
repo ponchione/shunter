@@ -462,17 +462,7 @@ func CompileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, o
 // app placeholders to concrete values. Raw SQL protocol surfaces must not use
 // this helper.
 func CompileSQLQueryStringWithParameters(qs string, sl SchemaLookup, caller *types.Identity, opts SQLQueryValidationOptions, parameters []SQLQueryParameterValue) (CompiledSQLQuery, error) {
-	compiler := sqlLiteralCompiler(runtimeSQLLiteralCompiler{caller: caller})
-	var validateUsed func() error
-	if len(parameters) != 0 {
-		bound, err := newBoundSQLLiteralCompiler(caller, parameters)
-		if err != nil {
-			return CompiledSQLQuery{}, err
-		}
-		compiler = bound
-		validateUsed = bound.validateUsed
-	}
-	compiled, err := compileSQLQueryWithCompiler(qs, sl, compiler, opts, validateUsed)
+	compiled, err := compileSQLQueryWithParameterCompiler(qs, sl, caller, opts, parameters, newBoundSQLLiteralCompiler)
 	if err != nil {
 		return CompiledSQLQuery{}, err
 	}
@@ -482,21 +472,25 @@ func CompileSQLQueryStringWithParameters(qs string, sl SchemaLookup, caller *typ
 // CompileSQLQueryTemplateString compiles declared-read SQL metadata against the
 // supplied parameter schema.
 func CompileSQLQueryTemplateString(qs string, sl SchemaLookup, caller *types.Identity, opts SQLQueryValidationOptions, parameters []SQLQueryParameter) (CompiledSQLQueryTemplate, error) {
-	compiler := sqlLiteralCompiler(runtimeSQLLiteralCompiler{caller: caller})
-	var validateUsed func() error
-	if len(parameters) != 0 {
-		template, err := newTemplateSQLLiteralCompiler(caller, parameters)
-		if err != nil {
-			return CompiledSQLQueryTemplate{}, err
-		}
-		compiler = template
-		validateUsed = template.validateUsed
-	}
-	compiled, err := compileSQLQueryWithCompiler(qs, sl, compiler, opts, validateUsed)
+	compiled, err := compileSQLQueryWithParameterCompiler(qs, sl, caller, opts, parameters, newTemplateSQLLiteralCompiler)
 	if err != nil {
 		return CompiledSQLQueryTemplate{}, err
 	}
 	return newCompiledSQLQueryTemplate(compiled), nil
+}
+
+func compileSQLQueryWithParameterCompiler[P any](qs string, sl SchemaLookup, caller *types.Identity, opts SQLQueryValidationOptions, parameters []P, build func(*types.Identity, []P) (*parameterSQLLiteralCompiler, error)) (compiledSQLQuery, error) {
+	compiler := sqlLiteralCompiler(runtimeSQLLiteralCompiler{caller: caller})
+	var validateUsed func() error
+	if len(parameters) != 0 {
+		parameterCompiler, err := build(caller, parameters)
+		if err != nil {
+			return compiledSQLQuery{}, err
+		}
+		compiler = parameterCompiler
+		validateUsed = parameterCompiler.validateUsed
+	}
+	return compileSQLQueryWithCompiler(qs, sl, compiler, opts, validateUsed)
 }
 
 func compileSQLQueryWithCompiler(qs string, sl SchemaLookup, literalCompiler sqlLiteralCompiler, opts SQLQueryValidationOptions, validateUsed func() error) (compiledSQLQuery, error) {
@@ -507,12 +501,10 @@ func compileSQLQueryWithCompiler(qs string, sl SchemaLookup, literalCompiler sql
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
-	if validateUsed != nil {
-		if err := validateUsed(); err != nil {
-			return compiledSQLQuery{}, err
-		}
+	if validateUsed == nil {
+		return compiled, nil
 	}
-	return compiled, nil
+	return compiled, validateUsed()
 }
 
 // CompileSQLQueryStringWithVisibility compiles SQL and expands matching
@@ -812,6 +804,19 @@ func compileSQLQueryString(qs string, sl SchemaLookup, literalCompiler sqlLitera
 		if err != nil {
 			return compiledSQLQuery{}, err
 		}
+		result := func(pred subscription.Predicate) compiledSQLQuery {
+			return compiledSQLQuery{
+				TableName:          stmt.ProjectedTable,
+				Predicate:          pred,
+				UsesCallerIdentity: usesCallerIdentity,
+				ProjectionColumns:  projectionColumns,
+				Aggregate:          aggregate,
+				OrderBy:            orderBy,
+				OrderByPresent:     len(stmtOrderBy) != 0,
+				Limit:              limit,
+				Offset:             offset,
+			}
+		}
 		if !stmt.Join.HasOn {
 			if stmt.Predicate != nil {
 				join, err := compileCrossJoinWhereColumnEquality(stmt, leftID, leftTS, rightID, rightTS, literalCompiler)
@@ -822,7 +827,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, literalCompiler sqlLitera
 					//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 					return compiledSQLQuery{}, fmt.Errorf("Subscriptions require indexes on join columns")
 				}
-				return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: join, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, OrderByPresent: len(stmtOrderBy) != 0, Limit: limit, Offset: offset}, nil
+				return result(join), nil
 			}
 			cross := subscription.CrossJoin{Left: leftID, Right: rightID}
 			if leftID == rightID {
@@ -830,10 +835,10 @@ func compileSQLQueryString(qs string, sl SchemaLookup, literalCompiler sqlLitera
 				cross.RightAlias = 1
 			}
 			cross.ProjectRight = joinProjectsRight(stmt, leftID == rightID)
-			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: cross, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, OrderByPresent: len(stmtOrderBy) != 0, Limit: limit, Offset: offset}, nil
+			return result(cross), nil
 		}
 		if _, ok := normalizedPredicate.(sql.FalsePredicate); ok {
-			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: subscription.NoRows{Table: projectedID}, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, OrderByPresent: len(stmtOrderBy) != 0, Limit: limit, Offset: offset}, nil
+			return result(subscription.NoRows{Table: projectedID}), nil
 		}
 		var filter subscription.Predicate
 		if stmt.Join.HasOn && normalizedPredicate != nil {
@@ -857,17 +862,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, literalCompiler sqlLitera
 			join.RightAlias = 1
 		}
 		join.ProjectRight = joinProjectsRight(stmt, leftID == rightID)
-		return compiledSQLQuery{
-			TableName:          stmt.ProjectedTable,
-			Predicate:          join,
-			UsesCallerIdentity: usesCallerIdentity,
-			ProjectionColumns:  projectionColumns,
-			Aggregate:          aggregate,
-			OrderBy:            orderBy,
-			OrderByPresent:     len(stmtOrderBy) != 0,
-			Limit:              limit,
-			Offset:             offset,
-		}, nil
+		return result(join), nil
 	}
 	projectedID, ts, ok := lookupSQLTableExact(sl, stmt.ProjectedTable)
 	if !ok {
