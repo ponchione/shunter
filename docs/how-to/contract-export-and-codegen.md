@@ -1,9 +1,5 @@
 # Contract Export And Codegen
 
-Status: current v1 app-author guidance
-Scope: exporting module contracts, reviewing compatibility, and generating
-client bindings.
-
 Contracts are the handoff artifact between a Shunter-backed Go app and clients,
 review tools, or generated bindings.
 

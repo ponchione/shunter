@@ -1,8 +1,5 @@
 # Serve Protocol Traffic
 
-Status: current v1 app-author guidance
-Scope: serving Shunter's HTTP/WebSocket protocol from an app process.
-
 Enable protocol serving when external clients should talk to Shunter over its
 WebSocket protocol. Keep using local runtime APIs for in-process workers,
 tests, admin tools, and app-owned HTTP handlers that do not need the protocol.

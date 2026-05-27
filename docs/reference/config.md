@@ -1,8 +1,5 @@
 # Config Reference
 
-Status: current v1 reference note
-Scope: app-facing `shunter.Config` fields and when to set them.
-
 Use Go doc for exact field types. This page explains practical app-author
 intent for the root runtime config.
 

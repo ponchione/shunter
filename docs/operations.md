@@ -1,8 +1,5 @@
 # Shunter Operations Runbook
 
-Status: current v1 operations guidance
-Scope: app-owned operation of a single Shunter runtime `DataDir`.
-
 This runbook describes the supported operator path for the current v1 line. It
 is intentionally conservative: Shunter is embedded in an app-owned Go binary,
 the app owns process supervision, and Shunter owns only the runtime state inside

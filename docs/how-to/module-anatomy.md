@@ -1,8 +1,5 @@
 # Module Anatomy
 
-Status: current v1 app-author guidance
-Scope: declaring app modules through the root `shunter` package.
-
 A Shunter module is the app-owned declaration that becomes a runtime. Keep the
 module declaration deterministic and close to the reducer code it registers.
 

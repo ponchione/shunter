@@ -1,8 +1,5 @@
 # Host Shunter As A Backend
 
-Status: current v1 app-author guidance
-Scope: standard static Go app server path for TypeScript frontends.
-
 The hosted app model is a normal Go binary that links your module and Shunter.
 Shunter is the backend boundary for application state; it is not a managed
 cloud database and it does not dynamically load arbitrary module code.

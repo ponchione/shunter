@@ -1,8 +1,5 @@
 # Shunter Concepts
 
-Status: current v1 app-author guidance
-Scope: vocabulary and mental model for app authors.
-
 This page explains the core nouns used by Shunter docs. It is not a subsystem
 spec and does not replace Go doc for method signatures.
 

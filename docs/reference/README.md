@@ -1,8 +1,5 @@
 # Reference Notes
 
-Status: current v1 reference notes
-Scope: compact implementation-facing notes that complement Go doc.
-
 Use Go doc for exact API signatures. These pages explain when and why to use
 the exported app-facing surfaces.
 

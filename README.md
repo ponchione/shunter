@@ -194,22 +194,22 @@ Shunter tool/runtime release version.
 
 ## Repository Guide
 
-For human orientation, start with:
+After this overview, use:
 
-1. [README.md](README.md) - project overview and current status
-2. [docs/README.md](docs/README.md) - guide to the app-author docs tree
-3. [docs/getting-started.md](docs/getting-started.md) - first-pass
+1. [docs/README.md](docs/README.md) - guide to the app-author docs tree
+2. [docs/getting-started.md](docs/getting-started.md) - first-pass
    app-author path for embedding Shunter
-4. [docs/concepts.md](docs/concepts.md) - vocabulary for modules, runtimes,
+3. [docs/concepts.md](docs/concepts.md) - vocabulary for modules, runtimes,
    reducers, procedures, reads, contracts, protocol serving, and durable state
-5. [docs/how-to/README.md](docs/how-to/README.md) - task-focused integration
+4. [docs/how-to/README.md](docs/how-to/README.md) - task-focused integration
    guides
-6. [docs/reference/README.md](docs/reference/README.md) - compact API
+5. [docs/reference/README.md](docs/reference/README.md) - compact API
    decision notes
 
-For implementation planning context, use `working-docs/README.md`,
-`working-docs/shunter-design-decisions.md`, and the narrow
-`working-docs/specs/` section for the surface being touched.
+Contributor planning notes live under `working-docs/`. Use
+`working-docs/README.md`, `working-docs/shunter-design-decisions.md`, and the
+narrow `working-docs/specs/` section only when implementation work needs that
+context.
 
 For implementation work, inspect the active packages directly:
 
@@ -222,13 +222,12 @@ For implementation work, inspect the active packages directly:
 - root package files such as `module.go`, `runtime.go`, `lifecycle.go`,
   `network.go`, and `config.go`
 
-For automation or agent-driven work, follow `AGENTS.md` and `RTK.md` before
-running commands or editing files.
+Repository command conventions are in `RTK.md`; task-specific automation
+instructions are in `AGENTS.md`.
 
-App-author and codebase docs live under `docs/`. Implementation planning,
-baseline specs, audits, and backlog trackers live under `working-docs/`.
-Prefer live code, tests, and the narrow spec section for the surface being
-touched.
+App-author and operator docs live under `docs/`. Implementation planning,
+baseline specs, audits, and backlog trackers live under `working-docs/`. Prefer
+live code, tests, and the narrow spec section for the surface being touched.
 
 ## Validation
 

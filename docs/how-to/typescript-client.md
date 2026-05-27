@@ -1,9 +1,5 @@
 # Use Generated TypeScript Clients
 
-Status: current v1 app-author guidance
-Scope: installing the local TypeScript SDK runtime, generating module bindings,
-and using the generated helpers from browser or Electron clients.
-
 Shunter's TypeScript path has two pieces:
 
 - the SDK runtime package in `typescript/client`, resolved by generated apps as

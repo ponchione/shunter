@@ -1,8 +1,5 @@
 # Configure Auth
 
-Status: current v1 app-author guidance
-Scope: choosing dev or strict auth mode for local calls and protocol serving.
-
 This page is a short integration guide. The full current auth contract lives in
 [Authentication](../authentication.md).
 

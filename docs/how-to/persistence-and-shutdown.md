@@ -1,9 +1,5 @@
 # Persistence And Shutdown
 
-Status: current v1 app-author guidance
-Scope: `DataDir`, startup, shutdown, snapshots, compaction, backup, restore,
-and migrations.
-
 Shunter persists runtime-owned state under `Config.DataDir`. Treat that
 directory as an implementation-owned unit: copy it as a whole, restore it as a
 whole, and never edit selected files by hand.

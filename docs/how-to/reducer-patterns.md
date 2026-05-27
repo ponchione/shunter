@@ -1,8 +1,5 @@
 # Reducer Patterns
 
-Status: current v1 app-author guidance
-Scope: writing reducers for Shunter modules.
-
 Reducers are the only supported write boundary for normal Shunter apps. They
 run synchronously on the runtime executor and receive a transaction-scoped
 database through `*schema.ReducerContext`.

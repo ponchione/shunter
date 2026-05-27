@@ -1,9 +1,5 @@
 # Getting Started With Shunter
 
-Status: current v1 app-author onboarding
-Scope: first orientation path for application authors embedding Shunter in a Go
-application.
-
 Shunter is a Go library for hosting stateful realtime application modules.
 An application defines a module, then either runs Shunter as the app's backend
 server with `shunter.Run` or builds a lower-level runtime and owns more of the
@@ -265,6 +261,14 @@ procedures, queries, views, permissions, read models, and migration metadata.
 Starting the runtime is not required for contract export.
 
 ```go
+rt, err := shunter.Build(app.Module(), shunter.Config{
+	DataDir: "./data/chat",
+})
+if err != nil {
+	return err
+}
+defer rt.Close()
+
 if err := contractworkflow.ExportRuntimeFile(rt, "shunter.contract.json"); err != nil {
 	return err
 }

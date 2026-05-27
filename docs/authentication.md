@@ -1,9 +1,5 @@
 # Shunter Authentication
 
-Status: current v1 auth guidance
-Scope: root `shunter.Config`, protocol authentication, local caller metadata,
-permissions, and visibility filters.
-
 Shunter authentication is intentionally small today. The root runtime supports a
 development mode that can mint anonymous protocol identities and a strict mode
 that requires signed JWTs for protocol connections.

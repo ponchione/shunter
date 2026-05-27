@@ -1,8 +1,5 @@
 # How-To Guides
 
-Status: current v1 app-author guidance
-Scope: task-focused app-author documentation.
-
 Use these pages when you already know what you want to do and need the current
 Shunter integration path.
 

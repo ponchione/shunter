@@ -1,8 +1,5 @@
 # Read Surface Reference
 
-Status: current v1 reference note
-Scope: choosing among Shunter's app-facing read surfaces.
-
 Use this page as the compact support reference for Shunter's current v1 read
 surfaces.
 

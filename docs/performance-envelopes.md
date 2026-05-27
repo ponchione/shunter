@@ -1,9 +1,5 @@
 # Shunter Performance Envelopes
 
-Status: latest recorded advisory v1 performance snapshot
-Scope: existing Go benchmarks for protocol, declared reads, executor,
-commitlog, subscription, and offline operations hot paths.
-
 This page records measured behavior for the benchmark coverage that already
 exists. The rows are advisory unless a release process defines hard thresholds
 for a specific workload. The snapshot below uses the preferred repo toolchain

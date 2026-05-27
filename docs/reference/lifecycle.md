@@ -1,8 +1,8 @@
 # Runtime Lifecycle Reference
 
-Status: current v1 reference note
-Scope: lifecycle order for `Build`, `Start`, serving, reads, writes, and
-`Close`.
+This page summarizes the normal lifecycle order for building, starting,
+serving, inspecting, and closing a Shunter runtime. Use Go doc for exact method
+signatures.
 
 ## Build
 

@@ -1,10 +1,5 @@
 # Running-App Admin CLI Reference
 
-Status: implemented v1 CLI surface
-Scope: `shunter call`, `shunter procedure`, `shunter query`,
-`shunter health --url`, and `shunter describe --url` commands against a
-running Shunter app.
-
 Shunter's generic CLI can target running app servers for declared reducers,
 procedures, and declared queries. It still does not dynamically load app
 modules; the running server is the app-owned Go binary that links the module.

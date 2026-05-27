@@ -1,8 +1,5 @@
 # Reads, Queries, And Views
 
-Status: current v1 app-author guidance
-Scope: local committed reads, declared queries, and declared live views.
-
 Shunter has three app-facing read paths:
 
 - `Runtime.Read` for in-process callback-scoped committed-state reads.

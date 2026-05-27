@@ -1,8 +1,5 @@
 # Testing Shunter Modules
 
-Status: current v1 app-author guidance
-Scope: testing app modules that embed Shunter.
-
 Most Shunter app behavior can be tested through the root runtime API. Prefer
 tests that build the real module, use a temporary `DataDir`, call reducers or
 procedures, and read state through public runtime surfaces.

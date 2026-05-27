@@ -80,23 +80,9 @@ stable reader path is the root Go API, documented contract format, generated
 client surface, Shunter-native protocol behavior, and the operations material
 in this directory.
 
-## Working Docs
+## Repository Notes
 
-Working docs are repository-internal implementation material. Consult them only
-when an active task needs their contracts or when live code and Go doc do not
-answer a dependency question.
-
-- `../working-docs/specs/*/SPEC-*.md` - numbered subsystem implementation
-  contracts.
-- `../working-docs/specs/README.md` - scope note for the numbered subsystem
-  contracts.
-- `../working-docs/tech-debt.md` - non-blocking follow-up work retired from stale
-  release roadmaps.
-- `../working-docs/shunter-design-decisions.md` - consolidated implementation
-  decisions that code and tests still cite.
-
-## Maintenance Notes
-
-Prefer live code, tests, and Go doc over stale prose. If a user-facing doc stops
-being current, fold the current contract into the smallest active doc or delete
-the obsolete page. Do not keep history-only files in `docs/`.
+Implementation planning material lives under `../working-docs/`. Treat those
+files as contributor context, not the app-author contract. For application
+integration and operations, prefer the root Go API, Go doc, tests, and the
+guides in this directory.
