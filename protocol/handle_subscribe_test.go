@@ -67,6 +67,13 @@ func requireSubscribeError(t *testing.T, conn *Conn, queryID uint32) Subscriptio
 	return se
 }
 
+func requireNoSubscribeRegistration(t *testing.T, exec *mockSubExecutor) {
+	t.Helper()
+	if req := exec.getRegisterSetReq(); req != nil {
+		t.Fatalf("executor registered subscription unexpectedly: %+v", req)
+	}
+}
+
 // --- Test mocks ---
 
 type mockSchemaLookup struct {
@@ -425,9 +432,7 @@ func TestHandleSubscribeSingle_MixedCaseTableRejectedByExactSQLPolicy(t *testing
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Fatal("executor should not receive RegisterSubscriptionSet for case-mismatched table")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_AmbiguousCaseFoldedTableNameRejectedBeforeRegistration(t *testing.T) {
@@ -465,9 +470,7 @@ func TestHandleSubscribeSingle_AmbiguousCaseFoldedTableNameRejectedBeforeRegistr
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called for ambiguous case-folded table names")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_GreaterThanComparison(t *testing.T) {
@@ -766,9 +769,7 @@ func TestHandleSubscribeSingle_LowercaseXEscapedStringOnBytesRejectedWithSQL(t *
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when lowercase x string content rejects as Array<U8>")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_OrComparisonWithAlias(t *testing.T) {
@@ -1092,9 +1093,7 @@ func TestHandleSubscribeSingle_CrossJoinWhereFalseStillRejected(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection", req)
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAccepted(t *testing.T) {
@@ -1282,9 +1281,7 @@ func TestHandleSubscribeSingle_CrossJoinAdmissionMatrix(t *testing.T) {
 				if se.Error != want {
 					t.Fatalf("Error = %q, want %q", se.Error, want)
 				}
-				if req := executor.getRegisterSetReq(); req != nil {
-					t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection", req)
-				}
+				requireNoSubscribeRegistration(t, executor)
 				return
 			}
 
@@ -1360,9 +1357,7 @@ func TestHandleSubscribeSingle_JoinCountAggregateOnCrossJoinWhereStillRejected(t
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q (aggregate guard fires before cross-join WHERE guard)", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection", req)
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_QuotedSpecialCharacterIdentifiers(t *testing.T) {
@@ -2148,9 +2143,7 @@ func TestHandleSubscribeSingle_AliasedBaseTableQualifiedWhereRejected(t *testing
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 17, "SubscriptionError.QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Fatal("executor should not be called for aliased base-table qualified WHERE")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_AliasedSelfCrossJoin(t *testing.T) {
@@ -2446,9 +2439,7 @@ func TestHandleSubscribeSingle_UnaliasedSelfCrossJoinRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 19, "SubscriptionError.QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Fatal("executor should not be called for unaliased self cross join")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_MultiWayJoinAcceptedForTableShape(t *testing.T) {
@@ -2549,9 +2540,7 @@ func TestHandleSubscribeSingle_MultiWayJoinProjectionRejected(t *testing.T) {
 	if !strings.Contains(se.Error, "Column projections are not supported in subscriptions") {
 		t.Fatalf("Error = %q, want projection rejection", se.Error)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Fatal("executor should not be called for multi-way projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_MultiWayJoinUnindexedJoinRejected(t *testing.T) {
@@ -2590,9 +2579,7 @@ func TestHandleSubscribeSingle_MultiWayJoinUnindexedJoinRejected(t *testing.T) {
 	if !strings.Contains(se.Error, "Subscriptions require indexes on join columns") {
 		t.Fatalf("Error = %q, want unindexed join rejection", se.Error)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Fatal("executor should not be called for unindexed multi-way join")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_UnknownTable(t *testing.T) {
@@ -2616,9 +2603,7 @@ func TestHandleSubscribeSingle_UnknownTable(t *testing.T) {
 	requireOptionalUint32(t, se.QueryID, 99, "SubscriptionError.QueryID")
 
 	// Executor must not have been called.
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called for unknown table")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_ExecutorReject(t *testing.T) {
@@ -2691,9 +2676,7 @@ func TestHandleSubscribeSingle_UnindexedJoinRejectedAtCompileStage(t *testing.T)
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile-stage rejection", req)
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // --- handleSubscribeMulti tests ---
@@ -2989,9 +2972,7 @@ func TestHandleSubscribeMulti_UnknownTable(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 99, "QueryID")
-	if req := exec.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when any query is invalid")
-	}
+	requireNoSubscribeRegistration(t, exec)
 }
 
 func TestHandleSubscribeMulti_ExecutorReject(t *testing.T) {
@@ -3487,9 +3468,7 @@ func TestHandleSubscribeSingle_StringLiteralOnIntegerColumnRejected(t *testing.T
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 81, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a string literal targets an integer column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected pins the
@@ -3519,9 +3498,7 @@ func TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected(t *testing.T)
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 83, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a float literal targets an integer column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterStringDigitsOnIntegerColumnWidens pins
@@ -3591,9 +3568,7 @@ func TestHandleSubscribeSingle_ShunterNonNumericStringOnIntegerEmitsInvalidLiter
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when LitString rejects via InvalidLiteral")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterNumericLiteralOnStringColumnWidens pins the
@@ -3685,9 +3660,7 @@ func TestHandleSubscribeSingle_ShunterScientificLiteralOverflowPreservesSourceTe
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when LitInt overflow source-text rejects via InvalidLiteral")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterHexLiteralWidensOntoStringColumn pins the
@@ -3754,9 +3727,7 @@ func TestHandleSubscribeSingle_ShunterUnknownTableRejected(t *testing.T) {
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	requireSubscribeError(t, conn, 85)
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when the FROM table is unknown")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnknownColumnRejected pins the reference
@@ -3781,9 +3752,7 @@ func TestHandleSubscribeSingle_ShunterUnknownColumnRejected(t *testing.T) {
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	requireSubscribeError(t, conn, 87)
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a qualified WHERE column is unknown")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterAliasedUnknownColumnRejected pins the
@@ -3810,9 +3779,7 @@ func TestHandleSubscribeSingle_ShunterAliasedUnknownColumnRejected(t *testing.T)
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	requireSubscribeError(t, conn, 89)
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when an alias-qualified WHERE column is unknown")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterBaseTableQualifierAfterAliasRejected pins the
@@ -3839,9 +3806,7 @@ func TestHandleSubscribeSingle_ShunterBaseTableQualifierAfterAliasRejected(t *te
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	requireSubscribeError(t, conn, 91)
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when the base-table qualifier is out of scope after an AS alias")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterBareColumnProjectionRejected pins the
@@ -3866,9 +3831,7 @@ func TestHandleSubscribeSingle_ShunterBareColumnProjectionRejected(t *testing.T)
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	requireSubscribeError(t, conn, 93)
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on a bare column projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_UnquotedNullWhereRejectedBeforeRegistration(t *testing.T) {
@@ -3886,9 +3849,7 @@ func TestHandleSubscribeSingle_UnquotedNullWhereRejectedBeforeRegistration(t *te
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	requireSubscribeError(t, conn, 94)
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when unquoted NULL appears in column position")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterJoinWithoutQualifiedProjectionRejected pins
@@ -3913,9 +3874,7 @@ func TestHandleSubscribeSingle_ShunterJoinWithoutQualifiedProjectionRejected(t *
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	requireSubscribeError(t, conn, 95)
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a join query lacks a qualified projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterJoinStarProjectionRejectText pins SELECT *
@@ -3950,9 +3909,7 @@ func TestHandleSubscribeSingle_ShunterJoinStarProjectionRejectText(t *testing.T)
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on SELECT * JOIN rejection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSelfJoinWithoutAliasesRejected pins the
@@ -3977,9 +3934,7 @@ func TestHandleSubscribeSingle_ShunterSelfJoinWithoutAliasesRejected(t *testing.
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	requireSubscribeError(t, conn, 97)
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called for a self-join without aliases")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterForwardAliasReferenceRejected pins forward
@@ -3999,9 +3954,7 @@ func TestHandleSubscribeSingle_ShunterForwardAliasReferenceRejected(t *testing.T
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	requireSubscribeError(t, conn, 99)
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a join references an alias declared later")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterLimitClauseRejected pins the reference type-
@@ -4032,9 +3985,7 @@ func TestHandleSubscribeSingle_ShunterLimitClauseRejected(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q (LIMIT-in-subscription must emit SubscriptionUnsupported::Feature)", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a LIMIT clause trails the query")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_OrderByRejected(t *testing.T) {
@@ -4057,9 +4008,7 @@ func TestHandleSubscribeSingle_OrderByRejected(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when ORDER BY appears on a subscription")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_MultiColumnOrderByRejected(t *testing.T) {
@@ -4083,9 +4032,7 @@ func TestHandleSubscribeSingle_MultiColumnOrderByRejected(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when multi-column ORDER BY appears on a subscription")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_OrderByProjectionAliasRejected(t *testing.T) {
@@ -4108,9 +4055,7 @@ func TestHandleSubscribeSingle_OrderByProjectionAliasRejected(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when ORDER BY projection alias appears on a subscription")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_OffsetRejected(t *testing.T) {
@@ -4133,9 +4078,7 @@ func TestHandleSubscribeSingle_OffsetRejected(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when OFFSET appears on a subscription")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterLimitPrecedesSetQuantifierRejectText pins
@@ -4177,9 +4120,7 @@ func TestHandleSubscribeSingle_ShunterLimitPrecedesSetQuantifierRejectText(t *te
 			if se.Error != want {
 				t.Fatalf("Error = %q, want %q (subscription LIMIT rejection must precede set quantifier)", se.Error, want)
 			}
-			if req := executor.getRegisterSetReq(); req != nil {
-				t.Error("executor should not be called when LIMIT and a set quantifier are rejected")
-			}
+			requireNoSubscribeRegistration(t, executor)
 		})
 	}
 }
@@ -4256,9 +4197,7 @@ func TestHandleSubscribeSingle_ShunterUnqualifiedWhereInJoinRejected(t *testing.
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 103, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a WHERE column is unqualified inside a join")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterScientificNotationUnsignedInteger pins the
@@ -4451,9 +4390,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeIntOnUnsignedRejecte
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 119, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a negative literal targets an unsigned column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterInvalidLiteralScientificOverflowRejected
@@ -4482,9 +4419,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralScientificOverflowRejected(t
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 121, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a scientific-notation literal overflows the unsigned column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterInvalidLiteralFloatOnUnsignedRejected pins
@@ -4513,9 +4448,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralFloatOnUnsignedRejected(t *t
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 123, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a float literal targets an unsigned column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected
@@ -4544,9 +4477,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnUnsignedRe
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 125, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a non-integral scientific literal targets an unsigned column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnSignedRejected
@@ -4575,9 +4506,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnSignedReje
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 127, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a non-integral scientific literal targets a signed column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterValidLiteralOnEachIntegerWidth pins integer
@@ -4728,9 +4657,7 @@ func TestHandleSubscribeSingle_ShunterUint256NegativeRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 243, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a negative literal targets a Uint256 column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterTimestampLiteralAccepted pins the reference
@@ -4830,9 +4757,7 @@ func TestHandleSubscribeSingle_ShunterTimestampMalformedRejected(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on a malformed timestamp literal")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterBoolLiteralOnTimestampRejectText pins
@@ -4865,9 +4790,7 @@ func TestHandleSubscribeSingle_ShunterBoolLiteralOnTimestampRejectText(t *testin
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a bool literal targets a Timestamp column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterStringLiteralOnArrayStringRejectText pins
@@ -4901,9 +4824,7 @@ func TestHandleSubscribeSingle_ShunterStringLiteralOnArrayStringRejectText(t *te
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a scalar literal targets an Array<String> column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterBoolLiteralOnArrayStringRejectText pins
@@ -4935,9 +4856,7 @@ func TestHandleSubscribeSingle_ShunterBoolLiteralOnArrayStringRejectText(t *test
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a bool literal targets an Array<String> column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUint128NegativeRejected extends the
@@ -4965,9 +4884,7 @@ func TestHandleSubscribeSingle_ShunterUint128NegativeRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 241, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a negative literal targets a Uint128 column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterDMLStatementRejected pins the reference
@@ -5009,9 +4926,7 @@ func TestHandleSubscribeSingle_ShunterDMLStatementRejected(t *testing.T) {
 			}
 			se := decoded.(SubscriptionError)
 			requireOptionalUint32(t, se.QueryID, queryID, "QueryID")
-			if req := executor.getRegisterSetReq(); req != nil {
-				t.Error("executor should not be called on a DML statement")
-			}
+			requireNoSubscribeRegistration(t, executor)
 		})
 	}
 }
@@ -5042,9 +4957,7 @@ func TestHandleSubscribeSingle_ShunterEmptyStatementRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 133, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on an empty query string")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterWhitespaceOnlyStatementRejected pins the
@@ -5073,9 +4986,7 @@ func TestHandleSubscribeSingle_ShunterWhitespaceOnlyStatementRejected(t *testing
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 135, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on a whitespace-only query string")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterDistinctProjectionRejected pins the reference
@@ -5111,9 +5022,7 @@ func TestHandleSubscribeSingle_ShunterDistinctProjectionRejected(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on a DISTINCT projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterAllModifierRejected pins the reference
@@ -5149,9 +5058,7 @@ func TestHandleSubscribeSingle_ShunterAllModifierRejected(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on a SELECT ALL projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSubqueryInFromRejected pins the reference
@@ -5182,9 +5089,7 @@ func TestHandleSubscribeSingle_ShunterSubqueryInFromRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 139, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on a subquery in FROM")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected
@@ -5214,9 +5119,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedSelectLiteralWithoutFromReje
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 141, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on SELECT without FROM")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedMultiPartTableNameRejected pins
@@ -5246,9 +5149,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedMultiPartTableNameRejected(t
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 143, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on multi-part table name")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedBitStringLiteralRejected pins
@@ -5278,9 +5179,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedBitStringLiteralRejected(t *
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 145, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on a bit-string literal")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedWildcardWithBareColumnsRejected
@@ -5310,9 +5209,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedWildcardWithBareColumnsRejec
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 147, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on wildcard with bare columns")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected
@@ -5342,9 +5239,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedOrderByWithLimitExpressionRe
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 149, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on ORDER BY with LIMIT expression")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedAggregateWithGroupByRejected
@@ -5374,9 +5269,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedAggregateWithGroupByRejected
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 151, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on aggregate with GROUP BY")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedImplicitCommaJoinRejected pins
@@ -5406,9 +5299,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedImplicitCommaJoinRejected(t 
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 153, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on implicit comma join")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected
@@ -5438,9 +5329,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejecte
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 155, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on unqualified JOIN ON vars")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidEmptySelectRejected pins the
@@ -5470,9 +5359,7 @@ func TestHandleSubscribeSingle_ShunterSqlInvalidEmptySelectRejected(t *testing.T
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 157, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on empty SELECT")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidEmptyFromRejected pins the
@@ -5501,9 +5388,7 @@ func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyFromRejected(t *testing.T) 
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 159, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on empty FROM")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidEmptyWhereRejected pins the
@@ -5532,9 +5417,7 @@ func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyWhereRejected(t *testing.T)
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 161, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on empty WHERE")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidEmptyGroupByRejected pins the
@@ -5564,9 +5447,7 @@ func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyGroupByRejected(t *testing.
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 163, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on empty GROUP BY")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterCountAliasRejected pins the deliberate
@@ -5593,9 +5474,7 @@ func TestHandleSubscribeSingle_ShunterCountAliasRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 165, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on aggregate projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_ShunterCountColumnAliasRejected(t *testing.T) {
@@ -5618,9 +5497,7 @@ func TestHandleSubscribeSingle_ShunterCountColumnAliasRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 167, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on aggregate projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_ShunterCountDistinctColumnAliasRejected(t *testing.T) {
@@ -5643,9 +5520,7 @@ func TestHandleSubscribeSingle_ShunterCountDistinctColumnAliasRejected(t *testin
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 173, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on aggregate projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_ShunterSumColumnAliasRejected(t *testing.T) {
@@ -5668,9 +5543,7 @@ func TestHandleSubscribeSingle_ShunterSumColumnAliasRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 171, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on aggregate projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_ShunterCountBareAliasRejected(t *testing.T) {
@@ -5693,9 +5566,7 @@ func TestHandleSubscribeSingle_ShunterCountBareAliasRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 175, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on bare-alias aggregate projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterCountAliasWithLimitRejected pins the
@@ -5731,9 +5602,7 @@ func TestHandleSubscribeSingle_ShunterCountAliasWithLimitRejected(t *testing.T) 
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q (LIMIT-in-subscription must emit SubscriptionUnsupported::Feature)", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on aggregate+LIMIT projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_JoinCountAggregateStillRejected(t *testing.T) {
@@ -5768,9 +5637,7 @@ func TestHandleSubscribeSingle_JoinCountAggregateStillRejected(t *testing.T) {
 	if !strings.Contains(se.Error, "Column projections are not supported in subscriptions; Subscriptions must return a table type") {
 		t.Fatalf("Error = %q, want deliberate aggregate subscription rejection", se.Error)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on join-backed aggregate projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_ShunterAliasedBareColumnProjectionRejected(t *testing.T) {
@@ -5793,9 +5660,7 @@ func TestHandleSubscribeSingle_ShunterAliasedBareColumnProjectionRejected(t *tes
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 167, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on aliased explicit projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 func TestHandleSubscribeSingle_ShunterJoinColumnProjectionRejected(t *testing.T) {
@@ -5839,9 +5704,7 @@ func TestHandleSubscribeSingle_ShunterJoinColumnProjectionRejected(t *testing.T)
 	if !strings.Contains(se.Error, "Column projections are not supported in subscriptions; Subscriptions must return a table type") {
 		t.Fatalf("Error = %q, want deliberate subscription projection rejection", se.Error)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called for join-backed column-list projection")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidAggregateWithoutAliasRejected pins
@@ -5871,9 +5734,7 @@ func TestHandleSubscribeSingle_ShunterSqlInvalidAggregateWithoutAliasRejected(t 
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 165, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on aggregate without alias")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterArraySenderRejected pins reference
@@ -5903,9 +5764,7 @@ func TestHandleSubscribeSingle_ShunterArraySenderRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 401, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when :sender targets an array column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterArrayJoinOnRejected pins reference
@@ -5943,9 +5802,7 @@ func TestHandleSubscribeSingle_ShunterArrayJoinOnRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 403, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on array-on-array join ON")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterJoinOnStrictEqualityRejectText pins the
@@ -5995,9 +5852,7 @@ func TestHandleSubscribeSingle_ShunterJoinOnStrictEqualityRejectText(t *testing.
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when JOIN ON is not a pure equality")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterCompileErrorIncludesExecutingSqlSuffix pins
@@ -6031,9 +5886,7 @@ func TestHandleSubscribeSingle_ShunterCompileErrorIncludesExecutingSqlSuffix(t *
 	if !strings.HasSuffix(se.Error, wantSuffix) {
 		t.Fatalf("Error = %q, want suffix %q (reference DBError::WithSql)", se.Error, wantSuffix)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on a compile-error admission")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeMulti_ShunterCompileErrorIncludesExecutingSqlSuffix pins
@@ -6069,9 +5922,7 @@ func TestHandleSubscribeMulti_ShunterCompileErrorIncludesExecutingSqlSuffix(t *t
 	if !strings.HasSuffix(se.Error, wantSuffix) {
 		t.Fatalf("Error = %q, want suffix %q (reference DBError::WithSql names the offending SQL)", se.Error, wantSuffix)
 	}
-	if req := exec.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on a compile-error admission")
-	}
+	requireNoSubscribeRegistration(t, exec)
 }
 
 func TestHandleSubscribeMulti_AggregateRejectedAtomically(t *testing.T) {
@@ -6100,9 +5951,7 @@ func TestHandleSubscribeMulti_AggregateRejectedAtomically(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := exec.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when any SubscribeMulti query has an unsupported aggregate")
-	}
+	requireNoSubscribeRegistration(t, exec)
 }
 
 // TestHandleSubscribeMulti_ShunterJoinStarProjectionRejectText pins
@@ -6148,9 +5997,7 @@ func TestHandleSubscribeMulti_ShunterJoinStarProjectionRejectText(t *testing.T) 
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := exec.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on SELECT * JOIN rejection")
-	}
+	requireNoSubscribeRegistration(t, exec)
 }
 
 // TestHandleSubscribeSingle_ShunterUnknownTableRejectText pins the reference
@@ -6184,9 +6031,7 @@ func TestHandleSubscribeSingle_ShunterUnknownTableRejectText(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when the FROM table is unknown")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeMulti_ShunterUnknownTableRejectText pins the same
@@ -6218,9 +6063,7 @@ func TestHandleSubscribeMulti_ShunterUnknownTableRejectText(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := exec.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when the FROM table is unknown")
-	}
+	requireNoSubscribeRegistration(t, exec)
 }
 
 // TestHandleSubscribeSingle_ShunterUnknownFieldRejectText pins the reference
@@ -6254,9 +6097,7 @@ func TestHandleSubscribeSingle_ShunterUnknownFieldRejectText(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a WHERE column is unknown")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeMulti_ShunterUnknownFieldRejectText pins the same
@@ -6285,9 +6126,7 @@ func TestHandleSubscribeMulti_ShunterUnknownFieldRejectText(t *testing.T) {
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := exec.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a WHERE column is unknown")
-	}
+	requireNoSubscribeRegistration(t, exec)
 }
 
 // TestHandleSubscribeSingle_ShunterAggregateReturnTypeRejectText pins the
@@ -6323,9 +6162,7 @@ func TestHandleSubscribeSingle_ShunterAggregateReturnTypeRejectText(t *testing.T
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on aggregate projection in subscription")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterColumnListReturnTypeRejectText pins the
@@ -6357,9 +6194,7 @@ func TestHandleSubscribeSingle_ShunterColumnListReturnTypeRejectText(t *testing.
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on column-list projection in subscription")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnresolvedVarProjectionColumnRejectText pins
@@ -6395,9 +6230,7 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarProjectionColumnRejectText(t 
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a projection column is unknown")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeMulti_ShunterUnresolvedVarProjectionColumnRejectText
@@ -6427,9 +6260,7 @@ func TestHandleSubscribeMulti_ShunterUnresolvedVarProjectionColumnRejectText(t *
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := exec.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a projection column is unknown")
-	}
+	requireNoSubscribeRegistration(t, exec)
 }
 
 // TestHandleSubscribeSingle_ShunterBoolLiteralOnIntegerColumnRejectText pins
@@ -6464,9 +6295,7 @@ func TestHandleSubscribeSingle_ShunterBoolLiteralOnIntegerColumnRejectText(t *te
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a bool literal targets an integer column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterIntOverflowOnUint8RejectText pins the
@@ -6501,9 +6330,7 @@ func TestHandleSubscribeSingle_ShunterIntOverflowOnUint8RejectText(t *testing.T)
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when an integer literal overflows an unsigned column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterFloatLiteralOnUint32RejectText pins
@@ -6532,9 +6359,7 @@ func TestHandleSubscribeSingle_ShunterFloatLiteralOnUint32RejectText(t *testing.
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a float literal targets an integer column")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterNonBoolLiteralOnBoolRejectText pins the
@@ -6579,9 +6404,7 @@ func TestHandleSubscribeSingle_ShunterNonBoolLiteralOnBoolRejectText(t *testing.
 			if se.Error != want {
 				t.Fatalf("Error = %q, want %q", se.Error, want)
 			}
-			if req := executor.getRegisterSetReq(); req != nil {
-				t.Error("executor should not be called when a non-Bool literal targets a Bool column")
-			}
+			requireNoSubscribeRegistration(t, executor)
 		})
 	}
 }
@@ -6626,9 +6449,7 @@ func TestHandleSubscribeSingle_ShunterDuplicateJoinAliasRejectText(t *testing.T)
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a join uses duplicate aliases")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterDuplicateSelfJoinRejectText pins the
@@ -6665,9 +6486,7 @@ func TestHandleSubscribeSingle_ShunterDuplicateSelfJoinRejectText(t *testing.T) 
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on an unaliased self-join")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterJoinColumnKindMismatchRejectText pins
@@ -6709,9 +6528,7 @@ func TestHandleSubscribeSingle_ShunterJoinColumnKindMismatchRejectText(t *testin
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called on a join column kind mismatch")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterJoinArrayColumnInvalidOpRejectText pins
@@ -6749,9 +6566,7 @@ func TestHandleSubscribeSingle_ShunterJoinArrayColumnInvalidOpRejectText(t *test
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when ON compares Array columns")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnresolvedVarUnqualifiedWhereRejectText
@@ -6782,9 +6597,7 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarUnqualifiedWhereRejectText(t 
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a WHERE column is unknown")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingRejectText
@@ -6825,9 +6638,7 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingRejectText(t *te
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a JOIN ON column is unknown")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnresolvedVarJoinWhereQualifiedMissingRejectText
@@ -6873,9 +6684,7 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarJoinWhereQualifiedMissingReje
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a join WHERE column is unknown")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnresolvedVarBaseTableAfterAliasRejectText
@@ -6908,9 +6717,7 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarBaseTableAfterAliasRejectText
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a WHERE qualifier is out of scope")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnresolvedVarBareJoinWildcardOnMissingRejectText
@@ -6952,9 +6759,7 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarBareJoinWildcardOnMissingReje
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when JOIN ON column is unknown")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText
@@ -6996,9 +6801,7 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingNotHiddenByWhere
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when JOIN ON column is unknown under WHERE FALSE")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnresolvedVarWherePrecedesProjectionRejectText
@@ -7031,9 +6834,7 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarWherePrecedesProjectionReject
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a WHERE column is unknown")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterBooleanConstantWhereDoesNotMaskBranchErrors
@@ -7074,9 +6875,7 @@ func TestHandleSubscribeSingle_ShunterBooleanConstantWhereDoesNotMaskBranchError
 			if se.Error != want {
 				t.Fatalf("Error = %q, want %q", se.Error, want)
 			}
-			if req := executor.getRegisterSetReq(); req != nil {
-				t.Error("executor should not be called when a logical branch fails type-checking")
-			}
+			requireNoSubscribeRegistration(t, executor)
 		})
 	}
 }
@@ -7108,9 +6907,7 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedProjectionQualifierR
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a projection qualifier is out of scope")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText
@@ -7141,9 +6938,7 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedWildcardQualifierRej
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when a wildcard projection qualifier is out of scope")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterMissingLeftTablePrecedesDuplicateJoinAliasRejectText
@@ -7180,9 +6975,7 @@ func TestHandleSubscribeSingle_ShunterMissingLeftTablePrecedesDuplicateJoinAlias
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when the left join table is missing")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnqualifiedNamesProjectionRejectText
@@ -7224,9 +7017,7 @@ func TestHandleSubscribeSingle_ShunterUnqualifiedNamesProjectionRejectText(t *te
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when projection column is unqualified in join scope")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnqualifiedNamesWhereRejectText pins
@@ -7268,9 +7059,7 @@ func TestHandleSubscribeSingle_ShunterUnqualifiedNamesWhereRejectText(t *testing
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when WHERE column is unqualified in join scope")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnqualifiedNamesJoinOnRejectText pins
@@ -7311,9 +7100,7 @@ func TestHandleSubscribeSingle_ShunterUnqualifiedNamesJoinOnRejectText(t *testin
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when JOIN ON operand is unqualified")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterSenderParameterCaseSensitiveRejectText
@@ -7346,9 +7133,7 @@ func TestHandleSubscribeSingle_ShunterSenderParameterCaseSensitiveRejectText(t *
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when :sender placeholder is byte-mismatched")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToTableNotFound pins
@@ -7380,9 +7165,7 @@ func TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToTableNotFound(t *te
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q (table-not-found must precede table-type return guard)", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when FROM table is missing")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToWhereResolution
@@ -7414,9 +7197,7 @@ func TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToWhereResolution(t *
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q (WHERE resolution must precede table-type return guard)", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when WHERE column is unresolved")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToTableNotFound pins
@@ -7448,9 +7229,7 @@ func TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToTableNotFound(t *tes
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q (aggregate path: table-not-found must precede table-type return guard)", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when aggregate FROM table is missing")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToWhereResolution
@@ -7479,7 +7258,5 @@ func TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToWhereResolution(t *t
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q (aggregate path: WHERE resolution must precede table-type return guard)", se.Error, want)
 	}
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when aggregate WHERE column is unresolved")
-	}
+	requireNoSubscribeRegistration(t, executor)
 }
