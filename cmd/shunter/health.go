@@ -56,7 +56,7 @@ func runHealth(stdout, stderr io.Writer, args []string) int {
 func runHealthURL(stdout, stderr io.Writer, rawURL string, timeout time.Duration, format string) int {
 	target, err := normalizeRunningAppDiagnosticsURL(rawURL, "/healthz")
 	if err != nil {
-		writeRunningAppUsageError(stderr, format, runningAppError{
+		writeRunningAppError(stderr, format, runningAppError{
 			Command:   "health",
 			TargetURL: rawURL,
 			Code:      "invalid_url",
@@ -66,7 +66,7 @@ func runHealthURL(stdout, stderr io.Writer, rawURL string, timeout time.Duration
 	}
 	var inspection shunter.RuntimeHealthInspection
 	if err := getRunningAppDiagnosticsJSON(target, timeout, healthDiagnosticsStatus, &inspection); err != nil {
-		writeRunningAppRuntimeError(stderr, format, runningAppError{
+		writeRunningAppError(stderr, format, runningAppError{
 			Command:   "health",
 			TargetURL: target,
 			Code:      classifyRunningAppErrorCode(err),

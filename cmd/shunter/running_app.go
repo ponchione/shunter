@@ -523,20 +523,12 @@ var (
 	errRunningAppUnsupportedStatus = errors.New("unsupported reducer status")
 )
 
-func writeRunningAppUsageError(stderr io.Writer, format string, err runningAppError) {
-	writeRunningAppError(stderr, format, err)
-}
-
-func writeRunningAppRuntimeError(stderr io.Writer, format string, err runningAppError) {
-	writeRunningAppError(stderr, format, err)
-}
-
 func reportRunningAppUsageError(stderr io.Writer, flags runningAppFlags, command, targetURL, surface, code, message string) {
-	writeRunningAppUsageError(stderr, flags.formatValue(), newRunningAppError(command, targetURL, surface, code, message))
+	writeRunningAppError(stderr, flags.formatValue(), newRunningAppError(command, targetURL, surface, code, message))
 }
 
 func reportRunningAppRuntimeError(stderr io.Writer, flags runningAppFlags, command, targetURL, surface, code, message string) {
-	writeRunningAppRuntimeError(stderr, flags.formatValue(), newRunningAppError(command, targetURL, surface, code, message))
+	writeRunningAppError(stderr, flags.formatValue(), newRunningAppError(command, targetURL, surface, code, message))
 }
 
 func newRunningAppError(command, targetURL, surface, code, message string) runningAppError {

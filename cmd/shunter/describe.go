@@ -66,7 +66,7 @@ func runDescribe(stdout, stderr io.Writer, args []string) int {
 func runDescribeURL(stdout, stderr io.Writer, rawURL string, timeout time.Duration, format string) int {
 	target, err := normalizeRunningAppDiagnosticsURL(rawURL, "/debug/shunter/runtime")
 	if err != nil {
-		writeRunningAppUsageError(stderr, format, runningAppError{
+		writeRunningAppError(stderr, format, runningAppError{
 			Command:   "describe",
 			TargetURL: rawURL,
 			Code:      "invalid_url",
@@ -76,7 +76,7 @@ func runDescribeURL(stdout, stderr io.Writer, rawURL string, timeout time.Durati
 	}
 	var description shunter.RuntimeDescription
 	if err := getRunningAppDiagnosticsJSON(target, timeout, diagnosticsSuccessStatus, &description); err != nil {
-		writeRunningAppRuntimeError(stderr, format, runningAppError{
+		writeRunningAppError(stderr, format, runningAppError{
 			Command:   "describe",
 			TargetURL: target,
 			Code:      classifyRunningAppErrorCode(err),
