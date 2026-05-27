@@ -616,14 +616,7 @@ func materializeOrderedOneOffRows(rows []orderedOneOffRow, orderBy []compiledSQL
 		}
 		return 0
 	})
-	start := offset
-	if start > len(rows) {
-		start = len(rows)
-	}
-	end := len(rows)
-	if limit >= 0 && limit < end-start {
-		end = start + limit
-	}
+	start, end := oneOffWindowBounds(len(rows), offset, limit)
 	outLen := end - start
 	out := make([]types.ProductValue, 0, outLen)
 	for i := start; i < end; i++ {
@@ -633,15 +626,19 @@ func materializeOrderedOneOffRows(rows []orderedOneOffRow, orderBy []compiledSQL
 }
 
 func sliceOneOffRows(rows []types.ProductValue, offset int, limit int) []types.ProductValue {
-	start := offset
-	if start > len(rows) {
-		start = len(rows)
+	start, end := oneOffWindowBounds(len(rows), offset, limit)
+	return rows[start:end]
+}
+
+func oneOffWindowBounds(length, offset, limit int) (start, end int) {
+	start, end = offset, length
+	if start > end {
+		start = end
 	}
-	end := len(rows)
 	if limit >= 0 && limit < end-start {
 		end = start + limit
 	}
-	return rows[start:end]
+	return start, end
 }
 
 func countOneOffMatches(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver) (uint64, error) {
