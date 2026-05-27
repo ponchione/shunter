@@ -44,6 +44,18 @@ TypeScript, offline backup/restore, and one app-owned migration path.
 Do not add a duplicate in-repo reference app unless the product direction
 changes.
 
+## Hosted App Productization
+
+Keep hosted-app productization work here until it becomes a concrete release
+slice:
+
+- publish-ready `@shunter/client` workflow, including package ownership,
+  public install docs, release instructions, and provenance decisions
+- standard static hosted-app template and deployment/runbook guidance
+- Nuxt/browser integration guide and SSR lifecycle guidance
+- dev workflow automation, such as rebuild/restart and TypeScript regeneration
+  watchers, if real app work proves the manual flow too expensive
+
 ## Hardening Follow-Up
 
 Keep hardening work tied to reproducible failures and focused regression

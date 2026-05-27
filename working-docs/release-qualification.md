@@ -31,6 +31,7 @@ rtk npm --prefix typescript/client test
 rtk npm --prefix typescript/client run build
 rtk npm --prefix typescript/client run pack:dry-run
 rtk npm --prefix typescript/client run smoke:package
+rtk bash scripts/hosted-chat-gate.sh
 ```
 
 Run from the sibling `opsboard-canary` checkout:

@@ -16,7 +16,7 @@ It provides:
 - An explicit builder API for programmatic registration (builder path)
 - Reducer registration
 - Schema freeze and immutable registry construction consumed by the hosted runtime
-- A defined interface for client code generation tools
+- Schema and contract export surfaces consumed by client code generation tools
 
 This spec covers:
 - Struct tag grammar and semantics
@@ -25,7 +25,7 @@ This spec covers:
 - Both registration paths (reflection and builder)
 - Schema versioning and compatibility checking
 - The `SchemaRegistry` interface consumed by other subsystems
-- Client codegen tool interface
+- Schema and contract codegen inputs
 
 This spec does not cover:
 - Table storage internals (SPEC-001)
@@ -50,7 +50,7 @@ Shunter is intentionally schema-simpler than the reference runtime in v1. The di
 | Column type system | Recursive `AlgebraicType` with sum/product/array/option shapes | Flat scalar `ValueKind` set plus `[]byte`; no recursive type graph |
 | Schema introspection | Large reflective `st_*` system-table surface | Two runtime system tables only (`sys_clients`, `sys_scheduled`); schema introspection uses `SchemaRegistry` / `ExportSchema()` |
 | Auto-increment metadata | First-class sequence schema objects | Per-column `AutoIncrement bool`; sequence state lives in SPEC-001 store/runtime behavior |
-| Reducer argument metadata | Typed reducer argument schemas available to bindings/codegen | Byte-oriented reducer handlers only; reducer argument schemas are intentionally omitted from `ReducerExport` in v1 |
+| Reducer argument metadata | Typed reducer argument schemas available to bindings/codegen | Reducer handlers stay byte-oriented; root `Module` declarations may attach explicit argument/result product schemas that are exported for codegen |
 | Schedule identifier width | `u32` schedule IDs | `uint64` `ScheduleID` / `schedule_id` for headroom |
 
 These simplifications are the baseline contract for Shunter v1. Future extensions may revisit them, but implementers should not infer hidden proc-macro, `SequenceSchema`, or `AlgebraicType` machinery behind the current API.
@@ -83,7 +83,7 @@ The following Go types may be used as struct field types in registered table str
 
 Named Go types whose underlying type is one of the scalar types above are also supported. Example: `type Score int64` is accepted and maps to `Int64`. Defined `time.Time`-shaped struct types map to `Timestamp`; `time.Duration` is supported exactly.
 
-**Excluded in v1:** pointers, interfaces, maps, slices other than `[]byte` / `json.RawMessage`, non-embedded nested structs, arrays other than `[16]byte`, nullable/optional fields, `int` / `uint` (platform-width; use explicit widths).
+**Excluded in v1:** interfaces, maps, slices other than `[]byte` / `json.RawMessage`, non-embedded nested structs, arrays other than `[16]byte`, and `int` / `uint` (platform-width; use explicit widths). Pointer fields are accepted only as nullable columns whose element type maps to one of the supported scalar kinds above.
 
 **Recommended practice:** Define a named type or alias if semantic clarity is useful. The engine stores only the underlying scalar representation.
 
@@ -271,7 +271,14 @@ Reducer handlers use the `ReducerHandler` type from SPEC-003:
 type ReducerHandler func(ctx *ReducerContext, argBSATN []byte) ([]byte, error)
 ```
 
-Typed reducer helpers are explicitly out of the v1 engine contract. Any future typed wrapper must be layered on top of explicit BSATN codecs rather than assumed implicit reflection.
+Reducer handlers remain byte-oriented in the engine. The root `Module` API may
+attach explicit product schemas with `WithReducerArgs` and
+`WithReducerResult`; those schemas are exported for contract/codegen consumers,
+but the Go reducer handler still receives and returns raw BSATN bytes.
+
+Generated client helpers may use explicit reducer argument/result metadata
+when it is present. Omitted metadata means the generated surface remains raw
+`Uint8Array` / equivalent for that reducer.
 
 v1 does not ship typed reducer adapters. The name `ErrReducerArgsDecode` is reserved for the future adapter layer's argument-decode sentinel, but no such sentinel is declared or produced by v1 code. SPEC-003 classifies any non-nil `ReducerHandler` error as `StatusFailedUser` via the generic handler-error path (§11) regardless of sentinel identity; once a typed adapter lands, it will wrap decode failures with `ErrReducerArgsDecode` and SPEC-003's classification stays unchanged.
 
@@ -629,13 +636,18 @@ schema error: Player: duplicate primarykey on fields ID and UID
 
 ---
 
-## 12. Client Code Generation Interface
+## 12. Schema And Contract Export For Codegen
 
-The `shunter-codegen` tool generates client-side type definitions from registered schemas. It is a build-time tool, not a runtime concern.
+Client-side code generation is driven by exported Shunter schema and module
+contract artifacts. Codegen is a build/release workflow concern, not a runtime
+execution concern.
 
 ### 12.1 Schema Export
 
-The lower-level schema engine and the root runtime both expose a schema dump function. Application tooling should prefer `Runtime.ExportSchema()` when a built runtime is available; `schema.Engine.ExportSchema()` remains the lower-level source used by tests and runtime internals.
+The lower-level schema engine and the root runtime both expose a schema dump
+function. Application tooling should prefer `Runtime.ExportSchema()` when a
+built runtime is available; `schema.Engine.ExportSchema()` remains the
+lower-level source used by tests and runtime internals.
 
 ```go
 // ExportSchema returns a serializable description of all registered tables
@@ -669,10 +681,8 @@ type IndexExport struct {
 type ReducerExport struct {
     Name      string
     Lifecycle bool // true for OnConnect / OnDisconnect
-    // Args and return type are not introspectable in v1 (byte-oriented handler).
-    // ReducerExport therefore intentionally omits argument schemas; applications
-    // must document reducer bytes contracts out-of-band until a future metadata
-    // registration surface lands.
+    Args      *ProductSchemaExport // optional explicit reducer argument schema
+    Result    *ProductSchemaExport // optional explicit reducer result schema
 }
 ```
 
@@ -680,20 +690,28 @@ type ReducerExport struct {
 
 ### 12.2 Codegen Tool
 
-`shunter-codegen` is the planned build-time tool surface for this spec. The repo does not yet ship `cmd/shunter-codegen`; this section defines the future contract so later implementation work has a pinned interface. When implemented, it is invoked as:
+The supported CLI codegen surface is:
 
 ```
-shunter-codegen --lang typescript --schema schema.json --out ./generated/
+shunter contract codegen --contract shunter.contract.json --language typescript --out ./generated/module.ts
 ```
 
-It reads a `SchemaExport` (serialized to JSON) and produces:
-- TypeScript: type definitions for all table row types, typed subscription helpers
-- Reducer call surfaces that expose names but still accept raw BSATN bytes (`Uint8Array` / equivalent) because reducer arg schemas are not exported in v1
-- Future: Go client types, C# types, etc.
+It reads a `ModuleContract` JSON artifact and produces TypeScript bindings for
+the app-facing contract surface: tables, event tables, reducers, procedures,
+declared queries, declared views, protocol metadata, and generated-client
+metadata. Reducer helpers are typed when explicit reducer product schemas are
+present; reducers without argument/result schemas retain raw BSATN bytes
+(`Uint8Array` / equivalent) at the generated boundary.
 
-How `schema.json` is produced: the application binary exports its schema via a `--export-schema` flag or a `go generate` directive that calls `engine.ExportSchema()` and writes JSON. The exact mechanism is left to the application.
+How `shunter.contract.json` is produced: the application binary links the
+module, builds a runtime, calls `Runtime.ExportContract()` or
+`Runtime.ExportContractJSON()`, and writes the artifact. The generic
+`cmd/shunter` binary intentionally does not dynamically load application
+modules to export their contracts.
 
-**v1 scope:** Codegen for typed reducer argument/return types is out of scope. Reducer argument types must be documented manually or via a separate annotation mechanism.
+**v1 scope:** TypeScript is the supported generated-client target. Additional
+language targets require a concrete app/client requirement and a contract
+surface review.
 
 ---
 
@@ -736,7 +754,7 @@ SPEC-001 integrity checks that reach the schema through the registry.
 
 1. **Schema version auto-derivation.** Should Shunter automatically compute a schema fingerprint (hash of column names + types) and use it as the version, eliminating the need for manual `SchemaVersion(n)` calls? Risk: adds complexity and may produce false mismatches on field reordering. Recommendation: keep explicit version for v1.
 
-2. **Typed reducer registration and codegen metadata.** The byte-oriented `ReducerHandler` signature does not expose typed reducer arguments/returns to codegen. Recommendation: add an explicit reducer metadata registration surface in v2 rather than implicit reflection.
+2. **Typed reducer adapters.** The byte-oriented `ReducerHandler` signature remains the runtime contract even when explicit reducer argument/result schemas are exported for codegen. Recommendation: keep Go typed adapters separate from schema export unless a real app proves the ergonomics justify them.
 
 3. **Future support for composite primary keys.** `IndexSchema` could represent them, but reflection tags and the builder path intentionally do not in v1. Recommendation: defer until the store/query surface proves a need.
 

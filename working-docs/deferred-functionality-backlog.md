@@ -1,8 +1,8 @@
 # Deferred Functionality Backlog
 
 This document holds intentionally deferred functionality gaps. These are not
-active work for the current self-hosted v1 hardening list in
-`working-docs/functionality-gap-log.md`.
+active work unless a current roadmap, issue, release gate, or user task
+promotes them back into scope.
 
 Current product decision:
 - Move Shunter toward a standalone self-hosted backend/database system that
@@ -36,20 +36,19 @@ Owner: root `shunter`, `cmd/shunter`, `protocol`, `auth`,
 
 Deferred decision:
 - Shunter's current standalone path is a static self-hosted app server binary.
-- `cmd/shunter` should not grow a generic `start` daemon, publish/update, live
-  database interaction, or control-plane commands until dynamic serving is
-  approved.
+- `cmd/shunter` may keep protocol-backed running-app admin commands, but it
+  should not grow a generic `start` daemon, publish/update, dynamic module
+  loading, or control-plane commands until dynamic serving is approved.
 
 Review later:
 - Whether Shunter needs `shunter start`.
 - Data-dir and listen-address flags.
 - Auth mode/key flags.
 - Graceful shutdown and restart behavior.
-- WebSocket protocol operations through the built binary.
-- Diagnostics and logs.
+- Built-binary server lifecycle smoke tests.
+- Logs and dev-server workflow.
 - Whether modules remain linked Go modules or need packaging, publish/update,
   and registration.
-- Black-box smoke tests that invoke the built binary.
 
 2. [ ] Managed control-plane behavior.
 
@@ -104,9 +103,11 @@ Review later:
 Owner: `schema`, `store`, `commitlog`, `contractdiff`, root `shunter`
 
 Deferred decision:
-- v1 remains exact/fail-fast for durable schema compatibility.
+- Keep current hosted-app additive compatibility reports and app-owned
+  migration hooks.
 - Contractdiff must reflect durable schema identity, but it is not an
   executable migration planner.
+- Defer a general online/executable schema migration engine.
 
 Review later:
 - Which schema changes can become explicit migration operations.
@@ -377,20 +378,7 @@ Review later:
 - Public SDK surface.
 - Contract metadata needed for generation.
 
-23. [ ] Generated reducer result schemas.
-
-Owner: `codegen`, contracts, root runtime
-
-Deferred decision:
-- Do not broaden generated APIs until reducer result schemas are confirmed as
-  stable public contract data.
-
-Review later:
-- Result product schema consumption.
-- Runtime decode behavior.
-- TypeScript SDK API shape.
-
-24. [ ] Contract workflow provenance and release automation hardening.
+23. [ ] Contract workflow provenance and release automation hardening.
 
 Owner: `contractworkflow`, `contractdiff`, `cmd/shunter`
 
@@ -405,7 +393,7 @@ Review later:
 
 ## Deferred Aggregates, Metrics, And Helpers
 
-25. [ ] Aggregate semantic expansion.
+24. [ ] Aggregate semantic expansion.
 
 Owner: `internal/valueagg`, `types`, `subscription`, `protocol`
 
@@ -419,7 +407,7 @@ Review later:
 - `DistinctSet` copy isolation.
 - Memory accounting and admission limits for `COUNT(DISTINCT)`.
 
-26. [ ] Observability surface expansion.
+25. [ ] Observability surface expansion.
 
 Owner: `observability/prometheus`, root runtime, future server boundary
 
@@ -434,7 +422,7 @@ Review later:
 - Per-metric histogram bucket configuration.
 - Built-in Prometheus route if standalone serving is approved.
 
-27. [ ] `internal/atomicfile` hardening beyond current callers.
+26. [ ] `internal/atomicfile` hardening beyond current callers.
 
 Owner: `internal/atomicfile`
 
@@ -449,7 +437,7 @@ Review later:
 - Preserve-mode behavior beyond permission bits.
 - Symlink handling.
 
-28. [ ] Richer value/schema type system.
+27. [ ] Richer value/schema type system.
 
 Owner: `types`, `bsatn`, `schema`, contracts, codegen, protocol
 
@@ -469,7 +457,7 @@ Review later:
 
 ## Deferred Test Harness Expansion
 
-29. [ ] Property/state-machine gauntlet harness.
+28. [ ] Property/state-machine gauntlet harness.
 
 Owner: `internal/gauntlettests`, root runtime
 
@@ -483,7 +471,7 @@ Review later:
 - Generated corpus management.
 - Relationship to existing fixed named workloads.
 
-30. [ ] Broader storage fault-injection matrix.
+29. [ ] Broader storage fault-injection matrix.
 
 Owner: `internal/gauntlettests`, `commitlog`, root runtime
 
@@ -497,7 +485,7 @@ Review later:
 - Partial publication cases.
 - Recovery-ordering coverage.
 
-31. [ ] Deterministic test time and synchronization hooks.
+30. [ ] Deterministic test time and synchronization hooks.
 
 Owner: runtime packages with scheduler, idle timeout, fanout, and close-state
 tests
@@ -511,7 +499,7 @@ Review later:
 - Explicit barriers for fanout absence and close behavior.
 - CI flake reduction.
 
-32. [ ] End-to-end type/index matrix.
+31. [ ] End-to-end type/index matrix.
 
 Owner: `internal/gauntlettests`, root runtime, protocol, codegen
 

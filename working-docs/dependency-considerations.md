@@ -1,6 +1,6 @@
 # Dependency Considerations
 
-Last reviewed: 2026-05-05
+Last reviewed: 2026-05-27
 
 This note captures adopted dependencies, dependency suggestions, and explicit
 rejections from the dependency scan of the current Shunter codebase. Candidate
@@ -21,12 +21,9 @@ Current repo context:
 - `github.com/ponchione/websocket v1.8.15-shunter.1` is Shunter's
   direct WebSocket dependency. It is published under the fork's module path so
   downstream Shunter consumers do not need a `replace` directive.
-- The broad suite passed after adopting `goleak` with:
-
-```bash
-rtk go test ./... -count=1
-# Go test: 2387 passed in 11 packages
-```
+- The original `goleak` adoption slice passed the broad suite. Use
+  `release-qualification.md` for current release-gate evidence and command
+  results.
 
 ## Adopted Runtime Dependencies
 
@@ -58,6 +55,33 @@ Notes:
 - Do not use default global Prometheus registration from Shunter-owned code.
 
 Docs: https://pkg.go.dev/github.com/prometheus/client_golang/prometheus
+
+### `github.com/golang-jwt/jwt/v5`
+
+Used by `auth` for JWT validation and anonymous development-token minting.
+
+Notes:
+
+- Keep token parsing and signature verification in the `auth` package.
+- Strict auth supports configured HS256, RS256, ES256, and JWKS/OIDC issuer
+  verification paths; do not spread JWT parsing into protocol or root runtime
+  code.
+- Do not use JWT claims directly as application authorization policy without
+  normalizing them through Shunter-owned auth/principal surfaces.
+
+Docs: https://pkg.go.dev/github.com/golang-jwt/jwt/v5
+
+### `lukechampine.com/blake3`
+
+Used by `commitlog` snapshot I/O for snapshot content hashes.
+
+Notes:
+
+- Keep hash-algorithm ownership in commitlog snapshot code.
+- Do not introduce a second snapshot hash dependency without a format-version
+  decision and recovery tests.
+
+Docs: https://pkg.go.dev/lukechampine.com/blake3
 
 ## Adopted Test Dependencies
 
@@ -100,6 +124,19 @@ Notes:
 - Do not add broader assertion frameworks.
 
 Docs: https://pkg.go.dev/github.com/google/go-cmp/cmp
+
+### `github.com/prometheus/client_model`
+
+Used directly by Prometheus adapter tests to inspect exported metric families.
+
+Notes:
+
+- Keep imports in `_test.go` files unless production Prometheus integration
+  needs the DTO layer explicitly.
+- Prefer asserting Shunter-owned metric names and labels through the adapter
+  behavior rather than binding root runtime code to Prometheus DTO types.
+
+Docs: https://pkg.go.dev/github.com/prometheus/client_model/go
 
 ### `pgregory.net/rapid`
 

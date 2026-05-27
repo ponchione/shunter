@@ -180,8 +180,15 @@ Decoder rules:
 - If a string payload is not valid UTF-8, decoding fails with `ErrInvalidUTF8`.
 - If a decoder finishes a row before consuming exactly `row_len` bytes, or needs bytes past `row_len`, decoding fails with `ErrRowLengthMismatch`.
 - Unknown tags fail with `ErrUnknownValueTag`.
+- Nullable columns require schema-aware product encoding. A nullable column
+  stores its normal value-kind tag followed by a one-byte presence marker:
+  `0x00` means null and has no payload; `0x01` means non-null and is followed
+  by that kind's normal payload bytes. Nulls in non-nullable columns fail
+  validation.
 
-v1 scope rule: nullable/optional column values are out of scope for this encoding. SPEC-006 MUST reject nullable column declarations in v1 rather than inventing an implicit null sentinel here.
+The non-schema `AppendValue`/`AppendProductValue` helpers reject nulls because
+the encoded bytes need column nullability metadata. Callers that may encode
+nulls MUST use the schema-aware product helpers.
 
 **TxID stamping (producer side).** `Changeset.TxID` (SPEC-001 §6.1) is allocated and stamped by the executor (Model A; see SPEC-003 §4.4 and §13.2) before the changeset is handed to `DurabilityHandle.EnqueueCommitted`. The commit-log payload format in §3.2 does not repeat `TxID` inside the payload because the enclosing record framing already carries `tx_id`. Producers and decoders MUST keep the two in sync: on decode during recovery, `cs.TxID` MUST be set to the framing `tx_id` before handing the decoded changeset to `store.ApplyChangeset` so downstream consumers see a stamped value.
 
@@ -517,14 +524,23 @@ Try newest snapshot <= durable_horizon
 
 A bad snapshot never authorizes replay past a log gap. Snapshot fallback only changes the starting base state; the replay suffix must still be contiguous and valid.
 
-### 6.3 Schema Mismatch on Recovery
+### 6.3 Schema Compatibility on Recovery
 
-If the snapshot's schema does not match the registered schema:
-- Return `ErrSchemaMismatch` with details (which table/column/index differs)
-- Do not attempt recovery
-- The operator must manually migrate or wipe the data directory
+Recovery compares durable snapshot/log schema metadata with the registered
+schema before replaying rows into the current registry.
 
-Schema evolution is out of scope for v1. Document this clearly.
+If the durable schema is incompatible with the registered schema:
+- return `ErrSchemaMismatch` with details such as the table, column, index, or
+  nullability difference;
+- do not attempt recovery into the mismatched registry;
+- require an app-owned migration, backup/restore workflow, or data-directory
+  reset before normal startup.
+
+Safe additive compatibility is handled above the raw replay loop. Root
+hosted-app preflight reports and startup may accept schema-version-only drift,
+added tables, and appended non-unique/non-primary indexes. Row-shape changes,
+table drops, and new unique/primary constraints over existing data remain
+blocked until app-owned migration hooks rewrite or validate persisted rows.
 
 ### 6.4 Truncated Record and Resume Handling
 
