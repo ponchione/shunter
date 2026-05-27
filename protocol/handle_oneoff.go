@@ -266,11 +266,11 @@ func projectOneOffRows(rows []types.ProductValue, columns []compiledSQLProjectio
 	for _, row := range rows {
 		out := make(types.ProductValue, 0, len(columns))
 		for _, col := range columns {
-			idx := col.Schema.Index
-			if idx < 0 || idx >= len(row) {
+			value, ok := oneOffProjectionValue(row, col)
+			if !ok {
 				continue
 			}
-			out = append(out, row[idx])
+			out = append(out, value)
 		}
 		projected = append(projected, out)
 	}
@@ -591,11 +591,11 @@ func orderAndLimitOneOffRows(rows []types.ProductValue, orderBy []compiledSQLOrd
 	for _, row := range rows {
 		keys := make([]types.Value, len(orderBy))
 		for i, term := range orderBy {
-			idx := term.Column.Schema.Index
-			if idx < 0 || idx >= len(row) {
+			value, ok := oneOffProjectionValue(row, term.Column)
+			if !ok {
 				return nil, fmt.Errorf("ORDER BY column %q is missing from row", term.Column.Schema.Name)
 			}
-			keys[i] = row[idx]
+			keys[i] = value
 		}
 		ordered = append(ordered, orderedOneOffRow{row: row, key: keys})
 	}
@@ -735,13 +735,13 @@ func sumOneOffAggregate(ctx context.Context, view store.CommittedReadView, table
 func visitOneOffAggregateColumnValues(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, column compiledSQLProjectionColumn, visit func(types.Value) bool) error {
 	if joinPred, ok := pred.(subscription.Join); ok {
 		return visitOneOffJoinPairs(ctx, view, joinPred, resolver, func(leftRow, rightRow types.ProductValue) bool {
-			value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, joinPred.Left, joinPred.LeftAlias, joinPred.Right, joinPred.RightAlias, column)
+			value, ok := oneOffJoinProjectionValue(leftRow, rightRow, joinPred.Left, joinPred.LeftAlias, joinPred.Right, joinPred.RightAlias, column)
 			return !ok || visit(value)
 		})
 	}
 	if crossPred, ok := pred.(subscription.CrossJoin); ok {
 		return visitOneOffCrossJoinPairs(ctx, view, crossPred, false, func(leftRow, rightRow types.ProductValue) bool {
-			value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, crossPred.Left, crossPred.LeftAlias, crossPred.Right, crossPred.RightAlias, column)
+			value, ok := oneOffJoinProjectionValue(leftRow, rightRow, crossPred.Left, crossPred.LeftAlias, crossPred.Right, crossPred.RightAlias, column)
 			return !ok || visit(value)
 		})
 	}
@@ -756,11 +756,7 @@ func oneOffAggregateRowColumnValue(row types.ProductValue, tableID schema.TableI
 	if column.Table != tableID {
 		return types.Value{}, false
 	}
-	idx := column.Schema.Index
-	if idx < 0 || idx >= len(row) {
-		return types.Value{}, false
-	}
-	return row[idx], true
+	return oneOffProjectionValue(row, column)
 }
 
 func evaluateOneOffJoin(ctx context.Context, view store.CommittedReadView, join subscription.Join, resolver schema.IndexResolver, limit int) ([]types.ProductValue, error) {
@@ -899,6 +895,10 @@ func oneOffRowValue(row types.ProductValue, col types.ColID) (types.Value, bool)
 	return row[idx], true
 }
 
+func oneOffProjectionValue(row types.ProductValue, column compiledSQLProjectionColumn) (types.Value, bool) {
+	return oneOffRowValue(row, types.ColID(column.Schema.Index))
+}
+
 func evaluateOneOffCrossJoinProjection(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, columns []compiledSQLProjectionColumn, limit int) ([]types.ProductValue, error) {
 	return collectOneOffPairProjections(
 		func(visit func(types.ProductValue, types.ProductValue) bool) error {
@@ -953,15 +953,11 @@ func collectOrderedOneOffPairProjections(visitPairs func(func(types.ProductValue
 func projectOneOffJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, columns []compiledSQLProjectionColumn) types.ProductValue {
 	out := make(types.ProductValue, 0, len(columns))
 	for _, col := range columns {
-		source, ok := projectedJoinColumnSource(col, leftID, leftAlias, leftRow, rightID, rightAlias, rightRow)
+		value, ok := oneOffJoinProjectionValue(leftRow, rightRow, leftID, leftAlias, rightID, rightAlias, col)
 		if !ok {
 			continue
 		}
-		idx := col.Schema.Index
-		if idx < 0 || idx >= len(source) {
-			continue
-		}
-		out = append(out, source[idx])
+		out = append(out, value)
 	}
 	return out
 }
@@ -987,16 +983,12 @@ func projectedJoinColumnSource(col compiledSQLProjectionColumn, leftID schema.Ta
 	}
 }
 
-func oneOffAggregateJoinColumnValue(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, column compiledSQLProjectionColumn) (types.Value, bool) {
+func oneOffJoinProjectionValue(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, column compiledSQLProjectionColumn) (types.Value, bool) {
 	source, ok := projectedJoinColumnSource(column, leftID, leftAlias, leftRow, rightID, rightAlias, rightRow)
 	if !ok {
 		return types.Value{}, false
 	}
-	idx := column.Schema.Index
-	if idx < 0 || idx >= len(source) {
-		return types.Value{}, false
-	}
-	return source[idx], true
+	return oneOffProjectionValue(source, column)
 }
 
 func orderKeysFromJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, orderBy []compiledSQLOrderBy) ([]types.Value, error) {
@@ -1006,11 +998,11 @@ func orderKeysFromJoinPair(leftRow, rightRow types.ProductValue, leftID schema.T
 		if !ok {
 			return nil, fmt.Errorf("ORDER BY column %q is not from the projected table", term.Column.Schema.Name)
 		}
-		idx := term.Column.Schema.Index
-		if idx < 0 || idx >= len(source) {
+		value, ok := oneOffProjectionValue(source, term.Column)
+		if !ok {
 			return nil, fmt.Errorf("ORDER BY column %q is missing from row", term.Column.Schema.Name)
 		}
-		keys[i] = source[idx]
+		keys[i] = value
 	}
 	return keys, nil
 }
