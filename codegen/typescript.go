@@ -213,21 +213,12 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	for _, reducer := range reducerIdentifiers {
 		reducerExport := reducersByName[reducer.name]
 		var argsTypeName, argsEncoderName string
-		if reducerExport.Args != nil {
-			argsTypeName = uniqueTypeScriptIdentifier(upperFirst(reducer.identifier)+"Args", topLevelValueNames)
-			argsColumnsName := uniqueTypeScriptIdentifier(reducer.identifier+"ArgsColumns", topLevelValueNames)
-			argsEncoderName = uniqueTypeScriptIdentifier("encode"+upperFirst(reducer.identifier)+"Args", topLevelValueNames)
-			if err := writeTypeScriptProductCodec(&b, argsTypeName, argsColumnsName, argsEncoderName, "", *reducerExport.Args, true, false); err != nil {
-				return nil, err
-			}
+		argsTypeName, argsEncoderName, _, err := writeTypeScriptProductCodecVariant(&b, topLevelValueNames, reducer.identifier, "Args", "ArgsColumns", "Args", "", reducerExport.Args, true, false)
+		if err != nil {
+			return nil, err
 		}
-		if reducerExport.Result != nil {
-			resultTypeName := uniqueTypeScriptIdentifier(upperFirst(reducer.identifier)+"Result", topLevelValueNames)
-			resultColumnsName := uniqueTypeScriptIdentifier(reducer.identifier+"ResultColumns", topLevelValueNames)
-			resultDecoderName := uniqueTypeScriptIdentifier("decode"+upperFirst(reducer.identifier)+"Result", topLevelValueNames)
-			if err := writeTypeScriptProductCodec(&b, resultTypeName, resultColumnsName, "", resultDecoderName, *reducerExport.Result, false, true); err != nil {
-				return nil, err
-			}
+		if _, _, _, err := writeTypeScriptProductCodecVariant(&b, topLevelValueNames, reducer.identifier, "Result", "ResultColumns", "", "Result", reducerExport.Result, false, true); err != nil {
+			return nil, err
 		}
 		functionName := uniqueTypeScriptIdentifier("call"+upperFirst(reducer.identifier), topLevelValueNames)
 		reducerFacade := typeScriptReducerFacade{
@@ -274,21 +265,12 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	for _, procedure := range procedureIdentifiers {
 		procedureExport := proceduresByName[procedure.name]
 		var argsTypeName, argsEncoderName string
-		if procedureExport.Args != nil {
-			argsTypeName = uniqueTypeScriptIdentifier(upperFirst(procedure.identifier)+"Args", topLevelValueNames)
-			argsColumnsName := uniqueTypeScriptIdentifier(procedure.identifier+"ArgsColumns", topLevelValueNames)
-			argsEncoderName = uniqueTypeScriptIdentifier("encode"+upperFirst(procedure.identifier)+"Args", topLevelValueNames)
-			if err := writeTypeScriptProductCodec(&b, argsTypeName, argsColumnsName, argsEncoderName, "", *procedureExport.Args, true, false); err != nil {
-				return nil, err
-			}
+		argsTypeName, argsEncoderName, _, err := writeTypeScriptProductCodecVariant(&b, topLevelValueNames, procedure.identifier, "Args", "ArgsColumns", "Args", "", procedureExport.Args, true, false)
+		if err != nil {
+			return nil, err
 		}
-		if procedureExport.Result != nil {
-			resultTypeName := uniqueTypeScriptIdentifier(upperFirst(procedure.identifier)+"Result", topLevelValueNames)
-			resultColumnsName := uniqueTypeScriptIdentifier(procedure.identifier+"ResultColumns", topLevelValueNames)
-			resultDecoderName := uniqueTypeScriptIdentifier("decode"+upperFirst(procedure.identifier)+"Result", topLevelValueNames)
-			if err := writeTypeScriptProductCodec(&b, resultTypeName, resultColumnsName, "", resultDecoderName, *procedureExport.Result, false, true); err != nil {
-				return nil, err
-			}
+		if _, _, _, err := writeTypeScriptProductCodecVariant(&b, topLevelValueNames, procedure.identifier, "Result", "ResultColumns", "", "Result", procedureExport.Result, false, true); err != nil {
+			return nil, err
 		}
 		functionName := uniqueTypeScriptIdentifier("call"+upperFirst(procedure.identifier)+"Procedure", topLevelValueNames)
 		procedureFacade := typeScriptProcedureFacade{
@@ -326,19 +308,16 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 		queryDescription := contract.Queries[queryIndexByName(contract.Queries, query.name)]
 		var queryParamsTypeName, queryParamsEncoderName string
 		if typeScriptDeclaredReadHasParameters(queryDescription.Parameters) {
-			queryParamsTypeName = uniqueTypeScriptIdentifier(upperFirst(query.identifier)+"Params", topLevelValueNames)
-			queryParamsColumnsName := uniqueTypeScriptIdentifier(query.identifier+"ParamColumns", topLevelValueNames)
-			queryParamsEncoderName = uniqueTypeScriptIdentifier("encode"+upperFirst(query.identifier)+"Params", topLevelValueNames)
-			if err := writeTypeScriptProductCodec(&b, queryParamsTypeName, queryParamsColumnsName, queryParamsEncoderName, "", *queryDescription.Parameters, true, false); err != nil {
+			var err error
+			queryParamsTypeName, queryParamsEncoderName, _, err = writeTypeScriptProductCodecVariant(&b, topLevelValueNames, query.identifier, "Params", "ParamColumns", "Params", "", queryDescription.Parameters, true, false)
+			if err != nil {
 				return nil, err
 			}
 		}
 		var queryRowsTypeName, queryRowDecodersName string
 		if queryDescription.RowSchema != nil && queryDescription.ResultShape != nil {
-			rowTypeName := uniqueTypeScriptIdentifier(upperFirst(query.identifier)+"QueryRow", topLevelValueNames)
-			columnsName := uniqueTypeScriptIdentifier(query.identifier+"QueryColumns", topLevelValueNames)
-			decoderName := uniqueTypeScriptIdentifier("decode"+upperFirst(query.identifier)+"QueryRow", topLevelValueNames)
-			if err := writeTypeScriptProductCodec(&b, rowTypeName, columnsName, "", decoderName, *queryDescription.RowSchema, false, true); err != nil {
+			rowTypeName, _, decoderName, err := writeTypeScriptProductCodecVariant(&b, topLevelValueNames, query.identifier, "QueryRow", "QueryColumns", "", "QueryRow", queryDescription.RowSchema, false, true)
+			if err != nil {
 				return nil, err
 			}
 			queryRowsTypeName = uniqueTypeScriptIdentifier(upperFirst(query.identifier)+"QueryRows", topLevelValueNames)
@@ -416,19 +395,17 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 		viewDescription := contract.Views[viewIndexByName(contract.Views, view.name)]
 		var viewParamsTypeName, viewParamsEncoderName string
 		if typeScriptDeclaredReadHasParameters(viewDescription.Parameters) {
-			viewParamsTypeName = uniqueTypeScriptIdentifier(upperFirst(view.identifier)+"Params", topLevelValueNames)
-			viewParamsColumnsName := uniqueTypeScriptIdentifier(view.identifier+"ParamColumns", topLevelValueNames)
-			viewParamsEncoderName = uniqueTypeScriptIdentifier("encode"+upperFirst(view.identifier)+"Params", topLevelValueNames)
-			if err := writeTypeScriptProductCodec(&b, viewParamsTypeName, viewParamsColumnsName, viewParamsEncoderName, "", *viewDescription.Parameters, true, false); err != nil {
+			var err error
+			viewParamsTypeName, viewParamsEncoderName, _, err = writeTypeScriptProductCodecVariant(&b, topLevelValueNames, view.identifier, "Params", "ParamColumns", "Params", "", viewDescription.Parameters, true, false)
+			if err != nil {
 				return nil, err
 			}
 		}
 		var rowTypeName, decoderName string
 		if viewDescription.RowSchema != nil {
-			rowTypeName = uniqueTypeScriptIdentifier(upperFirst(view.identifier)+"ViewRow", topLevelValueNames)
-			columnsName := uniqueTypeScriptIdentifier(view.identifier+"ViewColumns", topLevelValueNames)
-			decoderName = uniqueTypeScriptIdentifier("decode"+upperFirst(view.identifier)+"ViewRow", topLevelValueNames)
-			if err := writeTypeScriptProductCodec(&b, rowTypeName, columnsName, "", decoderName, *viewDescription.RowSchema, false, true); err != nil {
+			var err error
+			rowTypeName, _, decoderName, err = writeTypeScriptProductCodecVariant(&b, topLevelValueNames, view.identifier, "ViewRow", "ViewColumns", "", "ViewRow", viewDescription.RowSchema, false, true)
+			if err != nil {
 				return nil, err
 			}
 		}
@@ -662,6 +639,29 @@ func typeScriptRuntimeValueImportUsage(contract shunter.ModuleContract) typeScri
 
 func typeScriptDeclaredReadHasParameters(parameters *schema.ProductSchemaExport) bool {
 	return parameters != nil && len(parameters.Columns) > 0
+}
+
+func writeTypeScriptProductCodecVariant(
+	b *bytes.Buffer,
+	topLevelValueNames map[string]int,
+	identifier, typeSuffix, columnsSuffix, encoderSuffix, decoderSuffix string,
+	product *schema.ProductSchemaExport,
+	writeEncoder, writeDecoder bool,
+) (typeName, encoderName, decoderName string, err error) {
+	if product == nil {
+		return "", "", "", nil
+	}
+	upperIdentifier := upperFirst(identifier)
+	typeName = uniqueTypeScriptIdentifier(upperIdentifier+typeSuffix, topLevelValueNames)
+	columnsName := uniqueTypeScriptIdentifier(identifier+columnsSuffix, topLevelValueNames)
+	if writeEncoder {
+		encoderName = uniqueTypeScriptIdentifier("encode"+upperIdentifier+encoderSuffix, topLevelValueNames)
+	}
+	if writeDecoder {
+		decoderName = uniqueTypeScriptIdentifier("decode"+upperIdentifier+decoderSuffix, topLevelValueNames)
+	}
+	err = writeTypeScriptProductCodec(b, typeName, columnsName, encoderName, decoderName, *product, writeEncoder, writeDecoder)
+	return typeName, encoderName, decoderName, err
 }
 
 func writeTypeScriptRuntimeValueImports(b *bytes.Buffer, runtimeImport string, usage typeScriptRuntimeValueImports) {
