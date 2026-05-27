@@ -566,55 +566,31 @@ func parseDurationLiteral(s string) (int64, bool) {
 }
 
 // coerceBigIntToInt128 binds a big.Int literal to a 128-bit signed column.
-// Rejects |x| that overflows [-2^127, 2^127-1]. For negative values the
-// two's-complement encoding is materialized via `x + 2^128` before splitting
-// into (hi, lo) uint64 words — matches types.NewInt128's hi(signed)/lo(unsigned)
-// layout. InvalidLiteral text routes through `renderLiteralSourceText` so
-// the preserved numeric token (`1e40` etc.) survives over canonical decimal.
 func coerceBigIntToInt128(lit Literal, kind types.ValueKind) (types.Value, error) {
-	x := lit.Big
-	if x.Cmp(int128Max) > 0 || x.Cmp(int128Min) < 0 {
-		return types.Value{}, invalidLiteralFromSource(lit, kind)
-	}
-	t := new(big.Int).Set(x)
-	if t.Sign() < 0 {
-		t.Add(t, uint128Max)
-	}
 	var buf [16]byte
-	t.FillBytes(buf[:])
+	if err := fillSignedBigIntBytes(lit, kind, buf[:], int128Min, int128Max, uint128Max); err != nil {
+		return types.Value{}, err
+	}
 	hi := int64(binary.BigEndian.Uint64(buf[0:8]))
 	lo := binary.BigEndian.Uint64(buf[8:16])
 	return types.NewInt128(hi, lo), nil
 }
 
-// coerceBigIntToUint128 binds a big.Int literal to a 128-bit unsigned column.
-// Rejects negative values and values >= 2^128.
 func coerceBigIntToUint128(lit Literal, kind types.ValueKind) (types.Value, error) {
-	x := lit.Big
-	if x.Sign() < 0 || x.Cmp(uint128Max) >= 0 {
-		return types.Value{}, invalidLiteralFromSource(lit, kind)
-	}
 	var buf [16]byte
-	x.FillBytes(buf[:])
+	if err := fillUnsignedBigIntBytes(lit, kind, buf[:], uint128Max); err != nil {
+		return types.Value{}, err
+	}
 	hi := binary.BigEndian.Uint64(buf[0:8])
 	lo := binary.BigEndian.Uint64(buf[8:16])
 	return types.NewUint128(hi, lo), nil
 }
 
-// coerceBigIntToInt256 binds a big.Int literal to a 256-bit signed column.
-// Rejects |x| that overflows [-2^255, 2^255-1]. Negative values materialize
-// through `x + 2^256` for two's-complement encoding.
 func coerceBigIntToInt256(lit Literal, kind types.ValueKind) (types.Value, error) {
-	x := lit.Big
-	if x.Cmp(int256Max) > 0 || x.Cmp(int256Min) < 0 {
-		return types.Value{}, invalidLiteralFromSource(lit, kind)
-	}
-	t := new(big.Int).Set(x)
-	if t.Sign() < 0 {
-		t.Add(t, uint256Max)
-	}
 	var buf [32]byte
-	t.FillBytes(buf[:])
+	if err := fillSignedBigIntBytes(lit, kind, buf[:], int256Min, int256Max, uint256Max); err != nil {
+		return types.Value{}, err
+	}
 	w0 := int64(binary.BigEndian.Uint64(buf[0:8]))
 	w1 := binary.BigEndian.Uint64(buf[8:16])
 	w2 := binary.BigEndian.Uint64(buf[16:24])
@@ -622,22 +598,38 @@ func coerceBigIntToInt256(lit Literal, kind types.ValueKind) (types.Value, error
 	return types.NewInt256(w0, w1, w2, w3), nil
 }
 
-// coerceBigIntToUint256 binds a big.Int literal to a 256-bit unsigned column.
-// Rejects negative values and values >= 2^256. The reference-informed target
-// `u256 = 1e40` (check.rs:330-332) goes through this path — 10^40 fits
-// comfortably in u256 (max ~1.16e77).
 func coerceBigIntToUint256(lit Literal, kind types.ValueKind) (types.Value, error) {
-	x := lit.Big
-	if x.Sign() < 0 || x.Cmp(uint256Max) >= 0 {
-		return types.Value{}, invalidLiteralFromSource(lit, kind)
-	}
 	var buf [32]byte
-	x.FillBytes(buf[:])
+	if err := fillUnsignedBigIntBytes(lit, kind, buf[:], uint256Max); err != nil {
+		return types.Value{}, err
+	}
 	w0 := binary.BigEndian.Uint64(buf[0:8])
 	w1 := binary.BigEndian.Uint64(buf[8:16])
 	w2 := binary.BigEndian.Uint64(buf[16:24])
 	w3 := binary.BigEndian.Uint64(buf[24:32])
 	return types.NewUint256(w0, w1, w2, w3), nil
+}
+
+func fillSignedBigIntBytes(lit Literal, kind types.ValueKind, dst []byte, min, max, modulus *big.Int) error {
+	x := lit.Big
+	if x.Cmp(max) > 0 || x.Cmp(min) < 0 {
+		return invalidLiteralFromSource(lit, kind)
+	}
+	if x.Sign() >= 0 {
+		x.FillBytes(dst)
+		return nil
+	}
+	new(big.Int).Add(x, modulus).FillBytes(dst)
+	return nil
+}
+
+func fillUnsignedBigIntBytes(lit Literal, kind types.ValueKind, dst []byte, maxExclusive *big.Int) error {
+	x := lit.Big
+	if x.Sign() < 0 || x.Cmp(maxExclusive) >= 0 {
+		return invalidLiteralFromSource(lit, kind)
+	}
+	x.FillBytes(dst)
+	return nil
 }
 
 func parseHexLiteral(text string) ([]byte, error) {
