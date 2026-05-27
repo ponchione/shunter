@@ -451,11 +451,7 @@ func ValidateSQLQueryTemplateString(qs string, sl SchemaLookup, opts SQLQueryVal
 // caller identity. It is a narrow runtime seam for declared reads; raw external
 // SQL must still pass an auth-aware SchemaLookup when using this compiler.
 func CompileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, opts SQLQueryValidationOptions) (CompiledSQLQuery, error) {
-	if sl == nil {
-		return CompiledSQLQuery{}, fmt.Errorf("schema lookup must not be nil")
-	}
-	compiler := runtimeSQLLiteralCompiler{caller: caller}
-	compiled, err := compileSQLQueryString(qs, sl, compiler, opts.AllowLimit, opts.AllowProjection, opts.AllowOrderBy, opts.AllowOffset)
+	compiled, err := compileSQLQueryWithCompiler(qs, sl, runtimeSQLLiteralCompiler{caller: caller}, opts, nil)
 	if err != nil {
 		return CompiledSQLQuery{}, err
 	}
@@ -466,21 +462,18 @@ func CompileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, o
 // app placeholders to concrete values. Raw SQL protocol surfaces must not use
 // this helper.
 func CompileSQLQueryStringWithParameters(qs string, sl SchemaLookup, caller *types.Identity, opts SQLQueryValidationOptions, parameters []SQLQueryParameterValue) (CompiledSQLQuery, error) {
-	if sl == nil {
-		return CompiledSQLQuery{}, fmt.Errorf("schema lookup must not be nil")
+	compiler := sqlLiteralCompiler(runtimeSQLLiteralCompiler{caller: caller})
+	var validateUsed func() error
+	if len(parameters) != 0 {
+		bound, err := newBoundSQLLiteralCompiler(caller, parameters)
+		if err != nil {
+			return CompiledSQLQuery{}, err
+		}
+		compiler = bound
+		validateUsed = bound.validateUsed
 	}
-	if len(parameters) == 0 {
-		return CompileSQLQueryString(qs, sl, caller, opts)
-	}
-	compiler, err := newBoundSQLLiteralCompiler(caller, parameters)
+	compiled, err := compileSQLQueryWithCompiler(qs, sl, compiler, opts, validateUsed)
 	if err != nil {
-		return CompiledSQLQuery{}, err
-	}
-	compiled, err := compileSQLQueryString(qs, sl, compiler, opts.AllowLimit, opts.AllowProjection, opts.AllowOrderBy, opts.AllowOffset)
-	if err != nil {
-		return CompiledSQLQuery{}, err
-	}
-	if err := compiler.validateUsed(); err != nil {
 		return CompiledSQLQuery{}, err
 	}
 	return newCompiledSQLQuery(compiled), nil
@@ -489,28 +482,37 @@ func CompileSQLQueryStringWithParameters(qs string, sl SchemaLookup, caller *typ
 // CompileSQLQueryTemplateString compiles declared-read SQL metadata against the
 // supplied parameter schema.
 func CompileSQLQueryTemplateString(qs string, sl SchemaLookup, caller *types.Identity, opts SQLQueryValidationOptions, parameters []SQLQueryParameter) (CompiledSQLQueryTemplate, error) {
-	if sl == nil {
-		return CompiledSQLQueryTemplate{}, fmt.Errorf("schema lookup must not be nil")
-	}
-	if len(parameters) == 0 {
-		compiled, err := CompileSQLQueryString(qs, sl, caller, opts)
+	compiler := sqlLiteralCompiler(runtimeSQLLiteralCompiler{caller: caller})
+	var validateUsed func() error
+	if len(parameters) != 0 {
+		template, err := newTemplateSQLLiteralCompiler(caller, parameters)
 		if err != nil {
 			return CompiledSQLQueryTemplate{}, err
 		}
-		return newCompiledSQLQueryTemplate(compiled.query), nil
+		compiler = template
+		validateUsed = template.validateUsed
 	}
-	compiler, err := newTemplateSQLLiteralCompiler(caller, parameters)
+	compiled, err := compileSQLQueryWithCompiler(qs, sl, compiler, opts, validateUsed)
 	if err != nil {
-		return CompiledSQLQueryTemplate{}, err
-	}
-	compiled, err := compileSQLQueryString(qs, sl, compiler, opts.AllowLimit, opts.AllowProjection, opts.AllowOrderBy, opts.AllowOffset)
-	if err != nil {
-		return CompiledSQLQueryTemplate{}, err
-	}
-	if err := compiler.validateUsed(); err != nil {
 		return CompiledSQLQueryTemplate{}, err
 	}
 	return newCompiledSQLQueryTemplate(compiled), nil
+}
+
+func compileSQLQueryWithCompiler(qs string, sl SchemaLookup, literalCompiler sqlLiteralCompiler, opts SQLQueryValidationOptions, validateUsed func() error) (compiledSQLQuery, error) {
+	if sl == nil {
+		return compiledSQLQuery{}, fmt.Errorf("schema lookup must not be nil")
+	}
+	compiled, err := compileSQLQueryString(qs, sl, literalCompiler, opts.AllowLimit, opts.AllowProjection, opts.AllowOrderBy, opts.AllowOffset)
+	if err != nil {
+		return compiledSQLQuery{}, err
+	}
+	if validateUsed != nil {
+		if err := validateUsed(); err != nil {
+			return compiledSQLQuery{}, err
+		}
+	}
+	return compiled, nil
 }
 
 // CompileSQLQueryStringWithVisibility compiles SQL and expands matching
@@ -975,29 +977,24 @@ func resolveJoinOnColumn(ref sql.ColumnRef, stmt sql.Statement, leftTS, rightTS 
 }
 
 func compileStatementLimit(stmt sql.Statement, sqlText string) (*uint64, error) {
-	if stmt.UnsupportedLimit {
-		return nil, sql.UnsupportedFeatureError{SQL: sqlText}
-	}
-	if stmt.InvalidLimit != nil {
-		if stmt.InvalidLimit.Kind == sql.LitParameter {
-			return nil, fmt.Errorf("%w: SQL parameter %s is not supported in LIMIT", sql.ErrUnsupportedSQL, limitLiteralText(*stmt.InvalidLimit))
-		}
-		return nil, sql.InvalidLiteralError{Literal: limitLiteralText(*stmt.InvalidLimit), Type: "U64"}
-	}
-	return stmt.Limit, nil
+	return compileStatementUint64Clause("LIMIT", stmt.UnsupportedLimit, stmt.InvalidLimit, stmt.Limit, sqlText)
 }
 
 func compileStatementOffset(stmt sql.Statement, sqlText string) (*uint64, error) {
-	if stmt.UnsupportedOffset {
+	return compileStatementUint64Clause("OFFSET", stmt.UnsupportedOffset, stmt.InvalidOffset, stmt.Offset, sqlText)
+}
+
+func compileStatementUint64Clause(name string, unsupported bool, invalid *sql.Literal, value *uint64, sqlText string) (*uint64, error) {
+	if unsupported {
 		return nil, sql.UnsupportedFeatureError{SQL: sqlText}
 	}
-	if stmt.InvalidOffset != nil {
-		if stmt.InvalidOffset.Kind == sql.LitParameter {
-			return nil, fmt.Errorf("%w: SQL parameter %s is not supported in OFFSET", sql.ErrUnsupportedSQL, limitLiteralText(*stmt.InvalidOffset))
-		}
-		return nil, sql.InvalidLiteralError{Literal: limitLiteralText(*stmt.InvalidOffset), Type: "U64"}
+	if invalid == nil {
+		return value, nil
 	}
-	return stmt.Offset, nil
+	if invalid.Kind == sql.LitParameter {
+		return nil, fmt.Errorf("%w: SQL parameter %s is not supported in %s", sql.ErrUnsupportedSQL, limitLiteralText(*invalid), name)
+	}
+	return nil, sql.InvalidLiteralError{Literal: limitLiteralText(*invalid), Type: "U64"}
 }
 
 func limitLiteralText(lit sql.Literal) string {
