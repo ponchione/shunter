@@ -781,8 +781,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, literalCompiler sqlLitera
 			return compiledSQLQuery{}, err
 		}
 		if !allowProjection && len(stmt.ProjectionColumns) != 0 {
-			//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
-			return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
+			return compiledSQLQuery{}, errSubscriptionRequiresTableShape
 		}
 		aggregate, err := compileJoinAggregateProjection(stmt.Aggregate, relations, aliasTag)
 		if err != nil {
@@ -794,8 +793,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, literalCompiler sqlLitera
 		// the column-list guard above so schema/WHERE/JOIN-ON errors
 		// surface first.
 		if !allowProjection && stmt.Aggregate != nil {
-			//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
-			return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
+			return compiledSQLQuery{}, errSubscriptionRequiresTableShape
 		}
 		var orderBy []compiledSQLOrderBy
 		if stmt.Aggregate != nil {
@@ -892,8 +890,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, literalCompiler sqlLitera
 		return compiledSQLQuery{}, err
 	}
 	if !allowProjection && len(stmt.ProjectionColumns) != 0 {
-		//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
-		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
+		return compiledSQLQuery{}, errSubscriptionRequiresTableShape
 	}
 	aggregate, err := compileSingleRelationAggregateProjection(stmt.Aggregate, stmt.ProjectedTable, stmt.TableAlias, projectedID, ts)
 	if err != nil {
@@ -904,8 +901,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, literalCompiler sqlLitera
 	// resolves the projection. Aggregate guard mirrors the column-list
 	// guard above so schema/WHERE errors surface first.
 	if !allowProjection && stmt.Aggregate != nil {
-		//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
-		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
+		return compiledSQLQuery{}, errSubscriptionRequiresTableShape
 	}
 	var orderBy []compiledSQLOrderBy
 	if stmt.Aggregate != nil {

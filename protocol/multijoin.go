@@ -172,16 +172,14 @@ func compileMultiJoinSQLQuery(stmt sql.Statement, orderBy []sql.OrderByColumn, n
 		return compiledSQLQuery{}, err
 	}
 	if !allowProjection && len(stmt.ProjectionColumns) != 0 {
-		//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
-		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
+		return compiledSQLQuery{}, errSubscriptionRequiresTableShape
 	}
 	aggregate, err := compileJoinAggregateProjection(stmt.Aggregate, relationMap, aliasTag)
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
 	if !allowProjection && stmt.Aggregate != nil {
-		//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
-		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
+		return compiledSQLQuery{}, errSubscriptionRequiresTableShape
 	}
 	var compiledOrder []compiledSQLOrderBy
 	if stmt.Aggregate != nil {

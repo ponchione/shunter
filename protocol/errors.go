@@ -22,3 +22,6 @@ var ErrExecutorAdmissionRejected = errors.New("protocol: executor admission reje
 // ErrConnectionIDInUse marks a client-supplied ConnectionID that is already
 // owned by a live or admitting connection.
 var ErrConnectionIDInUse = errors.New("protocol: connection_id already in use")
+
+//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
+var errSubscriptionRequiresTableShape = errors.New("Column projections are not supported in subscriptions; Subscriptions must return a table type")
