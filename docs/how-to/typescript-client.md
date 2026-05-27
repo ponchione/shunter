@@ -6,8 +6,8 @@ and using the generated helpers from browser or Electron clients.
 
 Shunter's TypeScript path has two pieces:
 
-- the private local SDK runtime package in `typescript/client`, published to
-  apps as `@shunter/client`
+- the SDK runtime package in `typescript/client`, resolved by generated apps as
+  `@shunter/client`
 - generated module bindings from `shunter contract codegen --language
   typescript`
 
@@ -17,8 +17,13 @@ contract they were generated from.
 
 ## Install The Runtime Package
 
-For v1, use a local package path, workspace package, or packed tarball. Public
-npm publishing is not part of the v1 contract.
+Current v1 development still uses a local package path, workspace package, or
+packed tarball. The product target is for frontend apps and other projects to
+install `@shunter/client` from npm, then generate app-specific bindings from a
+reviewed Shunter contract.
+
+Until the npm release workflow is promoted, keep local installs resolving to
+the same package name the generated bindings import: `@shunter/client`.
 
 App `package.json` with a `file:` dependency:
 

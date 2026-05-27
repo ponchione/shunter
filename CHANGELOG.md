@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- TypeScript runtime WebSocket close handling now classifies auth/token
+  rejection close reasons as `ShunterAuthError` and does not retry them through
+  reconnect.
 - Detached contract validation now rejects names that duplicate after trimming
   surrounding whitespace, and schema engine startup checks now retain a
   build-time copy of recovered snapshot metadata.

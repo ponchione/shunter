@@ -308,6 +308,26 @@ export function assertGeneratedContractCompatible(contract, options = {}) {
         issue: result.issue,
     });
 }
+const authCloseSubjectPattern = /\b(?:auth(?:entication|orization)?|bearer|jwt|token)\b/;
+const authCloseFailurePattern = /\b(?:denied|expired|fail(?:ed|ure)?|forbidden|invalid|reject(?:ed|ion)?|unauthenticated|unauthori[sz]ed)\b/;
+const standaloneAuthCloseFailurePattern = /\b(?:unauthenticated|unauthori[sz]ed)\b/;
+function closeReasonIndicatesAuthFailure(reason) {
+    const normalizedReason = reason.trim().toLowerCase().replace(/[_-]+/g, " ");
+    if (normalizedReason === "") {
+        return false;
+    }
+    return standaloneAuthCloseFailurePattern.test(normalizedReason) ||
+        (authCloseSubjectPattern.test(normalizedReason) && authCloseFailurePattern.test(normalizedReason));
+}
+function authErrorFromCloseEvent(event, message) {
+    if (!closeReasonIndicatesAuthFailure(event.reason)) {
+        return undefined;
+    }
+    return new ShunterAuthError(message, {
+        code: String(event.code),
+        details: { reason: event.reason, wasClean: event.wasClean },
+    });
+}
 const closeNormalCode = 1000;
 const maxUint32 = 0xffffffff;
 export function createShunterClient(options) {
@@ -431,6 +451,15 @@ export function createShunterClient(options) {
         resolveClose?.();
         resolveClose = undefined;
     };
+    const failReconnect = (error) => {
+        if (state.status === "closed" || state.status === "closing") {
+            return;
+        }
+        rejectConnect?.(error);
+        rejectPendingOperations(error);
+        setState({ status: "closed", error });
+        finishClose();
+    };
     const failConnecting = (error) => {
         suppressSocketCloseTransition = true;
         rejectConnect?.(error);
@@ -456,6 +485,9 @@ export function createShunterClient(options) {
         finishClose();
     };
     const scheduleReconnect = (error) => {
+        if (error instanceof ShunterAuthError || error.kind === "auth") {
+            return false;
+        }
         if (!reconnectOptions.enabled ||
             !hasConnected ||
             disposed ||
@@ -464,10 +496,7 @@ export function createShunterClient(options) {
             return false;
         }
         if (reconnectAttempt >= reconnectOptions.maxAttempts) {
-            rejectConnect?.(error);
-            rejectPendingOperations(error);
-            setState({ status: "closed", error });
-            finishClose();
+            failReconnect(error);
             return true;
         }
         reconnectAttempt += 1;
@@ -485,7 +514,9 @@ export function createShunterClient(options) {
                 const reconnectError = isShunterError(connectError)
                     ? connectError
                     : toShunterError(connectError, "transport", "Reconnect failed");
-                scheduleReconnect(reconnectError);
+                if (!scheduleReconnect(reconnectError)) {
+                    failReconnect(reconnectError);
+                }
             });
         }, delay);
         return true;
@@ -1458,7 +1489,7 @@ export function createShunterClient(options) {
                         return;
                     }
                     if (state.status === "connecting") {
-                        const error = new ShunterTransportError("WebSocket closed before opening.", {
+                        const error = authErrorFromCloseEvent(event, "WebSocket authentication failed before opening.") ?? new ShunterTransportError("WebSocket closed before opening.", {
                             code: String(event.code),
                             details: { reason: event.reason, wasClean: event.wasClean },
                         });
@@ -1474,7 +1505,7 @@ export function createShunterClient(options) {
                         finishClose();
                     }
                     else if (state.status !== "closed") {
-                        const error = new ShunterClosedClientError("Shunter client connection closed.", {
+                        const error = authErrorFromCloseEvent(event, "Shunter client authentication failed.") ?? new ShunterClosedClientError("Shunter client connection closed.", {
                             code: String(event.code),
                             details: { reason: event.reason, wasClean: event.wasClean },
                         });

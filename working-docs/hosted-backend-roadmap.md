@@ -23,15 +23,31 @@ The target product direction is:
 
 ```text
 Frontend / TypeScript client
-  -> generated Shunter TypeScript SDK
-  -> Shunter backend runtime
+  -> npm-installed Shunter TypeScript SDK
+  -> generated app bindings from a Shunter contract
+  -> running Shunter backend
       -> Go module tables, reducers, reads, views, subscriptions
       -> durable state, recovery, snapshots, compaction
       -> optional app-owned service integrations
 ```
 
-Shunter should become the backend/database runtime for an application, not just
-a lower-level embedded library used by a traditional backend.
+Shunter should become the standalone backend/database system an application
+runs and talks to, not just a lower-level Go dependency hidden inside a
+traditional backend. Frontends and other client projects should experience
+Shunter as a running backend plus an npm-installed TypeScript SDK, with
+generated app bindings produced from reviewed Shunter contracts.
+
+Go remains the first module authoring language. In the near term, that means a
+Shunter app builds a static Go server binary that links the app module and the
+Shunter runtime. That is a deployment mechanism, not the long-term product
+boundary. The product boundary should move toward:
+
+- run a Shunter backend process for the app;
+- install `@shunter/client` from npm;
+- generate typed app bindings from the app's Shunter contract;
+- call reducers, procedures, declared reads, and subscriptions through the SDK;
+- operate Shunter-owned durability, recovery, backup, health, and diagnostics
+  as backend responsibilities.
 
 This does not require cloning the reference managed-cloud business model. It
 does require making Shunter feel like the app's primary backend boundary:
@@ -46,7 +62,10 @@ does require making Shunter feel like the app's primary backend boundary:
 
 ## Product Boundary
 
-The immediate target is a static Go app server powered by Shunter.
+The immediate target is a static Go app server powered by Shunter. This is the
+first standalone-server shape: deploy one binary, point clients at its Shunter
+protocol endpoint, and keep ordinary app code out of the frontend/backend state
+path.
 
 ```go
 package main
@@ -85,6 +104,12 @@ This is hosted from the developer and frontend perspective: the frontend talks
 to Shunter, not to hand-written CRUD handlers. Internally, Go still uses static
 linking because that is the most reliable Go-native module-loading model.
 
+This static server is intentionally not the final possible shape. It is the
+lowest-risk path to harden the real standalone system concerns first:
+protocol serving, npm SDK consumption, auth, migrations, durability, backup,
+observability, and deployment. A generic daemon with module publish/load can be
+considered later if static app servers become the bottleneck.
+
 ## Non-Goals
 
 These reference capabilities are not gaps for Shunter's current direction:
@@ -111,8 +136,26 @@ publishing. For Go, the options are all expensive:
 | Out-of-process Go module runner | Better isolation, possible dynamic replacement | Protocol, lifecycle, and transaction complexity |
 | WASM module hosting | Closer to reference host model | Large scope and weakens Go-only simplicity |
 
-Shunter should start with static Go binaries. A `publish`-like workflow can
-come later if static rebuild/redeploy proves too limiting.
+Decision: Shunter should start with static Go app binaries, while the product
+direction remains a standalone Shunter backend and public TypeScript SDK.
+
+This is the right first step because it proves the important user-facing
+contract without paying the full cost of dynamic module loading:
+
+- clients still talk to Shunter as the backend;
+- the TypeScript runtime can be published and consumed as `@shunter/client`;
+- contracts and generated bindings can stabilize;
+- auth, diagnostics, backup, migrations, and deployment can be hardened against
+  real apps;
+- module code stays idiomatic Go with normal builds, tests, and static
+  deployment.
+
+A generic daemon with `publish` or dynamic module loading should come later
+only if static rebuild/redeploy is the real blocker. Evidence that would
+justify that move includes multi-tenant hosting requirements, frequent module
+updates where binary redeploy is too slow, stronger module isolation needs, or
+operator workflows that cannot be handled by static app server templates and
+deployment automation.
 
 ## What SpaceTimeDB Provides And Why It Exists
 
@@ -697,6 +740,11 @@ Shunter status:
 - TypeScript runtime and generated helpers exist.
 
 Needed Shunter work:
+- make `@shunter/client` publish-ready as a real npm package, including package
+  metadata, version synchronization, packed-install smoke coverage, release
+  instructions, and provenance/ownership decisions;
+- update app-author install docs from local/workspace/tarball only to public
+  npm consumption once the package release gate exists;
 - Nuxt/browser-focused integration guide.
 - local cache ergonomics for table and view subscriptions.
 - generated reducer helpers with typed args/results.
@@ -820,10 +868,15 @@ Acceptance criteria:
 
 ### Phase 4: Hosted Runtime Expansion
 
-Goal: decide whether static app binaries are enough or whether a stronger
-hosted platform is needed.
+Goal: turn the static hosted-app architecture into a clearer standalone
+product distribution before attempting dynamic module hosting.
 
 Possible deliverables:
+- publish-ready `@shunter/client` npm package and release workflow.
+- app-author workflow where frontend projects install the SDK from npm and
+  generate app bindings from a contract artifact.
+- standardized app server template and deployment/runbook for self-hosted
+  Shunter backends.
 - static multi-module hosting improvements.
 - dev watcher that rebuilds/restarts app server and regenerates TypeScript.
 - database naming inside a single app server.
@@ -832,8 +885,10 @@ Possible deliverables:
   necessary.
 
 Explicit decision point:
-- Do not implement dynamic arbitrary Go module loading until static hosted
-  apps have proven insufficient.
+- Do not implement dynamic arbitrary Go module loading until static hosted apps
+  plus a public npm SDK have proven insufficient.
+- Treat a generic daemon with module publish/load as a later product phase, not
+  as the next implementation step.
 
 ## Replacement Strategy For Go Backend Plus Postgres Apps
 

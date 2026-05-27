@@ -2905,6 +2905,32 @@ await assert.rejects(errorPreIdentityConnecting, (error) => {
 });
 assert.equal(errorPreIdentityClient.state.status, "failed");
 
+const authPreIdentityStates = [];
+const authPreIdentityClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: fakeFactory,
+  onStateChange: ({ current }) => authPreIdentityStates.push(current.status),
+});
+const authPreIdentityConnecting = authPreIdentityClient.connect();
+await nextTurn();
+const authPreIdentitySocket = sockets.at(-1);
+authPreIdentitySocket.open();
+authPreIdentitySocket.dispatch("close", {
+  code: 1008,
+  reason: "auth-token rejected by admission",
+  wasClean: false,
+});
+await assert.rejects(authPreIdentityConnecting, (error) => {
+  assert(error instanceof ShunterAuthError);
+  assert.equal(error.kind, "auth");
+  assert.equal(error.code, "1008");
+  assert.deepEqual(error.details, { reason: "auth-token rejected by admission", wasClean: false });
+  return true;
+});
+assert.equal(authPreIdentityClient.state.status, "failed");
+assert.deepEqual(authPreIdentityStates, ["connecting", "failed"]);
+
 const closeDuringConnectSockets = [];
 const closeDuringConnectStates = [];
 const closeDuringConnectClient = createShunterClient({
@@ -3774,6 +3800,67 @@ assert.deepEqual(reconnectStates, [
 ]);
 await reconnectClient.close();
 
+const reconnectEstablishedAuthCloseSockets = [];
+const reconnectEstablishedAuthCloseStates = [];
+const reconnectEstablishedAuthCloseClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 3,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectEstablishedAuthCloseSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectEstablishedAuthCloseStates.push(current.status),
+});
+const reconnectEstablishedAuthCloseConnecting = reconnectEstablishedAuthCloseClient.connect();
+await nextTurn();
+reconnectEstablishedAuthCloseSockets[0].open();
+reconnectEstablishedAuthCloseSockets[0].message(identityTokenFrame().buffer);
+await reconnectEstablishedAuthCloseConnecting;
+const reconnectEstablishedAuthCloseHandleSubscription = reconnectEstablishedAuthCloseClient.subscribeTable(
+  "users",
+  undefined,
+  {
+    requestId: 0x01020304,
+    queryId: 0x11121314,
+    returnHandle: true,
+    decodeRow: (row) => [...row].join("-"),
+  },
+);
+reconnectEstablishedAuthCloseSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectEstablishedAuthCloseHandle = await reconnectEstablishedAuthCloseHandleSubscription;
+assert.deepEqual(reconnectEstablishedAuthCloseHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectEstablishedAuthCloseSockets[0].dispatch("close", {
+  code: 1008,
+  reason: "token rejected by admission",
+  wasClean: false,
+});
+assert.equal(reconnectEstablishedAuthCloseClient.state.status, "closed");
+const reconnectEstablishedAuthCloseError = reconnectEstablishedAuthCloseClient.state.error;
+assert(reconnectEstablishedAuthCloseError instanceof ShunterAuthError);
+assert.equal(reconnectEstablishedAuthCloseError.kind, "auth");
+assert.equal(reconnectEstablishedAuthCloseError.code, "1008");
+assert.deepEqual(reconnectEstablishedAuthCloseError.details, {
+  reason: "token rejected by admission",
+  wasClean: false,
+});
+const reconnectEstablishedAuthCloseClosed = await reconnectEstablishedAuthCloseHandle.closed;
+assert.equal(reconnectEstablishedAuthCloseClosed.reason, "error");
+assert.strictEqual(reconnectEstablishedAuthCloseClosed.error, reconnectEstablishedAuthCloseError);
+assert.deepEqual(reconnectEstablishedAuthCloseHandle.state, {
+  status: "closed",
+  error: reconnectEstablishedAuthCloseError,
+});
+await nextTurn();
+assert.equal(reconnectEstablishedAuthCloseSockets.length, 1);
+assert.deepEqual(reconnectEstablishedAuthCloseStates, ["connecting", "connected", "closed"]);
+
 const reconnectNoReplaySockets = [];
 const reconnectNoReplayStates = [];
 const reconnectNoReplayClient = createShunterClient({
@@ -4274,6 +4361,79 @@ assert.deepEqual(reconnectHandshakeCloseStates, [
   "reconnecting",
   "connecting",
   "closing",
+  "closed",
+]);
+
+const reconnectHandshakeAuthCloseSockets = [];
+const reconnectHandshakeAuthCloseStates = [];
+const reconnectHandshakeAuthCloseClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 3,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectHandshakeAuthCloseSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectHandshakeAuthCloseStates.push(current.status),
+});
+const reconnectHandshakeAuthCloseConnecting = reconnectHandshakeAuthCloseClient.connect();
+await nextTurn();
+reconnectHandshakeAuthCloseSockets[0].open();
+reconnectHandshakeAuthCloseSockets[0].message(identityTokenFrame().buffer);
+await reconnectHandshakeAuthCloseConnecting;
+const reconnectHandshakeAuthCloseHandleSubscription = reconnectHandshakeAuthCloseClient.subscribeTable(
+  "users",
+  undefined,
+  {
+    requestId: 0x01020304,
+    queryId: 0x11121314,
+    returnHandle: true,
+    decodeRow: (row) => [...row].join("-"),
+  },
+);
+reconnectHandshakeAuthCloseSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectHandshakeAuthCloseHandle = await reconnectHandshakeAuthCloseHandleSubscription;
+assert.deepEqual(reconnectHandshakeAuthCloseHandle.state, { status: "active", rows: ["1-2", "3"] });
+reconnectHandshakeAuthCloseSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+await nextTurn();
+assert.equal(reconnectHandshakeAuthCloseClient.state.status, "connecting");
+assert.equal(reconnectHandshakeAuthCloseSockets.length, 2);
+const observedReconnectHandshakeAuthClose = reconnectHandshakeAuthCloseClient.connect();
+reconnectHandshakeAuthCloseSockets[1].open();
+reconnectHandshakeAuthCloseSockets[1].dispatch("close", {
+  code: 1008,
+  reason: "auth-token rejected by admission",
+  wasClean: false,
+});
+const reconnectHandshakeAuthCloseError = await rejectByNextTurn(observedReconnectHandshakeAuthClose, (error) => {
+  assert(error instanceof ShunterAuthError);
+  assert.equal(error.kind, "auth");
+  assert.equal(error.code, "1008");
+  assert.deepEqual(error.details, { reason: "auth-token rejected by admission", wasClean: false });
+});
+assert.equal(reconnectHandshakeAuthCloseClient.state.status, "closed");
+assert.strictEqual(reconnectHandshakeAuthCloseClient.state.error, reconnectHandshakeAuthCloseError);
+const reconnectHandshakeAuthClosed = await reconnectHandshakeAuthCloseHandle.closed;
+assert.equal(reconnectHandshakeAuthClosed.reason, "error");
+assert.strictEqual(reconnectHandshakeAuthClosed.error, reconnectHandshakeAuthCloseError);
+assert.deepEqual(reconnectHandshakeAuthCloseHandle.state, {
+  status: "closed",
+  error: reconnectHandshakeAuthCloseError,
+});
+await nextTurn();
+assert.equal(reconnectHandshakeAuthCloseSockets.length, 2);
+assert.deepEqual(reconnectHandshakeAuthCloseStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "failed",
   "closed",
 ]);
 

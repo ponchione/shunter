@@ -5,11 +5,17 @@ active work for the current self-hosted v1 hardening list in
 `working-docs/functionality-gap-log.md`.
 
 Current product decision:
-- Keep Shunter focused on self-hosted Go applications that embed Shunter as a
-  runtime library.
+- Move Shunter toward a standalone self-hosted backend/database system that
+  apps run and clients talk to over the Shunter protocol.
+- Use static Go app server binaries as the first implementation path for that
+  standalone system. App modules are still authored in Go and linked into the
+  server binary while the protocol, SDK, auth, operations, and deployment
+  surfaces mature.
+- Make the TypeScript client runtime publishable as an npm package consumed by
+  frontend apps and generated bindings.
 - Harden the existing runtime, durability, protocol, schema, contract, and docs
   surfaces first.
-- Do not start standalone server/control-plane, managed service, dynamic module
+- Do not start generic daemon control-plane, managed service, dynamic module
   loading, publish/update, broad SQL, distributed database, or multi-language
   module-hosting work until this backlog is explicitly reviewed.
 
@@ -23,15 +29,16 @@ Clean-room rules still apply:
 
 ## Deferred Platform And Product Scope
 
-1. [ ] Standalone server and CLI product boundary.
+1. [ ] Generic daemon and CLI product boundary.
 
 Owner: root `shunter`, `cmd/shunter`, `protocol`, `auth`,
 `observability/prometheus`, `internal/gauntlettests`
 
 Deferred decision:
-- Shunter remains a self-hosted app-integrated runtime for now.
-- `cmd/shunter` should not grow `start`, publish/update, live database
-  interaction, or control-plane commands until standalone serving is approved.
+- Shunter's current standalone path is a static self-hosted app server binary.
+- `cmd/shunter` should not grow a generic `start` daemon, publish/update, live
+  database interaction, or control-plane commands until dynamic serving is
+  approved.
 
 Review later:
 - Whether Shunter needs `shunter start`.

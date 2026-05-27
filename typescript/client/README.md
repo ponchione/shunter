@@ -2,18 +2,23 @@
 
 Status: checked-in SDK runtime foundation.
 
-`typescript/client` is a private package-shaped SDK for local/workspace Shunter
-apps. It is named `@shunter/client` so generated bindings have a stable runtime
-import target, but `"private": true` keeps v1 out of public npm publishing.
+`typescript/client` is the TypeScript SDK runtime foundation for Shunter apps.
+It is named `@shunter/client` so generated bindings have a stable runtime
+import target. The long-term product target is a real npm package consumed by
+frontend apps and other projects. Today the package remains `"private": true`
+while the release workflow, package metadata, and packed-install gates are
+hardened.
+
 Build output is emitted to `dist/` as ESM JavaScript plus `.d.ts` files and
-source maps. Downstream apps should consume it through a workspace dependency,
-`file:` dependency, or locally packed tarball that still resolves as
-`@shunter/client`.
+source maps. Until public publishing is enabled, downstream apps should consume
+it through a workspace dependency, `file:` dependency, or locally packed tarball
+that still resolves as `@shunter/client`.
 
 ## Local installs
 
-Use local package paths for v1. Public npm publishing and ownership of the
-`@shunter` scope are not required.
+Use local package paths for current v1 development. Public npm publishing and
+ownership of the `@shunter` scope are productization work, not a blocker for
+local app validation.
 
 `file:` dependency from an app:
 
