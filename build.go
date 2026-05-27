@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/ponchione/shunter/commitlog"
@@ -147,10 +148,9 @@ func copyAuthVerificationKeys(in []AuthVerificationKey) []AuthVerificationKey {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]AuthVerificationKey, len(in))
-	for i, key := range in {
-		out[i] = key
-		out[i].Key = append([]byte(nil), key.Key...)
+	out := slices.Clone(in)
+	for i := range out {
+		out[i].Key = slices.Clone(out[i].Key)
 	}
 	return out
 }
@@ -159,10 +159,9 @@ func copyAuthOIDCIssuers(in []AuthOIDCIssuer) []AuthOIDCIssuer {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]AuthOIDCIssuer, len(in))
-	for i, issuer := range in {
-		out[i] = issuer
-		out[i].Algorithms = append([]AuthAlgorithm(nil), issuer.Algorithms...)
+	out := slices.Clone(in)
+	for i := range out {
+		out[i].Algorithms = slices.Clone(out[i].Algorithms)
 	}
 	return out
 }

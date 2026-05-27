@@ -224,69 +224,51 @@ func emptyReadModelContract() ReadModelContract {
 func buildPermissionContract(reducers []ReducerDeclaration, procedures []ProcedureDescription, queries []QueryDescription, views []ViewDescription) PermissionContract {
 	out := emptyPermissionContract()
 	for _, reducer := range reducers {
-		if !hasPermissionMetadata(reducer.Permissions) {
-			continue
-		}
-		out.Reducers = append(out.Reducers, PermissionContractDeclaration{
-			Name:     reducer.Name,
-			Required: normalizeStringSlice(reducer.Permissions.Required),
-		})
+		out.Reducers = appendPermissionContractDeclaration(out.Reducers, reducer.Name, reducer.Permissions)
 	}
 	for _, procedure := range procedures {
-		if !hasPermissionMetadata(procedure.Permissions) {
-			continue
-		}
-		out.Procedures = append(out.Procedures, PermissionContractDeclaration{
-			Name:     procedure.Name,
-			Required: normalizeStringSlice(procedure.Permissions.Required),
-		})
+		out.Procedures = appendPermissionContractDeclaration(out.Procedures, procedure.Name, procedure.Permissions)
 	}
 	for _, query := range queries {
-		if !hasPermissionMetadata(query.Permissions) {
-			continue
-		}
-		out.Queries = append(out.Queries, PermissionContractDeclaration{
-			Name:     query.Name,
-			Required: normalizeStringSlice(query.Permissions.Required),
-		})
+		out.Queries = appendPermissionContractDeclaration(out.Queries, query.Name, query.Permissions)
 	}
 	for _, view := range views {
-		if !hasPermissionMetadata(view.Permissions) {
-			continue
-		}
-		out.Views = append(out.Views, PermissionContractDeclaration{
-			Name:     view.Name,
-			Required: normalizeStringSlice(view.Permissions.Required),
-		})
+		out.Views = appendPermissionContractDeclaration(out.Views, view.Name, view.Permissions)
 	}
 	return out
+}
+
+func appendPermissionContractDeclaration(out []PermissionContractDeclaration, name string, metadata PermissionMetadata) []PermissionContractDeclaration {
+	if !hasPermissionMetadata(metadata) {
+		return out
+	}
+	return append(out, PermissionContractDeclaration{
+		Name:     name,
+		Required: normalizeStringSlice(metadata.Required),
+	})
 }
 
 func buildReadModelContract(queries []QueryDescription, views []ViewDescription) ReadModelContract {
 	out := emptyReadModelContract()
 	for _, query := range queries {
-		if !hasReadModelMetadata(query.ReadModel) {
-			continue
-		}
-		out.Declarations = append(out.Declarations, ReadModelContractDeclaration{
-			Surface: ReadModelSurfaceQuery,
-			Name:    query.Name,
-			Tables:  normalizeStringSlice(query.ReadModel.Tables),
-			Tags:    normalizeStringSlice(query.ReadModel.Tags),
-		})
+		out.Declarations = appendReadModelContractDeclaration(out.Declarations, ReadModelSurfaceQuery, query.Name, query.ReadModel)
 	}
 	for _, view := range views {
-		if !hasReadModelMetadata(view.ReadModel) {
-			continue
-		}
-		out.Declarations = append(out.Declarations, ReadModelContractDeclaration{
-			Surface: ReadModelSurfaceView,
-			Name:    view.Name,
-			Tables:  normalizeStringSlice(view.ReadModel.Tables),
-			Tags:    normalizeStringSlice(view.ReadModel.Tags),
-		})
+		out.Declarations = appendReadModelContractDeclaration(out.Declarations, ReadModelSurfaceView, view.Name, view.ReadModel)
 	}
 	return out
+}
+
+func appendReadModelContractDeclaration(out []ReadModelContractDeclaration, surface, name string, metadata ReadModelMetadata) []ReadModelContractDeclaration {
+	if !hasReadModelMetadata(metadata) {
+		return out
+	}
+	return append(out, ReadModelContractDeclaration{
+		Surface: surface,
+		Name:    name,
+		Tables:  normalizeStringSlice(metadata.Tables),
+		Tags:    normalizeStringSlice(metadata.Tags),
+	})
 }
 
 func emptyMigrationContract() MigrationContract {
@@ -301,23 +283,26 @@ func buildMigrationContract(schemaExport schema.SchemaExport, module MigrationMe
 	out.Module = normalizeMigrationMetadata(module)
 
 	for _, table := range schemaExport.Tables {
-		if metadata, ok := tableMigrations[table.Name]; ok && hasMigrationMetadata(metadata) {
-			out.Declarations = append(out.Declarations, migrationContractDeclaration(MigrationSurfaceTable, table.Name, metadata))
+		if metadata, ok := tableMigrations[table.Name]; ok {
+			out.Declarations = appendMigrationContractDeclaration(out.Declarations, MigrationSurfaceTable, table.Name, metadata)
 		}
 	}
 
 	for _, query := range queries {
-		if hasMigrationMetadata(query.Migration) {
-			out.Declarations = append(out.Declarations, migrationContractDeclaration(MigrationSurfaceQuery, query.Name, query.Migration))
-		}
+		out.Declarations = appendMigrationContractDeclaration(out.Declarations, MigrationSurfaceQuery, query.Name, query.Migration)
 	}
 	for _, view := range views {
-		if hasMigrationMetadata(view.Migration) {
-			out.Declarations = append(out.Declarations, migrationContractDeclaration(MigrationSurfaceView, view.Name, view.Migration))
-		}
+		out.Declarations = appendMigrationContractDeclaration(out.Declarations, MigrationSurfaceView, view.Name, view.Migration)
 	}
 
 	return out
+}
+
+func appendMigrationContractDeclaration(out []MigrationContractDeclaration, surface, name string, metadata MigrationMetadata) []MigrationContractDeclaration {
+	if !hasMigrationMetadata(metadata) {
+		return out
+	}
+	return append(out, migrationContractDeclaration(surface, name, metadata))
 }
 
 func migrationContractDeclaration(surface, name string, metadata MigrationMetadata) MigrationContractDeclaration {
@@ -506,41 +491,24 @@ func normalizeSchemaReadPolicy(in schema.ReadPolicy) schema.ReadPolicy {
 }
 
 func copyQueryDescriptions(in []QueryDescription) []QueryDescription {
-	if len(in) == 0 {
-		return []QueryDescription{}
-	}
-	out := make([]QueryDescription, len(in))
-	for i, query := range in {
-		out[i] = copyQueryDescription(query)
-	}
-	return out
+	return mapSlice(in, copyQueryDescription)
 }
 
 func normalizeProcedureDescriptions(in []ProcedureDescription) []ProcedureDescription {
-	if len(in) == 0 {
-		return []ProcedureDescription{}
-	}
-	out := make([]ProcedureDescription, len(in))
-	for i, procedure := range in {
-		out[i] = ProcedureDescription{
-			Name:        procedure.Name,
-			Args:        copyProductSchemaPtr(procedure.Args),
-			Result:      copyProductSchemaPtr(procedure.Result),
-			Permissions: copyPermissionMetadata(procedure.Permissions),
-		}
-	}
-	return out
+	return mapSlice(in, copyProcedureDescription)
 }
 
 func copyViewDescriptions(in []ViewDescription) []ViewDescription {
-	if len(in) == 0 {
-		return []ViewDescription{}
+	return mapSlice(in, copyViewDescription)
+}
+
+func copyProcedureDescription(procedure ProcedureDescription) ProcedureDescription {
+	return ProcedureDescription{
+		Name:        procedure.Name,
+		Args:        copyProductSchemaPtr(procedure.Args),
+		Result:      copyProductSchemaPtr(procedure.Result),
+		Permissions: copyPermissionMetadata(procedure.Permissions),
 	}
-	out := make([]ViewDescription, len(in))
-	for i, view := range in {
-		out[i] = copyViewDescription(view)
-	}
-	return out
 }
 
 func copyQueryDescription(query QueryDescription) QueryDescription {

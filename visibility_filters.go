@@ -115,17 +115,14 @@ func visibilityFilterDescription(filter VisibilityFilterDeclaration, sl protocol
 }
 
 func describeVisibilityFilterDeclarations(in []VisibilityFilterDeclaration) []VisibilityFilterDescription {
-	if len(in) == 0 {
-		return nil
+	return mapNonEmptySlice(in, describeVisibilityFilterDeclaration)
+}
+
+func describeVisibilityFilterDeclaration(filter VisibilityFilterDeclaration) VisibilityFilterDescription {
+	return VisibilityFilterDescription{
+		Name: filter.Name,
+		SQL:  filter.SQL,
 	}
-	out := make([]VisibilityFilterDescription, len(in))
-	for i, filter := range in {
-		out[i] = VisibilityFilterDescription{
-			Name: filter.Name,
-			SQL:  filter.SQL,
-		}
-	}
-	return out
 }
 
 func copyVisibilityFilterDescriptions(in []VisibilityFilterDescription) []VisibilityFilterDescription {
@@ -133,8 +130,5 @@ func copyVisibilityFilterDescriptions(in []VisibilityFilterDescription) []Visibi
 }
 
 func normalizeVisibilityFilterDescriptions(in []VisibilityFilterDescription) []VisibilityFilterDescription {
-	if len(in) == 0 {
-		return []VisibilityFilterDescription{}
-	}
-	return copyVisibilityFilterDescriptions(in)
+	return normalizeSlice(in)
 }

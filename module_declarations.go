@@ -504,35 +504,29 @@ func describeViewDeclaration(view viewDeclaration) ViewDescription {
 }
 
 func describeProcedureDeclarations(in []ProcedureDeclaration) []ProcedureDescription {
-	if len(in) == 0 {
-		return nil
+	return mapNonEmptySlice(in, describeProcedureDeclaration)
+}
+
+func describeProcedureDeclaration(procedure ProcedureDeclaration) ProcedureDescription {
+	return ProcedureDescription{
+		Name:        procedure.Name,
+		Args:        copyProductSchemaPtr(procedure.Args),
+		Result:      copyProductSchemaPtr(procedure.Result),
+		Permissions: copyPermissionMetadata(procedure.Permissions),
 	}
-	out := make([]ProcedureDescription, len(in))
-	for i, procedure := range in {
-		out[i] = ProcedureDescription{
-			Name:        procedure.Name,
-			Args:        copyProductSchemaPtr(procedure.Args),
-			Result:      copyProductSchemaPtr(procedure.Result),
-			Permissions: copyPermissionMetadata(procedure.Permissions),
-		}
-	}
-	return out
 }
 
 func copyReducerDeclarations(in []ReducerDeclaration) []ReducerDeclaration {
-	if len(in) == 0 {
-		return nil
+	return mapNonEmptySlice(in, copyReducerDeclaration)
+}
+
+func copyReducerDeclaration(reducer ReducerDeclaration) ReducerDeclaration {
+	return ReducerDeclaration{
+		Name:        reducer.Name,
+		Permissions: copyPermissionMetadata(reducer.Permissions),
+		Args:        copyProductSchemaPtr(reducer.Args),
+		Result:      copyProductSchemaPtr(reducer.Result),
 	}
-	out := make([]ReducerDeclaration, len(in))
-	for i, reducer := range in {
-		out[i] = ReducerDeclaration{
-			Name:        reducer.Name,
-			Permissions: copyPermissionMetadata(reducer.Permissions),
-			Args:        copyProductSchemaPtr(reducer.Args),
-			Result:      copyProductSchemaPtr(reducer.Result),
-		}
-	}
-	return out
 }
 
 func copyProcedureDeclaration(in ProcedureDeclaration) ProcedureDeclaration {
@@ -631,13 +625,17 @@ func normalizeSlice[T any](in []T) []T {
 	return copySlice(in)
 }
 
-func mapNonEmptySlice[T, U any](in []T, f func(T) U) []U {
-	if len(in) == 0 {
-		return nil
-	}
+func mapSlice[T, U any](in []T, f func(T) U) []U {
 	out := make([]U, len(in))
 	for i, item := range in {
 		out[i] = f(item)
 	}
 	return out
+}
+
+func mapNonEmptySlice[T, U any](in []T, f func(T) U) []U {
+	if len(in) == 0 {
+		return nil
+	}
+	return mapSlice(in, f)
 }
