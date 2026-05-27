@@ -176,7 +176,7 @@ func compileMultiJoinSQLQuery(stmt sql.Statement, orderBy []sql.OrderByColumn, n
 		//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 	}
-	aggregate, err := compileMultiJoinAggregateProjection(stmt.Aggregate, relationMap, aliasTag)
+	aggregate, err := compileJoinAggregateProjection(stmt.Aggregate, relationMap, aliasTag)
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
@@ -331,27 +331,6 @@ func resolveMultiJoinProjectedRelation(stmt sql.Statement, relations []compiledS
 
 func compileMultiJoinProjectionColumns(columns []sql.ProjectionColumn, relations map[string]relationSchema, aliasTag func(string) uint8) ([]compiledSQLProjectionColumn, error) {
 	return compileJoinProjectionColumns(columns, relations, aliasTag)
-}
-
-func compileMultiJoinAggregateProjection(agg *sql.AggregateProjection, relations map[string]relationSchema, aliasTag func(string) uint8) (*compiledSQLAggregate, error) {
-	if agg == nil || agg.Column == nil {
-		return compileAggregateProjection(agg, nil)
-	}
-	ref := *agg.Column
-	qualifier := ref.Alias
-	if qualifier == "" {
-		qualifier = ref.Table
-	}
-	rel, ok := relations[qualifier]
-	if !ok {
-		return nil, sql.UnresolvedVarError{Name: qualifier}
-	}
-	col, ok := lookupSQLColumnExact(rel.ts, ref.Column)
-	if !ok {
-		return nil, sql.UnresolvedVarError{Name: ref.Column}
-	}
-	argument := compiledSQLProjectionColumn{Schema: *col, Table: rel.id, Alias: aliasTag(ref.Alias)}
-	return compileAggregateProjection(agg, &argument)
 }
 
 func compileMultiJoinOrderBy(orderBy []sql.OrderByColumn, stmt sql.Statement, relations []compiledSQLMultiJoinRelation, relationMap map[string]relationSchema, projectionColumns []compiledSQLProjectionColumn, projectedRelation int) ([]compiledSQLOrderBy, error) {
