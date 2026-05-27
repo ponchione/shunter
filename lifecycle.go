@@ -203,19 +203,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 	r.scheduler = scheduler
 	if r.buildConfig.EnableProtocol {
 		if err := r.ensureProtocolGraphLocked(); err != nil {
-			r.lifecycleCancel = nil
-			r.fanOutCancel = nil
-			r.durability = nil
-			r.subscriptions = nil
-			r.fanOutInbox = nil
-			r.fanOutWorker = nil
-			r.fanOutSender = nil
-			r.executor = nil
-			r.scheduler = nil
-			r.protocolConns = nil
-			r.protocolInbox = nil
-			r.protocolSender = nil
-			r.protocolServer = nil
+			r.clearRuntimeGraphLocked()
 			r.mu.Unlock()
 			lifecycleCancel()
 			fanOutCancel()
@@ -329,6 +317,20 @@ func (r *Runtime) Close() error {
 	if droppedClients > r.subscriptionDroppedClients {
 		r.subscriptionDroppedClients = droppedClients
 	}
+	r.clearRuntimeGraphLocked()
+	r.lastErr = closeErr
+	r.stateName = RuntimeStateClosed
+	r.ready.Store(false)
+	r.mu.Unlock()
+	if closeErr != nil {
+		r.recordCloseFailure(closeErr, time.Since(startedAt))
+	} else {
+		r.recordClosed(time.Since(startedAt))
+	}
+	return closeErr
+}
+
+func (r *Runtime) clearRuntimeGraphLocked() {
 	r.lifecycleCancel = nil
 	r.fanOutCancel = nil
 	r.durability = nil
@@ -342,16 +344,6 @@ func (r *Runtime) Close() error {
 	r.protocolInbox = nil
 	r.protocolSender = nil
 	r.protocolServer = nil
-	r.lastErr = closeErr
-	r.stateName = RuntimeStateClosed
-	r.ready.Store(false)
-	r.mu.Unlock()
-	if closeErr != nil {
-		r.recordCloseFailure(closeErr, time.Since(startedAt))
-	} else {
-		r.recordClosed(time.Since(startedAt))
-	}
-	return closeErr
 }
 
 func (r *Runtime) recordStartFailure(ctx context.Context, err error, duration time.Duration) {
