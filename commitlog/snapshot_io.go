@@ -75,17 +75,21 @@ func RemoveLockFile(snapshotDir string) error {
 func EncodeSchemaSnapshot(w io.Writer, reg schema.SchemaRegistry) error {
 	ids := reg.Tables()
 	slices.Sort(ids)
-	if err := writeUint32Full(w, reg.Version()); err != nil {
-		return err
-	}
-	if err := writeUint32Full(w, uint32(len(ids))); err != nil {
-		return err
-	}
+	tables := make([]*schema.TableSchema, 0, len(ids))
 	for _, id := range ids {
 		ts, ok := reg.Table(id)
 		if !ok {
 			return fmt.Errorf("missing schema table %d", id)
 		}
+		tables = append(tables, ts)
+	}
+	if err := writeUint32Full(w, reg.Version()); err != nil {
+		return err
+	}
+	if err := writeUint32Full(w, uint32(len(tables))); err != nil {
+		return err
+	}
+	for _, ts := range tables {
 		if err := writeUint32Full(w, uint32(ts.ID)); err != nil {
 			return err
 		}
@@ -129,14 +133,10 @@ func EncodeSchemaSnapshot(w io.Writer, reg schema.SchemaRegistry) error {
 	if err := writeFull(w, schemaSnapshotEventFlagsMagic[:]); err != nil {
 		return err
 	}
-	if err := writeUint32Full(w, uint32(len(ids))); err != nil {
+	if err := writeUint32Full(w, uint32(len(tables))); err != nil {
 		return err
 	}
-	for _, id := range ids {
-		ts, ok := reg.Table(id)
-		if !ok {
-			return fmt.Errorf("missing schema table %d", id)
-		}
+	for _, ts := range tables {
 		if err := writeUint32Full(w, uint32(ts.ID)); err != nil {
 			return err
 		}
