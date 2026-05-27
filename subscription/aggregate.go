@@ -709,41 +709,30 @@ func (a *joinAggregateAccumulator) addCross(leftRow, rightRow types.ProductValue
 }
 
 func (a *joinAggregateAccumulator) addMulti(tuple []types.ProductValue, multi MultiJoin) error {
-	switch a.aggregate.Func {
-	case AggregateCount:
-		if a.aggregate.Argument == nil {
-			a.count++
-			return nil
-		}
-		value, ok := multiJoinAggregateArgumentValue(tuple, multi, a.aggregate.Argument)
-		if !ok || value.IsNull() {
-			return nil
-		}
-		if a.aggregate.Distinct {
-			a.distinct.Add(value)
-			return nil
-		}
-		a.count++
-		return nil
-	case AggregateSum:
-		value, ok := multiJoinAggregateArgumentValue(tuple, multi, a.aggregate.Argument)
-		if !ok {
-			return nil
-		}
-		return a.sum.Add(value)
-	default:
-		return fmt.Errorf("aggregate %q not supported", a.aggregate.Func)
+	var value types.Value
+	var ok bool
+	if a.aggregate.Argument != nil {
+		value, ok = multiJoinAggregateArgumentValue(tuple, multi, a.aggregate.Argument)
 	}
+	return a.addArgumentValue(value, ok)
 }
 
 func (a *joinAggregateAccumulator) addPair(leftRow, rightRow types.ProductValue, left TableID, leftAlias uint8, right TableID, rightAlias uint8) error {
+	var value types.Value
+	var ok bool
+	if a.aggregate.Argument != nil {
+		value, ok = relationPairAggregateArgumentValue(leftRow, rightRow, left, leftAlias, right, rightAlias, a.aggregate.Argument)
+	}
+	return a.addArgumentValue(value, ok)
+}
+
+func (a *joinAggregateAccumulator) addArgumentValue(value types.Value, ok bool) error {
 	switch a.aggregate.Func {
 	case AggregateCount:
 		if a.aggregate.Argument == nil {
 			a.count++
 			return nil
 		}
-		value, ok := relationPairAggregateArgumentValue(leftRow, rightRow, left, leftAlias, right, rightAlias, a.aggregate.Argument)
 		if !ok || value.IsNull() {
 			return nil
 		}
@@ -754,7 +743,6 @@ func (a *joinAggregateAccumulator) addPair(leftRow, rightRow types.ProductValue,
 		a.count++
 		return nil
 	case AggregateSum:
-		value, ok := relationPairAggregateArgumentValue(leftRow, rightRow, left, leftAlias, right, rightAlias, a.aggregate.Argument)
 		if !ok {
 			return nil
 		}
@@ -865,11 +853,7 @@ func relationPairAggregateArgumentValue(leftRow, rightRow types.ProductValue, le
 	default:
 		return types.Value{}, false
 	}
-	idx := int(arg.Column)
-	if idx < 0 || idx >= len(row) {
-		return types.Value{}, false
-	}
-	return row[idx], true
+	return rowValue(row, arg.Column)
 }
 
 func multiJoinAggregateArgumentValue(tuple []types.ProductValue, multi MultiJoin, arg *AggregateColumn) (types.Value, bool) {
@@ -880,12 +864,7 @@ func multiJoinAggregateArgumentValue(tuple []types.ProductValue, multi MultiJoin
 	if !ok || relation < 0 || relation >= len(tuple) {
 		return types.Value{}, false
 	}
-	row := tuple[relation]
-	idx := int(arg.Column)
-	if idx < 0 || idx >= len(row) {
-		return types.Value{}, false
-	}
-	return row[idx], true
+	return rowValue(tuple[relation], arg.Column)
 }
 
 func multiJoinAggregateRelationIndex(relations []MultiJoinRelation, table TableID, alias uint8) (int, bool) {
@@ -931,11 +910,8 @@ func aggregateRowContributes(row types.ProductValue, table TableID, pred Predica
 	if arg.Table != table || arg.Alias != 0 {
 		return false
 	}
-	idx := int(arg.Column)
-	if idx < 0 || idx >= len(row) {
-		return false
-	}
-	return !row[idx].IsNull()
+	value, ok := rowValue(row, arg.Column)
+	return ok && !value.IsNull()
 }
 
 func aggregateValueRow(value types.Value) types.ProductValue {
@@ -948,13 +924,7 @@ func aggregateRowsValue(rows []types.ProductValue, table TableID, pred Predicate
 		if aggregate.Distinct {
 			return types.NewUint64(distinctCountAggregateRows(rows, table, pred, aggregate)), nil
 		}
-		var count uint64
-		for _, row := range rows {
-			if aggregateRowContributes(row, table, pred, aggregate) {
-				count++
-			}
-		}
-		return types.NewUint64(count), nil
+		return types.NewUint64(countAggregateDeltaRows(rows, table, pred, aggregate)), nil
 	case AggregateSum:
 		acc := valueagg.NewSum(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
 		for _, row := range rows {
@@ -992,11 +962,7 @@ func aggregateArgumentValue(row types.ProductValue, table TableID, pred Predicat
 	if arg.Table != table || arg.Alias != 0 {
 		return types.Value{}, false
 	}
-	idx := int(arg.Column)
-	if idx < 0 || idx >= len(row) {
-		return types.Value{}, false
-	}
-	return row[idx], true
+	return rowValue(row, arg.Column)
 }
 
 func emptySumAggregateValue(aggregate *Aggregate) (types.Value, error) {
