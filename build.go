@@ -383,7 +383,7 @@ func buildExecutorReducerRegistry(reg schema.SchemaRegistry, declarations []Redu
 		if err := reducers.Register(executor.RegisteredReducer{
 			Name:                name,
 			Handler:             handler,
-			RequiredPermissions: copyStringSlice(permissionsByName[name].Required),
+			RequiredPermissions: copySlice(permissionsByName[name].Required),
 		}); err != nil {
 			return nil, err
 		}

@@ -1221,55 +1221,11 @@ func collectCandidatesForTableInto(
 // AND may use any required child constraint; OR must constrain all branches or
 // fall back to a broader tier.
 func findColRanges(pred Predicate, t TableID) []ColRange {
-	out, ok := requiredColRanges(pred, t)
+	out, ok := requiredColFilters(pred, t, requiredColFilterRanges)
 	if !ok {
 		return nil
 	}
-	return out
-}
-
-func requiredColRanges(pred Predicate, t TableID) ([]ColRange, bool) {
-	switch p := pred.(type) {
-	case ColRange:
-		if p.Table == t && rangeHasBound(p) {
-			return []ColRange{p}, true
-		}
-		return nil, false
-	case ColNe:
-		if p.Table == t {
-			return colNeRanges(p), true
-		}
-		return nil, false
-	case And:
-		left, leftOK := requiredColRanges(p.Left, t)
-		right, rightOK := requiredColRanges(p.Right, t)
-		switch {
-		case leftOK && rightOK:
-			return append(left, right...), true
-		case leftOK:
-			return left, true
-		case rightOK:
-			return right, true
-		default:
-			return nil, false
-		}
-	case Or:
-		left, leftOK := requiredColRanges(p.Left, t)
-		right, rightOK := requiredColRanges(p.Right, t)
-		if !leftOK || !rightOK {
-			return nil, false
-		}
-		return append(left, right...), true
-	case Join:
-		if p.Filter != nil {
-			return requiredColRanges(p.Filter, t)
-		}
-	case CrossJoin:
-		if p.Left != p.Right && p.Filter != nil {
-			return requiredColRanges(p.Filter, t)
-		}
-	}
-	return nil, false
+	return out.ranges
 }
 
 func colNeRanges(p ColNe) []ColRange {
@@ -1310,60 +1266,76 @@ func (p colFilterPlacements) hasAny() bool {
 // fallback while preserving the same safety rule: every OR branch must carry an
 // indexable constraint for t.
 func findMixedColEqRanges(pred Predicate, t TableID) ([]ColEq, []ColRange) {
-	out, ok := requiredMixedColEqRanges(pred, t)
+	out, ok := requiredColFilters(pred, t, requiredColFilterMixed)
 	if !ok || len(out.eqs) == 0 || len(out.ranges) == 0 {
 		return nil, nil
 	}
 	return out.eqs, out.ranges
 }
 
-func requiredMixedColEqRanges(pred Predicate, t TableID) (colFilterPlacements, bool) {
+type requiredColFilterMode uint8
+
+const (
+	requiredColFilterEqs requiredColFilterMode = 1 << iota
+	requiredColFilterRanges
+	requiredColFilterMixed = requiredColFilterEqs | requiredColFilterRanges
+)
+
+func (m requiredColFilterMode) allows(want requiredColFilterMode) bool {
+	return m&want != 0
+}
+
+func requiredColFilters(pred Predicate, t TableID, mode requiredColFilterMode) (colFilterPlacements, bool) {
 	switch p := pred.(type) {
 	case ColEq:
-		if p.Table == t {
+		if mode.allows(requiredColFilterEqs) && p.Table == t {
 			return colFilterPlacements{eqs: []ColEq{p}}, true
 		}
 		return colFilterPlacements{}, false
 	case ColRange:
-		if p.Table == t && rangeHasBound(p) {
+		if mode.allows(requiredColFilterRanges) && p.Table == t && rangeHasBound(p) {
 			return colFilterPlacements{ranges: []ColRange{p}}, true
 		}
 		return colFilterPlacements{}, false
 	case ColNe:
-		if p.Table == t {
+		if mode.allows(requiredColFilterRanges) && p.Table == t {
 			return colFilterPlacements{ranges: colNeRanges(p)}, true
 		}
 		return colFilterPlacements{}, false
 	case And:
-		left, leftOK := requiredMixedColEqRanges(p.Left, t)
-		right, rightOK := requiredMixedColEqRanges(p.Right, t)
-		switch {
-		case leftOK && rightOK:
-			return mergeColFilterPlacements(left, right), true
-		case leftOK:
-			return left, true
-		case rightOK:
-			return right, true
-		default:
-			return colFilterPlacements{}, false
-		}
+		left, leftOK := requiredColFilters(p.Left, t, mode)
+		right, rightOK := requiredColFilters(p.Right, t, mode)
+		return mergeRequiredColFilterBranches(left, leftOK, right, rightOK)
 	case Or:
-		left, leftOK := requiredMixedColEqRanges(p.Left, t)
-		right, rightOK := requiredMixedColEqRanges(p.Right, t)
+		left, leftOK := requiredColFilters(p.Left, t, mode)
+		right, rightOK := requiredColFilters(p.Right, t, mode)
 		if !leftOK || !rightOK {
 			return colFilterPlacements{}, false
 		}
 		return mergeColFilterPlacements(left, right), true
 	case Join:
 		if p.Filter != nil {
-			return requiredMixedColEqRanges(p.Filter, t)
+			return requiredColFilters(p.Filter, t, mode)
 		}
 	case CrossJoin:
 		if p.Left != p.Right && p.Filter != nil {
-			return requiredMixedColEqRanges(p.Filter, t)
+			return requiredColFilters(p.Filter, t, mode)
 		}
 	}
 	return colFilterPlacements{}, false
+}
+
+func mergeRequiredColFilterBranches(left colFilterPlacements, leftOK bool, right colFilterPlacements, rightOK bool) (colFilterPlacements, bool) {
+	switch {
+	case leftOK && rightOK:
+		return mergeColFilterPlacements(left, right), true
+	case leftOK:
+		return left, true
+	case rightOK:
+		return right, true
+	default:
+		return colFilterPlacements{}, false
+	}
 }
 
 func mergeColFilterPlacements(left, right colFilterPlacements) colFilterPlacements {
@@ -1381,50 +1353,11 @@ func mergeColFilterPlacements(left, right colFilterPlacements) colFilterPlacemen
 // constrains t, and through OR only when every branch constrains t; otherwise
 // callers must fall back to a broader tier.
 func findColEqs(pred Predicate, t TableID) []ColEq {
-	out, ok := requiredColEqs(pred, t)
+	out, ok := requiredColFilters(pred, t, requiredColFilterEqs)
 	if !ok {
 		return nil
 	}
-	return out
-}
-
-func requiredColEqs(pred Predicate, t TableID) ([]ColEq, bool) {
-	switch p := pred.(type) {
-	case ColEq:
-		if p.Table == t {
-			return []ColEq{p}, true
-		}
-		return nil, false
-	case And:
-		left, leftOK := requiredColEqs(p.Left, t)
-		right, rightOK := requiredColEqs(p.Right, t)
-		switch {
-		case leftOK && rightOK:
-			return append(left, right...), true
-		case leftOK:
-			return left, true
-		case rightOK:
-			return right, true
-		default:
-			return nil, false
-		}
-	case Or:
-		left, leftOK := requiredColEqs(p.Left, t)
-		right, rightOK := requiredColEqs(p.Right, t)
-		if !leftOK || !rightOK {
-			return nil, false
-		}
-		return append(left, right...), true
-	case Join:
-		if p.Filter != nil {
-			return requiredColEqs(p.Filter, t)
-		}
-	case CrossJoin:
-		if p.Left != p.Right && p.Filter != nil {
-			return requiredColEqs(p.Filter, t)
-		}
-	}
-	return nil, false
+	return out.eqs
 }
 
 // findJoin returns the first Join in the tree, or nil if there is none.

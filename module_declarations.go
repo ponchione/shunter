@@ -552,13 +552,13 @@ func copyProductSchemaPtr(in *ProductSchema) *ProductSchema {
 }
 
 func copyPermissionMetadata(in PermissionMetadata) PermissionMetadata {
-	return PermissionMetadata{Required: copyStringSlice(in.Required)}
+	return PermissionMetadata{Required: copySlice(in.Required)}
 }
 
 func copyReadModelMetadata(in ReadModelMetadata) ReadModelMetadata {
 	return ReadModelMetadata{
-		Tables: copyStringSlice(in.Tables),
-		Tags:   copyStringSlice(in.Tags),
+		Tables: copySlice(in.Tables),
+		Tags:   copySlice(in.Tags),
 	}
 }
 
@@ -601,14 +601,6 @@ func hasMigrationMetadata(in MigrationMetadata) bool {
 		in.Compatibility != "" ||
 		len(in.Classifications) > 0 ||
 		in.Notes != ""
-}
-
-func copyStringSlice(in []string) []string {
-	return copySlice(in)
-}
-
-func normalizeStringSlice(in []string) []string {
-	return normalizeSlice(in)
 }
 
 func copySlice[T any](in []T) []T {

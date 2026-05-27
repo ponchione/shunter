@@ -163,7 +163,7 @@ func normalizeModuleContract(c ModuleContract) ModuleContract {
 func normalizePermissionContractDeclarations(in []PermissionContractDeclaration) []PermissionContractDeclaration {
 	out := normalizeSlice(in)
 	for i := range out {
-		out[i].Required = normalizeStringSlice(out[i].Required)
+		out[i].Required = normalizeSlice(out[i].Required)
 	}
 	return out
 }
@@ -171,8 +171,8 @@ func normalizePermissionContractDeclarations(in []PermissionContractDeclaration)
 func normalizeReadModelContractDeclarations(in []ReadModelContractDeclaration) []ReadModelContractDeclaration {
 	out := normalizeSlice(in)
 	for i := range out {
-		out[i].Tables = normalizeStringSlice(out[i].Tables)
-		out[i].Tags = normalizeStringSlice(out[i].Tags)
+		out[i].Tables = normalizeSlice(out[i].Tables)
+		out[i].Tags = normalizeSlice(out[i].Tags)
 	}
 	return out
 }
@@ -244,7 +244,7 @@ func appendPermissionContractDeclaration(out []PermissionContractDeclaration, na
 	}
 	return append(out, PermissionContractDeclaration{
 		Name:     name,
-		Required: normalizeStringSlice(metadata.Required),
+		Required: normalizeSlice(metadata.Required),
 	})
 }
 
@@ -266,8 +266,8 @@ func appendReadModelContractDeclaration(out []ReadModelContractDeclaration, surf
 	return append(out, ReadModelContractDeclaration{
 		Surface: surface,
 		Name:    name,
-		Tables:  normalizeStringSlice(metadata.Tables),
-		Tags:    normalizeStringSlice(metadata.Tags),
+		Tables:  normalizeSlice(metadata.Tables),
+		Tags:    normalizeSlice(metadata.Tags),
 	})
 }
 
@@ -465,7 +465,7 @@ func copyTableExport(in schema.TableExport) schema.TableExport {
 		out.Indexes[i] = schema.IndexExport{
 			ID:             idx.ID,
 			Name:           idx.Name,
-			Columns:        normalizeStringSlice(idx.Columns),
+			Columns:        normalizeSlice(idx.Columns),
 			ColumnOrdinals: normalizeSlice(idx.ColumnOrdinals),
 			Unique:         idx.Unique,
 			Primary:        idx.Primary,
@@ -486,7 +486,7 @@ func copyReducerExport(in schema.ReducerExport) schema.ReducerExport {
 func normalizeSchemaReadPolicy(in schema.ReadPolicy) schema.ReadPolicy {
 	return schema.ReadPolicy{
 		Access:      in.Access,
-		Permissions: normalizeStringSlice(in.Permissions),
+		Permissions: normalizeSlice(in.Permissions),
 	}
 }
 
