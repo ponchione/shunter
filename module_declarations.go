@@ -260,39 +260,36 @@ func (m *Module) View(decl ViewDeclaration, opts ...ViewDeclarationOption) *Modu
 func validateModuleDeclarations(m *Module) error {
 	names := make(map[string]struct{}, len(m.queries)+len(m.views)+len(m.procedures))
 	for _, procedure := range m.procedures {
-		name := strings.TrimSpace(procedure.Name)
-		if name == "" {
-			return fmt.Errorf("%w: procedure", ErrEmptyDeclarationName)
+		if err := validateDeclarationName(names, "procedure", procedure.Name); err != nil {
+			return err
 		}
-		if _, ok := names[name]; ok {
-			return fmt.Errorf("%w: procedure %q", ErrDuplicateDeclarationName, procedure.Name)
-		}
-		names[name] = struct{}{}
 	}
 
 	for _, query := range m.queries {
-		name := strings.TrimSpace(query.Name)
-		if name == "" {
-			return fmt.Errorf("%w: query", ErrEmptyDeclarationName)
+		if err := validateDeclarationName(names, "query", query.Name); err != nil {
+			return err
 		}
-		if _, ok := names[name]; ok {
-			return fmt.Errorf("%w: query %q", ErrDuplicateDeclarationName, query.Name)
-		}
-		names[name] = struct{}{}
 	}
 
 	for _, view := range m.views {
-		name := strings.TrimSpace(view.Name)
-		if name == "" {
-			return fmt.Errorf("%w: view", ErrEmptyDeclarationName)
+		if err := validateDeclarationName(names, "view", view.Name); err != nil {
+			return err
 		}
-		if _, ok := names[name]; ok {
-			return fmt.Errorf("%w: view %q", ErrDuplicateDeclarationName, view.Name)
-		}
-		names[name] = struct{}{}
 	}
 
 	return validateModuleVisibilityFilterNames(m)
+}
+
+func validateDeclarationName(names map[string]struct{}, kind, raw string) error {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return fmt.Errorf("%w: %s", ErrEmptyDeclarationName, kind)
+	}
+	if _, ok := names[name]; ok {
+		return fmt.Errorf("%w: %s %q", ErrDuplicateDeclarationName, kind, raw)
+	}
+	names[name] = struct{}{}
+	return nil
 }
 
 func validateModuleDeclarationSQL(m *Module, sl protocol.SchemaLookup) error {
