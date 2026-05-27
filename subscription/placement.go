@@ -1842,7 +1842,7 @@ func forEachJoinedChangedRHSFilterValue(
 	if tc == nil {
 		return
 	}
-	lhsKeys := changedJoinKeySet(lhsRows, edge.LHSJoinCol)
+	lhsKeys := changedRowKeySet(lhsRows, edge.LHSJoinCol)
 	if len(lhsKeys) == 0 {
 		return
 	}
@@ -1850,7 +1850,7 @@ func forEachJoinedChangedRHSFilterValue(
 	forEachChangedRHSFilterValue(lhsKeys, edge, tc.Deletes, fn)
 }
 
-func changedJoinKeySet(rows []types.ProductValue, col ColID) map[valueKey]struct{} {
+func changedRowKeySet(rows []types.ProductValue, col ColID) map[valueKey]struct{} {
 	keys := make(map[valueKey]struct{}, len(rows))
 	for _, row := range rows {
 		value, ok := rowValue(row, col)
@@ -1910,14 +1910,7 @@ func joinKeyOverlapsChangedRows(lhsRows []types.ProductValue, lhsCol ColID, rhsR
 	if len(lhsRows) == 0 || len(rhsRows) == 0 {
 		return false
 	}
-	rhsKeys := make(map[valueKey]struct{}, len(rhsRows))
-	for _, row := range rhsRows {
-		value, ok := rowValue(row, rhsCol)
-		if !ok {
-			continue
-		}
-		rhsKeys[encodeValueKey(value)] = struct{}{}
-	}
+	rhsKeys := changedRowKeySet(rhsRows, rhsCol)
 	if len(rhsKeys) == 0 {
 		return false
 	}
