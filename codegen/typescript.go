@@ -13,9 +13,10 @@ import (
 )
 
 type namedTypeScriptIdentifier struct {
-	name       string
-	identifier string
-	sql        string
+	name          string
+	identifier    string
+	sql           string
+	contractIndex int
 }
 
 type typeScriptGenerationOptions struct {
@@ -308,7 +309,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	b.WriteString("export type ExecutableQueryName = (typeof queries)[keyof typeof querySQL];\n\n")
 	queryFacades := make([]typeScriptQueryFacade, 0, len(executableQueries))
 	for _, query := range executableQueries {
-		queryDescription := contract.Queries[queryIndexByName(contract.Queries, query.name)]
+		queryDescription := contract.Queries[query.contractIndex]
 		var queryParamsTypeName, queryParamsEncoderName string
 		if typeScriptDeclaredReadHasParameters(queryDescription.Parameters) {
 			var err error
@@ -395,7 +396,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	b.WriteString("export type ExecutableViewName = (typeof views)[keyof typeof viewSQL];\n\n")
 	viewFacades := make([]typeScriptViewFacade, 0, len(executableViews))
 	for _, view := range executableViews {
-		viewDescription := contract.Views[viewIndexByName(contract.Views, view.name)]
+		viewDescription := contract.Views[view.contractIndex]
 		var viewParamsTypeName, viewParamsEncoderName string
 		if typeScriptDeclaredReadHasParameters(viewDescription.Parameters) {
 			var err error
@@ -921,18 +922,10 @@ func executableQueryIdentifiers(queries []shunter.QueryDescription, identifiers 
 		}
 		identifier := identifiers[i]
 		identifier.sql = query.SQL
+		identifier.contractIndex = i
 		out = append(out, identifier)
 	}
 	return out
-}
-
-func queryIndexByName(queries []shunter.QueryDescription, name string) int {
-	for i, query := range queries {
-		if query.Name == name {
-			return i
-		}
-	}
-	return -1
 }
 
 func executableViewIdentifiers(views []shunter.ViewDescription, identifiers []namedTypeScriptIdentifier) []namedTypeScriptIdentifier {
@@ -943,18 +936,10 @@ func executableViewIdentifiers(views []shunter.ViewDescription, identifiers []na
 		}
 		identifier := identifiers[i]
 		identifier.sql = view.SQL
+		identifier.contractIndex = i
 		out = append(out, identifier)
 	}
 	return out
-}
-
-func viewIndexByName(views []shunter.ViewDescription, name string) int {
-	for i, view := range views {
-		if view.Name == name {
-			return i
-		}
-	}
-	return -1
 }
 
 func writeTypeScriptModuleClient(
