@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 
@@ -396,19 +395,7 @@ func compileSQLMultiPredicateForRelations(pred sql.Predicate, relations map[stri
 		}
 		v, err := literalCompiler.compileSQLLiteral(p.Filter.Literal, column.Column.schema.Type, p.Filter.Column)
 		if err != nil {
-			var utErr sql.UnexpectedTypeError
-			if errors.As(err, &utErr) {
-				return nil, err
-			}
-			var ilErr sql.InvalidLiteralError
-			if errors.As(err, &ilErr) {
-				return nil, err
-			}
-			var exprErr sql.UnsupportedExprError
-			if errors.As(err, &exprErr) {
-				return nil, err
-			}
-			return nil, fmt.Errorf("coerce column %q: %v", p.Filter.Column, err)
+			return nil, coerceSQLLiteralError(p.Filter.Column, err)
 		}
 		return &compiledSQLMultiPredicate{Kind: compiledSQLMultiPredicateComparison, Column: column, Op: p.Filter.Op, Value: v}, nil
 	case sql.NullPredicate:

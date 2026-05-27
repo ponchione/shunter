@@ -1572,118 +1572,97 @@ func sqlLiteralParameterName(lit sql.Literal) string {
 	return strings.TrimPrefix(lit.Text, ":")
 }
 
-type templateSQLLiteralCompiler struct {
-	runtimeSQLLiteralCompiler
-	byName map[string]SQLQueryParameter
-	usage  sqlParameterUsage
+type parameterSQLLiteral struct {
+	kind  types.ValueKind
+	value types.Value
 }
 
-func newTemplateSQLLiteralCompiler(caller *types.Identity, parameters []SQLQueryParameter) (*templateSQLLiteralCompiler, error) {
-	compiler := &templateSQLLiteralCompiler{
-		runtimeSQLLiteralCompiler: runtimeSQLLiteralCompiler{caller: caller},
-		byName:                    make(map[string]SQLQueryParameter, len(parameters)),
-		usage:                     newSQLParameterUsage(len(parameters)),
-	}
+type parameterSQLLiteralCompiler struct {
+	runtimeSQLLiteralCompiler
+	byName   map[string]parameterSQLLiteral
+	usage    sqlParameterUsage
+	usedVerb string
+	missing  string
+}
+
+func newParameterSQLLiteralCompiler[P any](caller *types.Identity, parameters []P, usedVerb, missing string, entry func(P) (string, parameterSQLLiteral)) (*parameterSQLLiteralCompiler, error) {
+	byName := make(map[string]parameterSQLLiteral, len(parameters))
+	usage := newSQLParameterUsage(len(parameters))
 	for _, parameter := range parameters {
-		_, exists := compiler.byName[parameter.Name]
-		if err := validateSQLParameterDefinition(parameter.Name, "declared", exists); err != nil {
+		name, value := entry(parameter)
+		_, exists := byName[name]
+		if err := validateSQLParameterDefinition(name, usedVerb, exists); err != nil {
 			return nil, err
 		}
-		compiler.byName[parameter.Name] = parameter
-		compiler.usage.add(parameter.Name)
+		byName[name] = value
+		usage.add(name)
 	}
-	return compiler, nil
+	return &parameterSQLLiteralCompiler{
+		runtimeSQLLiteralCompiler: runtimeSQLLiteralCompiler{caller: caller},
+		byName:                    byName,
+		usage:                     usage,
+		usedVerb:                  usedVerb,
+		missing:                   missing,
+	}, nil
 }
 
-func (c *templateSQLLiteralCompiler) compileSQLLiteral(lit sql.Literal, kind types.ValueKind, columnName string) (types.Value, error) {
+func newTemplateSQLLiteralCompiler(caller *types.Identity, parameters []SQLQueryParameter) (*parameterSQLLiteralCompiler, error) {
+	return newParameterSQLLiteralCompiler(caller, parameters, "declared", "is not declared", func(parameter SQLQueryParameter) (string, parameterSQLLiteral) {
+		return parameter.Name, parameterSQLLiteral{kind: parameter.Type, value: types.NewNull(parameter.Type)}
+	})
+}
+
+func newBoundSQLLiteralCompiler(caller *types.Identity, parameters []SQLQueryParameterValue) (*parameterSQLLiteralCompiler, error) {
+	return newParameterSQLLiteralCompiler(caller, parameters, "bound", "has no bound value", func(parameter SQLQueryParameterValue) (string, parameterSQLLiteral) {
+		value := parameter.Value.Copy()
+		return parameter.Name, parameterSQLLiteral{kind: value.Kind(), value: value}
+	})
+}
+
+func (c *parameterSQLLiteralCompiler) compileSQLLiteral(lit sql.Literal, kind types.ValueKind, columnName string) (types.Value, error) {
 	if lit.Kind != sql.LitParameter {
 		return c.runtimeSQLLiteralCompiler.compileSQLLiteral(lit, kind, columnName)
 	}
 	name := sqlLiteralParameterName(lit)
 	parameter, ok := c.byName[name]
 	if !ok {
-		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s is not declared", sql.ErrUnsupportedSQL, name)
+		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s %s", sql.ErrUnsupportedSQL, name, c.missing)
 	}
-	if parameter.Type != kind {
-		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s type %s is incompatible with column %q type %s", sql.ErrUnsupportedSQL, name, sql.AlgebraicName(parameter.Type), columnName, sql.AlgebraicName(kind))
-	}
-	c.usage.markUsed(name)
-	return types.NewNull(kind), nil
-}
-
-func (c *templateSQLLiteralCompiler) validateUsed() error {
-	return c.usage.validateUsed("declared")
-}
-
-type boundSQLLiteralCompiler struct {
-	runtimeSQLLiteralCompiler
-	byName map[string]types.Value
-	usage  sqlParameterUsage
-}
-
-func newBoundSQLLiteralCompiler(caller *types.Identity, parameters []SQLQueryParameterValue) (*boundSQLLiteralCompiler, error) {
-	compiler := &boundSQLLiteralCompiler{
-		runtimeSQLLiteralCompiler: runtimeSQLLiteralCompiler{caller: caller},
-		byName:                    make(map[string]types.Value, len(parameters)),
-		usage:                     newSQLParameterUsage(len(parameters)),
-	}
-	for _, parameter := range parameters {
-		_, exists := compiler.byName[parameter.Name]
-		if err := validateSQLParameterDefinition(parameter.Name, "bound", exists); err != nil {
-			return nil, err
-		}
-		compiler.byName[parameter.Name] = parameter.Value.Copy()
-		compiler.usage.add(parameter.Name)
-	}
-	return compiler, nil
-}
-
-func (c *boundSQLLiteralCompiler) compileSQLLiteral(lit sql.Literal, kind types.ValueKind, columnName string) (types.Value, error) {
-	if lit.Kind != sql.LitParameter {
-		return c.runtimeSQLLiteralCompiler.compileSQLLiteral(lit, kind, columnName)
-	}
-	name := sqlLiteralParameterName(lit)
-	value, ok := c.byName[name]
-	if !ok {
-		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s has no bound value", sql.ErrUnsupportedSQL, name)
-	}
-	if value.Kind() != kind {
-		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s type %s is incompatible with column %q type %s", sql.ErrUnsupportedSQL, name, sql.AlgebraicName(value.Kind()), columnName, sql.AlgebraicName(kind))
+	if parameter.kind != kind {
+		return types.Value{}, fmt.Errorf("%w: SQL parameter :%s type %s is incompatible with column %q type %s", sql.ErrUnsupportedSQL, name, sql.AlgebraicName(parameter.kind), columnName, sql.AlgebraicName(kind))
 	}
 	c.usage.markUsed(name)
-	return value, nil
+	return parameter.value, nil
 }
 
-func (c *boundSQLLiteralCompiler) validateUsed() error {
-	return c.usage.validateUsed("bound")
+func (c *parameterSQLLiteralCompiler) validateUsed() error {
+	return c.usage.validateUsed(c.usedVerb)
+}
+
+func singleSQLRelationTable(relations map[string]relationSchema) (schema.TableID, bool) {
+	if len(relations) != 1 {
+		return 0, false
+	}
+	for _, rel := range relations {
+		return rel.id, true
+	}
+	return 0, false
 }
 
 func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]relationSchema, aliasTag func(string) uint8, literalCompiler sqlLiteralCompiler, allowColumnComparisons bool) (subscription.Predicate, error) {
 	switch p := pred.(type) {
-	case nil:
-		if len(relations) != 1 {
+	case nil, sql.TruePredicate:
+		table, ok := singleSQLRelationTable(relations)
+		if !ok {
 			return nil, nil
 		}
-		for _, rel := range relations {
-			return subscription.AllRows{Table: rel.id}, nil
-		}
-		return nil, nil
-	case sql.TruePredicate:
-		if len(relations) != 1 {
-			return nil, nil
-		}
-		for _, rel := range relations {
-			return subscription.AllRows{Table: rel.id}, nil
-		}
-		return nil, nil
+		return subscription.AllRows{Table: table}, nil
 	case sql.FalsePredicate:
-		if len(relations) != 1 {
+		table, ok := singleSQLRelationTable(relations)
+		if !ok {
 			return nil, nil
 		}
-		for _, rel := range relations {
-			return subscription.NoRows{Table: rel.id}, nil
-		}
-		return nil, nil
+		return subscription.NoRows{Table: table}, nil
 	case sql.ComparisonPredicate:
 		return normalizeSQLFilterForRelations(p.Filter, relations, aliasTag, literalCompiler)
 	case sql.NullPredicate:
@@ -1807,25 +1786,27 @@ func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationS
 	}
 	v, err := literalCompiler.compileSQLLiteral(f.Literal, col.Type, f.Column)
 	if err != nil {
-		// Reference-informed error types carry the source literal verbatim; do
-		// not prefix with "coerce column" so the text matches
-		// reference expr/src/errors.rs (UnexpectedType:100,
-		// InvalidLiteral:84).
-		var utErr sql.UnexpectedTypeError
-		if errors.As(err, &utErr) {
-			return nil, err
-		}
-		var ilErr sql.InvalidLiteralError
-		if errors.As(err, &ilErr) {
-			return nil, err
-		}
-		var exprErr sql.UnsupportedExprError
-		if errors.As(err, &exprErr) {
-			return nil, err
-		}
-		return nil, fmt.Errorf("coerce column %q: %v", f.Column, err)
+		return nil, coerceSQLLiteralError(f.Column, err)
 	}
 	return normalizePredicate(rel.id, col.Index, aliasTag(f.Alias), f.Op, v)
+}
+
+func coerceSQLLiteralError(column string, err error) error {
+	// Reference-informed error types carry the source literal verbatim; do not
+	// prefix with "coerce column" so diagnostics stay stable.
+	var utErr sql.UnexpectedTypeError
+	if errors.As(err, &utErr) {
+		return err
+	}
+	var ilErr sql.InvalidLiteralError
+	if errors.As(err, &ilErr) {
+		return err
+	}
+	var exprErr sql.UnsupportedExprError
+	if errors.As(err, &exprErr) {
+		return err
+	}
+	return fmt.Errorf("coerce column %q: %v", column, err)
 }
 
 func normalizeSQLNullPredicateForRelations(p sql.NullPredicate, relations map[string]relationSchema, aliasTag func(string) uint8) (subscription.Predicate, error) {
