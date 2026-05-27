@@ -18,6 +18,7 @@ func Module() *shunter.Module {
 		}).
 		TableDef(messagesTable()).
 		Reducer("send_message", sendMessage).
+		Procedure("send_system_message", sendSystemMessage).
 		Query(recentMessagesQuery()).
 		View(liveMessagesView())
 }
@@ -31,6 +32,7 @@ The most common module methods are:
 - `Metadata(values)` stores string metadata for contract export.
 - `TableDef(def, opts...)` registers a table.
 - `Reducer(name, handler, opts...)` registers a reducer.
+- `Procedure(name, handler, opts...)` registers a client-callable procedure.
 - `Query(decl)` registers a named request/response read.
 - `View(decl)` registers a named live read.
 - `VisibilityFilter(decl)` registers row-level read filtering.
@@ -84,7 +86,7 @@ func messagesTable() schema.TableDefinition {
 
 Primary-key columns synthesize a unique primary-key index before declared
 secondary indexes. Do not repeat the same primary-key access path as a
-secondary index unless a future schema need explicitly requires it.
+secondary index unless a later schema need explicitly requires it.
 
 Add secondary indexes for access paths that matter:
 
@@ -133,6 +135,24 @@ mod.Reducer("send_message", sendMessage, shunter.WithReducerPermissions(
 Permission metadata is passive until a runtime path checks it. Attach it during
 module declaration so contracts and generated clients see the intended access
 surface.
+
+## Procedures
+
+Procedure registration binds a public procedure name to a Go handler that runs
+outside the serialized reducer executor.
+
+```go
+mod.Procedure("send_system_message", sendSystemMessage,
+	shunter.WithProcedurePermissions(
+		shunter.PermissionMetadata{Required: []string{"messages:write"}},
+	),
+)
+```
+
+Use procedures for client-callable workflows that may need external I/O before
+requesting a state change. Procedures should call `ProcedureContext.CallReducer`
+when they need durable state mutation, so writes still pass through reducer
+transactions and reducer permissions.
 
 ## Lifecycle Hooks
 

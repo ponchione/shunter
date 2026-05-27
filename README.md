@@ -1,34 +1,35 @@
 # Shunter
 
 Shunter is a Go-native hosted runtime for stateful realtime applications. It
-combines module definition, embedded relational storage, durable commit logging,
-serialized reducer execution, subscription delta evaluation, and WebSocket
-delivery behind a single runtime-owned API.
+lets an application define schema, reducers, reads, lifecycle hooks, and
+protocol behavior in Go, then runs that module with embedded relational
+storage, durable commit logging, serialized reducer execution, subscription
+delta evaluation, and WebSocket delivery behind one runtime API.
 
-The v1 line is focused on self-hosted Go applications that link Shunter as a
-runtime library or run it as the app's backend server from a static Go binary.
-Core subsystems are implemented and covered by the v1 support docs, hardening
-tests, TypeScript SDK tests, and the hosted-chat example gate. Broader
-product-app validation is expected to come from real Shunter-backed apps such as
-Kickbrass, with external synthetic canaries such as `opsboard-canary` used when
-available for coverage that real apps do not naturally exercise.
+The v1 line is designed for self-hosted Go services. Applications can link
+Shunter as a runtime library or run a Shunter-backed backend as a static Go
+binary. The repository contains the runtime implementation, CLI tooling,
+contract export and validation, TypeScript client generation, an end-to-end
+hosted example, and operational documentation for the current supported
+surface.
 
 ## Project Status
 
 The supported app-facing entrypoint is the root `shunter` package:
 
-- `Module` defines application tables, reducers, lifecycle hooks, queries,
-  views, visibility filters, metadata, and migration metadata.
+- `Module` defines application tables, reducers, procedures, lifecycle hooks,
+  queries, views, visibility filters, metadata, and migration metadata.
 - `Config` controls runtime startup, persistence, authentication, protocol
   settings, and serving behavior.
 - `ConfigFromEnv` reads the small Shunter-scoped hosted-app environment
-  surface for data directory, listen address, protocol, and local auth basics.
+  surface for data directory, listen address, protocol, and auth
+  configuration.
 - `Build` validates and constructs a runtime from a module definition.
 - `Run` builds a runtime, serves it with the runtime-owned HTTP/protocol
   lifecycle, and shuts down cleanly when the supplied context is canceled.
-- `Runtime` owns lifecycle, local reads, reducer calls, declared reads,
-  contract/schema export, HTTP serving, snapshots, compaction, and graceful
-  shutdown.
+- `Runtime` owns lifecycle, local reads, reducer and procedure calls, declared
+  reads, contract/schema export, HTTP serving, snapshots, compaction, and
+  graceful shutdown.
 
 Shunter v1 is a self-hosted embedded runtime, not a managed database service.
 The stable v1 surfaces are the root package APIs, Shunter-native protocol,
@@ -54,7 +55,7 @@ Current non-goals:
 - distributed database behavior
 - broad SQL compatibility
 - multi-language module hosting
-- protocol or client compatibility with another runtime
+- third-party protocol or client compatibility
 
 ## Implemented Components
 
@@ -71,15 +72,22 @@ subsystems:
   and compaction
 - `executor` - reducer registry, serialized execution, lifecycle and scheduler
   wiring, and subscription dispatch
+- root procedure support - app-owned service handlers that can perform
+  external work before requesting reducer commits
 - `subscription` - predicate model, pruning indexes, delta evaluation, fanout,
   and confirmed-read delivery
 - `protocol` - wire codecs, WebSocket upgrade/auth path, connection lifecycle,
   dispatch, outbound delivery, and backpressure handling
+- `protocolclient` - bounded WebSocket client helpers used by running-app CLI
+  commands and maintenance tooling
 - `query/sql` - the intentionally narrow SQL surface used by subscription and
   one-off query paths
 - `bsatn` - binary value encoding used across runtime boundaries
+- `contractworkflow` and `codegen` - contract loading, validation,
+  compatibility workflow, and generated TypeScript bindings
 - root `shunter` package - hosted-runtime API, lifecycle management, local
-  calls, protocol serving, declared reads, schema export, and contract export
+  calls, procedures, protocol serving, declared reads, schema export, and
+  contract export
 
 ## Runtime Entrypoint
 
@@ -102,6 +110,7 @@ Important public APIs include:
 - `NewModule`
 - `Module.TableDef`
 - `Module.Reducer`
+- `Module.Procedure`
 - `Module.Query`
 - `Module.View`
 - `Module.VisibilityFilter`
@@ -112,6 +121,7 @@ Important public APIs include:
 - `Runtime.Start`
 - `Runtime.Close`
 - `Runtime.CallReducer`
+- `Runtime.CallProcedure`
 - `Runtime.CallQuery`
 - `Runtime.SubscribeView`
 - `Runtime.CreateSnapshot`
@@ -124,22 +134,22 @@ Important public APIs include:
 The canonical hosted example is
 [`examples/hosted-chat`](examples/hosted-chat/README.md). It demonstrates a Go
 module, `shunter.Run`, contract export, TypeScript generation, and a
-frontend-shaped client that calls a reducer and subscribes to a live view.
+frontend-shaped client that calls reducers and procedures and subscribes to a
+live view.
 
 ## Current Limitations
 
-The runtime has meaningful implementation depth, but several areas are still
-early or intentionally narrow:
+The runtime has meaningful implementation depth, with several areas kept
+intentionally narrow:
 
-- the bundled hosted-chat example is intentionally small; real product apps
-  such as Kickbrass should drive adoption feedback, while external synthetic
-  canaries remain useful for broad regression coverage when available
-- generated TypeScript and the private local package-shaped `@shunter/client`
-  runtime are the v1 client path
+- the bundled hosted-chat example is small by design; larger applications
+  should add workload-specific tests, benchmarks, and operational gates
+- generated TypeScript and the local `@shunter/client` runtime package are the
+  v1 client path
 - SQL support is scoped to the documented v1 read surfaces; Shunter does not
   promise broad SQL database compatibility
-- performance rows are advisory unless a future release introduces hard
-  thresholds
+- performance rows are advisory unless a release process defines hard
+  thresholds for a specific workload
 - lower-level runtime packages remain implementation details except for the
   documented stable subsets used by root APIs, contracts, protocol rows, BSATN,
   and generated clients
@@ -174,7 +184,7 @@ For human orientation, start with:
 3. [docs/getting-started.md](docs/getting-started.md) - first-pass
    app-author path for embedding Shunter
 4. [docs/concepts.md](docs/concepts.md) - vocabulary for modules, runtimes,
-   reducers, reads, contracts, protocol serving, and durable state
+   reducers, procedures, reads, contracts, protocol serving, and durable state
 5. [docs/how-to/README.md](docs/how-to/README.md) - task-focused integration
    guides
 6. [docs/reference/README.md](docs/reference/README.md) - compact API
@@ -199,7 +209,7 @@ For automation or agent-driven work, follow `AGENTS.md` and `RTK.md` before
 running commands or editing files.
 
 App-author and codebase docs live under `docs/`. Implementation planning,
-baseline specs, audits, and future-work trackers live under `working-docs/`.
+baseline specs, audits, and backlog trackers live under `working-docs/`.
 Prefer live code, tests, and the narrow spec section for the surface being
 touched.
 

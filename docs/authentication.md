@@ -26,8 +26,8 @@ Behavior:
 - `AnonymousTokenIssuer` defaults to `shunter-dev`.
 - `AnonymousTokenAudience` defaults to the first configured `AuthAudiences`
   value, or `shunter-dev` when no audience is configured.
-- Local reducer and declared-read calls in dev mode allow all permissions unless
-  the caller explicitly supplies permissions.
+- Local reducer, procedure, and declared-read calls in dev mode allow all
+  permissions unless the caller explicitly supplies permissions.
 
 Do not use `AuthModeDev` as the production policy for a public service. Its
 purpose is to remove auth setup friction while building an app.
@@ -65,8 +65,8 @@ Behavior:
   `auth-token rejected by admission` so browser clients can classify the
   failure. Syntactically malformed `Authorization` headers remain HTTP 401
   before upgrade.
-- Local reducer and declared-read calls do not receive the dev-mode allow-all
-  permission bypass by default.
+- Local reducer, procedure, and declared-read calls do not receive the dev-mode
+  allow-all permission bypass by default.
 
 JWKS keys are fetched on demand, cached, and refreshed when a token presents a
 `kid` that is not present in the cached keyed remote set. Current strict mode
@@ -90,14 +90,16 @@ claims. They should not be used as issuer, subject, or permission values.
 Permissions are simple string tags. They can be declared on:
 
 - reducers with `WithReducerPermissions`
+- procedures with `WithProcedurePermissions`
 - declared queries and views with `PermissionMetadata`
 - table read policies with schema table options such as
   `schema.WithReadPermissions`
 
 Protocol strict-mode permissions come from the token's `permissions` claim.
-Local callers must supply permissions explicitly with `WithPermissions` or
-`WithDeclaredReadPermissions`, unless they intentionally use a dev/admin
-allow-all option in tests or trusted local tooling.
+Local callers must supply permissions explicitly with `WithPermissions`,
+`WithProcedureCallerPermissions`, or `WithDeclaredReadPermissions`, unless they
+intentionally use a dev/admin allow-all option in tests or trusted local
+tooling.
 
 Principal permissions are copied into `AuthPrincipal` for app code to inspect,
 but Shunter's admission checks use the caller permission set propagated through
@@ -108,7 +110,7 @@ the runtime path.
 Visibility filters are SQL filters that narrow rows before read evaluation or
 live delivery. The current stable parameter is `:sender`, derived from the
 caller identity. Visibility filters should not depend on arbitrary token claims
-unless a future auth design explicitly adds that surface.
+unless an auth extension explicitly adds that surface.
 
 Example:
 

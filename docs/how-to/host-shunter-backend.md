@@ -91,7 +91,7 @@ Inspect the generated contract before handing it to frontend code:
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json
 rtk go run ./cmd/shunter describe --contract examples/hosted-chat/shunter.contract.json --format json
 rtk go run ./cmd/shunter contract validate --contract examples/hosted-chat/shunter.contract.json
-rtk go run ./cmd/shunter contract assert --contract examples/hosted-chat/shunter.contract.json --module hosted_chat --module-version v0.1.0 --contract-version 1 --tables 3 --reducers 1 --procedures 1 --queries 1 --views 1
+rtk go run ./cmd/shunter contract assert --contract examples/hosted-chat/shunter.contract.json --module hosted_chat --module-version v0.1.0 --contract-version 1 --tables 4 --reducers 1 --procedures 1 --queries 1 --views 1
 rtk go run ./cmd/shunter health --contract examples/hosted-chat/shunter.contract.json
 ```
 

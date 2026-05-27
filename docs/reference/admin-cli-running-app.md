@@ -1,12 +1,13 @@
-# Running-App Admin CLI Shape
+# Running-App Admin CLI Reference
 
 Status: implemented v1 CLI surface
-Scope: `shunter call`, `shunter query`, `shunter health --url`, and
-`shunter describe --url` commands against a running Shunter app.
+Scope: `shunter call`, `shunter procedure`, `shunter query`,
+`shunter health --url`, and `shunter describe --url` commands against a
+running Shunter app.
 
-Shunter's generic CLI can target running app servers for declared reducers and
-declared queries. It still does not dynamically load app modules; the running
-server is the app-owned Go binary that links the module.
+Shunter's generic CLI can target running app servers for declared reducers,
+procedures, and declared queries. It still does not dynamically load app
+modules; the running server is the app-owned Go binary that links the module.
 
 Running-app admin commands are explicit about transport, auth, input encoding,
 and operator risk.
@@ -17,6 +18,12 @@ Call a reducer:
 
 ```bash
 shunter call --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" send_message '{"author":"Ada","body":"hello"}'
+```
+
+Call a procedure:
+
+```bash
+shunter procedure --url http://127.0.0.1:3000 --contract shunter.contract.json --token "$TOKEN" send_system_message '{"body":"hello"}'
 ```
 
 Run a declared query:
@@ -46,25 +53,28 @@ shunter query --url http://127.0.0.1:3000 --contract shunter.contract.json --all
 These commands target declared app surfaces:
 
 - `call` invokes a named reducer exported in the contract.
+- `procedure` invokes a named procedure exported in the contract.
 - `query` invokes a named declared query exported in the contract.
 - `health --url` checks the mounted runtime diagnostics `/healthz` endpoint.
 - `describe --url` reads the mounted runtime diagnostics debug snapshot.
 - Declared views remain subscription-oriented and should not be folded into
-  `query` unless a future one-shot view read is deliberately added.
+  `query` unless a one-shot view read surface is deliberately added.
 
-The contract path stays required for `call` and `query` even when the app can
-expose its own contract. The CLI uses the local contract to validate names,
-permissions metadata, parameter schemas, and generated-style argument encoding
-before sending any request.
-Use local contract helpers such as `contractworkflow.FindReducer` and
-`contractworkflow.FindQuery` for name validation before dialing a running app.
-Load the artifact with `contractworkflow.LoadContractFile` so malformed or
-semantically invalid local contract JSON fails before any transport work.
+The contract path stays required for `call`, `procedure`, and `query` even
+when the app can expose its own contract. The CLI uses the local contract to
+validate names, permissions metadata, parameter schemas, and generated-style
+argument encoding before sending any request.
+Use local contract helpers such as `contractworkflow.FindReducer`,
+`contractworkflow.FindProcedure`, and `contractworkflow.FindQuery` for name
+validation before dialing a running app. Load the artifact with
+`contractworkflow.LoadContractFile` so malformed or semantically invalid local
+contract JSON fails before any transport work.
 
 ## Transport Decision
 
-`call` and `query` use the existing Shunter WebSocket protocol. `http://` and
-`https://` URLs are normalized to the `/subscribe` WebSocket endpoint.
+`call`, `procedure`, and `query` use the existing Shunter WebSocket protocol.
+`http://` and `https://` URLs are normalized to the `/subscribe` WebSocket
+endpoint.
 `health --url` and `describe --url` use diagnostics HTTP endpoints mounted by
 the app.
 For both protocol and diagnostics commands, query strings and URL fragments are
@@ -75,14 +85,15 @@ rewritten to the corresponding diagnostics endpoint for `health --url` and
 
 Reasons:
 
-- The protocol already has reducer-call and declared-query message families.
+- The protocol already has reducer-call, procedure-call, and declared-query
+  message families.
 - Strict auth already protects protocol connections.
 - Adding generic HTTP management endpoints would require separate enablement,
   auth, request-size, CSRF, logging, and deployment documentation.
 
-There are no reducer/query HTTP admin endpoints. If those routes are later
-added, they must be opt-in and documented as a distinct management surface, not
-enabled implicitly by `shunter.Run`.
+There are no reducer, procedure, or query HTTP admin endpoints. If those routes
+are later added, they must be opt-in and documented as a distinct management
+surface, not enabled implicitly by `shunter.Run`.
 
 ## Package Boundaries
 
@@ -120,7 +131,7 @@ dial, write, and read waits.
 - The same deadline applies to WebSocket dial, token handshake, request write,
   response wait, and close.
 - Timeout returns a non-zero exit status and includes the target URL, command
-  kind, and reducer or query name in the error.
+  kind, and reducer, procedure, or query name in the error.
 - Reducer calls are not retried automatically. If a query retry is added later,
   it must be explicit and limited to transport failures before the request is
   accepted.
@@ -151,9 +162,9 @@ read environment variables itself.
 ## Encoding Rules
 
 JSON is the ergonomic CLI input format, but the wire payload must still follow
-the contract's reducer or query parameter schema.
+the contract's reducer, procedure, or query parameter schema.
 
-- Reject unknown reducer or query names before connecting.
+- Reject unknown reducer, procedure, or query names before connecting.
 - Reject missing contract product schemas for JSON argument mode.
 - Encode JSON objects to BSATN product rows by declared column name.
 - Support `--args`, `--args-file`, and `--args-hex`; positional JSON arguments
@@ -161,14 +172,14 @@ the contract's reducer or query parameter schema.
 - Decode rows through contract row schemas when present.
 - Emit text by default and JSON with `--format json`.
 
-The CLI should not infer reducer argument formats when the contract does not
-declare them. In that case, operators must use raw bytes mode or the app should
-export product schemas.
+The CLI should not infer reducer or procedure argument formats when the
+contract does not declare them. In that case, operators must use raw bytes mode
+or the app should export product schemas.
 
 Generated TypeScript already provides the user-facing model for contract-aware
-encoding: helpers know the reducer or declared-read schema, encode strongly
-typed arguments, and decode rows through contract metadata. The Go CLI should
-reuse the same contract semantics, but it should not depend on generated
+encoding: helpers know the reducer, procedure, or declared-read schema, encode
+strongly typed arguments, and decode rows through contract metadata. The Go CLI
+should reuse the same contract semantics, but it should not depend on generated
 TypeScript artifacts at runtime.
 
 For the CLI, prefer adding a Go helper that converts JSON values to
@@ -184,8 +195,7 @@ with tests rather than open-coding binary layouts under `cmd/shunter`.
 
 ## Safety Defaults
 
-Reducer calls are writes. The first `call` implementation should be
-conservative:
+Reducer calls are writes. The `call` command is conservative by default:
 
 - Require an explicit reducer name and payload.
 - Print the target URL, module name, and reducer before sending in text mode.
@@ -194,35 +204,37 @@ conservative:
 - Use a bounded default timeout.
 - Never retry reducer calls automatically.
 
-Declared queries are reads, but they can still expose private data. `query`
-must use the same auth and timeout rules as `call`.
+Procedures may perform external work and can call reducers. `procedure` must
+use the same auth and timeout rules as `call`. Declared queries are reads, but
+they can still expose private data. `query` uses the same auth and timeout
+rules as the write-oriented commands.
 
 ## Error Contract
 
 Running-app commands use the same broad exit-code shape as the existing CLI:
 
-- Exit `0` for successful calls or queries.
+- Exit `0` for successful calls, procedures, or queries.
 - Exit `1` for runtime failures after flags and local inputs are valid,
   including auth rejection, connection failure, timeout, protocol errors,
-  reducer errors, query errors, malformed server responses, stale contract
-  mismatches, and response decoding failures.
+  reducer errors, procedure errors, query errors, malformed server responses,
+  stale contract mismatches, and response decoding failures.
 - `health --url` prints the structured `/healthz` payload even when the
   runtime reports `failed` through HTTP 503, then exits `1`.
 - Exit `2` for local command misuse, including missing required flags, invalid
-  flag values, malformed JSON input, unknown reducer or query names, missing
-  token sources, and schema-less JSON argument mode.
+  flag values, malformed JSON input, unknown reducer, procedure, or query
+  names, missing token sources, and schema-less JSON argument mode.
 
 Text output can stay terse, but JSON output must be stable enough for operator
 automation. Failed JSON output should include:
 
 - `status`: `"error"`.
 - `scope`: `"running_app"`.
-- `command`: `"call"` or `"query"`.
+- `command`: `"call"`, `"procedure"`, or `"query"`.
 - `target_url`: the requested app URL.
-- `surface`: the reducer or query name when known.
+- `surface`: the reducer, procedure, or query name when known.
 - `error_code`: a stable snake_case classifier such as `missing_token`,
   `unknown_surface`, `timeout`, `auth_rejected`, `protocol_error`,
-  `reducer_error`, `query_error`, or `decode_error`.
+  `reducer_error`, `procedure_error`, `query_error`, or `decode_error`.
 - `message`: a human-readable summary.
 
 Example missing-token JSON error:
@@ -254,35 +266,35 @@ Example timeout JSON error:
 ```
 
 Do not put bearer tokens, raw request payloads, or decoded private rows in error
-objects. If a future implementation needs deeper diagnostics, add an explicit
+objects. If deeper diagnostics are needed, add an explicit
 verbose or trace mode that redacts credentials before printing.
 
-## Non-Goals For The First Slice
+## Non-Goals
 
-Do not include these in the first implementation:
+These remain outside the running-app admin CLI surface:
 
 - SQL DML or arbitrary SQL mutation.
 - Dynamic module publish, update, or loading.
 - Generic HTTP management endpoints.
 - Stored admin profiles or credential keychains.
-- App-owned custom reducer argument codecs.
+- App-owned custom reducer or procedure argument codecs.
 - Multi-module host discovery.
 
 ## Implemented Coverage
 
 - Contract-driven JSON-to-product encoding tests live in `contractworkflow`.
 - `protocolclient` covers explicit token handling, anonymous opt-in, timeout
-  classification, reducer calls, and declared-query responses.
+  classification, reducer calls, procedure calls, and declared-query responses.
 - `cmd/shunter` tests cover token source precedence, development anonymous
   opt-in, missing tokens, unknown names, malformed JSON, argument source
   exclusivity, raw hex args, JSON output, file-backed args, runtime reducer and
-  query errors, malformed protocol responses, and query row decoding.
-- The hosted-chat gate starts a real example server, runs one reducer call, and
-  runs one declared query.
+  procedure/query errors, malformed protocol responses, and query row decoding.
+- The hosted-chat gate starts a real example server, runs one reducer call, one
+  procedure call, and one declared query.
 
-## Test Strategy
+## Maintenance Test Strategy
 
-Build the feature in layers:
+When changing this surface, keep the coverage layered:
 
 - Unit-test JSON-to-product conversion with the same schema shapes exported by
   hosted-chat: successful object input, missing required fields, unknown
@@ -290,14 +302,15 @@ Build the feature in layers:
   required, and deterministic column ordering.
 - Unit-test `protocolclient` with `httptest` and the real WebSocket protocol
   handler where possible. Cover missing or rejected tokens, subprotocol
-  negotiation failure, malformed server frames, reducer failures, declared
-  query responses, context cancellation, and timeouts.
+  negotiation failure, malformed server frames, reducer failures, procedure
+  failures, declared query responses, context cancellation, and timeouts.
 - Command tests should exercise flag precedence, `SHUNTER_TOKEN` fallback,
   `--token-file`, missing token errors, schema-less JSON rejection, raw bytes
-  mode, text output, JSON output, and exit status.
+  mode, reducer/procedure/query failures, text output, JSON output, and exit
+  status.
 - Hosted-chat gate coverage should start a real example server on an ephemeral
-  address, export the matching contract, run one reducer call, run one declared
-  query, and shut the server down cleanly.
+  address, export the matching contract, run one reducer call, one procedure
+  call, and one declared query, then shut the server down cleanly.
 
 Tests should assert structured errors or JSON fields whenever practical. Human
 text can stay terse and should not be the only contract for automation.

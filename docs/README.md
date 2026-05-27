@@ -1,8 +1,8 @@
 # Shunter Documentation
 
-This directory holds current user-facing documentation for application authors
-and operators. Implementation plans, subsystem specs, audits, source-reading
-notes, and future-work trackers live under `../working-docs/`.
+This directory holds the current user-facing documentation for application
+authors and operators. Implementation plans, subsystem specs, audits,
+source-reading notes, and backlog trackers live under `../working-docs/`.
 
 ## App-Author Learning Path
 
@@ -10,11 +10,12 @@ notes, and future-work trackers live under `../working-docs/`.
    Shunter in a Go application.
 2. [Concepts](concepts.md) defines the vocabulary used by the guides.
 3. [How-to guides](how-to/README.md) cover specific integration tasks such as
-   declaring modules, writing reducers, serving protocol traffic, configuring
-   auth, persistence, contracts, generated TypeScript clients, and tests.
+   declaring modules, writing reducers and procedures, serving protocol
+   traffic, configuring auth, persistence, contracts, generated TypeScript
+   clients, and tests.
 4. [Reference notes](reference/README.md) summarize config, lifecycle, read
-   surface, and future running-app admin CLI choices that Go doc alone does
-   not explain.
+   surface, and running-app admin CLI behavior that Go doc alone does not
+   explain.
 
 Use [authentication](authentication.md) for the full current auth contract,
 [operations](operations.md) for backup/restore and release runbooks, and
@@ -25,8 +26,9 @@ benchmark snapshot.
 ## Compatibility And Support
 
 Shunter v1 is a Go-native hosted runtime with reducer-owned writes,
-Shunter-native protocol frames, and contract-driven clients. It is not a
-reference-runtime compatibility layer.
+Shunter-native protocol frames, and contract-driven clients. Compatibility is
+defined by Shunter's own app-facing APIs, contract JSON, WebSocket protocol,
+BSATN runtime-boundary encoding, and generated client surface.
 
 Stable v1 compatibility applies to the app-facing root package APIs for module
 declaration, runtime lifecycle, local reducer calls, local and declared reads,
@@ -43,17 +45,16 @@ generated clients, or documented protocol behavior.
 
 Runtime implementation packages such as `store`, `subscription`, `executor`,
 `commitlog`, `query/sql`, and `internal/*` are not app compatibility surfaces.
-`ignored reference tree` is research-only material.
 
 ## Current Docs
 
 - [Getting started](getting-started.md) - app-author onboarding flow.
-- [Concepts](concepts.md) - modules, runtimes, reducers, reads, contracts,
-  protocol serving, durable state, and trust boundaries.
+- [Concepts](concepts.md) - modules, runtimes, reducers, procedures, reads,
+  contracts, protocol serving, durable state, and trust boundaries.
 - [How-to guides](how-to/README.md) - task-focused integration guides.
 - [Use generated TypeScript clients](how-to/typescript-client.md) - local
-  `@shunter/client` installs, generated bindings, reducer/query/view helpers,
-  managed subscriptions, and reconnect.
+  `@shunter/client` installs, generated bindings, reducer/procedure/query/view
+  helpers, managed subscriptions, and reconnect.
 - [Reference notes](reference/README.md) - compact decision guides for exported
   app-facing surfaces.
 - [Authentication](authentication.md) - dev/strict auth behavior, principals,
@@ -75,7 +76,7 @@ answer a dependency question.
   contracts.
 - `../working-docs/specs/README.md` - scope note for the numbered subsystem
   contracts.
-- `../working-docs/tech-debt.md` - non-blocking future work retired from stale
+- `../working-docs/tech-debt.md` - non-blocking follow-up work retired from stale
   release roadmaps.
 - `../working-docs/shunter-design-decisions.md` - consolidated implementation
   decisions that code and tests still cite.

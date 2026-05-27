@@ -18,9 +18,9 @@ contract they were generated from.
 ## Install The Runtime Package
 
 Current v1 development still uses a local package path, workspace package, or
-packed tarball. The product target is for frontend apps and other projects to
-install `@shunter/client` from npm, then generate app-specific bindings from a
-reviewed Shunter contract.
+packed tarball. The intended distribution model is for frontend apps and other
+projects to install `@shunter/client` from a versioned package, then generate
+app-specific bindings from a reviewed Shunter contract.
 
 Until the npm release workflow is promoted, keep local installs resolving to
 the same package name the generated bindings import: `@shunter/client`.
@@ -88,8 +88,8 @@ numeric collision suffixes in contract order.
 Generated TypeScript is intended for browsers and Electron renderers with
 standard Web APIs. Non-browser hosts must provide a compatible
 `webSocketFactory`. Server-side SDK APIs, framework cache adapters, generated
-writes that bypass reducers, and reference-runtime client API compatibility
-are out of scope for v1.
+writes that bypass reducers, and third-party client API compatibility are out
+of scope for v1.
 
 ## Connect
 
@@ -192,6 +192,33 @@ if (result.status === "failed") {
 If a reducer does not export product schemas, keep the app's byte encoding
 documented near the reducer and pass encoded `Uint8Array` values through the
 raw helper.
+
+## Call Procedures
+
+Generated bindings expose raw procedure helpers and typed procedure helpers
+when a contract exports procedure argument product schemas. Procedures run
+outside the reducer executor and may call reducers from the server side.
+
+```ts
+import {
+  callSendSystemMessageProcedure,
+  callSendSystemMessageProcedureTyped,
+} from "./shunter.gen";
+
+await callSendSystemMessageProcedure(client.callProcedure, rawArgs);
+
+await callSendSystemMessageProcedureTyped(client.callProcedure, {
+  body: "hello from a service adapter",
+});
+
+await app.procedures.sendSystemMessage.call({
+  body: "hello from a service adapter",
+});
+```
+
+Use procedures for client-callable workflows that need service work before
+requesting reducer commits. Use reducers directly when the call is already a
+single durable state transition.
 
 ## Read Queries
 

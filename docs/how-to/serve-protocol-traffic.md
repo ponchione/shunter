@@ -87,8 +87,8 @@ Zero values use Shunter's protocol defaults.
 With protocol enabled, the runtime mounts the WebSocket protocol endpoint at
 `/subscribe`.
 
-The v1 protocol is Shunter-native. Do not document it as a compatibility layer
-for another runtime's wire format.
+The v1 protocol is Shunter-native. Document compatibility against Shunter's own
+WebSocket and BSATN frame contracts.
 
 ## Wire Compatibility
 
@@ -122,8 +122,8 @@ versions. Server tag `7` is reserved for the retired reducer-call result
 envelope.
 
 Row batches and subscription updates use Shunter row-list and flat update
-payloads. Reference wrapper chains, energy fields, and reference-runtime wire
-compatibility are out of scope.
+payloads. Fields, wrapper formats, or transport semantics not defined by
+Shunter's v1 protocol are out of scope.
 
 ## Auth Mode
 

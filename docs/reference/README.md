@@ -11,5 +11,6 @@ the exported app-facing surfaces.
   serving, health, and `Close`.
 - [Read surface](read-surface.md) - choosing among local reads, declared
   queries, declared views, and protocol reads.
-- [Running-app admin CLI shape](admin-cli-running-app.md) - design note for
-  future `shunter call` and `shunter query` commands.
+- [Running-app admin CLI](admin-cli-running-app.md) - behavior and maintenance
+  notes for `shunter call`, `shunter procedure`, `shunter query`, and live
+  diagnostics commands.

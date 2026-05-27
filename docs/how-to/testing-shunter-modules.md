@@ -4,8 +4,8 @@ Status: current v1 app-author guidance
 Scope: testing app modules that embed Shunter.
 
 Most Shunter app behavior can be tested through the root runtime API. Prefer
-tests that build the real module, use a temporary `DataDir`, call reducers, and
-read state through public runtime surfaces.
+tests that build the real module, use a temporary `DataDir`, call reducers or
+procedures, and read state through public runtime surfaces.
 
 ## Basic Runtime Test
 
@@ -42,6 +42,20 @@ func TestSendMessage(t *testing.T) {
 Use `t.TempDir()` unless the test is intentionally verifying recovery from a
 specific durable directory.
 
+## Test Procedures
+
+Use `Runtime.CallProcedure` when the app exposes service workflows through
+procedures. Procedure tests should assert both the returned bytes and any
+reducer-backed state changes the procedure commits.
+
+```go
+out, err := rt.CallProcedure(ctx, "send_system_message", args)
+if err != nil {
+	t.Fatal(err)
+}
+_ = out
+```
+
 ## Verify State
 
 Use `Runtime.Read` for local state assertions.
@@ -72,8 +86,8 @@ if len(result.Rows) != 1 {
 
 ## Test Permissions
 
-Attach permission metadata to reducers, queries, views, and tables. Then test
-allowed and denied callers through the same runtime path the app uses.
+Attach permission metadata to reducers, procedures, queries, views, and tables.
+Then test allowed and denied callers through the same runtime path the app uses.
 
 In dev mode, local calls without explicit permissions allow all permissions.
 To test denial, pass an explicit permission set that does not satisfy the
@@ -144,9 +158,9 @@ runtime with `EnableProtocol: true`, serve `Runtime.HTTPHandler()` through an
 `httptest.Server`, and connect with the protocol client path used by the app or
 SDK.
 
-Prefer local runtime tests for reducer and declared-read business logic, then
-add protocol tests for auth, WebSocket admission, message encoding, and live
-delivery behavior.
+Prefer local runtime tests for reducer, procedure, and declared-read business
+logic, then add protocol tests for auth, WebSocket admission, message encoding,
+and live delivery behavior.
 
 ## Test Checklist
 

@@ -7,9 +7,9 @@ client bindings.
 Contracts are the handoff artifact between a Shunter-backed Go app and clients,
 review tools, or generated bindings.
 
-A contract includes app-facing schema, reducers, declared queries, declared
-views, visibility filters, permissions, read-model metadata, migration
-metadata, and codegen metadata.
+A contract includes app-facing schema, reducers, procedures, declared queries,
+declared views, visibility filters, permissions, read-model metadata,
+migration metadata, and codegen metadata.
 
 ## Contract JSON Compatibility
 
@@ -18,19 +18,19 @@ are:
 
 - `module`: app module name, version, and string metadata
 - `schema`: schema version, tables, columns, indexes, read policy, reducers,
-  and optional reducer argument/result product schemas
+  procedures, and optional reducer/procedure argument/result product schemas
 - `queries` and `views`: declaration names, optional executable SQL, optional
   parameter schemas, row schema metadata, and result-shape metadata
 - `visibility_filters`: validated SQL, returned table metadata, and
   caller-identity usage
-- `permissions`: reducer, query, and view permission metadata
+- `permissions`: reducer, procedure, query, and view permission metadata
 - `read_model`: query and view read-model metadata
 - `migrations`: descriptive module, table, query, and view migration metadata
 - `codegen`: contract format, contract version, and default snapshot filename
 
 `ModuleContract.MarshalCanonicalJSON` is the canonical emitted JSON format.
-`ValidateModuleContract` validates known v1 fields, reducer product schemas,
-declared-read parameter schemas, and SQL/read metadata.
+`ValidateModuleContract` validates known v1 fields, reducer/procedure product
+schemas, declared-read parameter schemas, and SQL/read metadata.
 
 V1 readers must ignore unknown JSON fields so additive metadata can be
 introduced without breaking older consumers. V1 producers must not change the
@@ -85,11 +85,12 @@ rtk go run ./cmd/shunter contract plan --previous old.json --current shunter.con
 ```
 
 Use `describe` for a quick local inventory of module name, schema version,
-tables, reducers, declared reads, and visibility filters. `--section` narrows
-detail output for review scripts, and JSON output includes a `counts` object
-for review scripts. Use `contract assert` when a release gate needs explicit
-module, module-version, contract-version, schema-version, or count expectations
-for tables, columns, indexes, reducers, queries, views, or visibility filters.
+tables, reducers, procedures, declared reads, and visibility filters.
+`--section` narrows detail output for review scripts, and JSON output includes a
+`counts` object for review scripts. Use `contract assert` when a release gate
+needs explicit module, module-version, contract-version, schema-version, or
+count expectations for tables, columns, indexes, reducers, procedures, queries,
+views, or visibility filters.
 JSON assertion entries use `value_type` plus typed
 `expected_string`/`actual_string` or `expected_number`/`actual_number` fields,
 so review scripts do not need to infer assertion value types.
@@ -121,11 +122,11 @@ Or generate from an existing contract JSON file:
 rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
 ```
 
-Generated TypeScript imports the private local SDK package name
+Generated TypeScript imports the Shunter SDK runtime package name
 `@shunter/client` by default. Use `codegen.Options.TypeScriptRuntimeImport` or
-`--runtime-import` only when an app vendors or renames the local runtime
-package. The generated import path must match the dependency name resolved by
-the app's package manager:
+`--runtime-import` only when an app vendors or renames the runtime package. The
+generated import path must match the dependency name resolved by the app's
+package manager:
 
 ```bash
 rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --runtime-import @app/shunter-runtime --out client.ts
@@ -133,22 +134,23 @@ rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --lan
 
 Generated TypeScript currently includes protocol and contract metadata, table
 row interfaces, `TableRows` and `tableRowDecoders`, table subscription helpers,
-read-policy and visibility metadata, reducer constants and helpers, schema-aware
-reducer argument encoders and result decoders when product schemas are exported,
-declared-query/view constants and helper functions, typed declared-read
-parameter interfaces and encoders when parameter schemas are exported, decoded
-declared-query/view row helpers when read metadata is exported, permissions,
-and read-model metadata.
+read-policy and visibility metadata, reducer and procedure constants and
+helpers, schema-aware argument encoders and result decoders when product schemas
+are exported, declared-query/view constants and helper functions, typed
+declared-read parameter interfaces and encoders when parameter schemas are
+exported, decoded declared-query/view row helpers when read metadata is
+exported, permissions, and read-model metadata.
 
 Generated helpers are contract-driven client bindings. Raw `Uint8Array`
-helpers remain available for every reducer. When reducer product schemas are not
-declared, keep the application's reducer argument/result encoding documented
-near the reducer and use the same encoding across local calls, protocol
-clients, and tests.
+helpers remain available for every reducer and procedure. When product schemas
+are not declared, keep the application's argument/result encoding documented
+near the reducer or procedure and use the same encoding across local calls,
+protocol clients, and tests.
 
 See [Use generated TypeScript clients](typescript-client.md) for local
 `@shunter/client` installs, `createShunterClient`, stale-binding checks, typed
-reducers, decoded declared reads, managed subscriptions, and reconnect.
+reducers and procedures, decoded declared reads, managed subscriptions, and
+reconnect.
 The hosted end-to-end example under
 [`examples/hosted-chat`](../../examples/hosted-chat/README.md) shows these
 commands against a runnable app server and frontend-shaped TypeScript client.

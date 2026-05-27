@@ -17,7 +17,8 @@ move to the task-specific guides under [docs/how-to](how-to/README.md).
 The normal hosted-backend flow is:
 
 1. Add Shunter as a Go dependency and import the root package.
-2. Define a module with tables, reducers, reads, permissions, and metadata.
+2. Define a module with tables, reducers, reads, permissions, and metadata;
+   add procedures when client-callable workflows need external I/O.
 3. Read config with `shunter.ConfigFromEnv`.
 4. Run the backend with `shunter.Run`.
 5. Export a contract when app-facing schema or read surfaces change.
@@ -141,8 +142,9 @@ func main() {
 
 `ConfigFromEnv` reads `SHUNTER_DATA_DIR`, `SHUNTER_LISTEN_ADDR`,
 `SHUNTER_ENABLE_PROTOCOL`, `SHUNTER_AUTH_MODE`, `SHUNTER_AUTH_SIGNING_KEY`,
-`SHUNTER_AUTH_ISSUERS`, and `SHUNTER_AUTH_AUDIENCES`. Use dev auth for local
-work and strict auth with explicit key material for public protocol serving.
+`SHUNTER_AUTH_ISSUERS`, `SHUNTER_AUTH_AUDIENCES`, and
+`SHUNTER_AUTH_OIDC_ISSUERS`. Use dev auth for local work and strict auth with
+explicit key material or JWKS verification for public protocol serving.
 
 ## Build And Start Manually
 
@@ -259,8 +261,8 @@ frontend-shaped client that calls a reducer and subscribes to a live view.
 
 Export a contract from an app-owned binary that links your module. Contract
 JSON is the review and codegen artifact for app-facing tables, reducers,
-queries, views, permissions, read models, and migration metadata. Starting the
-runtime is not required for contract export.
+procedures, queries, views, permissions, read models, and migration metadata.
+Starting the runtime is not required for contract export.
 
 ```go
 if err := contractworkflow.ExportRuntimeFile(rt, "shunter.contract.json"); err != nil {

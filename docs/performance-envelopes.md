@@ -1,19 +1,19 @@
 # Shunter Performance Envelopes
 
-Status: latest recorded advisory v1 release-qualification snapshot
+Status: latest recorded advisory v1 performance snapshot
 Scope: existing Go benchmarks for protocol, declared reads, executor,
 commitlog, subscription, and offline operations hot paths.
 
 This page records measured behavior for the benchmark coverage that already
-exists. The rows are advisory for v1 release qualification unless a future
-release gate adds hard thresholds. The snapshot below uses the preferred repo
-toolchain from `go.mod`.
+exists. The rows are advisory unless a release process defines hard thresholds
+for a specific workload. The snapshot below uses the preferred repo toolchain
+from `go.mod`.
 
 ## Snapshot
 
 - Date: 2026-05-13
 - Shunter commit: `947e3dd2eb4dda1738abd670009845f127a745e0`
-- Measurement worktree: release-candidate checkout based on the commit above;
+- Measurement worktree: checkout based on the commit above;
   local changes during the run were release metadata, documentation, and
   release-evidence logs only
 - Host: `Linux gernsback 6.17.0-23-generic`, linux/amd64
@@ -167,14 +167,14 @@ Representative standings:
   and multi-way joins at 512 rows per table are the clearest allocation and
   latency targets in the current coverage.
 - Subscription fanout coverage now includes same-query, varied single-table,
-  skewed hot-key, and varied two-table fixtures. Workload-derived product-app
-  and external-canary distributions remain outside the local benchmark envelope.
+  skewed hot-key, and varied two-table fixtures. Workload-derived application
+  distributions remain outside the local benchmark envelope.
 - Ordered subscription window coverage now has a focused `-count=10` baseline
   across bounded initial rows, full ordering, initial row collection,
   registration, comparator shape, and live ordered/limited delta fixtures.
 - Executor reducer commit coverage now includes one-at-a-time round trips and
   a queued 64-command burst fixture. These are internal executor fixtures, not
-  public app or canary throughput measurements.
+  end-to-end application throughput measurements.
 - Declared read coverage now includes local declared-query execution and local
   declared live-view initial rows for projection/order/limit and count shapes.
 - Live multi-way joins now have opt-in production guardrails through
@@ -184,7 +184,7 @@ Representative standings:
   and four-way chains; refresh the pending rows when updating this envelope.
 - Offline backup/restore is covered for small and larger complete local
   DataDir fixtures and is expected to be I/O dominated; these rows do not
-  replace product-app or external-canary-scale backup/restore timing.
+  replace production-scale backup/restore timing.
 - WebSocket coverage now includes a single SubscribeSingle round trip and
   16-, 64-, and 128-client light-update fanout fixtures. Slow-reader
   backpressure now has a network-level advisory row for unrelated healthy
@@ -287,7 +287,7 @@ Findings:
   benchmark fixture setup; fixture file creation dominates the sample, while
   the timed copy path remains mostly visible through directory walking, stat,
   file open, and cleanup allocations. The workload is still a local 6.001 MiB
-  fixture, not product-app or external-canary backup/restore evidence.
+  fixture, not production-scale backup/restore evidence.
 - `BenchmarkSubscribeSingleWebSocketRoundTrip-24`: 16.137us/op,
   6,609 B/op, 82 allocs/op. Allocation space is dominated by SQL
   tokenization/parse/query-plan construction and WebSocket read/write timeout
@@ -337,16 +337,14 @@ These remain outside the current benchmark envelope:
 
 - WebSocket network-level subscription workloads beyond the current
   single-connection subscribe, 16/64/128-client light-update fanout, and
-  slow-reader backpressure fixtures, including product-app and external-canary
-  scale fanout; deterministic sender-level full-buffer rejection is covered
-  separately
-- workload-derived product-app or external-canary fanout distributions beyond
-  the deterministic in-process same-query, varied single-table, skewed hot-key,
-  and varied two-table predicate fixtures
-- product-app and external-canary workload timing, including canary-scale
-  backup/restore timing
+  slow-reader backpressure fixtures, including application-scale fanout;
+  deterministic sender-level full-buffer rejection is covered separately
+- workload-derived application fanout distributions beyond the deterministic
+  in-process same-query, varied single-table, skewed hot-key, and varied
+  two-table predicate fixtures
+- application workload timing, including production-scale backup/restore timing
 - memory profiles outside the current subscription, single-WebSocket,
   16/64/128-client WebSocket fanout, sender-level backpressure, executor
   reducer commit, and small/larger local backup/restore fixtures, including
-  product-app scale, external-canary scale, slow-reader network paths, and
-  production-sized backup/restore workloads
+  application-scale fanout, slow-reader network paths, and production-sized
+  backup/restore workloads

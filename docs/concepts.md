@@ -29,13 +29,13 @@ Public methods on unexported concrete types are implementation details.
 ## Module
 
 A module is the application definition that Shunter builds into a runtime. It
-contains the app-owned schema, reducers, lifecycle hooks, declared queries,
-declared views, visibility filters, permission metadata, migration metadata,
-and module identity.
+contains the app-owned schema, reducers, procedures, lifecycle hooks, declared
+queries, declared views, visibility filters, permission metadata, migration
+metadata, and module identity.
 
 Application code creates a module with `shunter.NewModule(name)` and registers
-declarations through fluent methods such as `TableDef`, `Reducer`, `Query`,
-`View`, and `VisibilityFilter`.
+declarations through fluent methods such as `TableDef`, `Reducer`,
+`Procedure`, `Query`, `View`, and `VisibilityFilter`.
 
 `Module.Version(...)` is app module metadata exported into contracts. It is not
 the Shunter runtime or CLI version.
@@ -80,6 +80,17 @@ Reducer errors roll back the reducer transaction. Reducer panics are recovered
 and reported as app reducer panics, but Shunter does not isolate arbitrary
 goroutines, deadlocks, memory exhaustion, or process-wide failures caused by
 application code.
+
+## Procedure
+
+A procedure is a client-callable service handler registered on a module.
+Procedures run outside the serialized reducer executor, so they can perform
+external I/O before deciding whether to request a state change.
+
+Procedures do not mutate Shunter state directly. When a procedure needs a
+durable state transition, it calls `ProcedureContext.CallReducer`, and the
+target reducer still runs through the normal reducer executor and permission
+path.
 
 ## Table
 
@@ -141,8 +152,8 @@ merge backup contents into it, or run two runtimes against the same directory.
 ## Contract
 
 A module contract is exported JSON describing the app-facing shape of a
-runtime: schema, reducers, queries, views, visibility filters, permissions,
-read-model metadata, migration metadata, and codegen metadata.
+runtime: schema, reducers, procedures, queries, views, visibility filters,
+permissions, read-model metadata, migration metadata, and codegen metadata.
 
 Contract JSON is the right artifact for review, compatibility checks, codegen,
 and client handoff.
@@ -153,8 +164,8 @@ The protocol path is Shunter's WebSocket interface for external clients. It is
 enabled with `Config.EnableProtocol` and mounted by `Runtime.HTTPHandler()` or
 served by `Runtime.ListenAndServe`.
 
-The v1 protocol is Shunter-native. It is not a promise of compatibility with
-another runtime's wire protocol.
+The v1 protocol is Shunter-native. Compatibility is defined by Shunter's own
+documented WebSocket and BSATN frame contracts.
 
 Use local runtime APIs for in-process workers, tests, CLIs, and app-owned HTTP
 handlers that do not need to speak the WebSocket protocol.

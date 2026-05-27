@@ -30,8 +30,8 @@ In dev mode:
 
 - protocol clients without a token are allowed
 - Shunter can mint anonymous development tokens
-- local reducer and declared-read calls allow all permissions unless the caller
-  explicitly supplies permissions
+- local reducer, procedure, and declared-read calls allow all permissions
+  unless the caller explicitly supplies permissions
 
 Do not use dev mode as the production policy for a public service.
 
@@ -101,12 +101,18 @@ signature keys, not claim policy.
 
 ## Permissions
 
-Declare required permissions on reducers and declared reads:
+Declare required permissions on reducers, procedures, and declared reads:
 
 ```go
 mod.Reducer("send_message", sendMessage, shunter.WithReducerPermissions(
 	shunter.PermissionMetadata{Required: []string{"messages:write"}},
 ))
+
+mod.Procedure("send_system_message", sendSystemMessage,
+	shunter.WithProcedurePermissions(
+		shunter.PermissionMetadata{Required: []string{"messages:write"}},
+	),
+)
 
 mod.Query(shunter.QueryDeclaration{
 	Name:        "recent_messages",
@@ -116,7 +122,8 @@ mod.Query(shunter.QueryDeclaration{
 ```
 
 Protocol strict-mode permissions come from the token's `permissions` claim.
-Local callers supply permissions with `WithPermissions` or
+Local reducer callers use `WithPermissions`, local procedure callers use
+`WithProcedureCallerPermissions`, and local declared-read callers use
 `WithDeclaredReadPermissions`.
 
 In dev mode, local calls allow all permissions when no permission option is
@@ -145,6 +152,25 @@ res, err := rt.CallReducer(
 `WithAuthPrincipal` supplies caller context. It does not bypass permission
 checks.
 
+Procedures use procedure-specific caller options:
+
+```go
+out, err := rt.CallProcedure(
+	ctx,
+	"send_system_message",
+	payload,
+	shunter.WithProcedureAuthPrincipal(shunter.AuthPrincipal{
+		Issuer:  "https://issuer.example",
+		Subject: "user-123",
+	}),
+	shunter.WithProcedureCallerPermissions("messages:write"),
+)
+if err != nil {
+	return err
+}
+_ = out
+```
+
 Declared reads use matching options:
 
 ```go
@@ -164,8 +190,8 @@ _ = result
 ```
 
 Use `WithDeclaredReadAllowAllPermissions` only in trusted tests or admin
-tooling. For reducer permission tests, pass explicit permissions so the runtime
-exercises the same admission path the app depends on.
+tooling. For reducer and procedure permission tests, pass explicit permissions
+so the runtime exercises the same admission path the app depends on.
 
 ## Visibility Filters
 
