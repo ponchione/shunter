@@ -122,18 +122,12 @@ func EncodeReducerArguments(contract shunter.ModuleContract, name string, data [
 // PrepareReducerCallRequest validates a reducer and prepares its encoded argument request shape.
 func PrepareReducerCallRequest(contract shunter.ModuleContract, name string, data []byte) (ReducerCallRequest, error) {
 	reducer, ok := FindReducer(contract, name)
-	if !ok {
-		return ReducerCallRequest{}, fmt.Errorf("%w: reducer %q", ErrSurfaceNotFound, strings.TrimSpace(name))
-	}
-	if reducer.Args == nil {
-		return ReducerCallRequest{}, fmt.Errorf("%w: reducer %q", ErrArgumentSchemaMissing, reducer.Name)
-	}
-	encoded, err := EncodeProductValueArguments(*reducer.Args, data)
+	surfaceName, encoded, err := prepareRequiredArgumentRequest("reducer", name, reducer.Name, reducer.Args, ok, data)
 	if err != nil {
 		return ReducerCallRequest{}, err
 	}
 	return ReducerCallRequest{
-		Name:      reducer.Name,
+		Name:      surfaceName,
 		Arguments: encoded,
 	}, nil
 }
@@ -150,20 +144,28 @@ func EncodeProcedureArguments(contract shunter.ModuleContract, name string, data
 // PrepareProcedureCallRequest validates a procedure and prepares its encoded argument request shape.
 func PrepareProcedureCallRequest(contract shunter.ModuleContract, name string, data []byte) (ProcedureCallRequest, error) {
 	procedure, ok := FindProcedure(contract, name)
-	if !ok {
-		return ProcedureCallRequest{}, fmt.Errorf("%w: procedure %q", ErrSurfaceNotFound, strings.TrimSpace(name))
-	}
-	if procedure.Args == nil {
-		return ProcedureCallRequest{}, fmt.Errorf("%w: procedure %q", ErrArgumentSchemaMissing, procedure.Name)
-	}
-	encoded, err := EncodeProductValueArguments(*procedure.Args, data)
+	surfaceName, encoded, err := prepareRequiredArgumentRequest("procedure", name, procedure.Name, procedure.Args, ok, data)
 	if err != nil {
 		return ProcedureCallRequest{}, err
 	}
 	return ProcedureCallRequest{
-		Name:      procedure.Name,
+		Name:      surfaceName,
 		Arguments: encoded,
 	}, nil
+}
+
+func prepareRequiredArgumentRequest(kind, lookupName, surfaceName string, args *schema.ProductSchemaExport, found bool, data []byte) (string, []byte, error) {
+	if !found {
+		return "", nil, fmt.Errorf("%w: %s %q", ErrSurfaceNotFound, kind, strings.TrimSpace(lookupName))
+	}
+	if args == nil {
+		return "", nil, fmt.Errorf("%w: %s %q", ErrArgumentSchemaMissing, kind, surfaceName)
+	}
+	encoded, err := EncodeProductValueArguments(*args, data)
+	if err != nil {
+		return "", nil, err
+	}
+	return surfaceName, encoded, nil
 }
 
 // EncodeQueryArguments encodes JSON arguments for a named declared-query contract surface.

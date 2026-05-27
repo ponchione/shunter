@@ -800,22 +800,10 @@ func captureCommittedSnapshotBodyLocked(body *snapshotBodyCapture, committed *st
 		if seq, ok := table.SequenceValue(); ok {
 			body.sequences = append(body.sequences, snapshotSequenceCapture{tableID: tableID, value: seq})
 		}
-	}
-	for _, tableID := range ids {
-		table, _ := committed.TableLocked(tableID)
-		if table.Schema().IsEvent {
-			continue
-		}
 		body.nextIDs = append(body.nextIDs, snapshotNextIDCapture{
 			tableID: tableID,
 			value:   uint64(table.NextID()),
 		})
-	}
-	for _, tableID := range ids {
-		table, _ := committed.TableLocked(tableID)
-		if table.Schema().IsEvent {
-			continue
-		}
 		rows, err := deterministicRows(table)
 		if err != nil {
 			return err

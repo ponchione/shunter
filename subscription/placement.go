@@ -341,46 +341,22 @@ func multiJoinPlacementConditions(pred MultiJoin) multiJoinPlacementConditionSet
 // this keeps only relation coverage common to every branch.
 func multiJoinFilterConditionsByRelation(pred Predicate, relations []MultiJoinRelation) map[int]multiJoinRelationFilterPlacement {
 	switch p := pred.(type) {
-	case ColEq:
-		relation, ok := multiJoinFilterRelationIndex(relations, p.Table, p.Alias)
+	case ColEq, ColRange, ColNe:
+		relation, filters, ok := multiJoinLocalFilterPlacement(p, relations)
 		if !ok {
 			return nil
 		}
 		return map[int]multiJoinRelationFilterPlacement{
-			relation: {filters: colFilterPlacements{eqs: []ColEq{p}}},
-		}
-	case ColRange:
-		if !rangeHasBound(p) {
-			return nil
-		}
-		relation, ok := multiJoinFilterRelationIndex(relations, p.Table, p.Alias)
-		if !ok {
-			return nil
-		}
-		return map[int]multiJoinRelationFilterPlacement{
-			relation: {filters: colFilterPlacements{ranges: []ColRange{p}}},
-		}
-	case ColNe:
-		relation, ok := multiJoinFilterRelationIndex(relations, p.Table, p.Alias)
-		if !ok {
-			return nil
-		}
-		return map[int]multiJoinRelationFilterPlacement{
-			relation: {filters: colFilterPlacements{ranges: colNeRanges(p)}},
+			relation: {filters: filters},
 		}
 	case ColEqCol:
-		left, ok := multiJoinFilterColumnRef(relations, p.LeftTable, p.LeftAlias, p.LeftColumn)
+		condition, ok := multiJoinColumnEqualityCondition(p, relations)
 		if !ok {
 			return nil
 		}
-		right, ok := multiJoinFilterColumnRef(relations, p.RightTable, p.RightAlias, p.RightColumn)
-		if !ok || left.Relation == right.Relation {
-			return nil
-		}
-		condition := MultiJoinCondition{Left: left, Right: right}
 		return map[int]multiJoinRelationFilterPlacement{
-			left.Relation:  {conditions: []MultiJoinCondition{condition}},
-			right.Relation: {conditions: []MultiJoinCondition{condition}},
+			condition.Left.Relation:  {conditions: []MultiJoinCondition{condition}},
+			condition.Right.Relation: {conditions: []MultiJoinCondition{condition}},
 		}
 	case And:
 		return mergeMultiJoinFilterConditionMaps(
@@ -395,6 +371,46 @@ func multiJoinFilterConditionsByRelation(pred Predicate, relations []MultiJoinRe
 	default:
 		return nil
 	}
+}
+
+func multiJoinLocalFilterPlacement(pred Predicate, relations []MultiJoinRelation) (int, colFilterPlacements, bool) {
+	switch p := pred.(type) {
+	case ColEq:
+		relation, ok := multiJoinFilterRelationIndex(relations, p.Table, p.Alias)
+		if !ok {
+			return 0, colFilterPlacements{}, false
+		}
+		return relation, colFilterPlacements{eqs: []ColEq{p}}, true
+	case ColRange:
+		if !rangeHasBound(p) {
+			return 0, colFilterPlacements{}, false
+		}
+		relation, ok := multiJoinFilterRelationIndex(relations, p.Table, p.Alias)
+		if !ok {
+			return 0, colFilterPlacements{}, false
+		}
+		return relation, colFilterPlacements{ranges: []ColRange{p}}, true
+	case ColNe:
+		relation, ok := multiJoinFilterRelationIndex(relations, p.Table, p.Alias)
+		if !ok {
+			return 0, colFilterPlacements{}, false
+		}
+		return relation, colFilterPlacements{ranges: colNeRanges(p)}, true
+	default:
+		return 0, colFilterPlacements{}, false
+	}
+}
+
+func multiJoinColumnEqualityCondition(p ColEqCol, relations []MultiJoinRelation) (MultiJoinCondition, bool) {
+	left, ok := multiJoinFilterColumnRef(relations, p.LeftTable, p.LeftAlias, p.LeftColumn)
+	if !ok {
+		return MultiJoinCondition{}, false
+	}
+	right, ok := multiJoinFilterColumnRef(relations, p.RightTable, p.RightAlias, p.RightColumn)
+	if !ok || left.Relation == right.Relation {
+		return MultiJoinCondition{}, false
+	}
+	return MultiJoinCondition{Left: left, Right: right}, true
 }
 
 func mergeMultiJoinFilterConditionMaps(left, right map[int]multiJoinRelationFilterPlacement) map[int]multiJoinRelationFilterPlacement {
@@ -587,15 +603,11 @@ func multiJoinColumnEqualityPlacementsForConditions(
 func multiJoinBranchColumnEqualityConditions(pred Predicate, relations []MultiJoinRelation) []MultiJoinCondition {
 	switch p := pred.(type) {
 	case ColEqCol:
-		left, ok := multiJoinFilterColumnRef(relations, p.LeftTable, p.LeftAlias, p.LeftColumn)
+		condition, ok := multiJoinColumnEqualityCondition(p, relations)
 		if !ok {
 			return nil
 		}
-		right, ok := multiJoinFilterColumnRef(relations, p.RightTable, p.RightAlias, p.RightColumn)
-		if !ok || left.Relation == right.Relation {
-			return nil
-		}
-		return []MultiJoinCondition{{Left: left, Right: right}}
+		return []MultiJoinCondition{condition}
 	case And:
 		left := multiJoinBranchColumnEqualityConditions(p.Left, relations)
 		right := multiJoinBranchColumnEqualityConditions(p.Right, relations)
@@ -607,32 +619,13 @@ func multiJoinBranchColumnEqualityConditions(pred Predicate, relations []MultiJo
 
 func multiJoinBranchLocalFilterPlacements(pred Predicate, relations []MultiJoinRelation) map[int]colFilterPlacements {
 	switch p := pred.(type) {
-	case ColEq:
-		relation, ok := multiJoinFilterRelationIndex(relations, p.Table, p.Alias)
+	case ColEq, ColRange, ColNe:
+		relation, filters, ok := multiJoinLocalFilterPlacement(p, relations)
 		if !ok {
 			return nil
 		}
 		return map[int]colFilterPlacements{
-			relation: {eqs: []ColEq{p}},
-		}
-	case ColRange:
-		if !rangeHasBound(p) {
-			return nil
-		}
-		relation, ok := multiJoinFilterRelationIndex(relations, p.Table, p.Alias)
-		if !ok {
-			return nil
-		}
-		return map[int]colFilterPlacements{
-			relation: {ranges: []ColRange{p}},
-		}
-	case ColNe:
-		relation, ok := multiJoinFilterRelationIndex(relations, p.Table, p.Alias)
-		if !ok {
-			return nil
-		}
-		return map[int]colFilterPlacements{
-			relation: {ranges: colNeRanges(p)},
+			relation: filters,
 		}
 	case And:
 		return mergeMultiJoinBranchLocalFilterMaps(

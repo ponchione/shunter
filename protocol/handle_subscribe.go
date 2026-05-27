@@ -106,11 +106,15 @@ type VisibilityFilter struct {
 // compiler. It is used by runtime-owned declared reads without routing those
 // reads through raw SQL admission.
 type CompiledSQLQuery struct {
+	compiledSQLQueryAccessor
+}
+
+type compiledSQLQueryAccessor struct {
 	query compiledSQLQuery
 }
 
 func newCompiledSQLQuery(query compiledSQLQuery) CompiledSQLQuery {
-	return CompiledSQLQuery{query: copyCompiledSQLQuery(query)}
+	return CompiledSQLQuery{compiledSQLQueryAccessor{query: copyCompiledSQLQuery(query)}}
 }
 
 // Copy returns a detached copy of the compiled SQL metadata.
@@ -118,19 +122,18 @@ func (q CompiledSQLQuery) Copy() CompiledSQLQuery {
 	return newCompiledSQLQuery(q.query)
 }
 
-// TableName returns the projected table name for this compiled query.
-func (q CompiledSQLQuery) TableName() string {
+// TableName returns the projected table name for this compiled SQL metadata.
+func (q compiledSQLQueryAccessor) TableName() string {
 	return q.query.TableName
 }
 
-// Predicate returns the compiled subscription predicate backing the query.
-func (q CompiledSQLQuery) Predicate() subscription.Predicate {
+// Predicate returns the compiled subscription predicate backing this metadata.
+func (q compiledSQLQueryAccessor) Predicate() subscription.Predicate {
 	return q.query.Predicate
 }
 
-// SubscriptionProjection returns the optional live-row projection represented
-// by this compiled SQL query.
-func (q CompiledSQLQuery) SubscriptionProjection() []subscription.ProjectionColumn {
+// SubscriptionProjection returns the optional live-row projection metadata.
+func (q compiledSQLQueryAccessor) SubscriptionProjection() []subscription.ProjectionColumn {
 	if len(q.query.ProjectionColumns) == 0 {
 		return nil
 	}
@@ -146,9 +149,8 @@ func (q CompiledSQLQuery) SubscriptionProjection() []subscription.ProjectionColu
 	return out
 }
 
-// SubscriptionAggregate returns the optional live aggregate row shape
-// represented by this compiled SQL query.
-func (q CompiledSQLQuery) SubscriptionAggregate() *subscription.Aggregate {
+// SubscriptionAggregate returns the optional live aggregate row shape.
+func (q compiledSQLQueryAccessor) SubscriptionAggregate() *subscription.Aggregate {
 	if q.query.Aggregate == nil {
 		return nil
 	}
@@ -169,8 +171,8 @@ func (q CompiledSQLQuery) SubscriptionAggregate() *subscription.Aggregate {
 	return out
 }
 
-// ResultColumns returns the encoded output columns for this compiled query.
-func (q CompiledSQLQuery) ResultColumns(sl SchemaLookup) []schema.ColumnSchema {
+// ResultColumns returns the encoded output columns for this metadata.
+func (q compiledSQLQueryAccessor) ResultColumns(sl SchemaLookup) []schema.ColumnSchema {
 	var fallback []schema.ColumnSchema
 	if sl != nil {
 		_, table, ok := sl.TableByName(q.query.TableName)
@@ -197,7 +199,7 @@ func (query compiledSQLQuery) resultColumns(fallback []schema.ColumnSchema) []sc
 
 // SubscriptionOrderBy returns optional ordering metadata for declared
 // single-table live windows. It does not imply positional delta semantics.
-func (q CompiledSQLQuery) SubscriptionOrderBy() []subscription.OrderByColumn {
+func (q compiledSQLQueryAccessor) SubscriptionOrderBy() []subscription.OrderByColumn {
 	if len(q.query.OrderBy) == 0 {
 		return nil
 	}
@@ -216,7 +218,7 @@ func (q CompiledSQLQuery) SubscriptionOrderBy() []subscription.OrderByColumn {
 
 // SubscriptionLimit returns optional LIMIT metadata for declared single-table
 // live windows.
-func (q CompiledSQLQuery) SubscriptionLimit() *uint64 {
+func (q compiledSQLQueryAccessor) SubscriptionLimit() *uint64 {
 	if q.query.Limit == nil {
 		return nil
 	}
@@ -226,7 +228,7 @@ func (q CompiledSQLQuery) SubscriptionLimit() *uint64 {
 
 // SubscriptionOffset returns optional OFFSET metadata for declared single-table
 // live windows.
-func (q CompiledSQLQuery) SubscriptionOffset() *uint64 {
+func (q compiledSQLQueryAccessor) SubscriptionOffset() *uint64 {
 	if q.query.Offset == nil {
 		return nil
 	}
@@ -235,32 +237,32 @@ func (q CompiledSQLQuery) SubscriptionOffset() *uint64 {
 }
 
 // HasOrderBy reports whether the source SQL included an ORDER BY clause.
-func (q CompiledSQLQuery) HasOrderBy() bool {
+func (q compiledSQLQueryAccessor) HasOrderBy() bool {
 	return q.query.OrderByPresent || len(q.query.OrderBy) != 0
 }
 
 // HasLimit reports whether the source SQL included a LIMIT clause.
-func (q CompiledSQLQuery) HasLimit() bool {
+func (q compiledSQLQueryAccessor) HasLimit() bool {
 	return q.query.Limit != nil
 }
 
 // HasOffset reports whether the source SQL included an OFFSET clause.
-func (q CompiledSQLQuery) HasOffset() bool {
+func (q compiledSQLQueryAccessor) HasOffset() bool {
 	return q.query.Offset != nil
 }
 
-// HasAggregate reports whether this query returns an aggregate row shape.
-func (q CompiledSQLQuery) HasAggregate() bool {
+// HasAggregate reports whether this metadata returns an aggregate row shape.
+func (q compiledSQLQueryAccessor) HasAggregate() bool {
 	return q.query.Aggregate != nil
 }
 
-// UsesCallerIdentity reports whether the compiled SQL references :sender.
-func (q CompiledSQLQuery) UsesCallerIdentity() bool {
+// UsesCallerIdentity reports whether the compiled SQL metadata references :sender.
+func (q compiledSQLQueryAccessor) UsesCallerIdentity() bool {
 	return q.query.UsesCallerIdentity
 }
 
 // ReferencedTables returns the table IDs referenced by the compiled predicate.
-func (q CompiledSQLQuery) ReferencedTables() []schema.TableID {
+func (q compiledSQLQueryAccessor) ReferencedTables() []schema.TableID {
 	if q.query.MultiJoin != nil {
 		return q.query.MultiJoin.referencedTables()
 	}
@@ -343,86 +345,16 @@ type SQLQueryParameterValue struct {
 // parameters. Runtime execution must bind concrete parameter values through
 // CompileSQLQueryStringWithParameters.
 type CompiledSQLQueryTemplate struct {
-	query compiledSQLQuery
+	compiledSQLQueryAccessor
 }
 
 func newCompiledSQLQueryTemplate(query compiledSQLQuery) CompiledSQLQueryTemplate {
-	return CompiledSQLQueryTemplate{query: copyCompiledSQLQuery(query)}
+	return CompiledSQLQueryTemplate{compiledSQLQueryAccessor{query: copyCompiledSQLQuery(query)}}
 }
 
 // Copy returns a detached copy of the compiled SQL template metadata.
 func (q CompiledSQLQueryTemplate) Copy() CompiledSQLQueryTemplate {
 	return newCompiledSQLQueryTemplate(q.query)
-}
-
-// TableName returns the projected table name for this SQL template.
-func (q CompiledSQLQueryTemplate) TableName() string {
-	return q.query.TableName
-}
-
-// Predicate returns the abstract predicate shape for validation metadata.
-func (q CompiledSQLQueryTemplate) Predicate() subscription.Predicate {
-	return q.query.Predicate
-}
-
-// SubscriptionProjection returns the optional live-row projection metadata.
-func (q CompiledSQLQueryTemplate) SubscriptionProjection() []subscription.ProjectionColumn {
-	return newCompiledSQLQuery(q.query).SubscriptionProjection()
-}
-
-// SubscriptionAggregate returns the optional live aggregate metadata.
-func (q CompiledSQLQueryTemplate) SubscriptionAggregate() *subscription.Aggregate {
-	return newCompiledSQLQuery(q.query).SubscriptionAggregate()
-}
-
-// ResultColumns returns the encoded output columns for this SQL template.
-func (q CompiledSQLQueryTemplate) ResultColumns(sl SchemaLookup) []schema.ColumnSchema {
-	return newCompiledSQLQuery(q.query).ResultColumns(sl)
-}
-
-// SubscriptionOrderBy returns optional initial-snapshot ordering metadata.
-func (q CompiledSQLQueryTemplate) SubscriptionOrderBy() []subscription.OrderByColumn {
-	return newCompiledSQLQuery(q.query).SubscriptionOrderBy()
-}
-
-// SubscriptionLimit returns optional initial-snapshot LIMIT metadata.
-func (q CompiledSQLQueryTemplate) SubscriptionLimit() *uint64 {
-	return newCompiledSQLQuery(q.query).SubscriptionLimit()
-}
-
-// SubscriptionOffset returns optional initial-snapshot OFFSET metadata.
-func (q CompiledSQLQueryTemplate) SubscriptionOffset() *uint64 {
-	return newCompiledSQLQuery(q.query).SubscriptionOffset()
-}
-
-// HasOrderBy reports whether the source SQL included an ORDER BY clause.
-func (q CompiledSQLQueryTemplate) HasOrderBy() bool {
-	return q.query.OrderByPresent || len(q.query.OrderBy) != 0
-}
-
-// HasLimit reports whether the source SQL included a LIMIT clause.
-func (q CompiledSQLQueryTemplate) HasLimit() bool {
-	return q.query.Limit != nil
-}
-
-// HasOffset reports whether the source SQL included an OFFSET clause.
-func (q CompiledSQLQueryTemplate) HasOffset() bool {
-	return q.query.Offset != nil
-}
-
-// HasAggregate reports whether this template returns an aggregate row shape.
-func (q CompiledSQLQueryTemplate) HasAggregate() bool {
-	return q.query.Aggregate != nil
-}
-
-// UsesCallerIdentity reports whether the template references :sender.
-func (q CompiledSQLQueryTemplate) UsesCallerIdentity() bool {
-	return q.query.UsesCallerIdentity
-}
-
-// ReferencedTables returns the table IDs referenced by the template.
-func (q CompiledSQLQueryTemplate) ReferencedTables() []schema.TableID {
-	return newCompiledSQLQuery(q.query).ReferencedTables()
 }
 
 type relationSchema struct {
