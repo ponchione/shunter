@@ -37,11 +37,7 @@ func runContractValidate(stdout, stderr io.Writer, args []string) int {
 		writeCLIError(stderr, err)
 		return 2
 	}
-	if _, err := stdout.Write(out); err != nil {
-		writeCLIError(stderr, err)
-		return 1
-	}
-	return 0
+	return writeCLIOutput(stdout, stderr, out)
 }
 
 func formatValidateContract(contract shunter.ModuleContract, format string) ([]byte, error) {

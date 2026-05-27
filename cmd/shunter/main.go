@@ -103,11 +103,7 @@ func runContractDiff(stdout, stderr io.Writer, args []string) int {
 		writeCLIError(stderr, err)
 		return 2
 	}
-	if _, err := stdout.Write(out); err != nil {
-		writeCLIError(stderr, err)
-		return 1
-	}
-	return 0
+	return writeCLIOutput(stdout, stderr, out)
 }
 
 func runContractPolicy(stdout, stderr io.Writer, args []string) int {
@@ -137,9 +133,8 @@ func runContractPolicy(stdout, stderr io.Writer, args []string) int {
 		writeCLIError(stderr, err)
 		return 2
 	}
-	if _, err := stdout.Write(out); err != nil {
-		writeCLIError(stderr, err)
-		return 1
+	if code := writeCLIOutput(stdout, stderr, out); code != 0 {
+		return code
 	}
 	if result.Failed {
 		return 1
@@ -178,9 +173,8 @@ func runContractPlan(stdout, stderr io.Writer, args []string) int {
 		writeCLIError(stderr, err)
 		return 2
 	}
-	if _, err := stdout.Write(out); err != nil {
-		writeCLIError(stderr, err)
-		return 1
+	if code := writeCLIOutput(stdout, stderr, out); code != 0 {
+		return code
 	}
 	if plan.Summary.PolicyFailed {
 		return 1
@@ -248,6 +242,14 @@ func requirePath(stderr io.Writer, name, value string) int {
 	}
 	writeCLIErrorf(stderr, "--%s is required\n", name)
 	return 2
+}
+
+func writeCLIOutput(stdout, stderr io.Writer, out []byte) int {
+	if _, err := stdout.Write(out); err != nil {
+		writeCLIError(stderr, err)
+		return 1
+	}
+	return 0
 }
 
 func validateContractReadFlags(stderr io.Writer, fs *flag.FlagSet, previousPath, currentPath, format string) int {

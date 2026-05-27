@@ -50,11 +50,7 @@ func runHealth(stdout, stderr io.Writer, args []string) int {
 		writeCLIError(stderr, err)
 		return 2
 	}
-	if _, err := stdout.Write(out); err != nil {
-		writeCLIError(stderr, err)
-		return 1
-	}
-	return 0
+	return writeCLIOutput(stdout, stderr, out)
 }
 
 func runHealthURL(stdout, stderr io.Writer, rawURL string, timeout time.Duration, format string) int {
@@ -83,9 +79,8 @@ func runHealthURL(stdout, stderr io.Writer, rawURL string, timeout time.Duration
 		writeCLIError(stderr, err)
 		return 2
 	}
-	if _, err := stdout.Write(out); err != nil {
-		writeCLIError(stderr, err)
-		return 1
+	if code := writeCLIOutput(stdout, stderr, out); code != 0 {
+		return code
 	}
 	if inspection.Status == shunter.HealthStatusFailed {
 		return 1

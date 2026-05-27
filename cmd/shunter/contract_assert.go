@@ -72,9 +72,8 @@ func runContractAssert(stdout, stderr io.Writer, args []string) int {
 		writeCLIError(stderr, err)
 		return 2
 	}
-	if _, err := stdout.Write(out); err != nil {
-		writeCLIError(stderr, err)
-		return 1
+	if code := writeCLIOutput(stdout, stderr, out); code != 0 {
+		return code
 	}
 	if report.Status != contractAssertStatusPassed {
 		return 1

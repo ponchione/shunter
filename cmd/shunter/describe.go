@@ -60,11 +60,7 @@ func runDescribe(stdout, stderr io.Writer, args []string) int {
 		writeCLIError(stderr, err)
 		return 2
 	}
-	if _, err := stdout.Write(out); err != nil {
-		writeCLIError(stderr, err)
-		return 1
-	}
-	return 0
+	return writeCLIOutput(stdout, stderr, out)
 }
 
 func runDescribeURL(stdout, stderr io.Writer, rawURL string, timeout time.Duration, format string) int {
@@ -93,11 +89,7 @@ func runDescribeURL(stdout, stderr io.Writer, rawURL string, timeout time.Durati
 		writeCLIError(stderr, err)
 		return 2
 	}
-	if _, err := stdout.Write(out); err != nil {
-		writeCLIError(stderr, err)
-		return 1
-	}
-	return 0
+	return writeCLIOutput(stdout, stderr, out)
 }
 
 func readDescribeContract(path string) (shunter.ModuleContract, error) {
