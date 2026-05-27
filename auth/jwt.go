@@ -127,8 +127,8 @@ var (
 // ValidateJWT parses + verifies tokenString against config and
 // normalizes its claims. Signature errors, expiry, future `iat`/`nbf`,
 // missing sub/iss, mismatched hex_identity, and audience-policy violations all
-// map to dedicated sentinels so the transport layer can produce the right HTTP
-// 401 responses (SPEC-005 §4.3).
+// map to dedicated sentinels so the transport layer can produce the right
+// authentication rejection (SPEC-005 §4.3).
 func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	if config == nil {
 		return nil, fmt.Errorf("%w: config is required", ErrJWTInvalid)

@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -432,34 +433,38 @@ func TestUpgradeStrictNoTokenRejected(t *testing.T) {
 	s, _ := strictServer(t)
 	srv := newTestServer(t, s)
 
-	_, resp, err := dialWS(t, srv, wsDialOpts{
+	conn, resp, err := dialWS(t, srv, wsDialOpts{
 		subprotocols: []string{"v1.bsatn.shunter"},
 	})
-	if err == nil {
-		t.Fatal("dial should fail without token in strict mode")
+	if err != nil {
+		t.Fatalf("dial should upgrade before strict-auth close: %v (resp=%v)", err, resp)
 	}
-	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("status = %v, want 401", resp)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("status = %d, want 101", resp.StatusCode)
 	}
+	requireAuthRejectedClose(t, conn)
 }
 
 func TestUpgradeInvalidTokenRejected(t *testing.T) {
 	s, _ := strictServer(t)
 	srv := newTestServer(t, s)
 
-	_, resp, err := dialWS(t, srv, wsDialOpts{
+	conn, resp, err := dialWS(t, srv, wsDialOpts{
 		authHeader:   "Bearer not-a-jwt",
 		subprotocols: []string{"v1.bsatn.shunter"},
 	})
-	if err == nil {
-		t.Fatal("dial should fail with invalid token")
+	if err != nil {
+		t.Fatalf("dial should upgrade before strict-auth close: %v (resp=%v)", err, resp)
 	}
-	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("status = %v, want 401", resp)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("status = %d, want 101", resp.StatusCode)
 	}
+	requireAuthRejectedClose(t, conn)
 }
 
-func TestUpgradeInvalidTokenResponseIsSanitized(t *testing.T) {
+func TestUpgradeInvalidTokenCloseReasonIsSanitized(t *testing.T) {
 	s, _ := strictServer(t)
 	s.JWT.Issuers = []string{"trusted-issuer"}
 	s.JWT.Audiences = []string{"trusted-audience"}
@@ -475,23 +480,24 @@ func TestUpgradeInvalidTokenResponseIsSanitized(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, resp, err := dialWS(t, srv, wsDialOpts{
+	conn, resp, err := dialWS(t, srv, wsDialOpts{
 		authHeader:   "Bearer " + token,
 		subprotocols: []string{"v1.bsatn.shunter"},
 	})
-	if err == nil {
-		t.Fatal("dial should fail with rejected token claims")
+	if err != nil {
+		t.Fatalf("dial should upgrade before strict-auth close: %v (resp=%v)", err, resp)
 	}
-	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %v, want 401", resp)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("status = %d, want 101", resp.StatusCode)
 	}
-	body := responseBodyString(t, resp)
-	if body != authRejectedInvalidToken+"\n" {
-		t.Fatalf("response body = %q, want sanitized invalid-token body", body)
+	closeErr := requireAuthRejectedClose(t, conn)
+	if closeErr.Reason != CloseReasonAuthRejected {
+		t.Fatalf("close reason = %q, want %q", closeErr.Reason, CloseReasonAuthRejected)
 	}
 	for _, leaked := range []string{"trusted-issuer", "trusted-audience", "attacker-issuer", "attacker-audience", "issuer not", "audience not"} {
-		if strings.Contains(body, leaked) {
-			t.Fatalf("response body leaked %q: %q", leaked, body)
+		if strings.Contains(closeErr.Reason, leaked) {
+			t.Fatalf("close reason leaked %q: %q", leaked, closeErr.Reason)
 		}
 	}
 }
@@ -783,6 +789,25 @@ func responseBodyString(t *testing.T, resp *http.Response) string {
 		t.Fatalf("read response body: %v", err)
 	}
 	return string(body)
+}
+
+func requireAuthRejectedClose(t *testing.T, conn *websocket.Conn) websocket.CloseError {
+	t.Helper()
+	_, err := readOneBinary(t, conn, 2*time.Second)
+	if err == nil {
+		t.Fatal("expected strict-auth close frame; got a data frame instead")
+	}
+	if got := websocket.CloseStatus(err); got != ClosePolicy {
+		t.Fatalf("close code = %d, want %d", got, ClosePolicy)
+	}
+	var closeErr websocket.CloseError
+	if !errors.As(err, &closeErr) {
+		t.Fatalf("read error = %T %[1]v, want websocket.CloseError", err)
+	}
+	if closeErr.Reason != CloseReasonAuthRejected {
+		t.Fatalf("close reason = %q, want %q", closeErr.Reason, CloseReasonAuthRejected)
+	}
+	return closeErr
 }
 
 func generateUpgradeRS256Key(t *testing.T) (*rsa.PrivateKey, []byte) {

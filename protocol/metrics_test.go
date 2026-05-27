@@ -197,10 +197,12 @@ func TestProtocolMetricsAuthFailureRecordsRejectedAuth(t *testing.T) {
 	u := strings.Replace(srv.URL, "http://", "ws://", 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_, _, err := websocket.Dial(ctx, u, &websocket.DialOptions{Subprotocols: []string{SubprotocolV1}})
-	if err == nil {
-		t.Fatal("dial without auth unexpectedly succeeded")
+	conn, resp, err := websocket.Dial(ctx, u, &websocket.DialOptions{Subprotocols: []string{SubprotocolV1}})
+	if err != nil {
+		t.Fatalf("dial should upgrade before strict-auth close: %v (resp=%v)", err, resp)
 	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	requireAuthRejectedClose(t, conn)
 
 	observer.requireConnectionResults(t, "rejected_auth")
 	observer.mu.Lock()

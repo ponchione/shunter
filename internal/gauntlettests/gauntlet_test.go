@@ -281,13 +281,13 @@ func TestRuntimeGauntletStrictAuthProtocolWorkload(t *testing.T) {
 	defer srv.Close()
 	url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/subscribe"
 
-	assertGauntletProtocolDialRejected(t, url, nil, http.StatusUnauthorized, "strict op 0 no token")
+	assertGauntletProtocolAuthClose(t, url, nil, "strict op 0 no token")
 	badAudienceToken := mintGauntletStrictToken(t, signingKey, "gauntlet-issuer", "alice", "other")
-	assertGauntletProtocolDialRejected(t, url, gauntletBearerHeader(badAudienceToken), http.StatusUnauthorized, "strict op 1 wrong audience")
+	assertGauntletProtocolAuthClose(t, url, gauntletBearerHeader(badAudienceToken), "strict op 1 wrong audience")
 	badIssuerToken := mintGauntletStrictToken(t, signingKey, "other-issuer", "alice", "gauntlet")
-	assertGauntletProtocolDialRejected(t, url, gauntletBearerHeader(badIssuerToken), http.StatusUnauthorized, "strict op 1 wrong issuer")
+	assertGauntletProtocolAuthClose(t, url, gauntletBearerHeader(badIssuerToken), "strict op 1 wrong issuer")
 	futureIssuedToken := mintGauntletStrictTokenAt(t, signingKey, "gauntlet-issuer", "alice", "gauntlet", time.Now().Add(time.Hour))
-	assertGauntletProtocolDialRejected(t, url, gauntletBearerHeader(futureIssuedToken), http.StatusUnauthorized, "strict op 1 future issued-at")
+	assertGauntletProtocolAuthClose(t, url, gauntletBearerHeader(futureIssuedToken), "strict op 1 future issued-at")
 
 	validToken := mintGauntletStrictToken(t, signingKey, "gauntlet-issuer", "alice", "gauntlet")
 	subscriber, subscriberIdentity := dialGauntletProtocolURLWithHeaders(t, url, gauntletBearerHeader(validToken), "strict op 2 subscriber dial")
@@ -345,7 +345,7 @@ func TestRuntimeGauntletStrictAuthProtocolWorkload(t *testing.T) {
 	restartedSrv := httptest.NewServer(restartedRT.HTTPHandler())
 	defer restartedSrv.Close()
 	restartedURL := strings.Replace(restartedSrv.URL, "http://", "ws://", 1) + "/subscribe"
-	assertGauntletProtocolDialRejected(t, restartedURL, nil, http.StatusUnauthorized, "strict op 8 after restart no token")
+	assertGauntletProtocolAuthClose(t, restartedURL, nil, "strict op 8 after restart no token")
 
 	restartedSubscriber, restartedSubscriberIdentity := dialGauntletProtocolURLWithHeaders(t, restartedURL, gauntletBearerHeader(validToken), "strict op 9 after restart subscriber dial")
 	defer restartedSubscriber.CloseNow()
@@ -4854,23 +4854,35 @@ func gauntletProtocolChurnRowsKey(rows map[uint64]string) string {
 	return b.String()
 }
 
-func assertGauntletProtocolDialRejected(t *testing.T, url string, headers http.Header, wantStatus int, label string) {
+func assertGauntletProtocolAuthClose(t *testing.T, url string, headers http.Header, label string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	conn, resp, err := websocket.Dial(ctx, url, gauntletWebSocketDialOptions(headers))
-	if conn != nil {
-		_ = conn.Close(websocket.StatusNormalClosure, "")
-	}
 	defer closeGauntletHTTPResponse(resp)
+	if err != nil {
+		t.Fatalf("%s dial error = %v, want WebSocket upgrade before auth close", label, err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	if resp == nil || resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("%s status = %v, want %d", label, resp, http.StatusSwitchingProtocols)
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _, err = conn.Read(ctx)
 	if err == nil {
-		t.Fatalf("%s dial succeeded, want HTTP %d rejection", label, wantStatus)
+		t.Fatalf("%s read succeeded, want strict-auth close", label)
 	}
-	if resp == nil {
-		t.Fatalf("%s dial error = %v with nil response, want HTTP %d", label, err, wantStatus)
+	if got := websocket.CloseStatus(err); got != protocol.ClosePolicy {
+		t.Fatalf("%s close code = %d, want %d", label, got, protocol.ClosePolicy)
 	}
-	if resp.StatusCode != wantStatus {
-		t.Fatalf("%s status = %d, want %d (err=%v)", label, resp.StatusCode, wantStatus, err)
+	var closeErr websocket.CloseError
+	if !errors.As(err, &closeErr) {
+		t.Fatalf("%s read error = %T %[1]v, want websocket.CloseError", label, err)
+	}
+	if closeErr.Reason != protocol.CloseReasonAuthRejected {
+		t.Fatalf("%s close reason = %q, want %q", label, closeErr.Reason, protocol.CloseReasonAuthRejected)
 	}
 }
 

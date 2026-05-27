@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Strict protocol auth failures now complete the WebSocket upgrade when a
+  supported Shunter subprotocol is offered, then close with 1008 and
+  `auth-token rejected by admission` so browser clients can classify token
+  rejection.
 - TypeScript runtime WebSocket close handling now classifies auth/token
   rejection close reasons as `ShunterAuthError` and does not retry them through
   reconnect.

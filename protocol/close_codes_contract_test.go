@@ -39,6 +39,7 @@ func TestShunterCloseReasonConstants(t *testing.T) {
 		CloseReasonSendBufferFull,
 		CloseReasonIdleTimeout,
 		CloseReasonServerShutdown,
+		CloseReasonAuthRejected,
 	}
 	seen := map[string]bool{}
 	for _, reason := range reasons {
@@ -66,6 +67,7 @@ func TestShunterCloseReasonTelemetryTaxonomy(t *testing.T) {
 		{"server_shutdown", CloseNormal, CloseReasonServerShutdown, "server_shutdown"},
 		{"send_buffer_full", ClosePolicy, CloseReasonSendBufferFull, "buffer_full"},
 		{"idle_timeout", ClosePolicy, CloseReasonIdleTimeout, "idle_timeout"},
+		{"auth_rejected", ClosePolicy, CloseReasonAuthRejected, "policy_violation"},
 		{"generic_protocol", CloseProtocol, "unknown tag", "protocol_error"},
 		{"generic_policy", ClosePolicy, "policy", "policy_violation"},
 		{"generic_internal", CloseInternal, "panic", "internal_error"},
@@ -99,18 +101,16 @@ func TestShunterProtocolErrorReasonTaxonomy(t *testing.T) {
 }
 
 // TestShunterHandshakeRejectionStatuses pins the HTTP status codes
-// the server returns before the WebSocket upgrade for each rejection
-// class. These sub-tests exercise the upgrade.go guard sequence in order
-// (auth → connection_id → compression → subprotocol). Each uses the
-// same httptest.Server + dialWS harness that upgrade_test.go uses.
+// the server returns before the WebSocket upgrade for non-auth rejection
+// classes. Strict token failures with a supported Shunter subprotocol
+// now upgrade and then close with 1008 so browser clients can observe
+// the auth failure.
 func TestShunterHandshakeRejectionStatuses(t *testing.T) {
 	// Each case describes the rejection class being pinned. Cases that
-	// test auth are set up without a valid token; cases that test
-	// post-auth guards (connection_id, compression, subprotocol) carry a
-	// valid token so that auth passes and the guard under test fires.
-	// The server-side guard order in upgrade.go is:
-	//   (1) auth  →  (2) connection_id  →  (3) compression  →  (4) subprotocol
-	// This table covers one representative failure from each class.
+	// test post-auth guards carry a valid token so that auth passes and
+	// the guard under test fires. The malformed Authorization case remains
+	// pre-upgrade because the header is syntactically invalid and must not
+	// fall back to a query token or anonymous minting.
 	cases := []struct {
 		name       string
 		useAuth    bool   // inject a valid token before dialing
@@ -120,17 +120,10 @@ func TestShunterHandshakeRejectionStatuses(t *testing.T) {
 		authHeader string
 		wantStatus int
 	}{
-		// Auth guard — strict server, no token.
 		{
-			name:       "strict_auth_no_token",
+			name:       "malformed_authorization_header",
 			serverMode: "strict",
-			wantStatus: http.StatusUnauthorized,
-		},
-		// Auth guard — strict server, malformed JWT.
-		{
-			name:       "invalid_token",
-			serverMode: "strict",
-			authHeader: "Bearer not.a.jwt",
+			authHeader: "Basic credentials",
 			wantStatus: http.StatusUnauthorized,
 		},
 		// connection_id guard — passes auth with a valid token.
@@ -194,6 +187,33 @@ func TestShunterHandshakeRejectionStatuses(t *testing.T) {
 			if resp.StatusCode != tc.wantStatus {
 				t.Errorf("status = %d, want %d", resp.StatusCode, tc.wantStatus)
 			}
+		})
+	}
+}
+
+func TestShunterStrictAuthRejectionCloseContract(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		authHeader string
+	}{
+		{name: "missing_token"},
+		{name: "invalid_token", authHeader: "Bearer not.a.jwt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := strictServer(t)
+			srv := newTestServer(t, s)
+			conn, resp, err := dialWS(t, srv, wsDialOpts{
+				authHeader:   tc.authHeader,
+				subprotocols: []string{SubprotocolV1},
+			})
+			if err != nil {
+				t.Fatalf("dial should complete WebSocket upgrade: %v (resp=%v)", err, resp)
+			}
+			defer conn.Close(websocket.StatusNormalClosure, "")
+			if resp.StatusCode != http.StatusSwitchingProtocols {
+				t.Fatalf("status = %d, want 101", resp.StatusCode)
+			}
+			requireAuthRejectedClose(t, conn)
 		})
 	}
 }

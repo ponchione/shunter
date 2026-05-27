@@ -233,10 +233,10 @@ For production deployments, an external identity provider may sign tokens. The e
 
 ### 4.3 Authentication Errors
 
-- No token, and engine is in strict auth mode → `401` before WebSocket upgrade
-- Invalid token signature → `401` before WebSocket upgrade
-- Expired token → `401` before WebSocket upgrade
-- `hex_identity` present but does not match recomputed identity → `401` before WebSocket upgrade
+- Syntactically malformed `Authorization` header → `401` before WebSocket upgrade
+- No token, and engine is in strict auth mode, with a supported Shunter subprotocol offered → WebSocket upgrade succeeds, then the server closes with code `1008` and reason `auth-token rejected by admission`
+- Invalid token signature, expired token, or `hex_identity` present but not matching recomputed identity, with a supported Shunter subprotocol offered → WebSocket upgrade succeeds, then the server closes with code `1008` and reason `auth-token rejected by admission`
+- Missing or unsupported Shunter subprotocol → `400` before WebSocket upgrade
 - Zero `connection_id` → `400` before WebSocket upgrade
 
 ---

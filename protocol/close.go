@@ -28,6 +28,7 @@ const (
 	CloseReasonIdleTimeout          = "idle timeout"
 	CloseReasonServerShutdown       = "server shutdown"
 	CloseReasonOnConnectRejected    = "onconnect rejected"
+	CloseReasonAuthRejected         = "auth-token rejected by admission"
 )
 
 // closeWithHandshake runs a bounded WebSocket close handshake.

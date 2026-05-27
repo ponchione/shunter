@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ponchione/websocket"
 
@@ -17,8 +18,8 @@ import (
 // routed from `/subscribe` by the host application.
 type Server struct {
 	// JWT configures token validation. Required. AuthMode determines
-	// whether missing tokens are rejected with 401 (Strict) or
-	// converted to a fresh anonymous identity (Anonymous).
+	// whether missing tokens are rejected during protocol admission
+	// (Strict) or converted to a fresh anonymous identity (Anonymous).
 	JWT *auth.JWTConfig
 	// Mint is required only when JWT.AuthMode == AuthModeAnonymous.
 	// Its fields control the issuer/audience/expiry of tokens the
@@ -114,6 +115,8 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Auth — strict requires a token, anonymous mints on absence.
+	var authRejectionReason string
+	var authRejectionErr error
 	token, hasToken, err := extractToken(r)
 	if err != nil {
 		s.writeAuthRejected(w, authRejectedInvalidToken, http.StatusUnauthorized, "invalid_token", err)
@@ -127,33 +130,56 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	if hasToken {
 		c, err := auth.ValidateJWT(token, s.JWT)
 		if err != nil {
-			s.writeAuthRejected(w, authRejectedInvalidToken, http.StatusUnauthorized, "invalid_token", err)
-			return
+			authRejectionReason = "invalid_token"
+			authRejectionErr = err
+		} else {
+			claims = c
+			identity = c.DeriveIdentity()
+			principal = c.Principal()
+			permissions = append([]string(nil), c.Permissions...)
 		}
-		claims = c
-		identity = c.DeriveIdentity()
-		principal = c.Principal()
-		permissions = append([]string(nil), c.Permissions...)
 	} else {
 		if s.JWT.AuthMode != auth.AuthModeAnonymous {
 			err := errors.New("no token and strict auth enabled")
-			s.writeAuthRejected(w, authRejectedMissingToken, http.StatusUnauthorized, "missing_token", err)
-			return
+			authRejectionReason = "missing_token"
+			authRejectionErr = err
+		} else {
+			if s.Mint == nil {
+				err := errors.New("server misconfigured: anonymous mode requires Mint config")
+				s.writeAuthRejected(w, authRejectedUnavailable, http.StatusInternalServerError, "mint_misconfigured", err)
+				return
+			}
+			mt, id, err := auth.MintAnonymousToken(s.Mint)
+			if err != nil {
+				s.writeAuthRejected(w, authRejectedUnavailable, http.StatusInternalServerError, "mint_failed", err)
+				return
+			}
+			mintedToken = mt
+			identity = id
 		}
-		if s.Mint == nil {
-			err := errors.New("server misconfigured: anonymous mode requires Mint config")
-			s.writeAuthRejected(w, authRejectedUnavailable, http.StatusInternalServerError, "mint_misconfigured", err)
-			return
-		}
-		mt, id, err := auth.MintAnonymousToken(s.Mint)
-		if err != nil {
-			s.writeAuthRejected(w, authRejectedUnavailable, http.StatusInternalServerError, "mint_failed", err)
-			return
-		}
-		mintedToken = mt
-		identity = id
 	}
 	allowAllPermissions := !hasToken && s.JWT.AuthMode == auth.AuthModeAnonymous
+
+	if authRejectionErr != nil {
+		selected, _, ok := negotiateSubprotocol(r, SupportedSubprotocols())
+		if !ok {
+			s.writeRejected(w,
+				"Sec-WebSocket-Protocol must include one of "+strings.Join(SupportedSubprotocols(), ", "),
+				http.StatusBadRequest,
+				"rejected_upgrade",
+				errors.New("missing required subprotocol"))
+			return
+		}
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			Subprotocols: []string{selected},
+		})
+		if err != nil {
+			s.recordRejected("rejected_upgrade", err)
+			return
+		}
+		s.closeAuthRejected(conn, authRejectionReason, authRejectionErr, options.CloseHandshakeTimeout)
+		return
+	}
 
 	// 2. connection_id: parse / generate / reject zero.
 	connID, err := resolveConnectionID(r.URL.Query().Get("connection_id"))
@@ -281,6 +307,14 @@ func (s *Server) writeAuthRejected(w http.ResponseWriter, message string, status
 		s.Observer.LogProtocolAuthFailed(reason, err)
 	}
 	s.writeRejected(w, message, status, "rejected_auth", err)
+}
+
+func (s *Server) closeAuthRejected(conn *websocket.Conn, reason string, err error, closeTimeout time.Duration) {
+	if s != nil && s.Observer != nil {
+		s.Observer.LogProtocolAuthFailed(reason, err)
+	}
+	s.recordRejected("rejected_auth", err)
+	closeWithHandshake(conn, ClosePolicy, CloseReasonAuthRejected, closeTimeout)
 }
 
 func (s *Server) writeRejected(w http.ResponseWriter, message string, status int, result string, err error) {

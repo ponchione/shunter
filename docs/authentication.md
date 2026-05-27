@@ -57,9 +57,14 @@ Behavior:
 - `aud` is checked only when `AuthAudiences` is non-empty.
 - `permissions` may be a string or string list and is copied into the caller
   principal and protocol connection.
-- Missing, malformed, expired, future-issued, not-yet-valid, wrong-algorithm,
-  bad-signature, audience-mismatched, or missing-claim tokens are rejected
-  before the WebSocket upgrade completes.
+- Missing, expired, future-issued, not-yet-valid, wrong-algorithm,
+  bad-signature, audience-mismatched, missing-claim, or otherwise invalid
+  tokens are rejected during protocol admission. When the client offers a
+  supported Shunter WebSocket subprotocol, Shunter completes the upgrade and
+  closes with WebSocket code 1008 and reason
+  `auth-token rejected by admission` so browser clients can classify the
+  failure. Syntactically malformed `Authorization` headers remain HTTP 401
+  before upgrade.
 - Local reducer and declared-read calls do not receive the dev-mode allow-all
   permission bypass by default.
 
@@ -132,8 +137,12 @@ HS256 path and should not be used for third-party OIDC providers.
 
 ## Failure Behavior
 
-- Missing token in strict mode: HTTP 401 before WebSocket upgrade.
-- Invalid token: HTTP 401 before WebSocket upgrade.
+- Missing token in strict mode with a supported Shunter subprotocol: WebSocket
+  close 1008 with reason `auth-token rejected by admission`.
+- Invalid token with a supported Shunter subprotocol: WebSocket close 1008 with
+  reason `auth-token rejected by admission`.
+- Syntactically malformed `Authorization` header: HTTP 401 before WebSocket
+  upgrade.
 - Bad protocol auth configuration: startup or protocol graph construction
   fails with an actionable error.
 - Missing reducer permission: reducer call is rejected as a permission failure.
