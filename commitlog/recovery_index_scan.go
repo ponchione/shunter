@@ -3,10 +3,8 @@ package commitlog
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
@@ -62,29 +60,13 @@ func tryIndexedSnapshotRecoveryScan(baseDir string, reg schema.SchemaRegistry) (
 			continue
 		}
 
-		snapshot, err := ReadSnapshot(filepath.Join(snapshotDir, fmt.Sprintf("%d", txID)))
+		snapshot, skip, err := readSnapshotCandidate(snapshotDir, txID, reg)
 		if err != nil {
-			if isUnsafeSnapshotSelectionError(err) {
-				return segments, durableHorizon, nil, skipped, true, err
-			}
-			skipped = append(skipped, SkippedSnapshotReport{
-				TxID:   txID,
-				Reason: SnapshotSkipReadFailed,
-				Detail: err.Error(),
-			})
-			continue
-		}
-		if snapshot.TxID != txID {
-			err := fmt.Errorf("%w: snapshot tx_id mismatch: directory=%d header=%d", ErrSnapshot, txID, snapshot.TxID)
-			skipped = append(skipped, SkippedSnapshotReport{
-				TxID:   txID,
-				Reason: SnapshotSkipReadFailed,
-				Detail: err.Error(),
-			})
-			continue
-		}
-		if err := compareSnapshotSchema(snapshot, reg); err != nil {
 			return segments, durableHorizon, nil, skipped, true, err
+		}
+		if skip != nil {
+			skipped = append(skipped, *skip)
+			continue
 		}
 		return segments, durableHorizon, snapshot, skipped, true, nil
 	}

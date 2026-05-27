@@ -31,29 +31,13 @@ func selectSnapshotWithReport(baseDir string, durableHorizon types.TxID, reg sch
 			})
 			continue
 		}
-		snapshot, err := ReadSnapshot(filepath.Join(snapshotDir, fmt.Sprintf("%d", txID)))
+		snapshot, skip, err := readSnapshotCandidate(snapshotDir, txID, reg)
 		if err != nil {
-			if isUnsafeSnapshotSelectionError(err) {
-				return nil, skipped, err
-			}
-			skipped = append(skipped, SkippedSnapshotReport{
-				TxID:   txID,
-				Reason: SnapshotSkipReadFailed,
-				Detail: err.Error(),
-			})
-			continue
-		}
-		if snapshot.TxID != txID {
-			err := fmt.Errorf("%w: snapshot tx_id mismatch: directory=%d header=%d", ErrSnapshot, txID, snapshot.TxID)
-			skipped = append(skipped, SkippedSnapshotReport{
-				TxID:   txID,
-				Reason: SnapshotSkipReadFailed,
-				Detail: err.Error(),
-			})
-			continue
-		}
-		if err := compareSnapshotSchema(snapshot, reg); err != nil {
 			return nil, skipped, err
+		}
+		if skip != nil {
+			skipped = append(skipped, *skip)
+			continue
 		}
 		return snapshot, skipped, nil
 	}
@@ -78,6 +62,32 @@ func resolveSnapshotAndLogDirs(baseDir string) (string, string) {
 		return snapshotDir, filepath.Dir(baseDir)
 	}
 	return snapshotDir, logDir
+}
+
+func readSnapshotCandidate(snapshotDir string, txID types.TxID, reg schema.SchemaRegistry) (*SnapshotData, *SkippedSnapshotReport, error) {
+	snapshot, err := ReadSnapshot(filepath.Join(snapshotDir, fmt.Sprintf("%d", txID)))
+	if err != nil {
+		if isUnsafeSnapshotSelectionError(err) {
+			return nil, nil, err
+		}
+		return nil, &SkippedSnapshotReport{
+			TxID:   txID,
+			Reason: SnapshotSkipReadFailed,
+			Detail: err.Error(),
+		}, nil
+	}
+	if snapshot.TxID != txID {
+		err := fmt.Errorf("%w: snapshot tx_id mismatch: directory=%d header=%d", ErrSnapshot, txID, snapshot.TxID)
+		return nil, &SkippedSnapshotReport{
+			TxID:   txID,
+			Reason: SnapshotSkipReadFailed,
+			Detail: err.Error(),
+		}, nil
+	}
+	if err := compareSnapshotSchema(snapshot, reg); err != nil {
+		return nil, nil, err
+	}
+	return snapshot, nil, nil
 }
 
 func compareSnapshotSchema(snapshot *SnapshotData, reg schema.SchemaRegistry) error {
