@@ -22,27 +22,7 @@ const defaultRunningAppTimeout = 10 * time.Second
 
 func runCall(stdout, stderr io.Writer, args []string) int {
 	const command = "call"
-	fs := newFlagSet(stderr, "shunter call")
-	flags := newRunningAppFlags(fs)
-	if code, stop := parseFlags(fs, args); stop {
-		return code
-	}
-	if code := validateRunningAppCommon(stderr, flags); code != 0 {
-		return code
-	}
-	if fs.NArg() < 1 || fs.NArg() > 2 {
-		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), "", "invalid_arguments", "call requires reducer name and optional JSON arguments")
-		return 2
-	}
-
-	name := strings.TrimSpace(fs.Arg(0))
-	rawArgs, err := flags.argumentBytes(fs.Args()[1:])
-	if err != nil {
-		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), name, classifyRunningAppErrorCode(err), err.Error())
-		return 2
-	}
-
-	contract, code, ok := readRunningAppCommandContract(stderr, flags, command, "call contract", name)
+	flags, name, rawArgs, contract, code, ok := readRunningAppRequiredArgumentCommand(stderr, args, command, "call requires reducer name and optional JSON arguments", "call contract")
 	if !ok {
 		return code
 	}
@@ -164,25 +144,7 @@ func runSQLQuery(stdout, stderr io.Writer, flags runningAppFlags, sqlText string
 
 func runProcedure(stdout, stderr io.Writer, args []string) int {
 	const command = "procedure"
-	fs := newFlagSet(stderr, "shunter procedure")
-	flags := newRunningAppFlags(fs)
-	if code, stop := parseFlags(fs, args); stop {
-		return code
-	}
-	if code := validateRunningAppCommon(stderr, flags); code != 0 {
-		return code
-	}
-	if fs.NArg() < 1 || fs.NArg() > 2 {
-		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), "", "invalid_arguments", "procedure requires procedure name and optional JSON arguments")
-		return 2
-	}
-	name := strings.TrimSpace(fs.Arg(0))
-	rawArgs, err := flags.argumentBytes(fs.Args()[1:])
-	if err != nil {
-		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), name, classifyRunningAppErrorCode(err), err.Error())
-		return 2
-	}
-	contract, code, ok := readRunningAppCommandContract(stderr, flags, command, "procedure contract", name)
+	flags, name, rawArgs, contract, code, ok := readRunningAppRequiredArgumentCommand(stderr, args, command, "procedure requires procedure name and optional JSON arguments", "procedure contract")
 	if !ok {
 		return code
 	}
@@ -260,6 +222,32 @@ func validateRunningAppCommon(stderr io.Writer, flags runningAppFlags) int {
 		return 2
 	}
 	return 0
+}
+
+func readRunningAppRequiredArgumentCommand(stderr io.Writer, args []string, command, argumentError, contractLabel string) (runningAppFlags, string, []byte, shunter.ModuleContract, int, bool) {
+	fs := newFlagSet(stderr, "shunter "+command)
+	flags := newRunningAppFlags(fs)
+	if code, stop := parseFlags(fs, args); stop {
+		return flags, "", nil, shunter.ModuleContract{}, code, false
+	}
+	if code := validateRunningAppCommon(stderr, flags); code != 0 {
+		return flags, "", nil, shunter.ModuleContract{}, code, false
+	}
+	if fs.NArg() < 1 || fs.NArg() > 2 {
+		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), "", "invalid_arguments", argumentError)
+		return flags, "", nil, shunter.ModuleContract{}, 2, false
+	}
+	name := strings.TrimSpace(fs.Arg(0))
+	rawArgs, err := flags.argumentBytes(fs.Args()[1:])
+	if err != nil {
+		reportRunningAppUsageError(stderr, flags, command, flags.urlValue(), name, classifyRunningAppErrorCode(err), err.Error())
+		return flags, "", nil, shunter.ModuleContract{}, 2, false
+	}
+	contract, code, ok := readRunningAppCommandContract(stderr, flags, command, contractLabel, name)
+	if !ok {
+		return flags, "", nil, shunter.ModuleContract{}, code, false
+	}
+	return flags, name, rawArgs, contract, 0, true
 }
 
 type runningAppRequestContext struct {
@@ -697,23 +685,7 @@ func writeQuerySuccess(stdout io.Writer, format string, contract shunter.ModuleC
 	if err != nil {
 		return err
 	}
-	out := querySuccess{
-		Status:       "ok",
-		Scope:        "running_app",
-		Command:      "query",
-		TargetURL:    target,
-		Module:       contract.Module.Name,
-		Surface:      name,
-		Identity:     hex.EncodeToString(identity.Identity[:]),
-		ConnectionID: hex.EncodeToString(identity.ConnectionID[:]),
-		Result:       rows,
-		DurationUS:   response.TotalHostExecutionDuration,
-	}
-	if strings.EqualFold(strings.TrimSpace(format), contractworkflow.FormatJSON) {
-		return writeJSON(stdout, out)
-	}
-	fmt.Fprintf(stdout, "Status: ok\nScope: running_app\nCommand: query\nTarget: %s\nModule: %s\nQuery: %s\nRows: %d\n", out.TargetURL, out.Module, out.Surface, len(out.Result.Rows))
-	return nil
+	return writeQueryRowsSuccess(stdout, format, contract, target, identity, response.TotalHostExecutionDuration, name, "Query", rows)
 }
 
 func writeSQLQuerySuccess(stdout io.Writer, format string, contract shunter.ModuleContract, target string, identity protocol.IdentityToken, response protocol.OneOffQueryResponse, sqlText string) error {
@@ -721,22 +693,26 @@ func writeSQLQuerySuccess(stdout io.Writer, format string, contract shunter.Modu
 	if err != nil {
 		return err
 	}
+	return writeQueryRowsSuccess(stdout, format, contract, target, identity, response.TotalHostExecutionDuration, sqlText, "SQL", rows)
+}
+
+func writeQueryRowsSuccess(stdout io.Writer, format string, contract shunter.ModuleContract, target string, identity protocol.IdentityToken, durationMicros int64, surface, label string, rows contractworkflow.JSONQueryRows) error {
 	out := querySuccess{
 		Status:       "ok",
 		Scope:        "running_app",
 		Command:      "query",
 		TargetURL:    target,
 		Module:       contract.Module.Name,
-		Surface:      sqlText,
+		Surface:      surface,
 		Identity:     hex.EncodeToString(identity.Identity[:]),
 		ConnectionID: hex.EncodeToString(identity.ConnectionID[:]),
 		Result:       rows,
-		DurationUS:   response.TotalHostExecutionDuration,
+		DurationUS:   durationMicros,
 	}
 	if strings.EqualFold(strings.TrimSpace(format), contractworkflow.FormatJSON) {
 		return writeJSON(stdout, out)
 	}
-	fmt.Fprintf(stdout, "Status: ok\nScope: running_app\nCommand: query\nTarget: %s\nModule: %s\nSQL: %s\nRows: %d\n", out.TargetURL, out.Module, out.Surface, len(out.Result.Rows))
+	fmt.Fprintf(stdout, "Status: ok\nScope: running_app\nCommand: query\nTarget: %s\nModule: %s\n%s: %s\nRows: %d\n", out.TargetURL, out.Module, label, out.Surface, len(out.Result.Rows))
 	return nil
 }
 
