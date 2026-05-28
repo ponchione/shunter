@@ -2052,7 +2052,17 @@ func TestContractCodegenCommandAcceptsTypeScriptRuntimeImport(t *testing.T) {
 
 func TestContractCodegenCommandAcceptsProfile(t *testing.T) {
 	dir := t.TempDir()
-	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
+	contract := cliContractFixture()
+	contract.Schema.Tables = append(contract.Schema.Tables, schema.TableExport{
+		Name: "private_messages",
+		SDK:  &schema.TableSDKMetadata{Visibility: schema.TableSDKVisibilityPrivate},
+		Columns: []schema.ColumnExport{
+			{Name: "id", Type: "uint64"},
+			{Name: "body", Type: "string"},
+		},
+		Indexes: []schema.IndexExport{{Name: "private_messages_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+	})
+	contractPath := writeCLIContract(t, dir, "contract.json", contract)
 	defaultOutputPath := filepath.Join(dir, "client.default.ts")
 	publicOutputPath := filepath.Join(dir, "client.public.ts")
 
@@ -2087,9 +2097,11 @@ func TestContractCodegenCommandAcceptsProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read public output: %v", err)
 	}
-	if !bytes.Equal(publicData, defaultData) {
-		t.Fatalf("public profile changed CLI output\n--- public ---\n%s\n--- default ---\n%s", publicData, defaultData)
-	}
+	assertContains(t, string(defaultData), `privateMessages: "private_messages",`)
+	assertContains(t, string(defaultData), `export function subscribePrivateMessages(`)
+	assertContains(t, string(publicData), `messages: "messages",`)
+	assertNotContains(t, string(publicData), `privateMessages: "private_messages",`)
+	assertNotContains(t, string(publicData), `export function subscribePrivateMessages(`)
 	assertContains(t, stdout.String(), "wrote "+publicOutputPath)
 }
 

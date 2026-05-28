@@ -121,10 +121,12 @@ rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --lan
 ```
 
 Profile selection is explicit with `--profile internal`, `--profile full`, or
-`--profile public`. Blank, `internal`, `full`, and `public` currently emit the
-same TypeScript. Contracts now export table visibility metadata for later public
-filtering; this path does not filter TypeScript table helpers yet. Go callers
-use `codegen.Options.Profile`.
+`--profile public`. Blank, `internal`, and `full` emit the complete TypeScript
+surface. The `public` profile uses each table's exported
+`schema.tables[].sdk.visibility` value and emits table row types, row decoders,
+read-policy metadata, table subscription helpers, event helpers, and module
+client table/event facades only for `public` tables. Go callers use
+`codegen.Options.Profile`.
 
 Generated TypeScript imports the Shunter SDK runtime package name
 `@shunter/client` by default. Use `codegen.Options.TypeScriptRuntimeImport` or
@@ -136,14 +138,17 @@ package manager:
 rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --runtime-import @app/shunter-runtime --out client.ts
 ```
 
-Generated TypeScript currently includes protocol and contract metadata, table
-row interfaces, `TableRows` and `tableRowDecoders`, table subscription helpers,
+Generated TypeScript includes protocol and contract metadata, table row
+interfaces, `TableRows` and `tableRowDecoders`, table subscription helpers,
 read-policy and visibility metadata, reducer and procedure constants and
 helpers, schema-aware argument encoders and result decoders when product schemas
 are exported, declared-query/view constants and helper functions, typed
 declared-read parameter interfaces and encoders when parameter schemas are
 exported, decoded declared-query/view row helpers when read metadata is
-exported, permissions, and read-model metadata.
+exported, permissions, and read-model metadata. Public-profile filtering does
+not remove executable declared queries or views; when declared-read row metadata
+is exported for a hidden table, generation keeps declared-read-specific codecs
+without exposing table subscription helpers for that table.
 
 Generated helpers are contract-driven client bindings. Raw `Uint8Array`
 helpers remain available for every reducer and procedure. When product schemas

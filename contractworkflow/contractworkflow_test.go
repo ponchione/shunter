@@ -297,7 +297,6 @@ func TestGenerateFromFileProfilesPreserveDefaultOutput(t *testing.T) {
 		{name: "blank", profile: codegen.ProfileDefault},
 		{name: "internal", profile: codegen.ProfileInternal},
 		{name: "full", profile: codegen.ProfileFull},
-		{name: "public", profile: codegen.ProfilePublic},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := GenerateFromFile(contractPath, codegen.Options{
@@ -311,6 +310,48 @@ func TestGenerateFromFileProfilesPreserveDefaultOutput(t *testing.T) {
 				t.Fatalf("profile %q changed generated output\n--- got ---\n%s\n--- want ---\n%s", tc.profile, got, want)
 			}
 		})
+	}
+}
+
+func TestGenerateFromFilePublicProfileFiltersHiddenTableHelpers(t *testing.T) {
+	dir := t.TempDir()
+	contract := workflowContractFixture()
+	contract.Schema.Tables = append(contract.Schema.Tables, schema.TableExport{
+		Name: "private_messages",
+		SDK:  &schema.TableSDKMetadata{Visibility: schema.TableSDKVisibilityPrivate},
+		Columns: []schema.ColumnExport{
+			{Name: "id", Type: "uint64"},
+			{Name: "body", Type: "string"},
+		},
+		Indexes: []schema.IndexExport{{Name: "private_messages_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+	})
+	contract.Queries = append(contract.Queries, shunter.QueryDescription{
+		Name: "private_message_summaries",
+		SQL:  "SELECT id, body FROM private_messages",
+		RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+			{Name: "id", Type: "uint64"},
+			{Name: "body", Type: "string"},
+		}},
+		ResultShape: &shunter.ReadResultShape{Kind: shunter.ReadResultShapeProjection, Table: "private_messages"},
+	})
+	contractPath := writeContractFixture(t, dir, "contract.json", contract)
+
+	got, err := GenerateFromFile(contractPath, codegen.Options{
+		Language: codegen.LanguageTypeScript,
+		Profile:  codegen.ProfilePublic,
+	})
+	if err != nil {
+		t.Fatalf("GenerateFromFile returned error: %v", err)
+	}
+	ts := string(got)
+
+	assertContains(t, ts, `messages: "messages",`)
+	assertContains(t, ts, `privateMessageSummaries: "private_message_summaries",`)
+	assertContains(t, ts, `export interface PrivateMessageSummariesQueryRow {`)
+	if strings.Contains(ts, `privateMessages: "private_messages",`) ||
+		strings.Contains(ts, `export interface PrivateMessagesRow {`) ||
+		strings.Contains(ts, `export function subscribePrivateMessages(`) {
+		t.Fatalf("public profile exposed private table helper surface:\n%s", ts)
 	}
 }
 
@@ -1889,7 +1930,6 @@ func TestGenerateRuntimeProfilesPreserveDefaultOutput(t *testing.T) {
 		{name: "blank", profile: codegen.ProfileDefault},
 		{name: "internal", profile: codegen.ProfileInternal},
 		{name: "full", profile: codegen.ProfileFull},
-		{name: "public", profile: codegen.ProfilePublic},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := GenerateRuntime(rt, codegen.Options{
@@ -1903,6 +1943,26 @@ func TestGenerateRuntimeProfilesPreserveDefaultOutput(t *testing.T) {
 				t.Fatalf("profile %q changed runtime generated output\n--- got ---\n%s\n--- want ---\n%s", tc.profile, got, want)
 			}
 		})
+	}
+}
+
+func TestGenerateRuntimePublicProfileHidesSystemTableHelpers(t *testing.T) {
+	rt := buildWorkflowRuntime(t)
+	got, err := GenerateRuntime(rt, codegen.Options{
+		Language: codegen.LanguageTypeScript,
+		Profile:  codegen.ProfilePublic,
+	})
+	if err != nil {
+		t.Fatalf("GenerateRuntime returned error: %v", err)
+	}
+	ts := string(got)
+
+	assertContains(t, ts, `messages: "messages",`)
+	if strings.Contains(ts, `sysClients: "sys_clients",`) ||
+		strings.Contains(ts, `sysScheduled: "sys_scheduled",`) ||
+		strings.Contains(ts, `export function subscribeSysClients(`) ||
+		strings.Contains(ts, `export function subscribeSysScheduled(`) {
+		t.Fatalf("public runtime profile exposed system table helper surface:\n%s", ts)
 	}
 }
 

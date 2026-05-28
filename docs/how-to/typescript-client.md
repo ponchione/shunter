@@ -60,8 +60,11 @@ rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --lan
 ```
 
 Use `--profile internal`, `--profile full`, or `--profile public` to make the
-generation profile explicit. All accepted profiles currently emit the same
-TypeScript output; public filtering is not active yet.
+generation profile explicit. Blank, `internal`, and `full` emit the complete
+TypeScript surface. The `public` profile hides table-facing generated helpers
+for tables whose exported `schema.tables[].sdk.visibility` is `internal`,
+`private`, or `system`; declared query/view helpers, permissions, read-model
+metadata, and declared-read-specific row codecs remain available.
 
 If the app renames or vendors the runtime package, generate with the same import
 specifier. For example, with an explicit public profile:

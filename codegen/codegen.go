@@ -22,7 +22,7 @@ const (
 	ProfileInternal = "internal"
 	// ProfileFull emits the complete TypeScript surface.
 	ProfileFull = "full"
-	// ProfilePublic selects the public TypeScript surface. It is currently a validated no-op.
+	// ProfilePublic selects the public TypeScript surface.
 	ProfilePublic = "public"
 )
 

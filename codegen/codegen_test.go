@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -579,8 +580,7 @@ func TestTypeScriptProfilesPreserveDefaultOutput(t *testing.T) {
 		{name: "blank", profile: ProfileDefault},
 		{name: "internal", profile: ProfileInternal},
 		{name: "full", profile: ProfileFull},
-		{name: "public", profile: ProfilePublic},
-		{name: "trimmed case", profile: " PUBLIC "},
+		{name: "trimmed case", profile: " FULL "},
 	} {
 		t.Run("Generate/"+tc.name, func(t *testing.T) {
 			got, err := Generate(contract, Options{
@@ -605,6 +605,117 @@ func TestTypeScriptProfilesPreserveDefaultOutput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTypeScriptPublicProfileGolden(t *testing.T) {
+	got, err := Generate(publicProfileContractFixture(), Options{
+		Language: LanguageTypeScript,
+		Profile:  ProfilePublic,
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	assertCodegenGoldenBytes(t, filepath.Join("testdata", "typescript_public_profile.ts"), got)
+}
+
+func TestTypeScriptPublicProfileHidesSystemTablesBySDKVisibility(t *testing.T) {
+	out, err := Generate(publicProfileContractFixture(), Options{
+		Language: LanguageTypeScript,
+		Profile:  ProfilePublic,
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `sysVisible: "sys_visible",`)
+	assertContains(t, ts, `export interface SysVisibleRow {`)
+	assertContains(t, ts, `export function subscribeSysVisible(subscribeTable: TableSubscribeCaller<SysVisibleRow>, onRows?: (rows: SysVisibleRow[]) => void, options: TableSubscribeOptions<SysVisibleRow> = {}): Promise<SubscriptionUnsubscribe> {`)
+	assertNotContains(t, ts, `scheduler: "scheduler",`)
+	assertNotContains(t, ts, `export interface SchedulerRow {`)
+	assertNotContains(t, ts, `"scheduler": SchedulerRow;`)
+	assertNotContains(t, ts, `decodeSchedulerRow`)
+	assertNotContains(t, ts, `export function subscribeScheduler(`)
+	assertNotContains(t, ts, `return subscribeTable("scheduler",`)
+	assertNotContains(t, ts, `scheduler: { access:`)
+}
+
+func TestTypeScriptPublicProfileHidesPrivateAndInternalTableHelpers(t *testing.T) {
+	out, err := Generate(publicProfileContractFixture(), Options{
+		Language: LanguageTypeScript,
+		Profile:  ProfilePublic,
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `messages: "messages",`)
+	assertContains(t, ts, `notifications: "notifications",`)
+	assertContains(t, ts, `export function subscribeNotificationsInserts(subscribeTable: TableSubscribeCaller<NotificationsRow>, onInsert: (event: SubscriptionRowEvent<NotificationsRow>) => void, options: TableSubscribeOptions<NotificationsRow> = {}): Promise<SubscriptionUnsubscribe> {`)
+	assertContains(t, ts, `messages: { access: "private", permissions: [] },`)
+	assertContains(t, ts, `sysVisible: { access: "private", permissions: [] },`)
+	assertContains(t, ts, `notifications: { access: "private", permissions: [] },`)
+	assertNotContains(t, ts, `internalNotes: "internal_notes",`)
+	assertNotContains(t, ts, `privateNotes: "private_notes",`)
+	assertNotContains(t, ts, `secretEvents: "secret_events",`)
+	assertNotContains(t, ts, `export interface InternalNotesRow {`)
+	assertNotContains(t, ts, `export interface PrivateNotesRow {`)
+	assertNotContains(t, ts, `export interface SecretEventsRow {`)
+	assertNotContains(t, ts, `decodeInternalNotesRow`)
+	assertNotContains(t, ts, `decodePrivateNotesRow`)
+	assertNotContains(t, ts, `decodeSecretEventsRow`)
+	assertNotContains(t, ts, `export function subscribeInternalNotes(`)
+	assertNotContains(t, ts, `export function subscribePrivateNotes(`)
+	assertNotContains(t, ts, `export function subscribeSecretEvents(`)
+	assertNotContains(t, ts, `subscribeSecretEventsInserts`)
+	assertNotContains(t, ts, `internalNotes: { access:`)
+	assertNotContains(t, ts, `privateNotes: { access:`)
+	assertNotContains(t, ts, `secretEvents: { access:`)
+}
+
+func TestTypeScriptPublicProfileKeepsDeclaredReadDecodingForHiddenTables(t *testing.T) {
+	out, err := Generate(publicProfileContractFixture(), Options{
+		Language: LanguageTypeScript,
+		Profile:  ProfilePublic,
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `privateNoteSummaries: "private_note_summaries",`)
+	assertContains(t, ts, `privateNoteSummaries: "SELECT id, body FROM private_notes",`)
+	assertContains(t, ts, `export interface PrivateNoteSummariesQueryRow {`)
+	assertContains(t, ts, `export type PrivateNoteSummariesQueryRows = {`)
+	assertContains(t, ts, `"private_notes": PrivateNoteSummariesQueryRow;`)
+	assertContains(t, ts, `export const privateNoteSummariesQueryRowDecoders = {`)
+	assertContains(t, ts, `"private_notes": decodePrivateNoteSummariesQueryRow,`)
+	assertContains(t, ts, `const decodeOptions: DeclaredQueryDecodeOptions<PrivateNoteSummariesQueryRows> = options.tableDecoders === undefined && options.decodeRow === undefined ? { ...options, tableDecoders: privateNoteSummariesQueryRowDecoders } : options;`)
+	assertContains(t, ts, `export async function queryPrivateNoteSummariesDecoded(runDeclaredQuery: DeclaredQueryRunner, options: DeclaredQueryDecodeOptions<PrivateNoteSummariesQueryRows> = {}): Promise<DecodedDeclaredQueryResult<typeof queries.privateNoteSummaries, PrivateNoteSummariesQueryRows>> {`)
+	assertContains(t, ts, `liveInternalAudit: "live_internal_audit",`)
+	assertContains(t, ts, `export interface LiveInternalAuditViewRow {`)
+	assertContains(t, ts, `export function subscribeLiveInternalAudit(subscribeDeclaredView: DeclaredViewSubscriber, options: DeclaredViewSubscribeOptions<LiveInternalAuditViewRow> = {}): Promise<SubscriptionUnsubscribe> {`)
+	assertNotContains(t, ts, `tableRowDecoders["private_notes"]`)
+}
+
+func TestTypeScriptPublicProfileKeepsPermissionAndReadModelMetadataForHiddenTables(t *testing.T) {
+	out, err := Generate(publicProfileContractFixture(), Options{
+		Language: LanguageTypeScript,
+		Profile:  ProfilePublic,
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `privateNoteSummaries: { required: ["notes:read"] },`)
+	assertContains(t, ts, `liveInternalAudit: { required: ["audit:read"] },`)
+	assertContains(t, ts, `privateNoteSummaries: { tables: ["private_notes"], tags: ["public-query"] },`)
+	assertContains(t, ts, `liveInternalAudit: { tables: ["internal_notes"], tags: ["internal-view"] },`)
+	assertNotContains(t, ts, `export function subscribePrivateNotes(`)
+	assertNotContains(t, ts, `export function subscribeInternalNotes(`)
 }
 
 func TestGeneratorRejectsUnusableContractJSON(t *testing.T) {
@@ -1592,6 +1703,148 @@ func contractFixture() shunter.ModuleContract {
 					Name:    "live_messages",
 					Tables:  []string{"messages"},
 					Tags:    []string{"realtime"},
+				},
+			},
+		},
+		Migrations: shunter.MigrationContract{
+			Declarations: []shunter.MigrationContractDeclaration{},
+		},
+		Codegen: shunter.CodegenContractMetadata{
+			ContractFormat:          shunter.ModuleContractFormat,
+			ContractVersion:         shunter.ModuleContractVersion,
+			DefaultSnapshotFilename: shunter.DefaultContractSnapshotFilename,
+		},
+	}
+}
+
+func publicProfileContractFixture() shunter.ModuleContract {
+	tableSDK := func(visibility schema.TableSDKVisibility) *schema.TableSDKMetadata {
+		return &schema.TableSDKMetadata{Visibility: visibility}
+	}
+	return shunter.ModuleContract{
+		ContractVersion: shunter.ModuleContractVersion,
+		Module: shunter.ModuleContractIdentity{
+			Name:     "public_profile",
+			Version:  "v0.1.0",
+			Metadata: map[string]string{"team": "runtime"},
+		},
+		Schema: schema.SchemaExport{
+			Version: 1,
+			Tables: []schema.TableExport{
+				{
+					Name: "messages",
+					SDK:  tableSDK(schema.TableSDKVisibilityPublic),
+					Columns: []schema.ColumnExport{
+						{Name: "id", Type: "uint64"},
+						{Name: "body", Type: "string"},
+					},
+					Indexes: []schema.IndexExport{{Name: "messages_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+				},
+				{
+					Name: "sys_visible",
+					SDK:  tableSDK(schema.TableSDKVisibilityPublic),
+					Columns: []schema.ColumnExport{
+						{Name: "id", Type: "uint64"},
+					},
+					Indexes: []schema.IndexExport{{Name: "sys_visible_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+				},
+				{
+					Name: "internal_notes",
+					SDK:  tableSDK(schema.TableSDKVisibilityInternal),
+					Columns: []schema.ColumnExport{
+						{Name: "id", Type: "uint64"},
+						{Name: "action", Type: "string"},
+					},
+					Indexes: []schema.IndexExport{{Name: "internal_notes_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+					ReadPolicy: schema.ReadPolicy{
+						Access:      schema.TableAccessPermissioned,
+						Permissions: []string{"audit:raw-read"},
+					},
+				},
+				{
+					Name: "private_notes",
+					SDK:  tableSDK(schema.TableSDKVisibilityPrivate),
+					Columns: []schema.ColumnExport{
+						{Name: "id", Type: "uint64"},
+						{Name: "body", Type: "string"},
+					},
+					Indexes:    []schema.IndexExport{{Name: "private_notes_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+					ReadPolicy: schema.ReadPolicy{Access: schema.TableAccessPublic},
+				},
+				{
+					Name: "scheduler",
+					SDK:  tableSDK(schema.TableSDKVisibilitySystem),
+					Columns: []schema.ColumnExport{
+						{Name: "id", Type: "uint64"},
+					},
+					Indexes: []schema.IndexExport{{Name: "scheduler_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+				},
+				{
+					Name:    "notifications",
+					IsEvent: true,
+					SDK:     tableSDK(schema.TableSDKVisibilityPublic),
+					Columns: []schema.ColumnExport{
+						{Name: "id", Type: "uint64"},
+						{Name: "message", Type: "string"},
+					},
+					Indexes: []schema.IndexExport{{Name: "notifications_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+				},
+				{
+					Name:    "secret_events",
+					IsEvent: true,
+					SDK:     tableSDK(schema.TableSDKVisibilityPrivate),
+					Columns: []schema.ColumnExport{
+						{Name: "id", Type: "uint64"},
+					},
+					Indexes: []schema.IndexExport{{Name: "secret_events_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+				},
+			},
+			Reducers: []schema.ReducerExport{},
+		},
+		Queries: []shunter.QueryDescription{
+			{
+				Name: "private_note_summaries",
+				SQL:  "SELECT id, body FROM private_notes",
+				RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+					{Name: "id", Type: "uint64"},
+					{Name: "body", Type: "string"},
+				}},
+				ResultShape: &shunter.ReadResultShape{Kind: shunter.ReadResultShapeProjection, Table: "private_notes"},
+			},
+		},
+		Views: []shunter.ViewDescription{
+			{
+				Name: "live_internal_audit",
+				SQL:  "SELECT id, action FROM internal_notes",
+				RowSchema: &shunter.ProductSchema{Columns: []shunter.ProductColumn{
+					{Name: "id", Type: "uint64"},
+					{Name: "action", Type: "string"},
+				}},
+				ResultShape: &shunter.ReadResultShape{Kind: shunter.ReadResultShapeProjection, Table: "internal_notes"},
+			},
+		},
+		Permissions: shunter.PermissionContract{
+			Reducers: []shunter.PermissionContractDeclaration{},
+			Queries: []shunter.PermissionContractDeclaration{
+				{Name: "private_note_summaries", Required: []string{"notes:read"}},
+			},
+			Views: []shunter.PermissionContractDeclaration{
+				{Name: "live_internal_audit", Required: []string{"audit:read"}},
+			},
+		},
+		ReadModel: shunter.ReadModelContract{
+			Declarations: []shunter.ReadModelContractDeclaration{
+				{
+					Surface: shunter.ReadModelSurfaceQuery,
+					Name:    "private_note_summaries",
+					Tables:  []string{"private_notes"},
+					Tags:    []string{"public-query"},
+				},
+				{
+					Surface: shunter.ReadModelSurfaceView,
+					Name:    "live_internal_audit",
+					Tables:  []string{"internal_notes"},
+					Tags:    []string{"internal-view"},
 				},
 			},
 		},
