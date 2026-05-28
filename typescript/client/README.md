@@ -9,6 +9,11 @@ frontend apps and other projects. Today the package remains `"private": true`
 while the release workflow, package metadata, and packed-install gates are
 hardened.
 
+Npm publishing is not enabled for this package yet. The repository does not
+currently document `@shunter` scope ownership, release authority, a publish
+command policy, or the final version/`dist/` artifact rule, so keep this
+package private until those decisions are made.
+
 Build output is emitted to `dist/` as ESM JavaScript plus `.d.ts` files and
 source maps. Until public publishing is enabled, downstream apps should consume
 it through a workspace dependency, `file:` dependency, or locally packed tarball
@@ -228,6 +233,9 @@ reducer result and raw declared-query result envelopes so helper code can keep
 those surfaces tied to generated name unions.
 
 ## Verification
+
+These commands validate local package shape and packed install behavior. They
+are not a public npm publish workflow.
 
 ```bash
 rtk npm --prefix typescript/client run test

@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Documented that `@shunter/client` npm ownership and release policy remain
+  unsettled, so the TypeScript runtime package stays private and current app
+  consumption remains workspace, `file:`, or locally packed tarball based.
 - Generated TypeScript `shunterContract` metadata now records the normalized
   generation profile and runtime import target for release traceability.
 - TypeScript public-profile codegen now uses explicit table

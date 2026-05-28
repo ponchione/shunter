@@ -18,6 +18,12 @@ packed tarball. The intended distribution model is for frontend apps and other
 projects to install `@shunter/client` from a versioned package, then generate
 app-specific bindings from a reviewed Shunter contract.
 
+The package is not published to npm yet and remains `"private": true`.
+Repository docs do not yet settle `@shunter` scope ownership, publish
+authority, publish commands, version synchronization, or the final `dist/`
+artifact policy. Until those are documented, do not treat
+`npm install @shunter/client` as a supported path.
+
 Until the npm release workflow is promoted, keep local installs resolving to
 the same package name the generated bindings import: `@shunter/client`.
 
@@ -50,6 +56,9 @@ Build the runtime package before consuming it through a local path or tarball:
 rtk npm --prefix typescript/client run build
 rtk npm --prefix typescript/client run pack:dry-run
 ```
+
+`pack:dry-run` and the package smoke gate validate local package contents and
+packed installs; they are not npm publish commands.
 
 ## Generate Bindings
 

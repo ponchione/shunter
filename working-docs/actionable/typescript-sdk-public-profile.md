@@ -232,6 +232,16 @@ Keep package publish mechanics separate from codegen behavior where possible.
 The public profile can be implemented before npm publishing, and npm
 publishing can be enabled after the existing pack/smoke gates are stable.
 
+Current package-readiness decision:
+
+- Existing repo docs do not settle npm ownership or release authority for the
+  `@shunter` scope.
+- Keep `typescript/client/package.json` private and do not add npm publish
+  mechanics until the registry owner, publish command policy, version
+  synchronization rule, and `dist/` release-artifact policy are documented.
+- The supported current consumption paths remain workspace, `file:`, and
+  locally packed tarball installs that resolve as `@shunter/client`.
+
 ## Provenance
 
 At minimum, generated TypeScript should continue to emit:

@@ -138,6 +138,12 @@ package manager:
 rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --runtime-import @app/shunter-runtime --out client.ts
 ```
 
+The default `@shunter/client` import target is stable for generated bindings,
+but the runtime package is still private in this repository. Current app
+installs should resolve that name through a workspace, `file:` dependency, or
+locally packed tarball until npm scope ownership and release policy are
+documented.
+
 Generated TypeScript includes protocol and contract metadata, including the
 normalized `generationProfile` and `runtimeImport` values in
 `shunterContract`, table row interfaces, `TableRows` and `tableRowDecoders`,

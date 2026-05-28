@@ -34,6 +34,11 @@ rtk npm --prefix typescript/client run smoke:package
 rtk bash scripts/static-hosted-binary-gate.sh
 ```
 
+The TypeScript package commands qualify local package shape, dry-run pack
+contents, and packed-install smoke behavior. They do not authorize public npm
+publishing and do not settle `@shunter` scope ownership, publish command
+policy, version synchronization, or `dist/` artifact policy.
+
 The static hosted-binary gate wraps the maintained hosted-chat gate and focused
 binary-level Go gauntlets. It is the release evidence for the current static
 hosted-app shape, strict auth on the built hosted-chat binary, live
