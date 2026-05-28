@@ -152,10 +152,18 @@ const generatedContractMetadata: GeneratedContractMetadata<typeof generatedProto
 const generatedContractProtocolMetadata: ProtocolMetadata =
   generatedContractMetadata.protocol;
 const generatedModuleName: string | undefined = generatedContractMetadata.moduleName;
+const generatedProfile: string | undefined =
+  generatedContractMetadata.generationProfile;
+const generatedRuntimeImport: string | undefined =
+  generatedContractMetadata.runtimeImport;
 const generatedContractFormat: typeof SHUNTER_MODULE_CONTRACT_FORMAT =
   shunterContract.contractFormat;
+const exactGeneratedProfile: "internal" = shunterContract.generationProfile;
+const exactGeneratedRuntimeImport: "@shunter/client" = shunterContract.runtimeImport;
 const appScopedContractMetadata: GeneratedContractMetadata<typeof appScopedShunterProtocol> =
   appScopedShunterContract;
+const exactAppScopedRuntimeImport: "@app/shunter-runtime" =
+  appScopedShunterContract.runtimeImport;
 const contractCompatibility: GeneratedContractCompatibilityResult =
   checkGeneratedContractCompatibility(shunterContract, {
     protocol: generatedProtocol,
@@ -783,7 +791,12 @@ async function exerciseGeneratedBindings(): Promise<void> {
 void connectedState;
 void runtimeProtocolMetadata;
 void generatedContractFormat;
+void generatedProfile;
+void generatedRuntimeImport;
+void exactGeneratedProfile;
+void exactGeneratedRuntimeImport;
 void appScopedContractMetadata;
+void exactAppScopedRuntimeImport;
 void compatibleContract;
 void contractCompatibilityIssue;
 void authErrorKind;

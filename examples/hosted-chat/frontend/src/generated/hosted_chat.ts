@@ -54,6 +54,8 @@ export const shunterContract = {
   contractVersion: 1,
   moduleName: "hosted_chat",
   moduleVersion: "v0.1.0",
+  generationProfile: "internal",
+  runtimeImport: "@shunter/client",
   protocol: shunterProtocol,
 } as const satisfies ShunterGeneratedContractMetadata<typeof shunterProtocol>;
 
@@ -473,4 +475,3 @@ export function createModuleClient(bindings: ModuleClientBindings) {
     },
   } as const;
 }
-

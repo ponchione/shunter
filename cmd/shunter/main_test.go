@@ -2047,6 +2047,7 @@ func TestContractCodegenCommandAcceptsTypeScriptRuntimeImport(t *testing.T) {
 	}
 	assertContains(t, string(data), `} from "@app/shunter-runtime";`)
 	assertNotContains(t, string(data), `} from "@shunter/client";`)
+	assertContains(t, string(data), `runtimeImport: "@app/shunter-runtime",`)
 	assertContains(t, stdout.String(), "wrote "+outputPath)
 }
 
@@ -2099,7 +2100,9 @@ func TestContractCodegenCommandAcceptsProfile(t *testing.T) {
 	}
 	assertContains(t, string(defaultData), `privateMessages: "private_messages",`)
 	assertContains(t, string(defaultData), `export function subscribePrivateMessages(`)
+	assertContains(t, string(defaultData), `generationProfile: "internal",`)
 	assertContains(t, string(publicData), `messages: "messages",`)
+	assertContains(t, string(publicData), `generationProfile: "public",`)
 	assertNotContains(t, string(publicData), `privateMessages: "private_messages",`)
 	assertNotContains(t, string(publicData), `export function subscribePrivateMessages(`)
 	assertContains(t, stdout.String(), "wrote "+publicOutputPath)

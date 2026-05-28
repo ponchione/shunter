@@ -110,6 +110,8 @@ export interface GeneratedContractMetadata<Protocol extends ProtocolMetadata = P
     readonly contractVersion: number;
     readonly moduleName?: string;
     readonly moduleVersion?: string;
+    readonly generationProfile?: string;
+    readonly runtimeImport?: string;
     readonly protocol: Protocol;
 }
 export interface GeneratedContractCompatibilityOptions {

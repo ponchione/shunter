@@ -120,7 +120,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	if err := writeTypeScriptProtocolMetadata(&b); err != nil {
 		return nil, err
 	}
-	writeTypeScriptContractMetadata(&b, contract)
+	writeTypeScriptContractMetadata(&b, contract, profile, opts.runtimeImport)
 	b.WriteString("export type ReducerCaller = ShunterReducerCaller<ReducerName, Uint8Array, Uint8Array>;\n")
 	b.WriteString("export type ProcedureCaller = ShunterProcedureCaller<ProcedureName, Uint8Array, Uint8Array>;\n")
 	b.WriteString("export type EncodedReducerCallOptions<Args = unknown> = ShunterEncodedReducerCallOptions<Args>;\n")
@@ -736,12 +736,14 @@ func writeTypeScriptProtocolMetadata(b *bytes.Buffer) error {
 	return nil
 }
 
-func writeTypeScriptContractMetadata(b *bytes.Buffer, contract shunter.ModuleContract) {
+func writeTypeScriptContractMetadata(b *bytes.Buffer, contract shunter.ModuleContract, profile, runtimeImport string) {
 	b.WriteString("export const shunterContract = {\n")
 	fmt.Fprintf(b, "  contractFormat: %s,\n", strconv.Quote(contract.Codegen.ContractFormat))
 	fmt.Fprintf(b, "  contractVersion: %d,\n", contract.Codegen.ContractVersion)
 	fmt.Fprintf(b, "  moduleName: %s,\n", strconv.Quote(contract.Module.Name))
 	fmt.Fprintf(b, "  moduleVersion: %s,\n", strconv.Quote(contract.Module.Version))
+	fmt.Fprintf(b, "  generationProfile: %s,\n", strconv.Quote(profile))
+	fmt.Fprintf(b, "  runtimeImport: %s,\n", strconv.Quote(runtimeImport))
 	b.WriteString("  protocol: shunterProtocol,\n")
 	b.WriteString("} as const satisfies ShunterGeneratedContractMetadata<typeof shunterProtocol>;\n\n")
 }

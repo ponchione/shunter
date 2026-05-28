@@ -221,8 +221,9 @@ and view names in the generated file. Codegen callers can override the runtime
 import specifier for app-scoped packages, a future owned npm scope, workspace
 packages, `file:` dependencies, or vendored paths. Generated bindings also
 export `shunterContract` alongside `shunterProtocol` so apps can inspect
-contract format/version, module name/version, and protocol metadata for stale
-binding and compatibility checks. They also export module-scoped aliases for
+contract format/version, module name/version, protocol metadata, normalized
+generation profile, and runtime import target for stale binding, compatibility,
+and release traceability checks. They also export module-scoped aliases for
 reducer result and raw declared-query result envelopes so helper code can keep
 those surfaces tied to generated name unions.
 

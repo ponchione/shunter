@@ -138,17 +138,19 @@ package manager:
 rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --runtime-import @app/shunter-runtime --out client.ts
 ```
 
-Generated TypeScript includes protocol and contract metadata, table row
-interfaces, `TableRows` and `tableRowDecoders`, table subscription helpers,
-read-policy and visibility metadata, reducer and procedure constants and
-helpers, schema-aware argument encoders and result decoders when product schemas
-are exported, declared-query/view constants and helper functions, typed
-declared-read parameter interfaces and encoders when parameter schemas are
-exported, decoded declared-query/view row helpers when read metadata is
-exported, permissions, and read-model metadata. Public-profile filtering does
-not remove executable declared queries or views; when declared-read row metadata
-is exported for a hidden table, generation keeps declared-read-specific codecs
-without exposing table subscription helpers for that table.
+Generated TypeScript includes protocol and contract metadata, including the
+normalized `generationProfile` and `runtimeImport` values in
+`shunterContract`, table row interfaces, `TableRows` and `tableRowDecoders`,
+table subscription helpers, read-policy and visibility metadata, reducer and
+procedure constants and helpers, schema-aware argument encoders and result
+decoders when product schemas are exported, declared-query/view constants and
+helper functions, typed declared-read parameter interfaces and encoders when
+parameter schemas are exported, decoded declared-query/view row helpers when
+read metadata is exported, permissions, and read-model metadata. Public-profile
+filtering does not remove executable declared queries or views; when
+declared-read row metadata is exported for a hidden table, generation keeps
+declared-read-specific codecs without exposing table subscription helpers for
+that table.
 
 Generated helpers are contract-driven client bindings. Raw `Uint8Array`
 helpers remain available for every reducer and procedure. When product schemas

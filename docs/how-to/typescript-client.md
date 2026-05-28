@@ -89,6 +89,12 @@ separators, applying the category's camel-case or Pascal-case style, prefixing
 leading digits with `_`, suffixing reserved words with `_`, and appending
 numeric collision suffixes in contract order.
 
+Generated bindings export `shunterContract` with machine-readable provenance:
+contract format/version, module name/version, protocol metadata, normalized
+`generationProfile`, and normalized `runtimeImport`. Blank profile values are
+recorded as `internal`; explicit `full` and `public` values are recorded with
+those names.
+
 Generated TypeScript is intended for browsers and Electron renderers with
 standard Web APIs. Non-browser hosts must provide a compatible
 `webSocketFactory`. Server-side SDK APIs, framework cache adapters, generated

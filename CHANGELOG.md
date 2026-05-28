@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Generated TypeScript `shunterContract` metadata now records the normalized
+  generation profile and runtime import target for release traceability.
 - TypeScript public-profile codegen now uses explicit table
   `sdk.visibility` metadata to hide internal, private, and system table helper
   surfaces while preserving declared query/view helpers and declared-read row

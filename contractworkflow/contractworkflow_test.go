@@ -293,10 +293,11 @@ func TestGenerateFromFileProfilesPreserveDefaultOutput(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		profile string
+		want    string
 	}{
-		{name: "blank", profile: codegen.ProfileDefault},
-		{name: "internal", profile: codegen.ProfileInternal},
-		{name: "full", profile: codegen.ProfileFull},
+		{name: "blank", profile: codegen.ProfileDefault, want: codegen.ProfileInternal},
+		{name: "internal", profile: codegen.ProfileInternal, want: codegen.ProfileInternal},
+		{name: "full", profile: codegen.ProfileFull, want: codegen.ProfileFull},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := GenerateFromFile(contractPath, codegen.Options{
@@ -306,9 +307,11 @@ func TestGenerateFromFileProfilesPreserveDefaultOutput(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GenerateFromFile returned error: %v", err)
 			}
-			if !bytes.Equal(got, want) {
+			if tc.want == codegen.ProfileInternal && !bytes.Equal(got, want) {
 				t.Fatalf("profile %q changed generated output\n--- got ---\n%s\n--- want ---\n%s", tc.profile, got, want)
 			}
+			assertWorkflowTypeScriptOutputDiffersOnlyByProvenance(t, got, want)
+			assertContains(t, string(got), `generationProfile: "`+tc.want+`",`)
 		})
 	}
 }
@@ -1926,10 +1929,11 @@ func TestGenerateRuntimeProfilesPreserveDefaultOutput(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		profile string
+		want    string
 	}{
-		{name: "blank", profile: codegen.ProfileDefault},
-		{name: "internal", profile: codegen.ProfileInternal},
-		{name: "full", profile: codegen.ProfileFull},
+		{name: "blank", profile: codegen.ProfileDefault, want: codegen.ProfileInternal},
+		{name: "internal", profile: codegen.ProfileInternal, want: codegen.ProfileInternal},
+		{name: "full", profile: codegen.ProfileFull, want: codegen.ProfileFull},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := GenerateRuntime(rt, codegen.Options{
@@ -1939,9 +1943,11 @@ func TestGenerateRuntimeProfilesPreserveDefaultOutput(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GenerateRuntime returned error: %v", err)
 			}
-			if !bytes.Equal(got, want) {
+			if tc.want == codegen.ProfileInternal && !bytes.Equal(got, want) {
 				t.Fatalf("profile %q changed runtime generated output\n--- got ---\n%s\n--- want ---\n%s", tc.profile, got, want)
 			}
+			assertWorkflowTypeScriptOutputDiffersOnlyByProvenance(t, got, want)
+			assertContains(t, string(got), `generationProfile: "`+tc.want+`",`)
 		})
 	}
 }
@@ -2697,6 +2703,27 @@ func assertContains(t *testing.T, haystack, needle string) {
 	if !strings.Contains(haystack, needle) {
 		t.Fatalf("missing %q in:\n%s", needle, haystack)
 	}
+}
+
+func assertWorkflowTypeScriptOutputDiffersOnlyByProvenance(t *testing.T, got, want []byte) {
+	t.Helper()
+	gotWithoutProvenance := stripWorkflowTypeScriptProvenanceLines(got)
+	wantWithoutProvenance := stripWorkflowTypeScriptProvenanceLines(want)
+	if !bytes.Equal(gotWithoutProvenance, wantWithoutProvenance) {
+		t.Fatalf("generated output changed outside provenance\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+func stripWorkflowTypeScriptProvenanceLines(data []byte) []byte {
+	lines := bytes.Split(data, []byte("\n"))
+	out := lines[:0]
+	for _, line := range lines {
+		if bytes.HasPrefix(line, []byte("  generationProfile: ")) || bytes.HasPrefix(line, []byte("  runtimeImport: ")) {
+			continue
+		}
+		out = append(out, line)
+	}
+	return bytes.Join(out, []byte("\n"))
 }
 
 func assertNoWorkflowTempFiles(t *testing.T, dir, outputBase string) {

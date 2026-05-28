@@ -83,10 +83,12 @@ const caller: ReducerCaller = async (_name, args) => args;
 const protocol: typeof SHUNTER_SUBPROTOCOL_V2 = generatedProtocol.defaultSubprotocol;
 const contractFormat: string = shunterContract.contractFormat;
 const moduleName: string | undefined = shunterContract.moduleName;
+const generationProfile: "internal" = shunterContract.generationProfile;
+const runtimeImport: string = shunterContract.runtimeImport;
 
 await caller(reducers.createMessage, new Uint8Array());
 
-console.log(runtimeProtocol.defaultSubprotocol, protocol, contractFormat, moduleName);
+console.log(runtimeProtocol.defaultSubprotocol, protocol, contractFormat, moduleName, generationProfile, runtimeImport);
 `,
   );
 

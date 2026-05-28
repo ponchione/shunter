@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -107,6 +108,9 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `recentMessages: { required: ["messages:read"] },`)
 	assertContains(t, ts, `views: {`)
 	assertContains(t, ts, `liveMessages: { required: ["messages:subscribe"] },`)
+	assertContains(t, ts, `export const shunterContract = {`)
+	assertContains(t, ts, `generationProfile: "internal",`)
+	assertContains(t, ts, `runtimeImport: "@shunter/client",`)
 	assertContains(t, ts, `export const readModels = {`)
 	assertContains(t, ts, `recentMessages: { tables: ["messages"], tags: ["history"] },`)
 	assertContains(t, ts, `liveMessages: { tables: ["messages"], tags: ["realtime"] },`)
@@ -576,11 +580,12 @@ func TestTypeScriptProfilesPreserveDefaultOutput(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		profile string
+		want    string
 	}{
-		{name: "blank", profile: ProfileDefault},
-		{name: "internal", profile: ProfileInternal},
-		{name: "full", profile: ProfileFull},
-		{name: "trimmed case", profile: " FULL "},
+		{name: "blank", profile: ProfileDefault, want: ProfileInternal},
+		{name: "internal", profile: ProfileInternal, want: ProfileInternal},
+		{name: "full", profile: ProfileFull, want: ProfileFull},
+		{name: "trimmed case", profile: " FULL ", want: ProfileFull},
 	} {
 		t.Run("Generate/"+tc.name, func(t *testing.T) {
 			got, err := Generate(contract, Options{
@@ -590,9 +595,12 @@ func TestTypeScriptProfilesPreserveDefaultOutput(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Generate returned error: %v", err)
 			}
-			if !bytes.Equal(got, want) {
+			if tc.want == ProfileInternal && !bytes.Equal(got, want) {
 				t.Fatalf("profile %q changed generated output\n--- got ---\n%s\n--- want ---\n%s", tc.profile, got, want)
 			}
+			assertTypeScriptOutputDiffersOnlyByProvenance(t, got, want)
+			assertContains(t, string(got), `generationProfile: `+strconv.Quote(tc.want)+`,`)
+			assertContains(t, string(got), `runtimeImport: "@shunter/client",`)
 		})
 
 		t.Run("GenerateTypeScriptWithOptions/"+tc.name, func(t *testing.T) {
@@ -600,11 +608,31 @@ func TestTypeScriptProfilesPreserveDefaultOutput(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GenerateTypeScriptWithOptions returned error: %v", err)
 			}
-			if !bytes.Equal(got, want) {
+			if tc.want == ProfileInternal && !bytes.Equal(got, want) {
 				t.Fatalf("profile %q changed TypeScript output\n--- got ---\n%s\n--- want ---\n%s", tc.profile, got, want)
 			}
+			assertTypeScriptOutputDiffersOnlyByProvenance(t, got, want)
+			assertContains(t, string(got), `generationProfile: `+strconv.Quote(tc.want)+`,`)
+			assertContains(t, string(got), `runtimeImport: "@shunter/client",`)
 		})
 	}
+}
+
+func TestTypeScriptGeneratorEmitsNormalizedProvenance(t *testing.T) {
+	out, err := Generate(contractFixture(), Options{
+		Language:                LanguageTypeScript,
+		TypeScriptRuntimeImport: " @app/shunter-runtime ",
+		Profile:                 " FULL ",
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `} from "@app/shunter-runtime";`)
+	assertContains(t, ts, `generationProfile: "full",`)
+	assertContains(t, ts, `runtimeImport: "@app/shunter-runtime",`)
+	assertNotContains(t, ts, `runtimeImport: " @app/shunter-runtime ",`)
 }
 
 func TestTypeScriptPublicProfileGolden(t *testing.T) {
@@ -615,6 +643,8 @@ func TestTypeScriptPublicProfileGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate returned error: %v", err)
 	}
+	assertContains(t, string(got), `generationProfile: "public",`)
+	assertContains(t, string(got), `runtimeImport: "@shunter/client",`)
 
 	assertCodegenGoldenBytes(t, filepath.Join("testdata", "typescript_public_profile.ts"), got)
 }
@@ -1901,6 +1931,27 @@ func assertNotContains(t *testing.T, haystack, needle string) {
 	if strings.Contains(haystack, needle) {
 		t.Fatalf("generated TypeScript unexpectedly contains %q:\n%s", needle, haystack)
 	}
+}
+
+func assertTypeScriptOutputDiffersOnlyByProvenance(t *testing.T, got, want []byte) {
+	t.Helper()
+	gotWithoutProvenance := stripTypeScriptProvenanceLines(got)
+	wantWithoutProvenance := stripTypeScriptProvenanceLines(want)
+	if !bytes.Equal(gotWithoutProvenance, wantWithoutProvenance) {
+		t.Fatalf("generated output changed outside provenance\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+func stripTypeScriptProvenanceLines(data []byte) []byte {
+	lines := bytes.Split(data, []byte("\n"))
+	out := lines[:0]
+	for _, line := range lines {
+		if bytes.HasPrefix(line, []byte("  generationProfile: ")) || bytes.HasPrefix(line, []byte("  runtimeImport: ")) {
+			continue
+		}
+		out = append(out, line)
+	}
+	return bytes.Join(out, []byte("\n"))
 }
 
 func waitForCodegenSoakWorkers(t *testing.T, ch <-chan struct{}, want int, label string) {

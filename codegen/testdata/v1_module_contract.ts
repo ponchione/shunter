@@ -54,6 +54,8 @@ export const shunterContract = {
   contractVersion: 1,
   moduleName: "v1_guardrails",
   moduleVersion: "v1.0.0",
+  generationProfile: "internal",
+  runtimeImport: "@shunter/client",
   protocol: shunterProtocol,
 } as const satisfies ShunterGeneratedContractMetadata<typeof shunterProtocol>;
 
