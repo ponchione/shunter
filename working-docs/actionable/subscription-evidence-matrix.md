@@ -41,7 +41,8 @@ Current evidence:
 
 - `subscription/bench_test.go` includes equality subscriptions, fanout,
   ordered-window paths, join delta eval, multi-way join size fixtures, relation
-  shape fixtures, delta index construction, and candidate collection.
+  shape fixtures, bounded Stage B multi-way dimensions, delta index
+  construction, and candidate collection.
 - `docs/performance-envelopes.md` records advisory benchmark snapshots and
   known gaps.
 - Package tests already cover many subscription correctness paths.
@@ -67,12 +68,16 @@ Implementation anchors:
 - `internal/gauntlettests` is the right place for hosted-runtime or protocol
   matrix coverage that should run through real runtime APIs.
 
-Exact gaps after Stage A evidence publication:
+Exact gaps after Stage B subset evidence publication:
 
-- Stage B still lacks benchmark dimensions for cross joins,
-  selectivity/skew, changed row count, and aggregate relation-shape variants.
-  The current published relation-shape rows cover the existing `chain3`,
-  `self_alias3`, and `chain4` benchmark fixtures.
+- Stage B now has bounded benchmark rows for a 3-relation Cartesian
+  multi-join, one-match vs 8x8 hot-key selectivity/skew, 1/10/100 changed
+  endpoint rows, and `COUNT(*)` aggregate relation-shape variants across
+  accepted `chain3`, `self_alias3`, `chain4`, and bounded `cross3` fixtures.
+- Remaining multi-way evidence gaps include larger Cartesian fixtures, larger
+  skew/fanout distributions, relation counts beyond current bounded fixtures,
+  aggregate functions beyond the published `COUNT(*)` relation-shape rows, and
+  workload-derived application distributions.
 - There is no hosted end-to-end type/index matrix crossing reducer writes,
   declared reads, live subscriptions, protocol payloads, generated TypeScript,
   and restart or backup/restore.
@@ -113,6 +118,11 @@ is insufficient for real hosted apps.
    - aggregate vs non-aggregate
    - selectivity/skew
    - changed row count
+
+   Stage B subset completed on 2026-05-28 for a bounded `cross3` shape,
+   one-match vs `hot_key_8x8` selectivity, 1/10/100 changed endpoint rows, and
+   `COUNT(*)` aggregate relation-shape variants. Keep the remaining dimensions
+   evidence-first and bounded.
 3. Decide whether default multi-way join limits need to change, using
    benchmark and canary evidence rather than speculation.
 4. Add an end-to-end type/index matrix that crosses:
@@ -132,6 +142,9 @@ Start with existing benchmark names:
 - `BenchmarkEvalOrderedLimitedWindowDelta`
 - `BenchmarkMultiWayLiveJoinEvalSizes`
 - `BenchmarkMultiWayLiveJoinRelationShapes`
+- `BenchmarkMultiWayLiveJoinSelectivity`
+- `BenchmarkMultiWayLiveJoinChangedRows`
+- `BenchmarkMultiWayLiveJoinAggregateRelationShapes`
 - `BenchmarkJoinFragmentEval`
 - `BenchmarkFanOut1KClientsSameQuery`
 - `BenchmarkFanOut1KClientsVariedQueries`
@@ -281,6 +294,15 @@ Stage B: add missing subscription dimensions.
   skew, and changed-row-count dimensions
 - add aggregate subcases only for shapes already accepted today
 - keep sub-benchmark names reviewable in `benchstat`
+
+Stage B status, 2026-05-28: completed a bounded benchmark subset in
+`subscription/bench_test.go` and published the focused `-count=10` evidence in
+`docs/performance-envelopes.md`. The subset covers `cross3_rows_24`,
+`one_match`, `hot_key_8x8`, `changed_1`, `changed_10`, `changed_100`, and
+`COUNT(*)` aggregate relation-shape variants for accepted `chain3`,
+`self_alias3`, `chain4`, and bounded `cross3` shapes. Runtime semantics and
+default multi-way join guardrails stayed unchanged. The type/index canary and
+default-limit policy remain deferred.
 
 Stage C: add the type/index canary.
 

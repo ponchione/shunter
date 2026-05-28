@@ -955,31 +955,123 @@ func BenchmarkMultiWayLiveJoinRelationShapes(b *testing.B) {
 		changed := types.ProductValue{types.NewUint64(uint64(size + 3000)), types.NewUint64(uint64(size/2 + 1))}
 		benchmarkMultiWayLiveJoinShape(b, multiJoinFourRelationTestSchema(), multiJoinFourRelationPredicate(), benchmarkMultiJoinFourRelationCommitted(size, false), benchmarkMultiJoinFourRelationCommitted(size, true), 4, changed)
 	})
+	b.Run("cross3_rows_24", func(b *testing.B) {
+		const crossSize = 24
+		changed := types.ProductValue{types.NewUint64(uint64(crossSize + 1000)), types.NewUint64(uint64(crossSize/2 + 1))}
+		benchmarkMultiWayLiveJoinShape(b, multiJoinTestSchema(), benchmarkMultiJoinCross3Predicate(), benchmarkMultiJoinCommitted(crossSize, false), benchmarkMultiJoinCommitted(crossSize, true), 3, changed)
+	})
 }
 
 func benchmarkMultiWayLiveJoinShape(b *testing.B, s *fakeSchema, pred MultiJoin, before, after *mockCommitted, changedTable TableID, changed types.ProductValue) {
 	b.Helper()
+	cs := benchmarkMultiJoinInsertChangeset(changedTable, []types.ProductValue{changed})
+	benchmarkMultiWayLiveJoinDelta(b, s, pred, before, after, cs, nil)
+}
+
+func BenchmarkMultiWayLiveJoinSelectivity(b *testing.B) {
+	const size = 128
+	cases := []struct {
+		name      string
+		hotFanout int
+	}{
+		{name: "one_match", hotFanout: 1},
+		{name: "hot_key_8x8", hotFanout: 8},
+	}
+
+	for _, tc := range cases {
+		name := fmt.Sprintf("rows_%d/%s", size, tc.name)
+		b.Run(name, func(b *testing.B) {
+			changed := types.ProductValue{types.NewUint64(9000), types.NewUint64(1)}
+			before := benchmarkMultiJoinSelectivityCommitted(size, tc.hotFanout, nil)
+			after := benchmarkMultiJoinSelectivityCommitted(size, tc.hotFanout, []types.ProductValue{changed})
+			cs := benchmarkMultiJoinInsertChangeset(3, []types.ProductValue{changed})
+			benchmarkMultiWayLiveJoinDelta(b, multiJoinTestSchema(), multiJoinTestPredicate(), before, after, cs, nil)
+		})
+	}
+}
+
+func BenchmarkMultiWayLiveJoinChangedRows(b *testing.B) {
+	const size = 128
+	for _, changedRowCount := range []int{1, 10, 100} {
+		name := fmt.Sprintf("rows_%d/changed_%d", size, changedRowCount)
+		b.Run(name, func(b *testing.B) {
+			changedRows := benchmarkMultiJoinChangedRows(size, changedRowCount, 10_000)
+			before := benchmarkMultiJoinCommittedWithChangedRows(size, nil)
+			after := benchmarkMultiJoinCommittedWithChangedRows(size, changedRows)
+			cs := benchmarkMultiJoinInsertChangeset(3, changedRows)
+			benchmarkMultiWayLiveJoinDelta(b, multiJoinTestSchema(), multiJoinTestPredicate(), before, after, cs, nil)
+		})
+	}
+}
+
+func BenchmarkMultiWayLiveJoinAggregateRelationShapes(b *testing.B) {
+	const size = 128
+	b.Run("chain3/count", func(b *testing.B) {
+		changed := types.ProductValue{types.NewUint64(uint64(size + 1000)), types.NewUint64(uint64(size/2 + 1))}
+		benchmarkMultiWayLiveJoinShapeAggregate(b, multiJoinTestSchema(), multiJoinTestPredicate(), benchmarkMultiJoinCommitted(size, false), benchmarkMultiJoinCommitted(size, true), 3, changed, countStarAggregate())
+	})
+	b.Run("self_alias3/count", func(b *testing.B) {
+		changed := types.ProductValue{types.NewUint64(uint64(size + 2000)), types.NewUint64(uint64(size/2 + 1))}
+		benchmarkMultiWayLiveJoinShapeAggregate(b, multiJoinTestSchema(), repeatedMultiJoinConditionPredicate(), benchmarkMultiJoinCommitted(size, false), benchmarkMultiJoinSelfAliasCommitted(size, true), 2, changed, countStarAggregate())
+	})
+	b.Run("chain4/count", func(b *testing.B) {
+		changed := types.ProductValue{types.NewUint64(uint64(size + 3000)), types.NewUint64(uint64(size/2 + 1))}
+		benchmarkMultiWayLiveJoinShapeAggregate(b, multiJoinFourRelationTestSchema(), multiJoinFourRelationPredicate(), benchmarkMultiJoinFourRelationCommitted(size, false), benchmarkMultiJoinFourRelationCommitted(size, true), 4, changed, countStarAggregate())
+	})
+	b.Run("cross3_rows_24/count", func(b *testing.B) {
+		const crossSize = 24
+		changed := types.ProductValue{types.NewUint64(uint64(crossSize + 1000)), types.NewUint64(uint64(crossSize/2 + 1))}
+		benchmarkMultiWayLiveJoinShapeAggregate(b, multiJoinTestSchema(), benchmarkMultiJoinCross3Predicate(), benchmarkMultiJoinCommitted(crossSize, false), benchmarkMultiJoinCommitted(crossSize, true), 3, changed, countStarAggregate())
+	})
+}
+
+func benchmarkMultiWayLiveJoinShapeAggregate(b *testing.B, s *fakeSchema, pred MultiJoin, before, after *mockCommitted, changedTable TableID, changed types.ProductValue, aggregate *Aggregate) {
+	b.Helper()
+	cs := benchmarkMultiJoinInsertChangeset(changedTable, []types.ProductValue{changed})
+	benchmarkMultiWayLiveJoinDelta(b, s, pred, before, after, cs, aggregate)
+}
+
+func benchmarkMultiWayLiveJoinDelta(b *testing.B, s *fakeSchema, pred MultiJoin, before, after *mockCommitted, cs *store.Changeset, aggregate *Aggregate) {
+	b.Helper()
 	inbox := make(chan FanOutMessage, 1024)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
-	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+	req := SubscriptionSetRegisterRequest{
 		ConnID:     types.ConnectionID{9},
 		QueryID:    90,
 		Predicates: []Predicate{pred},
-	}, before); err != nil {
+	}
+	if aggregate != nil {
+		req.Aggregates = []*Aggregate{aggregate}
+	}
+	if _, err := mgr.RegisterSet(req, before); err != nil {
 		b.Fatalf("RegisterSet: %v", err)
 	}
 	drainBenchmarkInbox(b, inbox)
-	cs := &store.Changeset{
-		TxID: 1,
-		Tables: map[schema.TableID]*store.TableChangeset{
-			changedTable: {TableID: changedTable, TableName: fmt.Sprintf("t%d", changedTable), Inserts: []types.ProductValue{changed}},
-		},
-	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		mgr.EvalAndBroadcast(types.TxID(uint64(i+2)), cs, after, PostCommitMeta{})
+	}
+}
+
+func benchmarkMultiJoinCross3Predicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 2, Alias: 1},
+			{Table: 3, Alias: 2},
+		},
+		ProjectedRelation: 0,
+	}
+}
+
+func benchmarkMultiJoinInsertChangeset(table TableID, rows []types.ProductValue) *store.Changeset {
+	return &store.Changeset{
+		TxID: 1,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			table: {TableID: table, TableName: fmt.Sprintf("t%d", table), Inserts: rows},
+		},
 	}
 }
 
@@ -1017,6 +1109,58 @@ func benchmarkMultiWayLiveJoinEval(b *testing.B, size int, aggregate *Aggregate)
 	for i := 0; i < b.N; i++ {
 		mgr.EvalAndBroadcast(types.TxID(uint64(i+2)), cs, after, PostCommitMeta{})
 	}
+}
+
+func benchmarkMultiJoinSelectivityCommitted(size, hotFanout int, changedRows []types.ProductValue) *mockCommitted {
+	s := multiJoinTestSchema()
+	tRows := make([]types.ProductValue, size)
+	sRows := make([]types.ProductValue, size)
+	rRows := make([]types.ProductValue, size, size+len(changedRows))
+	for i := 0; i < size; i++ {
+		key := uint64(i + 2)
+		if i < hotFanout {
+			key = 1
+		}
+		tRows[i] = types.ProductValue{types.NewUint64(uint64(i + 1)), types.NewUint64(key)}
+		sRows[i] = types.ProductValue{types.NewUint64(uint64(i + 1001)), types.NewUint64(key)}
+		rRows[i] = types.ProductValue{types.NewUint64(uint64(i + 2001)), types.NewUint64(uint64(i + 20_000))}
+	}
+	rRows = append(rRows, changedRows...)
+	return buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: tRows,
+		2: sRows,
+		3: rRows,
+	})
+}
+
+func benchmarkMultiJoinChangedRows(size, count int, idBase uint64) []types.ProductValue {
+	rows := make([]types.ProductValue, count)
+	for i := range rows {
+		rows[i] = types.ProductValue{
+			types.NewUint64(idBase + uint64(i)),
+			types.NewUint64(uint64(i%size + 1)),
+		}
+	}
+	return rows
+}
+
+func benchmarkMultiJoinCommittedWithChangedRows(size int, changedRows []types.ProductValue) *mockCommitted {
+	s := multiJoinTestSchema()
+	tRows := make([]types.ProductValue, size)
+	sRows := make([]types.ProductValue, size)
+	rRows := make([]types.ProductValue, size, size+len(changedRows))
+	for i := 0; i < size; i++ {
+		key := types.NewUint64(uint64(i + 1))
+		tRows[i] = types.ProductValue{types.NewUint64(uint64(i + 1)), key}
+		sRows[i] = types.ProductValue{types.NewUint64(uint64(i + 1001)), key}
+		rRows[i] = types.ProductValue{types.NewUint64(uint64(i + 2001)), key}
+	}
+	rRows = append(rRows, changedRows...)
+	return buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: tRows,
+		2: sRows,
+		3: rRows,
+	})
 }
 
 func benchmarkMultiJoinCommitted(size int, includeChanged bool) *mockCommitted {

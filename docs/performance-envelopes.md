@@ -241,6 +241,65 @@ Representative standings:
 | Multi-way relation shape | `MultiWayLiveJoinRelationShapes/chain4-24` | 4-relation chain, 128 rows per relation, one endpoint insert | 1.067ms +/- 1% | 50.42Ki +/- 0% | 88 | advisory |
 | Multi-way focused geomean | all focused multi-way live join benchmarks | 9 sub-benchmark geomean | 769.2us | 41.31Ki | 72 | advisory |
 
+## Focused Multi-Way Live Join Stage B Dimensions
+
+This focused snapshot adds bounded benchmark dimensions for the Stage B
+subscription evidence slice: one Cartesian multi-join relation shape,
+selectivity/skew rows, changed-row-count variation, and `COUNT(*)` aggregate
+relation-shape variants over accepted multi-join shapes. It is advisory and
+does not change default multi-way join guardrails.
+
+- Date: 2026-05-28
+- Shunter commit: `1c40533f56dcaf7bd45b395bb906bd79e13bd343`
+- Measurement worktree: commit above plus Stage B benchmark and documentation
+  changes
+- Host: `Linux gernsback 6.17.0-29-generic`, linux/amd64
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`, 12 cores, 24 logical CPUs
+- Raw sample: 13 sub-benchmarks, `-count=10`, 130 benchmark rows, total
+  package benchmark time 177.668s
+- Raw output: `/tmp/shunter-subscription-stage-b-bench-raw-20260528.txt`
+- Benchstat output: `/tmp/shunter-subscription-stage-b-benchstat-20260528.txt`
+
+Command:
+
+```bash
+rtk bash -lc 'go test -run "^$" -bench "BenchmarkMultiWayLiveJoin(RelationShapes|Selectivity|ChangedRows|AggregateRelationShapes)$" -benchmem -count=10 ./subscription > /tmp/shunter-subscription-stage-b-bench-raw-20260528.txt 2>&1'
+rtk bash -lc 'rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-subscription-stage-b-bench-raw-20260528.txt > /tmp/shunter-subscription-stage-b-benchstat-20260528.txt 2>&1'
+```
+
+Representative standings:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Multi-way relation shape | `MultiWayLiveJoinRelationShapes/chain3-24` | 3-relation chain, 128 rows per relation, one endpoint insert | 385.6us +/- 1% | 37.37Ki +/- 0% | 68 | advisory |
+| Multi-way relation shape | `MultiWayLiveJoinRelationShapes/self_alias3-24` | 3 aliases over 2 physical tables, 128-row fixture, one repeated-table insert | 496.2us +/- 1% | 38.55Ki +/- 0% | 71 | advisory |
+| Multi-way relation shape | `MultiWayLiveJoinRelationShapes/chain4-24` | 4-relation chain, 128 rows per relation, one endpoint insert | 1.064ms +/- 1% | 50.42Ki +/- 0% | 88 | advisory |
+| Multi-way relation shape | `MultiWayLiveJoinRelationShapes/cross3_rows_24-24` | 3-relation Cartesian multi-join, 24 rows per relation, one endpoint insert | 50.09us +/- 1% | 86.70Ki +/- 0% | 85 | advisory |
+| Multi-way selectivity | `MultiWayLiveJoinSelectivity/rows_128/one_match-24` | 128 rows per relation, one changed row matching one left/middle tuple | 351.4us +/- 1% | 37.37Ki +/- 0% | 68 | advisory |
+| Multi-way selectivity | `MultiWayLiveJoinSelectivity/rows_128/hot_key_8x8-24` | 128 rows per relation, one changed hot-key row matching 8 left rows by 8 middle rows | 361.7us +/- 1% | 45.79Ki +/- 0% | 79 | advisory |
+| Multi-way changed rows | `MultiWayLiveJoinChangedRows/rows_128/changed_1-24` | 128 rows per relation, 1 inserted endpoint row | 383.3us +/- 1% | 37.37Ki +/- 0% | 68 | advisory |
+| Multi-way changed rows | `MultiWayLiveJoinChangedRows/rows_128/changed_10-24` | 128 rows per relation, 10 inserted endpoint rows | 436.7us +/- 1% | 40.35Ki +/- 0% | 77 | advisory |
+| Multi-way changed rows | `MultiWayLiveJoinChangedRows/rows_128/changed_100-24` | 128 rows per relation, 100 inserted endpoint rows | 953.7us +/- 0% | 91.98Ki +/- 0% | 183 | advisory |
+| Multi-way aggregate shape | `MultiWayLiveJoinAggregateRelationShapes/chain3/count-24` | `COUNT(*)` over 3-relation chain, 128 rows per relation, one endpoint insert | 2.366ms +/- 1% | 37.66Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate shape | `MultiWayLiveJoinAggregateRelationShapes/self_alias3/count-24` | `COUNT(*)` over 3 aliases across 2 physical tables, 128-row fixture, one repeated-table insert | 102.3ms +/- 2% | 39.45Ki +/- 0% | 77 | advisory |
+| Multi-way aggregate shape | `MultiWayLiveJoinAggregateRelationShapes/chain4/count-24` | `COUNT(*)` over 4-relation chain, 128 rows per relation, one endpoint insert | 4.708ms +/- 0% | 50.66Ki +/- 0% | 93 | advisory |
+| Multi-way aggregate shape | `MultiWayLiveJoinAggregateRelationShapes/cross3_rows_24/count-24` | `COUNT(*)` over 3-relation Cartesian multi-join, 24 rows per relation, one endpoint insert | 309.5us +/- 1% | 9.964Ki +/- 0% | 73 | advisory |
+| Multi-way Stage B geomean | all focused Stage B multi-way live join benchmarks | 13 sub-benchmark geomean | 817.6us | 41.61Ki | 81.58 | advisory |
+
+Current read:
+
+- The bounded 3-relation Cartesian fixture is intentionally much smaller than
+  the 128-row chain fixtures. Its delta row emits a 24x24 Cartesian fragment;
+  this is useful shape evidence, not a default-limit proposal.
+- Changed-row-count evidence is now present for 1, 10, and 100 inserted
+  endpoint rows on the 128-row chain fixture.
+- The hot-key fixture shows a modest local cost increase for one changed row
+  matching 8 left rows by 8 middle rows. Larger skew remains outside this
+  bounded slice.
+- The accepted `COUNT(*)` aggregate relation-shape rows show the repeated-table
+  self-alias aggregate path is the standout latency case in this slice.
+
 ## Focused Ordered Subscription Window Baseline
 
 This focused snapshot records the ordered subscription window benchmarks added
@@ -309,8 +368,10 @@ Representative standings:
   `Config.SubscriptionMaxMultiJoinRelations` and
   `Config.SubscriptionMaxMultiJoinRowsPerRelation`. The focused Stage A
   snapshot above refreshes the relation-size fixtures and publishes the
-  existing chain3, self_alias3, and chain4 relation-shape fixtures. It does not
-  justify changing the unlimited defaults.
+  existing chain3, self_alias3, and chain4 relation-shape fixtures. The focused
+  Stage B snapshot adds bounded cross-shape, selectivity/skew,
+  changed-row-count, and `COUNT(*)` aggregate relation-shape rows. This evidence
+  does not justify changing the unlimited defaults.
 - Offline backup/restore is covered for small and larger complete local
   DataDir fixtures and is expected to be I/O dominated; these rows do not
   replace production-scale backup/restore timing.
@@ -472,9 +533,10 @@ These remain outside the current benchmark envelope:
   in-process same-query, varied single-table, skewed hot-key, and varied
   two-table predicate fixtures
 - application workload timing, including production-scale backup/restore timing
-- Stage B multi-way join dimensions beyond the focused Stage A snapshot,
-  including cross-join relation shapes, selectivity/skew, changed-row-count
-  variation, and aggregate relation-shape variants
+- multi-way join evidence beyond the focused Stage B snapshot, including
+  larger Cartesian fixtures, larger skew/fanout distributions, relation counts
+  beyond current bounded fixtures, aggregate functions beyond the published
+  `COUNT(*)` relation-shape rows, and app-derived workload distributions
 - memory profiles outside the current subscription, single-WebSocket,
   16/64/128-client WebSocket fanout, sender-level backpressure, executor
   reducer commit, and small/larger local backup/restore fixtures, including
