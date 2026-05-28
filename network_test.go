@@ -186,9 +186,15 @@ func TestBuildAuthConfigStrictMapsIssuersAudiencesAndCopiesKey(t *testing.T) {
 	issuers := []string{"issuer"}
 	audiences := []string{"app"}
 	extraClaims := []string{"email"}
+	discoveryAlgorithms := []AuthAlgorithm{AuthAlgorithmRS256}
 	cfg := Config{
-		AuthMode:                AuthModeStrict,
-		AuthSigningKey:          key,
+		AuthMode:       AuthModeStrict,
+		AuthSigningKey: key,
+		AuthOIDCDiscoveryIssuers: []AuthOIDCDiscoveryIssuer{{
+			Issuer:       "https://discovery.example",
+			DiscoveryURL: "https://discovery.example/.well-known/openid-configuration",
+			Algorithms:   discoveryAlgorithms,
+		}},
 		AuthIssuers:             issuers,
 		AuthAudiences:           audiences,
 		AuthExtraClaims:         extraClaims,
@@ -206,6 +212,7 @@ func TestBuildAuthConfigStrictMapsIssuersAudiencesAndCopiesKey(t *testing.T) {
 	issuers[0] = "mutated"
 	audiences[0] = "mutated"
 	extraClaims[0] = "mutated"
+	discoveryAlgorithms[0] = AuthAlgorithmES256
 	if string(jwtCfg.SigningKey) == string(key) {
 		t.Fatal("signing key was not defensively copied")
 	}
@@ -217,6 +224,9 @@ func TestBuildAuthConfigStrictMapsIssuersAudiencesAndCopiesKey(t *testing.T) {
 	}
 	if jwtCfg.ExtraClaims[0] == extraClaims[0] {
 		t.Fatal("extra claims were not defensively copied")
+	}
+	if len(jwtCfg.OIDCDiscovery) != 1 || jwtCfg.OIDCDiscovery[0].Algorithms[0] != AuthAlgorithmRS256 {
+		t.Fatalf("OIDCDiscovery = %#v, want detached original discovery config", jwtCfg.OIDCDiscovery)
 	}
 	if jwtCfg.MaxExtraClaimBytes != 12 || jwtCfg.MaxExtraClaimsBytes != 34 {
 		t.Fatalf("extra claim limits = %d/%d, want 12/34", jwtCfg.MaxExtraClaimBytes, jwtCfg.MaxExtraClaimsBytes)
@@ -276,6 +286,31 @@ func TestBuildAuthConfigStrictAcceptsOIDCIssuersWithoutLocalKey(t *testing.T) {
 	}
 }
 
+func TestBuildAuthConfigStrictAcceptsOIDCDiscoveryIssuersWithoutLocalKey(t *testing.T) {
+	cfg := Config{
+		AuthMode: AuthModeStrict,
+		AuthOIDCDiscoveryIssuers: []AuthOIDCDiscoveryIssuer{{
+			Issuer:     "https://issuer.example",
+			Algorithms: []AuthAlgorithm{AuthAlgorithmRS256},
+		}},
+		AuthIssuers:   []string{"https://issuer.example"},
+		AuthAudiences: []string{"app"},
+	}
+	jwtCfg, mintCfg, err := buildAuthConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildAuthConfig returned error: %v", err)
+	}
+	if jwtCfg.AuthMode != auth.AuthModeStrict || mintCfg != nil {
+		t.Fatalf("unexpected strict config: jwt=%+v mint=%+v", jwtCfg, mintCfg)
+	}
+	if len(jwtCfg.OIDCDiscovery) != 1 || jwtCfg.OIDCDiscovery[0].Issuer != "https://issuer.example" {
+		t.Fatalf("OIDCDiscovery = %#v, want configured discovery issuer", jwtCfg.OIDCDiscovery)
+	}
+	if len(jwtCfg.JWKS) != 0 {
+		t.Fatalf("JWKS = %#v, want discovery to stay separate from explicit JWKS config", jwtCfg.JWKS)
+	}
+}
+
 func TestBuildAuthConfigStrictRejectsInvalidVerificationKey(t *testing.T) {
 	_, _, err := buildAuthConfig(Config{
 		AuthMode: AuthModeStrict,
@@ -303,6 +338,40 @@ func TestConfigFromEnvParsesOIDCIssuers(t *testing.T) {
 	}
 	if cfg.AuthOIDCIssuers[1].Issuer != "https://other.example" || cfg.AuthOIDCIssuers[1].JWKSURL != "https://other.example/jwks" {
 		t.Fatalf("second AuthOIDCIssuer = %#v", cfg.AuthOIDCIssuers[1])
+	}
+}
+
+func TestConfigFromEnvParsesOIDCDiscoveryIssuers(t *testing.T) {
+	t.Setenv("SHUNTER_AUTH_OIDC_DISCOVERY_ISSUERS", "https://issuer.example; issuer-alias, https://issuer.example/.well-known/openid-configuration")
+
+	cfg, err := ConfigFromEnvE()
+	if err != nil {
+		t.Fatalf("ConfigFromEnvE returned error: %v", err)
+	}
+	if len(cfg.AuthOIDCDiscoveryIssuers) != 2 {
+		t.Fatalf("AuthOIDCDiscoveryIssuers = %#v, want two entries", cfg.AuthOIDCDiscoveryIssuers)
+	}
+	if cfg.AuthOIDCDiscoveryIssuers[0].Issuer != "https://issuer.example" || cfg.AuthOIDCDiscoveryIssuers[0].DiscoveryURL != "" {
+		t.Fatalf("first AuthOIDCDiscoveryIssuer = %#v, want issuer-only entry", cfg.AuthOIDCDiscoveryIssuers[0])
+	}
+	if cfg.AuthOIDCDiscoveryIssuers[1].Issuer != "issuer-alias" ||
+		cfg.AuthOIDCDiscoveryIssuers[1].DiscoveryURL != "https://issuer.example/.well-known/openid-configuration" {
+		t.Fatalf("second AuthOIDCDiscoveryIssuer = %#v, want issuer plus discovery URL", cfg.AuthOIDCDiscoveryIssuers[1])
+	}
+}
+
+func TestConfigFromEnvRejectsMalformedOIDCDiscoveryIssuer(t *testing.T) {
+	tests := []string{
+		",https://issuer.example/.well-known/openid-configuration",
+		"https://issuer.example, ",
+	}
+	for _, value := range tests {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("SHUNTER_AUTH_OIDC_DISCOVERY_ISSUERS", value)
+			if _, err := ConfigFromEnvE(); err == nil {
+				t.Fatal("ConfigFromEnvE succeeded with malformed OIDC discovery issuer entry")
+			}
+		})
 	}
 }
 
@@ -376,6 +445,7 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	key := []byte("strict-runtime-secret")
 	verificationKey := []byte("runtime-verification-secret")
 	oidcAlgorithms := []AuthAlgorithm{AuthAlgorithmRS256}
+	discoveryAlgorithms := []AuthAlgorithm{AuthAlgorithmES256}
 	issuers := []string{"issuer"}
 	audiences := []string{"app"}
 	extraClaims := []string{"email"}
@@ -388,6 +458,9 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 		},
 		AuthOIDCIssuers: []AuthOIDCIssuer{
 			{Issuer: "oidc", JWKSURL: "https://oidc.example/jwks.json", Algorithms: oidcAlgorithms},
+		},
+		AuthOIDCDiscoveryIssuers: []AuthOIDCDiscoveryIssuer{
+			{Issuer: "discovery", DiscoveryURL: "https://discovery.example/.well-known/openid-configuration", Algorithms: discoveryAlgorithms},
 		},
 		AuthIssuers:     issuers,
 		AuthAudiences:   audiences,
@@ -402,6 +475,7 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	key[0] = 'X'
 	verificationKey[0] = 'X'
 	oidcAlgorithms[0] = AuthAlgorithmES256
+	discoveryAlgorithms[0] = AuthAlgorithmRS256
 	issuers[0] = "mutated"
 	audiences[0] = "mutated"
 	extraClaims[0] = "mutated"
@@ -422,6 +496,9 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	if len(got.AuthOIDCIssuers) != 1 || got.AuthOIDCIssuers[0].Algorithms[0] != AuthAlgorithmRS256 {
 		t.Fatalf("Config AuthOIDCIssuers = %#v, want detached original OIDC issuer", got.AuthOIDCIssuers)
 	}
+	if len(got.AuthOIDCDiscoveryIssuers) != 1 || got.AuthOIDCDiscoveryIssuers[0].Algorithms[0] != AuthAlgorithmES256 {
+		t.Fatalf("Config AuthOIDCDiscoveryIssuers = %#v, want detached original OIDC discovery issuer", got.AuthOIDCDiscoveryIssuers)
+	}
 	if len(got.AuthExtraClaims) != 1 || got.AuthExtraClaims[0] != "email" {
 		t.Fatalf("Config AuthExtraClaims = %#v, want detached original extra claim", got.AuthExtraClaims)
 	}
@@ -430,6 +507,7 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	got.AuthVerificationKeys[0].Key[0] = 'Y'
 	got.AuthVerificationKeys[0].KeyID = "changed"
 	got.AuthOIDCIssuers[0].Algorithms[0] = AuthAlgorithmES256
+	got.AuthOIDCDiscoveryIssuers[0].Algorithms[0] = AuthAlgorithmRS256
 	got.AuthIssuers[0] = "changed"
 	got.AuthAudiences[0] = "changed"
 	got.AuthExtraClaims[0] = "changed"
@@ -451,6 +529,9 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	}
 	if len(again.AuthOIDCIssuers) != 1 || again.AuthOIDCIssuers[0].Algorithms[0] != AuthAlgorithmRS256 {
 		t.Fatalf("second Config AuthOIDCIssuers = %#v, want detached original OIDC issuer", again.AuthOIDCIssuers)
+	}
+	if len(again.AuthOIDCDiscoveryIssuers) != 1 || again.AuthOIDCDiscoveryIssuers[0].Algorithms[0] != AuthAlgorithmES256 {
+		t.Fatalf("second Config AuthOIDCDiscoveryIssuers = %#v, want detached original OIDC discovery issuer", again.AuthOIDCDiscoveryIssuers)
 	}
 	if len(again.AuthExtraClaims) != 1 || again.AuthExtraClaims[0] != "email" {
 		t.Fatalf("second Config AuthExtraClaims = %#v, want detached original extra claim", again.AuthExtraClaims)

@@ -70,15 +70,29 @@ type JWKSConfig struct {
 	RefreshTimeout time.Duration
 }
 
+// OIDCDiscoveryConfig configures OpenID Connect discovery-document lookup for
+// one issuer. Discovery resolves a jwks_uri into the existing JWKS verification
+// path; issuer and audience claim policy is still enforced through
+// JWTConfig.Issuers and JWTConfig.Audiences.
+type OIDCDiscoveryConfig struct {
+	Issuer         string
+	DiscoveryURL   string
+	Algorithms     []JWTAlgorithm
+	CacheTTL       time.Duration
+	RefreshTimeout time.Duration
+}
+
 // JWTConfig is the engine-level auth configuration. SigningKey
 // is the legacy HS256 verification key and remains supported for anonymous
 // token minting and existing strict-mode configuration. VerificationKeys adds
 // explicit local verification keys for HS256, RS256, and ES256. JWKS adds
-// remote RS256/ES256 verification keys fetched from trusted issuer metadata.
+// explicit remote RS256/ES256 verification keys. OIDCDiscovery resolves
+// discovery documents into JWKS verification sources on demand.
 type JWTConfig struct {
 	SigningKey          []byte
 	VerificationKeys    []JWTVerificationKey
 	JWKS                []JWKSConfig
+	OIDCDiscovery       []OIDCDiscoveryConfig
 	Issuers             []string // empty = skip issuer allowlist validation
 	Audiences           []string // empty = skip audience validation (SPEC-005 §4.1)
 	AuthMode            AuthMode
@@ -235,6 +249,9 @@ func ValidateJWTConfig(config *JWTConfig) error {
 	if err := validateJWKSConfig(config); err != nil {
 		return err
 	}
+	if err := validateOIDCDiscoveryConfig(config); err != nil {
+		return err
+	}
 	if err := ValidateJWTExtraClaimsConfig(config); err != nil {
 		return err
 	}
@@ -266,8 +283,8 @@ func resolveLocalJWTVerificationKeys(config *JWTConfig) ([]resolvedJWTVerificati
 		})
 	}
 	specs = append(specs, config.VerificationKeys...)
-	if len(specs) == 0 && len(config.JWKS) == 0 {
-		return nil, fmt.Errorf("%w: signing key or verification key is required", ErrJWTInvalid)
+	if len(specs) == 0 && len(config.JWKS) == 0 && len(config.OIDCDiscovery) == 0 {
+		return nil, fmt.Errorf("%w: signing key, verification key, JWKS, or OIDC discovery source is required", ErrJWTInvalid)
 	}
 	keys := make([]resolvedJWTVerificationKey, 0, len(specs))
 	for i, spec := range specs {

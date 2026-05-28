@@ -139,6 +139,7 @@ func copyConfig(cfg Config) Config {
 	out.AuthSigningKey = append([]byte(nil), cfg.AuthSigningKey...)
 	out.AuthVerificationKeys = copyAuthVerificationKeys(cfg.AuthVerificationKeys)
 	out.AuthOIDCIssuers = copyAuthOIDCIssuers(cfg.AuthOIDCIssuers)
+	out.AuthOIDCDiscoveryIssuers = copyAuthOIDCDiscoveryIssuers(cfg.AuthOIDCDiscoveryIssuers)
 	out.AuthIssuers = append([]string(nil), cfg.AuthIssuers...)
 	out.AuthAudiences = append([]string(nil), cfg.AuthAudiences...)
 	out.AuthExtraClaims = append([]string(nil), cfg.AuthExtraClaims...)
@@ -157,6 +158,17 @@ func copyAuthVerificationKeys(in []AuthVerificationKey) []AuthVerificationKey {
 }
 
 func copyAuthOIDCIssuers(in []AuthOIDCIssuer) []AuthOIDCIssuer {
+	if len(in) == 0 {
+		return nil
+	}
+	out := slices.Clone(in)
+	for i := range out {
+		out[i].Algorithms = slices.Clone(out[i].Algorithms)
+	}
+	return out
+}
+
+func copyAuthOIDCDiscoveryIssuers(in []AuthOIDCDiscoveryIssuer) []AuthOIDCDiscoveryIssuer {
 	if len(in) == 0 {
 		return nil
 	}

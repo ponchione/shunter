@@ -62,10 +62,8 @@ func validateJWKSConfig(config *JWTConfig) error {
 		if err := validateJWKSURL(source.JWKSURL); err != nil {
 			return fmt.Errorf("%w: jwks source %d: %w", ErrJWTInvalid, i+1, err)
 		}
-		for _, alg := range source.Algorithms {
-			if alg != JWTAlgorithmRS256 && alg != JWTAlgorithmES256 {
-				return fmt.Errorf("%w: jwks source %d: %w: %s", ErrJWTInvalid, i+1, ErrJWTUnsupportedAlg, alg)
-			}
+		if err := validateRemoteJWTAlgorithms(source.Algorithms); err != nil {
+			return fmt.Errorf("%w: jwks source %d: %w", ErrJWTInvalid, i+1, err)
 		}
 		if source.CacheTTL < 0 {
 			return fmt.Errorf("%w: jwks source %d: cache ttl must not be negative", ErrJWTInvalid, i+1)
@@ -78,21 +76,34 @@ func validateJWKSConfig(config *JWTConfig) error {
 }
 
 func validateJWKSURL(raw string) error {
+	return validateRemoteAuthURL(raw, "jwks url")
+}
+
+func validateRemoteAuthURL(raw, label string) error {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
-		return fmt.Errorf("jwks url: %w", err)
+		return fmt.Errorf("%s: %w", label, err)
 	}
 	if u.Host == "" {
-		return fmt.Errorf("jwks url host is required")
+		return fmt.Errorf("%s host is required", label)
 	}
 	if u.Scheme == "https" {
 		return nil
 	}
 	if u.Scheme != "http" {
-		return fmt.Errorf("jwks url must use https")
+		return fmt.Errorf("%s must use https", label)
 	}
 	if !isLoopbackJWKSHost(u.Hostname()) {
-		return fmt.Errorf("jwks url must use https unless the host is loopback")
+		return fmt.Errorf("%s must use https unless the host is loopback", label)
+	}
+	return nil
+}
+
+func validateRemoteJWTAlgorithms(algorithms []JWTAlgorithm) error {
+	for _, alg := range algorithms {
+		if alg != JWTAlgorithmRS256 && alg != JWTAlgorithmES256 {
+			return fmt.Errorf("%w: %s", ErrJWTUnsupportedAlg, alg)
+		}
 	}
 	return nil
 }
@@ -109,16 +120,50 @@ func isLoopbackJWKSHost(host string) bool {
 }
 
 func resolveJWKSVerificationKeys(config *JWTConfig, alg JWTAlgorithm, keyID, tokenIssuer string) ([]resolvedJWTVerificationKey, error) {
-	if config == nil || len(config.JWKS) == 0 {
+	if config == nil || (len(config.JWKS) == 0 && len(config.OIDCDiscovery) == 0) {
 		return nil, nil
 	}
 	if err := validateJWKSConfig(config); err != nil {
+		return nil, err
+	}
+	if err := validateOIDCDiscoveryConfig(config); err != nil {
 		return nil, err
 	}
 	var out []resolvedJWTVerificationKey
 	var lastErr error
 	for _, source := range config.JWKS {
 		if strings.TrimSpace(source.Issuer) != tokenIssuer {
+			continue
+		}
+		if !jwksSourceAllowsAlgorithm(source, alg) {
+			continue
+		}
+		keys, err := keysForJWKS(source, false)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		matches := matchingJWKSVerificationKeys(keys, alg, keyID)
+		if len(matches) == 0 && keyID != "" {
+			keys, err = keysForJWKS(source, true)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			matches = matchingJWKSVerificationKeys(keys, alg, keyID)
+		}
+		out = append(out, matches...)
+	}
+	for _, discovery := range config.OIDCDiscovery {
+		if strings.TrimSpace(discovery.Issuer) != tokenIssuer {
+			continue
+		}
+		if !oidcDiscoverySourceAllowsAlgorithm(discovery, alg) {
+			continue
+		}
+		source, err := jwksForOIDCDiscovery(discovery)
+		if err != nil {
+			lastErr = err
 			continue
 		}
 		if !jwksSourceAllowsAlgorithm(source, alg) {

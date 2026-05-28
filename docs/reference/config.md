@@ -24,9 +24,10 @@ subscription multi-way join limits are rejected during `Build`.
 
 | Field | Purpose |
 | --- | --- |
-| `AuthSigningKey` | Legacy HS256 token signing/verification key. Required for strict protocol serving unless `AuthVerificationKeys` or `AuthOIDCIssuers` is configured. |
+| `AuthSigningKey` | Legacy HS256 token signing/verification key. Required for strict protocol serving unless `AuthVerificationKeys`, `AuthOIDCIssuers`, or `AuthOIDCDiscoveryIssuers` is configured. |
 | `AuthVerificationKeys` | Local JWT verification keys for HS256, RS256, or ES256, with optional `KeyID`/`kid` matching for rotation. |
 | `AuthOIDCIssuers` | Explicit remote JWKS verification sources for RS256 or ES256 JWTs. This config supplies keys, not issuer/audience policy. |
+| `AuthOIDCDiscoveryIssuers` | Generic OIDC discovery-document sources that resolve to JWKS verification sources. This config supplies keys, not issuer/audience policy. |
 | `AuthIssuers` | Accepted JWT issuer values when non-empty. |
 | `AuthAudiences` | Accepted JWT audience values when non-empty. |
 | `AuthExtraClaims` | Optional allowlist of extra JWT claim names copied into reducer/procedure caller principals as compact JSON. |
@@ -55,6 +56,7 @@ only; they do not grant permissions.
 | `SHUNTER_AUTH_ISSUERS` | `AuthIssuers` |
 | `SHUNTER_AUTH_AUDIENCES` | `AuthAudiences` |
 | `SHUNTER_AUTH_OIDC_ISSUERS` | `AuthOIDCIssuers` as `issuer,jwks-url;issuer,jwks-url` |
+| `SHUNTER_AUTH_OIDC_DISCOVERY_ISSUERS` | `AuthOIDCDiscoveryIssuers` as `issuer;issuer,discovery-url` |
 | `SHUNTER_AUTH_EXTRA_CLAIMS` | `AuthExtraClaims` |
 | `SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES` | `AuthMaxExtraClaimBytes` |
 | `SHUNTER_AUTH_MAX_EXTRA_CLAIMS_BYTES` | `AuthMaxExtraClaimsBytes` |
@@ -164,3 +166,28 @@ cfg := shunter.Config{
 Supabase remains the delegated auth provider. Shunter validates the externally
 issued JWT, enforces `AuthIssuers` and `AuthAudiences`, and does not map
 Supabase `role` into Shunter permissions.
+
+Strict protocol runtime with generic OIDC discovery:
+
+```go
+cfg := shunter.Config{
+	DataDir:        "./data/chat",
+	EnableProtocol: true,
+	ListenAddr:     "127.0.0.1:3000",
+	AuthMode:       shunter.AuthModeStrict,
+	AuthOIDCDiscoveryIssuers: []shunter.AuthOIDCDiscoveryIssuer{
+		{
+			Issuer: "https://issuer.example",
+		},
+	},
+	AuthIssuers:   []string{"https://issuer.example"},
+	AuthAudiences: []string{"chat"},
+}
+```
+
+When `DiscoveryURL` is blank, the default is
+`<issuer>/.well-known/openid-configuration` for URL issuers. Non-URL issuers
+require an explicit discovery URL. Explicit JWKS remains supported and is the
+preferred Supabase asymmetric-signing-key configuration path. Discovery does
+not add provider SDK behavior; Shunter still does not manage login/logout,
+sessions, refresh tokens, or provider user lifecycle.

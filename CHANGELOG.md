@@ -27,6 +27,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   claims as copy-isolated reducer/procedure caller context, including
   Supabase-style delegated-auth claims without mapping provider `role` values
   to Shunter permissions.
+- Strict auth now supports generic OIDC discovery issuers as a separate
+  key-discovery path that resolves discovery documents into JWKS verification
+  sources while preserving explicit JWKS configuration unchanged.
 - Non-caller transaction-update fanout now treats connections that disappear
   during delivery as skipped, matching the documented missing-connection
   behavior while avoiding a duplicate manager lookup.

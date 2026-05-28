@@ -36,15 +36,18 @@ root runtime.
 Behavior:
 
 - Protocol connections must present a bearer token.
-- Either `AuthSigningKey`, at least one `AuthVerificationKeys` entry, or at
-  least one `AuthOIDCIssuers` entry is required when protocol serving is
-  enabled.
+- Either `AuthSigningKey`, at least one `AuthVerificationKeys` entry, at least
+  one `AuthOIDCIssuers` entry, or at least one `AuthOIDCDiscoveryIssuers`
+  entry is required when protocol serving is enabled.
 - `AuthSigningKey` validates legacy HS256 JWTs.
 - `AuthVerificationKeys` validates local HS256, RS256, or ES256 keys. RS256 and
   ES256 keys are PEM-encoded public keys or certificates.
 - `AuthOIDCIssuers` validates RS256 or ES256 tokens against remote JWKS
   documents for configured trusted issuers. Remote JWKS URLs must use HTTPS,
   except loopback HTTP URLs used by local tests and development tooling.
+- `AuthOIDCDiscoveryIssuers` fetches OIDC discovery documents on demand,
+  validates their issuer and `jwks_uri`, then uses the discovered JWKS URL for
+  the same RS256/ES256 verification path.
 - A verification key's `KeyID` matches the token header `kid` for overlapping
   rotation. If a token supplies `kid`, keyed matches are preferred; unkeyed
   keys remain a fallback for legacy HS256 configurations.
@@ -69,9 +72,9 @@ Behavior:
   allow-all permission bypass by default.
 
 JWKS keys are fetched on demand, cached, and refreshed when a token presents a
-`kid` that is not present in the cached keyed remote set. Current strict mode
-does not include OIDC discovery-document lookup, background remote key refresh,
-or app-provided claim mappers.
+`kid` that is not present in the cached keyed remote set. OIDC discovery
+documents are also fetched on demand and cached; Shunter does not run
+background remote key or discovery refresh workers.
 
 ## Delegated Providers And Supabase
 
@@ -98,9 +101,12 @@ cfg := shunter.Config{
 }
 ```
 
-`AuthOIDCIssuers` supplies verification keys. `AuthIssuers` and
-`AuthAudiences` remain the issuer and audience policy. Allow Supabase `anon` as
-an audience only for apps that intentionally admit anonymous users.
+`AuthOIDCIssuers` supplies explicit JWKS verification keys and remains the
+preferred Supabase asymmetric-signing-key path. `AuthOIDCDiscoveryIssuers` is
+generic IdP key-discovery support for providers where discovery is desired.
+`AuthIssuers` and `AuthAudiences` remain the issuer and audience policy in both
+cases. Allow Supabase `anon` as an audience only for apps that intentionally
+admit anonymous users.
 
 Supabase `role` is not a Shunter permission. Shunter permission checks use only
 the `permissions` JWT claim or local caller permission options.
@@ -182,10 +188,17 @@ old and new public keys or HMAC secrets during the overlap window, give keyed
 tokens a stable `kid`, then remove retired keys in a later deployment.
 
 For remote key rotation, configure `AuthOIDCIssuers` with each trusted issuer
-and JWKS URL. Shunter fetches those JWKS documents when validating matching
-RS256 or ES256 tokens, caches successful key sets for the configured TTL, and
-refreshes a source immediately when a token's `kid` is not present in the
-cached keyed set. Cached keys remain usable until their TTL expires.
+and explicit JWKS URL, or configure `AuthOIDCDiscoveryIssuers` for a generic
+OIDC provider when you want Shunter to discover the JWKS URL. Shunter fetches
+JWKS documents when validating matching RS256 or ES256 tokens, caches
+successful key sets for the configured TTL, and refreshes a source immediately
+when a token's `kid` is not present in the cached keyed set. Cached keys remain
+usable until their TTL expires.
+
+Discovery uses `<issuer>/.well-known/openid-configuration` when
+`DiscoveryURL` is blank and the issuer is a URL. Non-URL issuer strings require
+an explicit discovery URL. Discovery and JWKS URLs must use HTTPS except for
+loopback HTTP used in local development and tests.
 
 Local `AuthVerificationKeys` remain useful when deployments want key material
 fully controlled by app configuration. `AuthSigningKey` remains the legacy
@@ -213,7 +226,9 @@ Before deploying strict auth:
 1. Set `AuthMode: shunter.AuthModeStrict`.
 2. Provide a strong `AuthSigningKey` for HS256 tokens, configure
    `AuthVerificationKeys` for local HS256, RS256, or ES256 verification, or
-   configure `AuthOIDCIssuers` for remote RS256/ES256 JWKS verification.
+   configure `AuthOIDCIssuers` for explicit remote RS256/ES256 JWKS
+   verification. Use `AuthOIDCDiscoveryIssuers` only when a generic IdP
+   discovery document should supply the JWKS URL.
 3. Configure `AuthIssuers` to the accepted token issuer values.
 4. Configure `AuthAudiences` when tokens should be scoped to this app.
 5. Ensure issued tokens contain `iss`, `sub`, and any required `permissions`.
@@ -225,7 +240,6 @@ Before deploying strict auth:
 
 ## Unsupported In Current Strict Mode
 
-- OIDC discovery-document lookup
 - background remote key refresh
 - app-provided claim-to-permission mappers
 - anonymous-token minting in strict mode

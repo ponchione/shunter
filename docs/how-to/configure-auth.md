@@ -96,6 +96,32 @@ loopback HTTP URLs used by local tests and development tooling. Keep
 `AuthIssuers` and `AuthAudiences` configured; JWKS configuration supplies
 signature keys, not claim policy.
 
+For a generic OIDC identity provider, Shunter can discover the JWKS URL from
+the provider discovery document:
+
+```go
+cfg := shunter.Config{
+	DataDir:        "./data/chat",
+	EnableProtocol: true,
+	AuthMode:       shunter.AuthModeStrict,
+	AuthOIDCDiscoveryIssuers: []shunter.AuthOIDCDiscoveryIssuer{
+		{
+			Issuer: "https://issuer.example",
+		},
+	},
+	AuthIssuers:   []string{"https://issuer.example"},
+	AuthAudiences: []string{"chat"},
+}
+```
+
+`AuthOIDCDiscoveryIssuers` resolves OIDC discovery documents into JWKS key
+sources and then uses the same RS256/ES256 verification path as explicit JWKS.
+When `DiscoveryURL` is blank, Shunter uses
+`<issuer>/.well-known/openid-configuration` only if the issuer is a URL.
+Non-URL issuer strings require an explicit discovery URL. Discovery and JWKS
+URLs must use HTTPS except for loopback HTTP in local development and tests.
+`AuthIssuers` and `AuthAudiences` remain the issuer and audience policy.
+
 ### Supabase
 
 Treat Supabase as delegated auth. Your frontend or app code obtains and
@@ -124,7 +150,8 @@ cfg := shunter.Config{
 
 Allow `anon` as an audience only when the app intentionally admits anonymous
 Supabase users. Supabase `role` is not a Shunter permission; the only JWT path
-to Shunter permissions is the `permissions` claim.
+to Shunter permissions is the `permissions` claim. Shunter does not manage
+Supabase login/logout, sessions, refresh tokens, or provider user lifecycle.
 
 ## Permissions
 
@@ -268,7 +295,9 @@ The current stable parameter is `:sender`, derived from caller identity.
 - Set `AuthModeStrict` for public protocol serving.
 - Provide a strong `AuthSigningKey` for HS256, configure
   `AuthVerificationKeys` for local HS256/RS256/ES256, or configure
-  `AuthOIDCIssuers` for remote RS256/ES256 JWKS verification.
+  `AuthOIDCIssuers` for explicit remote RS256/ES256 JWKS verification. Use
+  `AuthOIDCDiscoveryIssuers` when a generic IdP discovery document should
+  supply the JWKS URL.
 - Configure accepted issuers.
 - Configure audiences when tokens are app-scoped.
 - Include required permissions in issued tokens.

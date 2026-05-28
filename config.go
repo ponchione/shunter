@@ -40,6 +40,11 @@ type AuthVerificationKey = auth.JWTVerificationKey
 // AuthAudiences.
 type AuthOIDCIssuer = auth.JWKSConfig
 
+// AuthOIDCDiscoveryIssuer configures OIDC discovery-document lookup for one
+// issuer. Discovery resolves to a JWKS key source; issuer and audience claims
+// are still enforced by AuthIssuers and AuthAudiences.
+type AuthOIDCDiscoveryIssuer = auth.OIDCDiscoveryConfig
+
 // Config contains hosted-runtime build, startup, protocol, and authentication
 // options. Zero values keep the local/dev path easy to boot unless a serving or
 // strict-auth path requires additional fields.
@@ -51,14 +56,15 @@ type Config struct {
 	ListenAddr              string
 	AuthMode                AuthMode
 
-	AuthSigningKey          []byte
-	AuthVerificationKeys    []AuthVerificationKey
-	AuthOIDCIssuers         []AuthOIDCIssuer
-	AuthIssuers             []string
-	AuthAudiences           []string
-	AuthExtraClaims         []string
-	AuthMaxExtraClaimBytes  int
-	AuthMaxExtraClaimsBytes int
+	AuthSigningKey           []byte
+	AuthVerificationKeys     []AuthVerificationKey
+	AuthOIDCIssuers          []AuthOIDCIssuer
+	AuthOIDCDiscoveryIssuers []AuthOIDCDiscoveryIssuer
+	AuthIssuers              []string
+	AuthAudiences            []string
+	AuthExtraClaims          []string
+	AuthMaxExtraClaimBytes   int
+	AuthMaxExtraClaimsBytes  int
 
 	AnonymousTokenIssuer   string
 	AnonymousTokenAudience string
@@ -89,6 +95,7 @@ type Config struct {
 //   - SHUNTER_AUTH_ISSUERS: comma-separated
 //   - SHUNTER_AUTH_AUDIENCES: comma-separated
 //   - SHUNTER_AUTH_OIDC_ISSUERS: semicolon-separated issuer,jwks-url pairs
+//   - SHUNTER_AUTH_OIDC_DISCOVERY_ISSUERS: semicolon-separated issuer or issuer,discovery-url entries
 //   - SHUNTER_AUTH_EXTRA_CLAIMS: comma-separated extra claim names
 //   - SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES
 //   - SHUNTER_AUTH_MAX_EXTRA_CLAIMS_BYTES
@@ -132,6 +139,11 @@ func ConfigFromEnvE() (Config, error) {
 		return Config{}, fmt.Errorf("SHUNTER_AUTH_OIDC_ISSUERS: %w", err)
 	}
 	cfg.AuthOIDCIssuers = issuers
+	discoveryIssuers, err := parseOIDCDiscoveryIssuerEnv(os.Getenv("SHUNTER_AUTH_OIDC_DISCOVERY_ISSUERS"))
+	if err != nil {
+		return Config{}, fmt.Errorf("SHUNTER_AUTH_OIDC_DISCOVERY_ISSUERS: %w", err)
+	}
+	cfg.AuthOIDCDiscoveryIssuers = discoveryIssuers
 	cfg.AuthExtraClaims = splitEnvListPreserveEmpty(os.Getenv("SHUNTER_AUTH_EXTRA_CLAIMS"))
 	if cfg.AuthMaxExtraClaimBytes, err = parseOptionalIntEnv("SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES"); err != nil {
 		return Config{}, err
@@ -208,6 +220,34 @@ func parseOIDCIssuerEnv(value string) ([]AuthOIDCIssuer, error) {
 			return nil, fmt.Errorf("entry %q must include issuer and jwks-url", entry)
 		}
 		out = append(out, AuthOIDCIssuer{Issuer: issuer, JWKSURL: jwksURL})
+	}
+	return out, nil
+}
+
+func parseOIDCDiscoveryIssuerEnv(value string) ([]AuthOIDCDiscoveryIssuer, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	entries := strings.Split(value, ";")
+	out := make([]AuthOIDCDiscoveryIssuer, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		parts := strings.SplitN(entry, ",", 2)
+		issuer := strings.TrimSpace(parts[0])
+		if issuer == "" {
+			return nil, fmt.Errorf("entry %q must include issuer", entry)
+		}
+		var discoveryURL string
+		if len(parts) == 2 {
+			discoveryURL = strings.TrimSpace(parts[1])
+			if discoveryURL == "" {
+				return nil, fmt.Errorf("entry %q must include discovery-url when a comma is present", entry)
+			}
+		}
+		out = append(out, AuthOIDCDiscoveryIssuer{Issuer: issuer, DiscoveryURL: discoveryURL})
 	}
 	return out, nil
 }

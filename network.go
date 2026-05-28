@@ -28,7 +28,7 @@ const (
 
 var (
 	// ErrAuthSigningKeyRequired reports that strict protocol auth lacks verification material.
-	ErrAuthSigningKeyRequired = errors.New("shunter: auth signing key, verification key, or OIDC issuer required")
+	ErrAuthSigningKeyRequired = errors.New("shunter: auth signing key, verification key, OIDC issuer, or OIDC discovery issuer required")
 	// ErrAnonymousTokenTTLInvalid reports invalid anonymous token TTL configuration.
 	ErrAnonymousTokenTTLInvalid = errors.New("shunter: anonymous token TTL must not be negative")
 	// ErrRuntimeNotReady reports that protocol traffic reached a non-ready runtime.
@@ -58,6 +58,7 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 	signingKey := append([]byte(nil), cfg.AuthSigningKey...)
 	verificationKeys := copyAuthVerificationKeys(cfg.AuthVerificationKeys)
 	oidcIssuers := copyAuthOIDCIssuers(cfg.AuthOIDCIssuers)
+	oidcDiscoveryIssuers := copyAuthOIDCDiscoveryIssuers(cfg.AuthOIDCDiscoveryIssuers)
 	issuers := append([]string(nil), cfg.AuthIssuers...)
 	audiences := append([]string(nil), cfg.AuthAudiences...)
 	extraClaims := append([]string(nil), cfg.AuthExtraClaims...)
@@ -94,6 +95,7 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 			SigningKey:          append([]byte(nil), signingKey...),
 			VerificationKeys:    verificationKeys,
 			JWKS:                oidcIssuers,
+			OIDCDiscovery:       oidcDiscoveryIssuers,
 			Issuers:             issuers,
 			Audiences:           audiences,
 			AuthMode:            auth.AuthModeAnonymous,
@@ -107,13 +109,14 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 		mintCfg := &auth.MintConfig{Issuer: issuer, Audience: audience, SigningKey: append([]byte(nil), signingKey...), Expiry: cfg.AnonymousTokenTTL}
 		return jwtCfg, mintCfg, nil
 	case AuthModeStrict:
-		if len(signingKey) == 0 && len(verificationKeys) == 0 && len(oidcIssuers) == 0 {
+		if len(signingKey) == 0 && len(verificationKeys) == 0 && len(oidcIssuers) == 0 && len(oidcDiscoveryIssuers) == 0 {
 			return nil, nil, ErrAuthSigningKeyRequired
 		}
 		jwtCfg := &auth.JWTConfig{
 			SigningKey:          signingKey,
 			VerificationKeys:    verificationKeys,
 			JWKS:                oidcIssuers,
+			OIDCDiscovery:       oidcDiscoveryIssuers,
 			Issuers:             issuers,
 			Audiences:           audiences,
 			AuthMode:            auth.AuthModeStrict,
