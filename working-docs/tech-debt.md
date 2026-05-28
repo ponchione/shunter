@@ -50,7 +50,9 @@ Keep hosted-app productization work here until it becomes a concrete release
 slice:
 
 - publish-ready `@shunter/client` workflow, including package ownership,
-  public install docs, release instructions, and provenance decisions
+  public install docs, release instructions, and provenance decisions; the
+  deferred npm policy proposal is recorded in
+  `working-docs/actionable/typescript-sdk-public-profile.md`
 - standard static hosted-app template and deployment/runbook guidance
 - Nuxt/browser integration guide and SSR lifecycle guidance
 - dev workflow automation, such as rebuild/restart and TypeScript regeneration

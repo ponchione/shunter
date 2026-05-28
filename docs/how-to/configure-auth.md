@@ -205,14 +205,16 @@ SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES=4096
 SHUNTER_AUTH_MAX_EXTRA_CLAIMS_BYTES=16384
 ```
 
-Blank `AuthExtraClaims` preserves the narrow principal. Claim names are trimmed,
-may use provider or URI-style names, and cannot be empty, duplicated,
-control-character-bearing, over 256 bytes, or Shunter-owned (`iss`, `sub`,
-`aud`, `exp`, `iat`, `nbf`, `hex_identity`, `permissions`). Missing configured
-claims are skipped. Present claims are compact JSON values copied out of the
-already parsed JWT claim map. The byte-limit env vars are decimal integers;
-unset or zero values use the 4096-byte per-claim and 16384-byte total defaults,
-and negative values fail `ConfigFromEnvE`.
+Blank `AuthExtraClaims` preserves the narrow principal. At most 32 claim names
+can be configured. Claim names are trimmed, may use provider or URI-style names,
+and cannot be empty, duplicated, control-character-bearing, over 256 bytes, or
+Shunter-owned (`iss`, `sub`, `aud`, `exp`, `iat`, `nbf`, `hex_identity`,
+`permissions`). Missing configured claims are skipped. Present claims must be
+JSON scalar, object, or array values with nesting no deeper than 16 levels, and
+are copied as compact JSON out of the already parsed JWT claim map. The
+byte-limit env vars are decimal integers; unset or zero values use the 4096-byte
+per-claim and 16384-byte total defaults, and negative values fail
+`ConfigFromEnvE`.
 
 Extra claims are application context only. They do not expose JWT headers,
 `kid`, signatures, bearer tokens, or raw JWT text, and provider claims such as

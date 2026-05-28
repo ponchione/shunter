@@ -1,7 +1,13 @@
 # Auth Provider And Claims Hardening
 
-Status: actionable implementation slice
+Status: repo-local complete; audited 2026-05-28
 Primary backlog items: `deferred-functionality-backlog.md` items 12 and 13
+
+Audit note: this document keeps the original implementation plan for
+traceability. The boundary and gap sections below describe the
+pre-implementation state before commit `05b0460`; live code now implements OIDC
+discovery, explicit JWKS verification, bounded extra claims, Supabase delegated
+auth docs, and issuer/audience policy separation.
 
 ## Purpose
 
@@ -58,9 +64,9 @@ OIDC discovery remains useful generic IdP support. It should not replace or
 deprioritize explicit JWKS config, because Supabase's documented verification
 path exposes a direct JWKS endpoint.
 
-## Current Boundary
+## Pre-Implementation Boundary
 
-Current auth behavior:
+Pre-implementation auth behavior:
 
 - Root `Config` supports dev and strict auth modes.
 - Strict auth validates HS256 through `AuthSigningKey`.
@@ -100,7 +106,7 @@ Implementation anchors:
   `protocol/upgrade_test.go`, `procedure_test.go`, and
   `internal/gauntlettests/read_auth_gauntlet_test.go`.
 
-Exact gaps:
+Pre-implementation gaps:
 
 - No OIDC discovery document type, fetcher, cache, or env parser exists.
 - `AuthOIDCIssuers` means explicit JWKS URL today; changing that format would
@@ -270,7 +276,7 @@ should fail `ConfigFromEnvE`/startup before serving traffic.
 
 ## Extra Claim Context
 
-Current `AuthPrincipal` is narrow and safe:
+Pre-implementation `AuthPrincipal` was narrow and safe:
 
 ```go
 type AuthPrincipal struct {
@@ -306,6 +312,9 @@ Guardrails:
 - claim names are trimmed, non-empty, unique, and size-limited
 - claim names may use provider/URI-style names; do not restrict them to Go or
   SQL identifier syntax
+- configured claim count is bounded
+- preserved claim values are limited to JSON scalar, object, and array values
+- preserved claim value depth is bounded
 - each preserved raw JSON claim has a byte limit
 - total preserved claim bytes have a limit
 - `Copy()` deep-copies the map and raw-message byte slices

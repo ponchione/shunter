@@ -1,8 +1,17 @@
 # TypeScript SDK Public Profile And Provenance
 
-Status: actionable implementation slice
+Status: repo-local complete through public-profile/provenance stages; package publishing policy deferred
 Primary backlog items: `deferred-functionality-backlog.md` items 22 and 23
 Related deferred item: item 21 only for the current TypeScript output path
+
+Audit note: this document keeps the original staged implementation plan for
+traceability. The boundary and gap sections below describe the
+pre-implementation state before commits `f13069f`, `69c4d51`, `26a0510`, and
+`c15c360`; live code now implements TypeScript profile plumbing, table SDK
+visibility metadata, public-profile filtering, and generated provenance.
+Package publishing remains deferred because repository docs still do not settle
+`@shunter` scope ownership, release authority, publish command policy, version
+synchronization, or final `dist/` artifact policy.
 
 ## Purpose
 
@@ -13,9 +22,9 @@ profile that does not expose private/system tables as callable public helpers,
 plus package/release provenance that makes generated bindings traceable to the
 contract and Shunter runtime they target.
 
-## Current Boundary
+## Pre-Implementation Boundary
 
-Current state:
+Pre-implementation state:
 
 - `typescript/client` is named `@shunter/client`.
 - Generated TypeScript imports runtime helpers from `@shunter/client` by
@@ -54,7 +63,7 @@ Implementation anchors:
 - `typescript/client/package.json` has local build/test/package-smoke scripts
   but remains private.
 
-Exact gaps:
+Pre-implementation gaps:
 
 - There is no codegen profile option in Go APIs or CLI.
 - The generator cannot distinguish public app helpers from internal/system
@@ -101,15 +110,17 @@ policy, and visibility filters remain the security boundary.
 3. In the public profile, hide private/system tables from public facades.
 4. Preserve enough metadata for compatibility checks and declared-read decoding
    without turning private tables into app-facing helpers.
-5. Add package/release metadata and docs needed to publish `@shunter/client`.
+5. Document package readiness and keep npm publishing disabled until ownership
+   and release policy are settled.
 6. Add provenance fields or generated comments that let a generated binding be
    tied back to:
-   - Shunter version
    - contract format/version
    - module name/version
    - protocol min/current/default/supported values
    - runtime import target
    - generation profile
+   - optional future Shunter version or source contract hash when a workflow
+     layer can supply it cleanly
 
 ## Public Profile Semantics
 
@@ -242,6 +253,27 @@ Current package-readiness decision:
 - The supported current consumption paths remain workspace, `file:`, and
   locally packed tarball installs that resolve as `@shunter/client`.
 
+Deferred npm publishing policy proposal:
+
+- Use an npm organization scope for `@shunter/client`, with named package
+  maintainers, two-factor authentication, and a fallback if the `@shunter`
+  scope is unavailable.
+- Publish public scoped packages only from approved release automation, not
+  local developer machines.
+- Prefer registry-backed trusted publishing/provenance instead of long-lived
+  npm tokens when the repository and registry setup support it.
+- Derive the npm package version from root `VERSION` without the leading `v`;
+  publish stable tags with the `latest` dist-tag, prereleases with a prerelease
+  dist-tag, and do not publish `-dev` versions.
+- Keep the current local package-shape gates before any publish step: build,
+  pack dry-run, packed-install smoke test, clean worktree, and matching
+  changelog/release-qualification evidence.
+- Decide whether `dist/` remains checked in for local `file:` consumption or
+  becomes release-built only before changing the package publish workflow.
+- Add public package metadata only after the ownership decision is made:
+  public-user description, repository, bugs, homepage, keywords, and a license
+  field if the repository has a license.
+
 ## Provenance
 
 At minimum, generated TypeScript should continue to emit:
@@ -254,11 +286,12 @@ At minimum, generated TypeScript should continue to emit:
 Add profile and generation provenance:
 
 - `generationProfile`
-- Shunter codegen/runtime version from `CurrentBuildInfo` if the generator path
-  can access it without making codegen package depend on process globals in an
-  awkward way
-- optional source contract hash if contractworkflow owns the file path and can
-  compute it at the workflow layer
+- `runtimeImport`
+- optional future Shunter codegen/runtime version from `CurrentBuildInfo` if the
+  generator path can access it without making codegen package depend on process
+  globals in an awkward way
+- optional future source contract hash if contractworkflow owns the file path
+  and can compute it at the workflow layer
 
 Keep provenance machine-readable in the generated `shunterContract` or adjacent
 metadata. A comment is useful for humans but not enough for release automation.

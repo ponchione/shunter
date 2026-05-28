@@ -67,8 +67,10 @@ identity-provider tokens. `AuthOIDCDiscoveryIssuers` is available for generic
 OIDC providers when the app wants Shunter to resolve a discovery document into
 a JWKS key source. These key-source settings do not replace
 `SHUNTER_AUTH_ISSUERS` or `SHUNTER_AUTH_AUDIENCES`.
-Unset or zero extra-claim byte limits use the 4096-byte per-claim and
-16384-byte total defaults; negative values fail startup configuration.
+At most 32 extra claim names can be configured. Preserved values must be JSON
+scalar, object, or array values no deeper than 16 levels. Unset or zero
+extra-claim byte limits use the 4096-byte per-claim and 16384-byte total
+defaults; negative values fail startup configuration.
 
 Supabase is a delegated-auth provider in this model. Configure Supabase
 asymmetric signing-key deployments with explicit JWKS verification:
@@ -83,12 +85,12 @@ SHUNTER_AUTH_EXTRA_CLAIMS=email,role,session_id,aal,is_anonymous
 
 The browser or app owns Supabase login, refresh, and session lifecycle. Shunter
 validates the bearer token and enforces `SHUNTER_AUTH_ISSUERS` and
-`SHUNTER_AUTH_AUDIENCES`. Optional extra claims are bounded caller context for
-reducers and procedures. Supabase `role` is not a Shunter permission; use the
-`permissions` JWT claim or local permission options for Shunter permission
-checks. Explicit JWKS remains the preferred Supabase asymmetric-signing-key
-configuration path; discovery is generic IdP support, not a Supabase session or
-provider SDK integration.
+`SHUNTER_AUTH_AUDIENCES`. Optional extra claims are bounded, copy-isolated
+caller context for reducers and procedures. Supabase `role` is not a Shunter
+permission; use the `permissions` JWT claim or local permission options for
+Shunter permission checks. Explicit JWKS remains the preferred Supabase
+asymmetric-signing-key configuration path; discovery is generic IdP support, not
+a Supabase session or provider SDK integration.
 
 ## Example Workflow
 

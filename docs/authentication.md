@@ -61,9 +61,9 @@ Behavior:
 - `permissions` may be a string or string list and is copied into the caller
   principal and protocol connection.
 - Configured extra JWT claims are copied into reducer and procedure caller
-  principals as compact JSON values, bounded by per-claim and total byte
-  limits. Blank extra-claim configuration preserves the previous narrow
-  principal.
+  principals as compact JSON values, bounded by configured-claim count, JSON
+  value type/depth, per-claim bytes, and total bytes. Blank extra-claim
+  configuration preserves the previous narrow principal.
 - Missing, expired, future-issued, not-yet-valid, wrong-algorithm,
   bad-signature, audience-mismatched, missing-claim, or otherwise invalid
   tokens are rejected during protocol admission. When the client offers a
@@ -140,13 +140,15 @@ cfg.AuthMaxExtraClaimBytes = 4096
 cfg.AuthMaxExtraClaimsBytes = 16384
 ```
 
-Claim names are trimmed and must be non-empty, unique, no more than 256 bytes,
-free of control characters, and not Shunter-owned claims such as `iss`, `sub`,
-`aud`, `exp`, `iat`, `nbf`, `hex_identity`, or `permissions`. Missing
-configured claims are skipped. Values are re-marshaled from the parsed JWT claim
-map into compact JSON and copied on access. The byte-limit env vars are
-decimal integers; unset or zero values use the 4096-byte per-claim and
-16384-byte total defaults, and negative values fail configuration validation.
+At most 32 claim names can be configured. Claim names are trimmed and must be
+non-empty, unique, no more than 256 bytes, free of control characters, and not
+Shunter-owned claims such as `iss`, `sub`, `aud`, `exp`, `iat`, `nbf`,
+`hex_identity`, or `permissions`. Missing configured claims are skipped. Values
+must be JSON scalar, object, or array values with nesting no deeper than 16
+levels. Preserved values are re-marshaled from the parsed JWT claim map into
+compact JSON and copied on access. The byte-limit env vars are decimal integers;
+unset or zero values use the 4096-byte per-claim and 16384-byte total defaults,
+and negative values fail configuration validation.
 
 Extra claims do not expose JWT headers, `kid`, signatures, bearer tokens, or raw
 JWT text. They also do not affect permission checks.

@@ -4,9 +4,14 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Strict JWT extra-claim preservation now rejects excessive configured claim
+  counts and non-JSON or overly deep JSON claim values before exposing caller
+  context to reducers and procedures.
 - Documented that `@shunter/client` npm ownership and release policy remain
   unsettled, so the TypeScript runtime package stays private and current app
   consumption remains workspace, `file:`, or locally packed tarball based.
+- Added a deferred `@shunter/client` npm publishing policy proposal while
+  keeping npm publishing and package metadata behavior unchanged.
 - Generated TypeScript `shunterContract` metadata now records the normalized
   generation profile and runtime import target for release traceability.
 - TypeScript public-profile codegen now uses explicit table

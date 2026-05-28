@@ -41,11 +41,13 @@ See [Authentication](../authentication.md) and
 [Configure auth](../how-to/configure-auth.md) before using strict mode in a
 public service.
 
-Extra claim names are trimmed and validated at startup. They may use provider
-or URI-style names, but cannot be empty, duplicated, over 256 bytes, contain
-control characters, or name Shunter-owned claims: `iss`, `sub`, `aud`, `exp`,
-`iat`, `nbf`, `hex_identity`, or `permissions`. Extra claims are caller context
-only; they do not grant permissions.
+Extra claim names are trimmed and validated at startup. At most 32 names can be
+configured. They may use provider or URI-style names, but cannot be empty,
+duplicated, over 256 bytes, contain control characters, or name Shunter-owned
+claims: `iss`, `sub`, `aud`, `exp`, `iat`, `nbf`, `hex_identity`, or
+`permissions`. Preserved values must be JSON scalar, object, or array values
+with nesting no deeper than 16 levels. Extra claims are caller context only;
+they do not grant permissions.
 
 `ConfigFromEnv` maps these auth variables:
 

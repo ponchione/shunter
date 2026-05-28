@@ -617,6 +617,55 @@ func TestValidateJWTExtraClaimsRejectsTotalTooLarge(t *testing.T) {
 	}
 }
 
+func TestValidateJWTExtraClaimsRejectsTooManyConfiguredNames(t *testing.T) {
+	names := make([]string, maxExtraClaims+1)
+	for i := range names {
+		names[i] = fmt.Sprintf("claim_%d", i)
+	}
+	cfg := JWTConfig{SigningKey: testKey, ExtraClaims: names}
+
+	if err := ValidateJWTExtraClaimsConfig(&cfg); !errors.Is(err, ErrJWTInvalid) {
+		t.Fatalf("ValidateJWTExtraClaimsConfig error = %v, want ErrJWTInvalid", err)
+	}
+}
+
+func TestValidateJWTExtraClaimsRejectsExcessiveJSONDepth(t *testing.T) {
+	deep := any("leaf")
+	for range maxExtraClaimDepth + 1 {
+		deep = []any{deep}
+	}
+	cfg := &JWTConfig{
+		SigningKey:          testKey,
+		ExtraClaims:         []string{"metadata"},
+		MaxExtraClaimBytes:  4096,
+		MaxExtraClaimsBytes: 4096,
+	}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub":      "alice",
+		"iss":      "issuer",
+		"metadata": deep,
+	})
+
+	_, err := ValidateJWT(s, cfg)
+	if !errors.Is(err, ErrJWTInvalid) {
+		t.Fatalf("ValidateJWT error = %v, want ErrJWTInvalid", err)
+	}
+}
+
+func TestPreserveExtraClaimsRejectsNonJSONValueType(t *testing.T) {
+	_, err := preserveExtraClaims(
+		jwt.MapClaims{"metadata": map[any]any{"key": "value"}},
+		extraClaimConfig{
+			names:         []string{"metadata"},
+			maxClaimBytes: DefaultMaxExtraClaimBytes,
+			maxTotalBytes: DefaultMaxExtraClaimsBytes,
+		},
+	)
+	if !errors.Is(err, ErrJWTInvalid) {
+		t.Fatalf("preserveExtraClaims error = %v, want ErrJWTInvalid", err)
+	}
+}
+
 func TestValidateJWTRejectsInvalidExtraClaimConfig(t *testing.T) {
 	tests := []struct {
 		name string

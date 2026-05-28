@@ -33,7 +33,9 @@ const (
 	MaxIssuerBytes  = 1024
 	MaxSubjectBytes = 1024
 
+	maxExtraClaims             = 32
 	MaxExtraClaimNameBytes     = 256
+	maxExtraClaimDepth         = 16
 	DefaultMaxExtraClaimBytes  = 4096
 	DefaultMaxExtraClaimsBytes = 16384
 )
@@ -502,6 +504,9 @@ func normalizeExtraClaimConfig(config *JWTConfig) (extraClaimConfig, error) {
 	if len(config.ExtraClaims) == 0 {
 		return extraClaimConfig{maxClaimBytes: maxClaimBytes, maxTotalBytes: maxTotalBytes}, nil
 	}
+	if len(config.ExtraClaims) > maxExtraClaims {
+		return extraClaimConfig{}, fmt.Errorf("%w: extra claim count %d exceeds %d", ErrJWTInvalid, len(config.ExtraClaims), maxExtraClaims)
+	}
 	names := make([]string, 0, len(config.ExtraClaims))
 	seen := make(map[string]struct{}, len(config.ExtraClaims))
 	for _, raw := range config.ExtraClaims {
@@ -556,6 +561,9 @@ func preserveExtraClaims(mc jwt.MapClaims, config extraClaimConfig) (types.AuthC
 		if !ok {
 			continue
 		}
+		if err := validateExtraClaimValue(raw, 0); err != nil {
+			return types.AuthClaims{}, fmt.Errorf("%w: extra claim %q: %v", ErrJWTInvalid, name, err)
+		}
 		encoded, err := json.Marshal(raw)
 		if err != nil {
 			return types.AuthClaims{}, fmt.Errorf("%w: extra claim %q: %v", ErrJWTInvalid, name, err)
@@ -573,6 +581,32 @@ func preserveExtraClaims(mc jwt.MapClaims, config extraClaimConfig) (types.AuthC
 		return types.AuthClaims{}, nil
 	}
 	return types.AuthClaims{Values: values}, nil
+}
+
+func validateExtraClaimValue(value any, depth int) error {
+	if depth > maxExtraClaimDepth {
+		return fmt.Errorf("JSON value depth exceeds %d", maxExtraClaimDepth)
+	}
+	switch v := value.(type) {
+	case nil, bool, string, float64, json.Number:
+		return nil
+	case []any:
+		for i, item := range v {
+			if err := validateExtraClaimValue(item, depth+1); err != nil {
+				return fmt.Errorf("[%d]: %w", i, err)
+			}
+		}
+		return nil
+	case map[string]any:
+		for key, item := range v {
+			if err := validateExtraClaimValue(item, depth+1); err != nil {
+				return fmt.Errorf(".%s: %w", key, err)
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported JSON value type %T", value)
+	}
 }
 
 // extractStringListClaim normalizes JSON-loose claim shapes: string,
