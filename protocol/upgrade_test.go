@@ -33,9 +33,10 @@ func newTestServer(t *testing.T, s *Server) *httptest.Server {
 func mintValidToken(t *testing.T) string {
 	t.Helper()
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": "alice",
-		"iss": "test-issuer",
-		"iat": time.Now().Unix(),
+		"sub":   "alice",
+		"iss":   "test-issuer",
+		"iat":   time.Now().Unix(),
+		"email": "alice@example.com",
 	})
 	s, err := tok.SignedString(testSigningKey)
 	if err != nil {
@@ -314,12 +315,15 @@ func TestUpgradeValidTokenCarriesPermissions(t *testing.T) {
 func TestUpgradeValidTokenPopulatesPrincipal(t *testing.T) {
 	s, rec := strictServer(t)
 	s.JWT.Audiences = []string{"shunter-api"}
+	s.JWT.ExtraClaims = []string{"email", "role"}
 	srv := newTestServer(t, s)
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":         "alice",
 		"iss":         "https://issuer.example",
 		"aud":         []string{"mobile", "shunter-api"},
 		"iat":         time.Now().Unix(),
+		"email":       "alice@example.com",
+		"role":        "authenticated",
 		"permissions": []string{"messages:send", "messages:read"},
 	})
 	token, err := tok.SignedString(testSigningKey)
@@ -348,6 +352,12 @@ func TestUpgradeValidTokenPopulatesPrincipal(t *testing.T) {
 	}
 	if got := uc.Principal.Permissions; len(got) != 2 || got[0] != "messages:send" || got[1] != "messages:read" {
 		t.Fatalf("Principal.Permissions = %#v, want send/read tags", got)
+	}
+	if got, ok := uc.Principal.Claims.Get("email"); !ok || string(got) != `"alice@example.com"` {
+		t.Fatalf("Principal.Claims[email] = %s, %v; want copied email", got, ok)
+	}
+	if got, ok := uc.Claims.Claims.Get("role"); !ok || string(got) != `"authenticated"` {
+		t.Fatalf("Claims.Claims[role] = %s, %v; want copied role", got, ok)
 	}
 	if got := uc.Permissions; len(got) != 2 || got[0] != "messages:send" || got[1] != "messages:read" {
 		t.Fatalf("UpgradeContext.Permissions = %#v, want send/read tags", got)

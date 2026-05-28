@@ -51,11 +51,14 @@ type Config struct {
 	ListenAddr              string
 	AuthMode                AuthMode
 
-	AuthSigningKey       []byte
-	AuthVerificationKeys []AuthVerificationKey
-	AuthOIDCIssuers      []AuthOIDCIssuer
-	AuthIssuers          []string
-	AuthAudiences        []string
+	AuthSigningKey          []byte
+	AuthVerificationKeys    []AuthVerificationKey
+	AuthOIDCIssuers         []AuthOIDCIssuer
+	AuthIssuers             []string
+	AuthAudiences           []string
+	AuthExtraClaims         []string
+	AuthMaxExtraClaimBytes  int
+	AuthMaxExtraClaimsBytes int
 
 	AnonymousTokenIssuer   string
 	AnonymousTokenAudience string
@@ -86,6 +89,9 @@ type Config struct {
 //   - SHUNTER_AUTH_ISSUERS: comma-separated
 //   - SHUNTER_AUTH_AUDIENCES: comma-separated
 //   - SHUNTER_AUTH_OIDC_ISSUERS: semicolon-separated issuer,jwks-url pairs
+//   - SHUNTER_AUTH_EXTRA_CLAIMS: comma-separated extra claim names
+//   - SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES
+//   - SHUNTER_AUTH_MAX_EXTRA_CLAIMS_BYTES
 func ConfigFromEnv() Config {
 	cfg, err := ConfigFromEnvE()
 	if err != nil {
@@ -126,6 +132,20 @@ func ConfigFromEnvE() (Config, error) {
 		return Config{}, fmt.Errorf("SHUNTER_AUTH_OIDC_ISSUERS: %w", err)
 	}
 	cfg.AuthOIDCIssuers = issuers
+	cfg.AuthExtraClaims = splitEnvListPreserveEmpty(os.Getenv("SHUNTER_AUTH_EXTRA_CLAIMS"))
+	if cfg.AuthMaxExtraClaimBytes, err = parseOptionalIntEnv("SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES"); err != nil {
+		return Config{}, err
+	}
+	if cfg.AuthMaxExtraClaimsBytes, err = parseOptionalIntEnv("SHUNTER_AUTH_MAX_EXTRA_CLAIMS_BYTES"); err != nil {
+		return Config{}, err
+	}
+	if err := auth.ValidateJWTExtraClaimsConfig(&auth.JWTConfig{
+		ExtraClaims:         cfg.AuthExtraClaims,
+		MaxExtraClaimBytes:  cfg.AuthMaxExtraClaimBytes,
+		MaxExtraClaimsBytes: cfg.AuthMaxExtraClaimsBytes,
+	}); err != nil {
+		return Config{}, fmt.Errorf("SHUNTER_AUTH_EXTRA_CLAIMS: %w", err)
+	}
 	return cfg, nil
 }
 
@@ -141,6 +161,30 @@ func splitEnvList(value string) []string {
 		}
 	}
 	return out
+}
+
+func splitEnvListPreserveEmpty(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, len(parts))
+	for i, part := range parts {
+		out[i] = strings.TrimSpace(part)
+	}
+	return out
+}
+
+func parseOptionalIntEnv(name string) (int, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", name, err)
+	}
+	return parsed, nil
 }
 
 func parseOIDCIssuerEnv(value string) ([]AuthOIDCIssuer, error) {

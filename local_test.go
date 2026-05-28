@@ -2,6 +2,7 @@ package shunter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -174,10 +175,14 @@ func TestCallReducerWithAuthPrincipal(t *testing.T) {
 		Subject:     "alice",
 		Audience:    []string{"shunter-api"},
 		Permissions: []string{"principal:permission"},
+		Claims: AuthClaims{Values: map[string]json.RawMessage{
+			"email": []byte(`"alice@example.com"`),
+		}},
 	}
 	var got types.AuthPrincipal
 	rt := buildStartedRuntimeWithReducer(t, "inspect_principal", func(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {
 		got = ctx.Caller.Principal.Copy()
+		ctx.Caller.Principal.Claims.Values["email"][1] = 'A'
 		return nil, nil
 	})
 	defer rt.Close()
@@ -193,6 +198,12 @@ func TestCallReducerWithAuthPrincipal(t *testing.T) {
 		len(got.Audience) != 1 || got.Audience[0] != "shunter-api" ||
 		len(got.Permissions) != 1 || got.Permissions[0] != "principal:permission" {
 		t.Fatalf("principal = %+v, want %+v", got, want)
+	}
+	if claim, ok := got.Claims.Get("email"); !ok || string(claim) != `"alice@example.com"` {
+		t.Fatalf("principal email claim = %s, %v; want copied email", claim, ok)
+	}
+	if string(want.Claims.Values["email"]) != `"alice@example.com"` {
+		t.Fatalf("reducer principal claim mutation changed caller principal: %+v", want)
 	}
 }
 

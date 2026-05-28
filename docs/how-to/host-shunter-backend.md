@@ -54,10 +54,31 @@ routing or more direct lifecycle control.
 - `SHUNTER_AUTH_ISSUERS` as comma-separated values
 - `SHUNTER_AUTH_AUDIENCES` as comma-separated values
 - `SHUNTER_AUTH_OIDC_ISSUERS` as semicolon-separated `issuer,jwks-url` pairs
+- `SHUNTER_AUTH_EXTRA_CLAIMS` as comma-separated claim names
+- `SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES`
+- `SHUNTER_AUTH_MAX_EXTRA_CLAIMS_BYTES`
 
 Local development can use dev auth. Public protocol serving should use strict
 auth with explicit issuer and audience policy plus local key material or
 `AuthOIDCIssuers` JWKS verification for RS256/ES256 identity-provider tokens.
+
+Supabase is a delegated-auth provider in this model. Configure Supabase
+asymmetric signing-key deployments with explicit JWKS verification:
+
+```text
+SHUNTER_AUTH_MODE=strict
+SHUNTER_AUTH_OIDC_ISSUERS=https://<project-ref>.supabase.co/auth/v1,https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json
+SHUNTER_AUTH_ISSUERS=https://<project-ref>.supabase.co/auth/v1
+SHUNTER_AUTH_AUDIENCES=authenticated
+SHUNTER_AUTH_EXTRA_CLAIMS=email,role,session_id,aal,is_anonymous
+```
+
+The browser or app owns Supabase login, refresh, and session lifecycle. Shunter
+validates the bearer token and enforces `SHUNTER_AUTH_ISSUERS` and
+`SHUNTER_AUTH_AUDIENCES`. Optional extra claims are bounded caller context for
+reducers and procedures. Supabase `role` is not a Shunter permission; use the
+`permissions` JWT claim or local permission options for Shunter permission
+checks.
 
 ## Example Workflow
 

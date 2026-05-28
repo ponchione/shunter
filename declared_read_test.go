@@ -2,6 +2,7 @@ package shunter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -2390,6 +2391,27 @@ func TestDeclaredReadAuthPrincipalDoesNotGrantLocalDeclarationPermission(t *test
 	}
 	if len(sub.InitialRows) != 1 || sub.InitialRows[0][1].AsString() != "hello" {
 		t.Fatalf("SubscribeView explicit permission rows = %#v, want inserted row", sub.InitialRows)
+	}
+}
+
+func TestDeclaredReadAuthPrincipalOptionCopiesClaims(t *testing.T) {
+	rt := &Runtime{buildConfig: Config{AuthMode: AuthModeStrict}}
+	principal := AuthPrincipal{
+		Subject: "alice",
+		Claims: AuthClaims{Values: map[string]json.RawMessage{
+			"email": []byte(`"alice@example.com"`),
+		}},
+	}
+
+	opts := rt.applyDeclaredReadOptions([]DeclaredReadOption{WithDeclaredReadAuthPrincipal(principal)})
+	opts.caller.Principal.Claims.Values["email"][1] = 'A'
+	if string(principal.Claims.Values["email"]) != `"alice@example.com"` {
+		t.Fatalf("declared read principal option aliased caller claims: %+v", principal)
+	}
+
+	principal.Claims.Values["email"][1] = 'B'
+	if claim, ok := opts.caller.Principal.Claims.Get("email"); !ok || string(claim) != `"Alice@example.com"` {
+		t.Fatalf("declared read option principal claim = %s, %v; want detached prior mutation", claim, ok)
 	}
 }
 

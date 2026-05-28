@@ -53,12 +53,14 @@ type AuthPrincipal struct {
 	Subject     string
 	Audience    []string
 	Permissions []string
+	Claims      AuthClaims
 }
 
 // Copy returns a detached copy of p.
 func (p AuthPrincipal) Copy() AuthPrincipal {
 	p.Audience = append([]string(nil), p.Audience...)
 	p.Permissions = append([]string(nil), p.Permissions...)
+	p.Claims = p.Claims.Copy()
 	return p
 }
 

@@ -107,8 +107,9 @@ func lifecycleServer(t *testing.T, inbox *fakeInbox) (*Server, *ConnManager) {
 	mgr := NewConnManager()
 	return &Server{
 		JWT: &auth.JWTConfig{
-			SigningKey: testSigningKey,
-			AuthMode:   auth.AuthModeStrict,
+			SigningKey:  testSigningKey,
+			AuthMode:    auth.AuthModeStrict,
+			ExtraClaims: []string{"email"},
 		},
 		Options:  DefaultProtocolOptions(),
 		Executor: inbox,
@@ -224,6 +225,8 @@ func TestRunLifecycleSuccessSendsIdentityToken(t *testing.T) {
 	}
 	if gotPrincipal := inbox.principalSnapshot(); gotPrincipal.Issuer != "test-issuer" || gotPrincipal.Subject != "alice" {
 		t.Errorf("OnConnect principal = %+v, want issuer test-issuer subject alice", gotPrincipal)
+	} else if claim, ok := gotPrincipal.Claims.Get("email"); !ok || string(claim) != `"alice@example.com"` {
+		t.Errorf("OnConnect principal email claim = %s, %v; want copied email", claim, ok)
 	}
 
 	// Connection is registered in ConnManager.
@@ -232,6 +235,13 @@ func TestRunLifecycleSuccessSendsIdentityToken(t *testing.T) {
 		t.Error("ConnManager has no entry for admitted connection")
 	} else if serverConn.Principal.Issuer != "test-issuer" || serverConn.Principal.Subject != "alice" {
 		t.Errorf("Conn principal = %+v, want issuer test-issuer subject alice", serverConn.Principal)
+	} else if claim, ok := serverConn.Principal.Claims.Get("email"); !ok || string(claim) != `"alice@example.com"` {
+		t.Errorf("Conn principal email claim = %s, %v; want copied email", claim, ok)
+	} else {
+		serverConn.Principal.Claims.Values["email"][1] = 'A'
+		if got, ok := inbox.principalSnapshot().Claims.Get("email"); !ok || string(got) != `"alice@example.com"` {
+			t.Errorf("Conn principal mutation changed inbox snapshot: %s, %v", got, ok)
+		}
 	}
 }
 

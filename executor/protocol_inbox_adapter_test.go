@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -861,7 +862,14 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_ReplyPrecedesLaterSameGoro
 func TestProtocolInboxAdapter_OnConnect_BridgesLifecycleResponse(t *testing.T) {
 	connID := types.ConnectionID{7}
 	identity := types.Identity{8}
-	principal := types.AuthPrincipal{Issuer: "issuer", Subject: "alice", Audience: []string{"api"}}
+	principal := types.AuthPrincipal{
+		Issuer:   "issuer",
+		Subject:  "alice",
+		Audience: []string{"api"},
+		Claims: types.AuthClaims{Values: map[string]json.RawMessage{
+			"email": []byte(`"alice@example.com"`),
+		}},
+	}
 	adapter := newProtocolInboxAdapter(
 		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
 			onConnect, ok := cmd.(OnConnectCmd)
@@ -875,6 +883,10 @@ func TestProtocolInboxAdapter_OnConnect_BridgesLifecycleResponse(t *testing.T) {
 				len(got.Audience) != 1 || got.Audience[0] != "api" {
 				t.Fatalf("OnConnectCmd.Principal = %+v, want copied issuer/subject/audience", got)
 			}
+			if got, ok := onConnect.Principal.Claims.Get("email"); !ok || string(got) != `"alice@example.com"` {
+				t.Fatalf("OnConnectCmd.Principal.Claims[email] = %s, %v; want copied email", got, ok)
+			}
+			onConnect.Principal.Claims.Values["email"][1] = 'A'
 			onConnect.ResponseCh <- ReducerResponse{Status: StatusCommitted}
 			return nil
 		}},
@@ -883,6 +895,9 @@ func TestProtocolInboxAdapter_OnConnect_BridgesLifecycleResponse(t *testing.T) {
 
 	if err := adapter.OnConnect(context.Background(), connID, identity, principal); err != nil {
 		t.Fatalf("OnConnect: %v", err)
+	}
+	if string(principal.Claims.Values["email"]) != `"alice@example.com"` {
+		t.Fatalf("OnConnect command mutation changed caller principal: %+v", principal)
 	}
 }
 
@@ -1020,6 +1035,9 @@ func TestProtocolInboxAdapter_CallReducer_ForwardsPermissionContext(t *testing.T
 		Subject:     "alice",
 		Audience:    []string{"shunter-api"},
 		Permissions: []string{"principal:permission"},
+		Claims: types.AuthClaims{Values: map[string]json.RawMessage{
+			"email": []byte(`"alice@example.com"`),
+		}},
 	}
 	adapter := newProtocolInboxAdapter(
 		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
@@ -1035,6 +1053,10 @@ func TestProtocolInboxAdapter_CallReducer_ForwardsPermissionContext(t *testing.T
 				len(got.Permissions) != 1 || got.Permissions[0] != "principal:permission" {
 				t.Fatalf("caller principal = %+v, want copied issuer/subject/audience/permissions", got)
 			}
+			if got, ok := call.Request.Caller.Principal.Claims.Get("email"); !ok || string(got) != `"alice@example.com"` {
+				t.Fatalf("caller principal email claim = %s, %v; want copied email", got, ok)
+			}
+			call.Request.Caller.Principal.Claims.Values["email"][1] = 'A'
 			if !call.Request.Caller.AllowAllPermissions {
 				t.Fatal("AllowAllPermissions = false, want true")
 			}
@@ -1054,6 +1076,9 @@ func TestProtocolInboxAdapter_CallReducer_ForwardsPermissionContext(t *testing.T
 	})
 	if err != nil {
 		t.Fatalf("CallReducer: %v", err)
+	}
+	if string(principal.Claims.Values["email"]) != `"alice@example.com"` {
+		t.Fatalf("CallReducer command mutation changed caller principal: %+v", principal)
 	}
 }
 

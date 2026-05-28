@@ -60,6 +60,7 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 	oidcIssuers := copyAuthOIDCIssuers(cfg.AuthOIDCIssuers)
 	issuers := append([]string(nil), cfg.AuthIssuers...)
 	audiences := append([]string(nil), cfg.AuthAudiences...)
+	extraClaims := append([]string(nil), cfg.AuthExtraClaims...)
 
 	switch cfg.AuthMode {
 	case AuthModeDev:
@@ -90,12 +91,15 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 			audiences = append(audiences, audience)
 		}
 		jwtCfg := &auth.JWTConfig{
-			SigningKey:       append([]byte(nil), signingKey...),
-			VerificationKeys: verificationKeys,
-			JWKS:             oidcIssuers,
-			Issuers:          issuers,
-			Audiences:        audiences,
-			AuthMode:         auth.AuthModeAnonymous,
+			SigningKey:          append([]byte(nil), signingKey...),
+			VerificationKeys:    verificationKeys,
+			JWKS:                oidcIssuers,
+			Issuers:             issuers,
+			Audiences:           audiences,
+			AuthMode:            auth.AuthModeAnonymous,
+			ExtraClaims:         extraClaims,
+			MaxExtraClaimBytes:  cfg.AuthMaxExtraClaimBytes,
+			MaxExtraClaimsBytes: cfg.AuthMaxExtraClaimsBytes,
 		}
 		if err := auth.ValidateJWTConfig(jwtCfg); err != nil {
 			return nil, nil, err
@@ -107,12 +111,15 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 			return nil, nil, ErrAuthSigningKeyRequired
 		}
 		jwtCfg := &auth.JWTConfig{
-			SigningKey:       signingKey,
-			VerificationKeys: verificationKeys,
-			JWKS:             oidcIssuers,
-			Issuers:          issuers,
-			Audiences:        audiences,
-			AuthMode:         auth.AuthModeStrict,
+			SigningKey:          signingKey,
+			VerificationKeys:    verificationKeys,
+			JWKS:                oidcIssuers,
+			Issuers:             issuers,
+			Audiences:           audiences,
+			AuthMode:            auth.AuthModeStrict,
+			ExtraClaims:         extraClaims,
+			MaxExtraClaimBytes:  cfg.AuthMaxExtraClaimBytes,
+			MaxExtraClaimsBytes: cfg.AuthMaxExtraClaimsBytes,
 		}
 		if err := auth.ValidateJWTConfig(jwtCfg); err != nil {
 			return nil, nil, err

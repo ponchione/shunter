@@ -141,6 +141,7 @@ func copyConfig(cfg Config) Config {
 	out.AuthOIDCIssuers = copyAuthOIDCIssuers(cfg.AuthOIDCIssuers)
 	out.AuthIssuers = append([]string(nil), cfg.AuthIssuers...)
 	out.AuthAudiences = append([]string(nil), cfg.AuthAudiences...)
+	out.AuthExtraClaims = append([]string(nil), cfg.AuthExtraClaims...)
 	return out
 }
 

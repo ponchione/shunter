@@ -5,11 +5,14 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/golang-jwt/jwt/v5"
 
@@ -29,6 +32,10 @@ const (
 const (
 	MaxIssuerBytes  = 1024
 	MaxSubjectBytes = 1024
+
+	MaxExtraClaimNameBytes     = 256
+	DefaultMaxExtraClaimBytes  = 4096
+	DefaultMaxExtraClaimsBytes = 16384
 )
 
 // JWTAlgorithm identifies a JWT signing algorithm Shunter can verify locally.
@@ -69,12 +76,15 @@ type JWKSConfig struct {
 // explicit local verification keys for HS256, RS256, and ES256. JWKS adds
 // remote RS256/ES256 verification keys fetched from trusted issuer metadata.
 type JWTConfig struct {
-	SigningKey       []byte
-	VerificationKeys []JWTVerificationKey
-	JWKS             []JWKSConfig
-	Issuers          []string // empty = skip issuer allowlist validation
-	Audiences        []string // empty = skip audience validation (SPEC-005 §4.1)
-	AuthMode         AuthMode
+	SigningKey          []byte
+	VerificationKeys    []JWTVerificationKey
+	JWKS                []JWKSConfig
+	Issuers             []string // empty = skip issuer allowlist validation
+	Audiences           []string // empty = skip audience validation (SPEC-005 §4.1)
+	AuthMode            AuthMode
+	ExtraClaims         []string
+	MaxExtraClaimBytes  int
+	MaxExtraClaimsBytes int
 }
 
 // Claims is the validated, normalized claim set returned from
@@ -91,6 +101,8 @@ type Claims struct {
 	// Permissions carries optional caller permission tags from the
 	// `permissions` JWT claim.
 	Permissions []string
+	// Claims carries configured extra JWT claims as compact JSON values.
+	Claims types.AuthClaims
 }
 
 // DeriveIdentity is a convenience wrapper: identity derivation uses
@@ -110,6 +122,7 @@ func (c *Claims) Principal() types.AuthPrincipal {
 		Subject:     c.Subject,
 		Audience:    append([]string(nil), c.Audience...),
 		Permissions: append([]string(nil), c.Permissions...),
+		Claims:      c.Claims.Copy(),
 	}
 }
 
@@ -132,6 +145,10 @@ var (
 func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	if config == nil {
 		return nil, fmt.Errorf("%w: config is required", ErrJWTInvalid)
+	}
+	extraClaims, err := normalizeExtraClaimConfig(config)
+	if err != nil {
+		return nil, err
 	}
 	localKeys, err := resolveLocalJWTVerificationKeys(config)
 	if err != nil {
@@ -165,7 +182,7 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 				lastErr = fmt.Errorf("%w: token reported invalid", ErrJWTInvalid)
 				continue
 			}
-			return claimsFromValidatedToken(parsed, config)
+			return claimsFromValidatedToken(parsed, config, extraClaims)
 		}
 		lastErr = err
 		if !errors.Is(err, jwt.ErrTokenSignatureInvalid) {
@@ -218,7 +235,17 @@ func ValidateJWTConfig(config *JWTConfig) error {
 	if err := validateJWKSConfig(config); err != nil {
 		return err
 	}
+	if err := ValidateJWTExtraClaimsConfig(config); err != nil {
+		return err
+	}
 	return nil
+}
+
+// ValidateJWTExtraClaimsConfig validates the bounded extra-claim portion of a
+// JWTConfig without requiring verification key material.
+func ValidateJWTExtraClaimsConfig(config *JWTConfig) error {
+	_, err := normalizeExtraClaimConfig(config)
+	return err
 }
 
 type resolvedJWTVerificationKey struct {
@@ -366,7 +393,7 @@ func parsePublicKeyPEM(data []byte) (any, error) {
 	}
 }
 
-func claimsFromValidatedToken(parsed *jwt.Token, config *JWTConfig) (*Claims, error) {
+func claimsFromValidatedToken(parsed *jwt.Token, config *JWTConfig, extraClaims extraClaimConfig) (*Claims, error) {
 	if !parsed.Valid {
 		return nil, fmt.Errorf("%w: token reported invalid", ErrJWTInvalid)
 	}
@@ -421,8 +448,114 @@ func claimsFromValidatedToken(parsed *jwt.Token, config *JWTConfig) (*Claims, er
 			return nil, fmt.Errorf("%w: got %v, allowed %v", ErrJWTAudienceMismatch, c.Audience, config.Audiences)
 		}
 	}
+	claims, err := preserveExtraClaims(mc, extraClaims)
+	if err != nil {
+		return nil, err
+	}
+	c.Claims = claims
 
 	return c, nil
+}
+
+type extraClaimConfig struct {
+	names         []string
+	maxClaimBytes int
+	maxTotalBytes int
+}
+
+func normalizeExtraClaimConfig(config *JWTConfig) (extraClaimConfig, error) {
+	if config == nil {
+		return extraClaimConfig{}, fmt.Errorf("%w: config is required", ErrJWTInvalid)
+	}
+	maxClaimBytes := config.MaxExtraClaimBytes
+	if maxClaimBytes == 0 {
+		maxClaimBytes = DefaultMaxExtraClaimBytes
+	}
+	if maxClaimBytes < 0 {
+		return extraClaimConfig{}, fmt.Errorf("%w: max extra claim bytes must not be negative", ErrJWTInvalid)
+	}
+	maxTotalBytes := config.MaxExtraClaimsBytes
+	if maxTotalBytes == 0 {
+		maxTotalBytes = DefaultMaxExtraClaimsBytes
+	}
+	if maxTotalBytes < 0 {
+		return extraClaimConfig{}, fmt.Errorf("%w: max extra claims bytes must not be negative", ErrJWTInvalid)
+	}
+
+	if len(config.ExtraClaims) == 0 {
+		return extraClaimConfig{maxClaimBytes: maxClaimBytes, maxTotalBytes: maxTotalBytes}, nil
+	}
+	names := make([]string, 0, len(config.ExtraClaims))
+	seen := make(map[string]struct{}, len(config.ExtraClaims))
+	for _, raw := range config.ExtraClaims {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			return extraClaimConfig{}, fmt.Errorf("%w: extra claim name must not be empty", ErrJWTInvalid)
+		}
+		if len(name) > MaxExtraClaimNameBytes {
+			return extraClaimConfig{}, fmt.Errorf("%w: extra claim name %q exceeds %d bytes", ErrJWTInvalid, name, MaxExtraClaimNameBytes)
+		}
+		if containsControlRune(name) {
+			return extraClaimConfig{}, fmt.Errorf("%w: extra claim name %q contains a control character", ErrJWTInvalid, name)
+		}
+		if isShunterOwnedClaim(name) {
+			return extraClaimConfig{}, fmt.Errorf("%w: extra claim name %q is reserved", ErrJWTInvalid, name)
+		}
+		if _, ok := seen[name]; ok {
+			return extraClaimConfig{}, fmt.Errorf("%w: duplicate extra claim name %q", ErrJWTInvalid, name)
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	return extraClaimConfig{names: names, maxClaimBytes: maxClaimBytes, maxTotalBytes: maxTotalBytes}, nil
+}
+
+func containsControlRune(s string) bool {
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func isShunterOwnedClaim(name string) bool {
+	switch name {
+	case "iss", "sub", "aud", "exp", "iat", "nbf", "hex_identity", "permissions":
+		return true
+	default:
+		return false
+	}
+}
+
+func preserveExtraClaims(mc jwt.MapClaims, config extraClaimConfig) (types.AuthClaims, error) {
+	if len(config.names) == 0 {
+		return types.AuthClaims{}, nil
+	}
+	values := make(map[string]json.RawMessage, len(config.names))
+	total := 0
+	for _, name := range config.names {
+		raw, ok := mc[name]
+		if !ok {
+			continue
+		}
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			return types.AuthClaims{}, fmt.Errorf("%w: extra claim %q: %v", ErrJWTInvalid, name, err)
+		}
+		if len(encoded) > config.maxClaimBytes {
+			return types.AuthClaims{}, fmt.Errorf("%w: extra claim %q exceeds %d bytes", ErrJWTClaimTooLarge, name, config.maxClaimBytes)
+		}
+		total += len(encoded)
+		if total > config.maxTotalBytes {
+			return types.AuthClaims{}, fmt.Errorf("%w: extra claims exceed %d bytes", ErrJWTClaimTooLarge, config.maxTotalBytes)
+		}
+		values[name] = append(json.RawMessage(nil), encoded...)
+	}
+	if len(values) == 0 {
+		return types.AuthClaims{}, nil
+	}
+	return types.AuthClaims{Values: values}, nil
 }
 
 // extractStringListClaim normalizes JSON-loose claim shapes: string,

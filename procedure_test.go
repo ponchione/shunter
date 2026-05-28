@@ -2,6 +2,7 @@ package shunter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -57,6 +58,60 @@ func TestCallProcedureCopiesArgumentsAndReturn(t *testing.T) {
 	returned[0] = 0xee
 	if string(got) != string([]byte{0x03, 0x04}) {
 		t.Fatalf("procedure return = %x, want detached 0304", got)
+	}
+}
+
+func TestCallProcedureWithAuthPrincipalCopiesClaimsThroughReducer(t *testing.T) {
+	want := AuthPrincipal{
+		Issuer:  "issuer",
+		Subject: "alice",
+		Claims: AuthClaims{Values: map[string]json.RawMessage{
+			"email": []byte(`"alice@example.com"`),
+		}},
+	}
+	var gotProcedure types.AuthPrincipal
+	var gotProcedureAfterReducer types.AuthPrincipal
+	var gotReducer types.AuthPrincipal
+	rt, err := Build(validChatModule().
+		Reducer("inspect_from_procedure", func(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {
+			gotReducer = ctx.Caller.Principal.Copy()
+			ctx.Caller.Principal.Claims.Values["email"][1] = 'R'
+			return nil, nil
+		}).
+		Procedure("inspect", func(ctx *ProcedureContext, _ []byte) ([]byte, error) {
+			gotProcedure = ctx.Caller.Principal.Copy()
+			res, err := ctx.CallReducer("inspect_from_procedure", nil)
+			if err != nil {
+				return nil, err
+			}
+			if res.Error != nil {
+				return nil, res.Error
+			}
+			gotProcedureAfterReducer = ctx.Caller.Principal.Copy()
+			return nil, nil
+		}), Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer rt.Close()
+
+	if _, err := rt.CallProcedure(context.Background(), "inspect", nil, WithProcedureAuthPrincipal(want)); err != nil {
+		t.Fatalf("CallProcedure returned error: %v", err)
+	}
+	if claim, ok := gotProcedure.Claims.Get("email"); !ok || string(claim) != `"alice@example.com"` {
+		t.Fatalf("procedure principal email claim = %s, %v; want copied email", claim, ok)
+	}
+	if claim, ok := gotReducer.Claims.Get("email"); !ok || string(claim) != `"alice@example.com"` {
+		t.Fatalf("reducer principal email claim = %s, %v; want propagated email", claim, ok)
+	}
+	if string(want.Claims.Values["email"]) != `"alice@example.com"` {
+		t.Fatalf("procedure/reducer claim mutation changed caller principal: %+v", want)
+	}
+	if claim, _ := gotProcedureAfterReducer.Claims.Get("email"); string(claim) != `"alice@example.com"` {
+		t.Fatalf("reducer claim mutation changed procedure principal: %s", claim)
 	}
 }
 

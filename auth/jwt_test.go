@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -17,6 +18,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/ponchione/shunter/types"
 )
 
 var testKey = []byte("test-secret-key")
@@ -515,6 +518,153 @@ func TestValidateJWTPermissionClaims(t *testing.T) {
 	}
 }
 
+func TestValidateJWTExtraClaimsPreserved(t *testing.T) {
+	cfg := &JWTConfig{
+		SigningKey:  testKey,
+		ExtraClaims: []string{" email ", "role", "https://claims.example/session"},
+	}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub":                            "alice",
+		"iss":                            "issuer",
+		"email":                          "alice@example.com",
+		"role":                           "authenticated",
+		"https://claims.example/session": map[string]any{"id": "session-1", "aal": 2},
+		"missing":                        "not configured",
+	})
+
+	claims, err := ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := map[string]string{
+		"email":                          `"alice@example.com"`,
+		"role":                           `"authenticated"`,
+		"https://claims.example/session": `{"aal":2,"id":"session-1"}`,
+	}
+	for name, want := range tests {
+		got, ok := claims.Claims.Get(name)
+		if !ok {
+			t.Fatalf("extra claim %q missing from %#v", name, claims.Claims.Values)
+		}
+		if string(got) != want {
+			t.Fatalf("extra claim %q = %s, want %s", name, got, want)
+		}
+	}
+	if _, ok := claims.Claims.Get("missing"); ok {
+		t.Fatal("unconfigured claim was preserved")
+	}
+}
+
+func TestValidateJWTExtraClaimsSkipMissing(t *testing.T) {
+	cfg := &JWTConfig{SigningKey: testKey, ExtraClaims: []string{"email", "role"}}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub":   "alice",
+		"iss":   "issuer",
+		"email": "alice@example.com",
+	})
+
+	claims, err := ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claims.Claims.Values) != 1 {
+		t.Fatalf("extra claims = %#v, want only configured present claim", claims.Claims.Values)
+	}
+	if got, ok := claims.Claims.Get("email"); !ok || string(got) != `"alice@example.com"` {
+		t.Fatalf("email claim = %s, %v; want preserved email", got, ok)
+	}
+	if _, ok := claims.Claims.Get("role"); ok {
+		t.Fatal("missing configured role claim was preserved")
+	}
+}
+
+func TestValidateJWTExtraClaimsRejectsPerClaimTooLarge(t *testing.T) {
+	cfg := &JWTConfig{
+		SigningKey:          testKey,
+		ExtraClaims:         []string{"email"},
+		MaxExtraClaimBytes:  8,
+		MaxExtraClaimsBytes: 128,
+	}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub":   "alice",
+		"iss":   "issuer",
+		"email": "alice@example.com",
+	})
+
+	_, err := ValidateJWT(s, cfg)
+	if !errors.Is(err, ErrJWTClaimTooLarge) {
+		t.Fatalf("ValidateJWT error = %v, want ErrJWTClaimTooLarge", err)
+	}
+}
+
+func TestValidateJWTExtraClaimsRejectsTotalTooLarge(t *testing.T) {
+	cfg := &JWTConfig{
+		SigningKey:          testKey,
+		ExtraClaims:         []string{"email", "role"},
+		MaxExtraClaimBytes:  64,
+		MaxExtraClaimsBytes: 20,
+	}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub":   "alice",
+		"iss":   "issuer",
+		"email": "alice@example.com",
+		"role":  "authenticated",
+	})
+
+	_, err := ValidateJWT(s, cfg)
+	if !errors.Is(err, ErrJWTClaimTooLarge) {
+		t.Fatalf("ValidateJWT error = %v, want ErrJWTClaimTooLarge", err)
+	}
+}
+
+func TestValidateJWTRejectsInvalidExtraClaimConfig(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  JWTConfig
+	}{
+		{name: "empty", cfg: JWTConfig{ExtraClaims: []string{"email", " "}}},
+		{name: "duplicate after trim", cfg: JWTConfig{ExtraClaims: []string{"email", " email "}}},
+		{name: "too long", cfg: JWTConfig{ExtraClaims: []string{strings.Repeat("a", MaxExtraClaimNameBytes+1)}}},
+		{name: "control", cfg: JWTConfig{ExtraClaims: []string{"em\nail"}}},
+		{name: "owned", cfg: JWTConfig{ExtraClaims: []string{"permissions"}}},
+		{name: "negative per claim", cfg: JWTConfig{MaxExtraClaimBytes: -1}},
+		{name: "negative total", cfg: JWTConfig{MaxExtraClaimsBytes: -1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.cfg.SigningKey = testKey
+			if err := ValidateJWTExtraClaimsConfig(&tt.cfg); !errors.Is(err, ErrJWTInvalid) {
+				t.Fatalf("ValidateJWTExtraClaimsConfig error = %v, want ErrJWTInvalid", err)
+			}
+		})
+	}
+}
+
+func TestValidateJWTExtraClaimsDoNotGrantPermissions(t *testing.T) {
+	cfg := &JWTConfig{SigningKey: testKey, ExtraClaims: []string{"role"}, Audiences: []string{"authenticated"}}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub":         "alice",
+		"iss":         "issuer",
+		"aud":         "authenticated",
+		"role":        "service_role",
+		"permissions": []string{"messages:send"},
+	})
+
+	claims, err := ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := claims.Permissions; len(got) != 1 || got[0] != "messages:send" {
+		t.Fatalf("Permissions = %#v, want only permissions claim", got)
+	}
+	if got := claims.Audience; len(got) != 1 || got[0] != "authenticated" {
+		t.Fatalf("Audience = %#v, want configured audience", got)
+	}
+	if got, ok := claims.Claims.Get("role"); !ok || string(got) != `"service_role"` {
+		t.Fatalf("role claim = %s, %v; want preserved role", got, ok)
+	}
+}
+
 func TestValidateJWTLooseStringListClaims(t *testing.T) {
 	cfg := &JWTConfig{SigningKey: testKey}
 	tests := []struct {
@@ -647,6 +797,9 @@ func TestClaimsPrincipalCopiesExternalClaims(t *testing.T) {
 		Subject:     "alice",
 		Audience:    []string{"shunter-api"},
 		Permissions: []string{"messages:send"},
+		Claims: types.AuthClaims{Values: map[string]json.RawMessage{
+			"email": []byte(`"alice@example.com"`),
+		}},
 	}
 
 	principal := c.Principal()
@@ -659,15 +812,20 @@ func TestClaimsPrincipalCopiesExternalClaims(t *testing.T) {
 	if len(principal.Permissions) != 1 || principal.Permissions[0] != "messages:send" {
 		t.Fatalf("Principal permissions = %#v, want messages:send", principal.Permissions)
 	}
+	if got, ok := principal.Claims.Get("email"); !ok || string(got) != `"alice@example.com"` {
+		t.Fatalf("Principal claims email = %s, %v; want copied email", got, ok)
+	}
 
 	principal.Audience[0] = "mutated"
 	principal.Permissions[0] = "mutated"
-	if c.Audience[0] != "shunter-api" || c.Permissions[0] != "messages:send" {
+	principal.Claims.Values["email"][1] = 'A'
+	if c.Audience[0] != "shunter-api" || c.Permissions[0] != "messages:send" ||
+		string(c.Claims.Values["email"]) != `"alice@example.com"` {
 		t.Fatalf("Principal aliases Claims slices: claims=%+v principal=%+v", c, principal)
 	}
 
 	var nilClaims *Claims
-	if got := nilClaims.Principal(); got.Issuer != "" || got.Subject != "" || got.Audience != nil || got.Permissions != nil {
+	if got := nilClaims.Principal(); got.Issuer != "" || got.Subject != "" || got.Audience != nil || got.Permissions != nil || got.Claims.Values != nil {
 		t.Fatalf("nil Claims Principal = %+v, want zero", got)
 	}
 }

@@ -8,6 +8,8 @@ the app-author documentation in `docs/`.
 
 - `deferred-functionality-backlog.md` - intentionally deferred product,
   runtime, and test-surface work that is not active for the current slice.
+- `actionable/` - focused implementation slices promoted from the deferred
+  backlog for near-term work.
 - `dependency-considerations.md` - dependency policy and dependency decisions.
 - `hosted-backend-roadmap.md` - current hosted-backend product direction for
   Shunter as a Go-first backend/database runtime.

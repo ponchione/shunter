@@ -23,6 +23,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   zero-value behavior.
 - JWT validation now parses each token's unverified header and issuer in one
   pass before signature verification.
+- Strict JWT validation can now preserve explicitly configured, bounded extra
+  claims as copy-isolated reducer/procedure caller context, including
+  Supabase-style delegated-auth claims without mapping provider `role` values
+  to Shunter permissions.
 - Non-caller transaction-update fanout now treats connections that disappear
   during delivery as skipped, matching the documented missing-connection
   behavior while avoiding a duplicate manager lookup.

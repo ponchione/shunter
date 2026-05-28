@@ -3,6 +3,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -231,7 +232,8 @@ func TestOnConnectRunsReducerWithLifecycleSource(t *testing.T) {
 	rh.onCall = func(ctx *types.ReducerContext) {
 		// No source field on ReducerContext directly; instead rely on Caller.
 		// Lifecycle invocations carry the connection identity in Caller.
-		gotCaller = ctx.Caller
+		gotCaller = ctx.Caller.Copy()
+		ctx.Caller.Principal.Claims.Values["email"][1] = 'A'
 	}
 	h := newLifecycleHarness(t, lifecycleOpt{withOnConnect: true, onConnectPayload: rh})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -240,7 +242,14 @@ func TestOnConnectRunsReducerWithLifecycleSource(t *testing.T) {
 
 	conn := types.ConnectionID{9}
 	identity := types.Identity{0xBB}
-	principal := types.AuthPrincipal{Issuer: "issuer", Subject: "alice", Audience: []string{"shunter-api"}}
+	principal := types.AuthPrincipal{
+		Issuer:   "issuer",
+		Subject:  "alice",
+		Audience: []string{"shunter-api"},
+		Claims: types.AuthClaims{Values: map[string]json.RawMessage{
+			"email": []byte(`"alice@example.com"`),
+		}},
+	}
 	resp := submitOnConnectWithPrincipal(t, h.exec, conn, identity, principal)
 	if resp.Status != StatusCommitted {
 		t.Fatalf("status=%d err=%v", resp.Status, resp.Error)
@@ -257,6 +266,12 @@ func TestOnConnectRunsReducerWithLifecycleSource(t *testing.T) {
 	if gotCaller.Principal.Issuer != "issuer" || gotCaller.Principal.Subject != "alice" ||
 		len(gotCaller.Principal.Audience) != 1 || gotCaller.Principal.Audience[0] != "shunter-api" {
 		t.Errorf("caller principal=%+v, want copied issuer/subject/audience", gotCaller.Principal)
+	}
+	if claim, ok := gotCaller.Principal.Claims.Get("email"); !ok || string(claim) != `"alice@example.com"` {
+		t.Errorf("caller principal email claim=%s, %v; want copied email", claim, ok)
+	}
+	if string(principal.Claims.Values["email"]) != `"alice@example.com"` {
+		t.Errorf("lifecycle reducer claim mutation changed command principal: %+v", principal)
 	}
 	// Row was inserted.
 	if n := len(h.sysClientsSnapshot()); n != 1 {
@@ -378,7 +393,8 @@ func TestOnDisconnectRunsReducerAndDeletes(t *testing.T) {
 	rh := &recordedHandler{}
 	var gotCaller types.CallerContext
 	rh.onCall = func(ctx *types.ReducerContext) {
-		gotCaller = ctx.Caller
+		gotCaller = ctx.Caller.Copy()
+		ctx.Caller.Principal.Claims.Values["email"][1] = 'B'
 	}
 	h := newLifecycleHarness(t, lifecycleOpt{withOnDisconn: true, onDisconnPayload: rh})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -388,7 +404,14 @@ func TestOnDisconnectRunsReducerAndDeletes(t *testing.T) {
 	conn := types.ConnectionID{7}
 	prime(t, h, conn, types.Identity{0x7})
 
-	resp := submitOnDisconnectWithPrincipal(t, h.exec, conn, types.Identity{0x7}, types.AuthPrincipal{Issuer: "issuer", Subject: "bob"})
+	principal := types.AuthPrincipal{
+		Issuer:  "issuer",
+		Subject: "bob",
+		Claims: types.AuthClaims{Values: map[string]json.RawMessage{
+			"email": []byte(`"bob@example.com"`),
+		}},
+	}
+	resp := submitOnDisconnectWithPrincipal(t, h.exec, conn, types.Identity{0x7}, principal)
 	if resp.Status != StatusCommitted {
 		t.Fatalf("status=%d err=%v", resp.Status, resp.Error)
 	}
@@ -400,6 +423,12 @@ func TestOnDisconnectRunsReducerAndDeletes(t *testing.T) {
 	}
 	if gotCaller.Principal.Issuer != "issuer" || gotCaller.Principal.Subject != "bob" {
 		t.Errorf("OnDisconnect caller principal=%+v, want issuer/bob", gotCaller.Principal)
+	}
+	if claim, ok := gotCaller.Principal.Claims.Get("email"); !ok || string(claim) != `"bob@example.com"` {
+		t.Errorf("OnDisconnect caller principal email=%s, %v; want copied email", claim, ok)
+	}
+	if string(principal.Claims.Values["email"]) != `"bob@example.com"` {
+		t.Errorf("OnDisconnect reducer claim mutation changed command principal: %+v", principal)
 	}
 }
 

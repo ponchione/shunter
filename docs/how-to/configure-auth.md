@@ -96,6 +96,36 @@ loopback HTTP URLs used by local tests and development tooling. Keep
 `AuthIssuers` and `AuthAudiences` configured; JWKS configuration supplies
 signature keys, not claim policy.
 
+### Supabase
+
+Treat Supabase as delegated auth. Your frontend or app code obtains and
+refreshes the Supabase access token, then passes it as the existing Shunter
+bearer token. Shunter validates the JWT locally; it does not call Supabase Auth
+or manage Supabase sessions.
+
+For Supabase projects using asymmetric signing keys, prefer explicit JWKS
+configuration:
+
+```go
+cfg := shunter.Config{
+	DataDir:        "./data/chat",
+	EnableProtocol: true,
+	AuthMode:       shunter.AuthModeStrict,
+	AuthOIDCIssuers: []shunter.AuthOIDCIssuer{
+		{
+			Issuer:  "https://<project-ref>.supabase.co/auth/v1",
+			JWKSURL: "https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json",
+		},
+	},
+	AuthIssuers:   []string{"https://<project-ref>.supabase.co/auth/v1"},
+	AuthAudiences: []string{"authenticated"},
+}
+```
+
+Allow `anon` as an audience only when the app intentionally admits anonymous
+Supabase users. Supabase `role` is not a Shunter permission; the only JWT path
+to Shunter permissions is the `permissions` claim.
+
 ## Permissions
 
 Declare required permissions on reducers, procedures, and declared reads:
@@ -127,6 +157,36 @@ In dev mode, local calls allow all permissions when no permission option is
 supplied. Once a local caller supplies an explicit permission set, Shunter
 checks that set against declared requirements. Strict mode does not provide the
 dev allow-all default.
+
+## Extra JWT Claims
+
+Reducers and procedures can inspect an explicit, bounded subset of provider
+claims through `ctx.Caller.Principal.Claims`.
+
+```go
+cfg.AuthExtraClaims = []string{"email", "role", "session_id", "aal", "is_anonymous"}
+cfg.AuthMaxExtraClaimBytes = 4096
+cfg.AuthMaxExtraClaimsBytes = 16384
+```
+
+Equivalent environment variables:
+
+```text
+SHUNTER_AUTH_EXTRA_CLAIMS=email,role,session_id,aal,is_anonymous
+SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES=4096
+SHUNTER_AUTH_MAX_EXTRA_CLAIMS_BYTES=16384
+```
+
+Blank `AuthExtraClaims` preserves the narrow principal. Claim names are trimmed,
+may use provider or URI-style names, and cannot be empty, duplicated,
+control-character-bearing, over 256 bytes, or Shunter-owned (`iss`, `sub`,
+`aud`, `exp`, `iat`, `nbf`, `hex_identity`, `permissions`). Missing configured
+claims are skipped. Present claims are compact JSON values copied out of the
+already parsed JWT claim map.
+
+Extra claims are application context only. They do not expose JWT headers,
+`kid`, signatures, bearer tokens, or raw JWT text, and provider claims such as
+Supabase `role` are not mapped to Shunter permissions.
 
 ## Caller Metadata For Local Calls
 

@@ -53,6 +53,10 @@ Behavior:
 - `aud` is checked only when `AuthAudiences` is non-empty.
 - `permissions` may be a string or string list and is copied into the caller
   principal and protocol connection.
+- Configured extra JWT claims are copied into reducer and procedure caller
+  principals as compact JSON values, bounded by per-claim and total byte
+  limits. Blank extra-claim configuration preserves the previous narrow
+  principal.
 - Missing, expired, future-issued, not-yet-valid, wrong-algorithm,
   bad-signature, audience-mismatched, missing-claim, or otherwise invalid
   tokens are rejected during protocol admission. When the client offers a
@@ -69,6 +73,38 @@ JWKS keys are fetched on demand, cached, and refreshed when a token presents a
 does not include OIDC discovery-document lookup, background remote key refresh,
 or app-provided claim mappers.
 
+## Delegated Providers And Supabase
+
+Shunter delegates authentication to external issuers. Browser or app code owns
+login, logout, sessions, refresh tokens, MFA, user lifecycle, and provider API
+calls. Shunter validates externally issued JWTs and exposes only normalized
+caller context to app code.
+
+Supabase Auth fits this model as an external JWT issuer. Hosted Supabase
+deployments using asymmetric signing keys should configure explicit JWKS
+verification:
+
+```go
+cfg := shunter.Config{
+	AuthMode: shunter.AuthModeStrict,
+	AuthOIDCIssuers: []shunter.AuthOIDCIssuer{
+		{
+			Issuer:  "https://<project-ref>.supabase.co/auth/v1",
+			JWKSURL: "https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json",
+		},
+	},
+	AuthIssuers:   []string{"https://<project-ref>.supabase.co/auth/v1"},
+	AuthAudiences: []string{"authenticated"},
+}
+```
+
+`AuthOIDCIssuers` supplies verification keys. `AuthIssuers` and
+`AuthAudiences` remain the issuer and audience policy. Allow Supabase `anon` as
+an audience only for apps that intentionally admit anonymous users.
+
+Supabase `role` is not a Shunter permission. Shunter permission checks use only
+the `permissions` JWT claim or local caller permission options.
+
 ## Principal And Identity
 
 Protocol identity is derived from the validated `(iss, sub)` pair. If a token
@@ -80,6 +116,28 @@ can supply equivalent metadata with options such as `WithIdentity`,
 
 `Module.Version(...)` and Shunter build metadata are unrelated to authentication
 claims. They should not be used as issuer, subject, or permission values.
+
+## Extra Claims
+
+Apps can opt into bounded extra JWT claims with `Config.AuthExtraClaims` or
+`SHUNTER_AUTH_EXTRA_CLAIMS`. Values appear at
+`ctx.Caller.Principal.Claims` for reducers and procedures, and can be read with
+`AuthClaims.Get(name)`.
+
+```go
+cfg.AuthExtraClaims = []string{"email", "role", "session_id", "aal", "is_anonymous"}
+cfg.AuthMaxExtraClaimBytes = 4096
+cfg.AuthMaxExtraClaimsBytes = 16384
+```
+
+Claim names are trimmed and must be non-empty, unique, no more than 256 bytes,
+free of control characters, and not Shunter-owned claims such as `iss`, `sub`,
+`aud`, `exp`, `iat`, `nbf`, `hex_identity`, or `permissions`. Missing
+configured claims are skipped. Values are re-marshaled from the parsed JWT claim
+map into compact JSON and copied on access.
+
+Extra claims do not expose JWT headers, `kid`, signatures, bearer tokens, or raw
+JWT text. They also do not affect permission checks.
 
 ## Permissions
 

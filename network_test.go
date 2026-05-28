@@ -85,6 +85,24 @@ func TestBuildAuthConfigDevGeneratesAnonymousMintConfig(t *testing.T) {
 	}
 }
 
+func TestBuildAuthConfigDevMapsExtraClaims(t *testing.T) {
+	jwtCfg, _, err := buildAuthConfig(Config{
+		AuthMode:                AuthModeDev,
+		AuthExtraClaims:         []string{"email"},
+		AuthMaxExtraClaimBytes:  12,
+		AuthMaxExtraClaimsBytes: 34,
+	})
+	if err != nil {
+		t.Fatalf("buildAuthConfig returned error: %v", err)
+	}
+	if len(jwtCfg.ExtraClaims) != 1 || jwtCfg.ExtraClaims[0] != "email" {
+		t.Fatalf("ExtraClaims = %#v, want email", jwtCfg.ExtraClaims)
+	}
+	if jwtCfg.MaxExtraClaimBytes != 12 || jwtCfg.MaxExtraClaimsBytes != 34 {
+		t.Fatalf("extra claim limits = %d/%d, want 12/34", jwtCfg.MaxExtraClaimBytes, jwtCfg.MaxExtraClaimsBytes)
+	}
+}
+
 func TestBuildAuthConfigDevMintedTokenValidatesWithConfiguredAudiences(t *testing.T) {
 	jwtCfg, mintCfg, err := buildAuthConfig(Config{
 		AuthMode:      AuthModeDev,
@@ -167,7 +185,16 @@ func TestBuildAuthConfigStrictMapsIssuersAudiencesAndCopiesKey(t *testing.T) {
 	key := []byte("test-secret")
 	issuers := []string{"issuer"}
 	audiences := []string{"app"}
-	cfg := Config{AuthMode: AuthModeStrict, AuthSigningKey: key, AuthIssuers: issuers, AuthAudiences: audiences}
+	extraClaims := []string{"email"}
+	cfg := Config{
+		AuthMode:                AuthModeStrict,
+		AuthSigningKey:          key,
+		AuthIssuers:             issuers,
+		AuthAudiences:           audiences,
+		AuthExtraClaims:         extraClaims,
+		AuthMaxExtraClaimBytes:  12,
+		AuthMaxExtraClaimsBytes: 34,
+	}
 	jwtCfg, mintCfg, err := buildAuthConfig(cfg)
 	if err != nil {
 		t.Fatalf("buildAuthConfig returned error: %v", err)
@@ -178,6 +205,7 @@ func TestBuildAuthConfigStrictMapsIssuersAudiencesAndCopiesKey(t *testing.T) {
 	key[0] = 'X'
 	issuers[0] = "mutated"
 	audiences[0] = "mutated"
+	extraClaims[0] = "mutated"
 	if string(jwtCfg.SigningKey) == string(key) {
 		t.Fatal("signing key was not defensively copied")
 	}
@@ -186,6 +214,12 @@ func TestBuildAuthConfigStrictMapsIssuersAudiencesAndCopiesKey(t *testing.T) {
 	}
 	if jwtCfg.Audiences[0] == audiences[0] {
 		t.Fatal("audiences were not defensively copied")
+	}
+	if jwtCfg.ExtraClaims[0] == extraClaims[0] {
+		t.Fatal("extra claims were not defensively copied")
+	}
+	if jwtCfg.MaxExtraClaimBytes != 12 || jwtCfg.MaxExtraClaimsBytes != 34 {
+		t.Fatalf("extra claim limits = %d/%d, want 12/34", jwtCfg.MaxExtraClaimBytes, jwtCfg.MaxExtraClaimsBytes)
 	}
 }
 
@@ -272,6 +306,49 @@ func TestConfigFromEnvParsesOIDCIssuers(t *testing.T) {
 	}
 }
 
+func TestConfigFromEnvParsesExtraClaimsAndLimits(t *testing.T) {
+	t.Setenv("SHUNTER_AUTH_EXTRA_CLAIMS", " email,role, https://claims.example/session ")
+	t.Setenv("SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES", "4097")
+	t.Setenv("SHUNTER_AUTH_MAX_EXTRA_CLAIMS_BYTES", "16385")
+
+	cfg, err := ConfigFromEnvE()
+	if err != nil {
+		t.Fatalf("ConfigFromEnvE returned error: %v", err)
+	}
+	if len(cfg.AuthExtraClaims) != 3 ||
+		cfg.AuthExtraClaims[0] != "email" ||
+		cfg.AuthExtraClaims[1] != "role" ||
+		cfg.AuthExtraClaims[2] != "https://claims.example/session" {
+		t.Fatalf("AuthExtraClaims = %#v, want trimmed configured claims", cfg.AuthExtraClaims)
+	}
+	if cfg.AuthMaxExtraClaimBytes != 4097 || cfg.AuthMaxExtraClaimsBytes != 16385 {
+		t.Fatalf("extra claim limits = %d/%d, want 4097/16385", cfg.AuthMaxExtraClaimBytes, cfg.AuthMaxExtraClaimsBytes)
+	}
+}
+
+func TestConfigFromEnvRejectsInvalidExtraClaims(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+	}{
+		{name: "empty name", env: map[string]string{"SHUNTER_AUTH_EXTRA_CLAIMS": "email,,role"}},
+		{name: "duplicate", env: map[string]string{"SHUNTER_AUTH_EXTRA_CLAIMS": "email, email"}},
+		{name: "owned", env: map[string]string{"SHUNTER_AUTH_EXTRA_CLAIMS": "sub"}},
+		{name: "negative per claim", env: map[string]string{"SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES": "-1"}},
+		{name: "negative total", env: map[string]string{"SHUNTER_AUTH_MAX_EXTRA_CLAIMS_BYTES": "-1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			if _, err := ConfigFromEnvE(); err == nil {
+				t.Fatal("ConfigFromEnvE succeeded with invalid extra claim config")
+			}
+		})
+	}
+}
+
 func TestConfigFromEnvParsesOIDCIssuerURLWithComma(t *testing.T) {
 	t.Setenv("SHUNTER_AUTH_OIDC_ISSUERS", "https://issuer.example,https://issuer.example/jwks.json?keys=a,b")
 
@@ -301,6 +378,7 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	oidcAlgorithms := []AuthAlgorithm{AuthAlgorithmRS256}
 	issuers := []string{"issuer"}
 	audiences := []string{"app"}
+	extraClaims := []string{"email"}
 	cfg := Config{
 		DataDir:        t.TempDir(),
 		AuthMode:       AuthModeStrict,
@@ -311,8 +389,9 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 		AuthOIDCIssuers: []AuthOIDCIssuer{
 			{Issuer: "oidc", JWKSURL: "https://oidc.example/jwks.json", Algorithms: oidcAlgorithms},
 		},
-		AuthIssuers:   issuers,
-		AuthAudiences: audiences,
+		AuthIssuers:     issuers,
+		AuthAudiences:   audiences,
+		AuthExtraClaims: extraClaims,
 	}
 
 	rt, err := Build(validChatModule(), cfg)
@@ -325,6 +404,7 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	oidcAlgorithms[0] = AuthAlgorithmES256
 	issuers[0] = "mutated"
 	audiences[0] = "mutated"
+	extraClaims[0] = "mutated"
 
 	got := rt.Config()
 	if string(got.AuthSigningKey) != "strict-runtime-secret" {
@@ -342,6 +422,9 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	if len(got.AuthOIDCIssuers) != 1 || got.AuthOIDCIssuers[0].Algorithms[0] != AuthAlgorithmRS256 {
 		t.Fatalf("Config AuthOIDCIssuers = %#v, want detached original OIDC issuer", got.AuthOIDCIssuers)
 	}
+	if len(got.AuthExtraClaims) != 1 || got.AuthExtraClaims[0] != "email" {
+		t.Fatalf("Config AuthExtraClaims = %#v, want detached original extra claim", got.AuthExtraClaims)
+	}
 
 	got.AuthSigningKey[0] = 'Y'
 	got.AuthVerificationKeys[0].Key[0] = 'Y'
@@ -349,6 +432,7 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	got.AuthOIDCIssuers[0].Algorithms[0] = AuthAlgorithmES256
 	got.AuthIssuers[0] = "changed"
 	got.AuthAudiences[0] = "changed"
+	got.AuthExtraClaims[0] = "changed"
 
 	again := rt.Config()
 	if string(again.AuthSigningKey) != "strict-runtime-secret" {
@@ -367,6 +451,9 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	}
 	if len(again.AuthOIDCIssuers) != 1 || again.AuthOIDCIssuers[0].Algorithms[0] != AuthAlgorithmRS256 {
 		t.Fatalf("second Config AuthOIDCIssuers = %#v, want detached original OIDC issuer", again.AuthOIDCIssuers)
+	}
+	if len(again.AuthExtraClaims) != 1 || again.AuthExtraClaims[0] != "email" {
+		t.Fatalf("second Config AuthExtraClaims = %#v, want detached original extra claim", again.AuthExtraClaims)
 	}
 }
 

@@ -43,6 +43,9 @@ type ProductValue = types.ProductValue
 // AuthPrincipal carries normalized external-auth claim data for reducer calls.
 type AuthPrincipal = types.AuthPrincipal
 
+// AuthClaims carries configured extra JWT claims as compact JSON values.
+type AuthClaims = types.AuthClaims
+
 // RowID identifies a row within a table.
 type RowID = types.RowID
 

@@ -24,10 +24,14 @@ subscription multi-way join limits are rejected during `Build`.
 
 | Field | Purpose |
 | --- | --- |
-| `AuthSigningKey` | Legacy HS256 token signing/verification key. Required for strict protocol serving unless `AuthVerificationKeys` is configured. |
+| `AuthSigningKey` | Legacy HS256 token signing/verification key. Required for strict protocol serving unless `AuthVerificationKeys` or `AuthOIDCIssuers` is configured. |
 | `AuthVerificationKeys` | Local JWT verification keys for HS256, RS256, or ES256, with optional `KeyID`/`kid` matching for rotation. |
+| `AuthOIDCIssuers` | Explicit remote JWKS verification sources for RS256 or ES256 JWTs. This config supplies keys, not issuer/audience policy. |
 | `AuthIssuers` | Accepted JWT issuer values when non-empty. |
 | `AuthAudiences` | Accepted JWT audience values when non-empty. |
+| `AuthExtraClaims` | Optional allowlist of extra JWT claim names copied into reducer/procedure caller principals as compact JSON. |
+| `AuthMaxExtraClaimBytes` | Per-extra-claim compact JSON byte limit. Zero defaults to 4096. |
+| `AuthMaxExtraClaimsBytes` | Total compact JSON byte limit for all preserved extra claims. Zero defaults to 16384. |
 | `AnonymousTokenIssuer` | Development anonymous-token issuer override. |
 | `AnonymousTokenAudience` | Development anonymous-token audience override. |
 | `AnonymousTokenTTL` | Development anonymous-token lifetime override. |
@@ -35,6 +39,25 @@ subscription multi-way join limits are rejected during `Build`.
 See [Authentication](../authentication.md) and
 [Configure auth](../how-to/configure-auth.md) before using strict mode in a
 public service.
+
+Extra claim names are trimmed and validated at startup. They may use provider
+or URI-style names, but cannot be empty, duplicated, over 256 bytes, contain
+control characters, or name Shunter-owned claims: `iss`, `sub`, `aud`, `exp`,
+`iat`, `nbf`, `hex_identity`, or `permissions`. Extra claims are caller context
+only; they do not grant permissions.
+
+`ConfigFromEnv` maps these auth variables:
+
+| Environment variable | Config field |
+| --- | --- |
+| `SHUNTER_AUTH_MODE` | `AuthMode` |
+| `SHUNTER_AUTH_SIGNING_KEY` | `AuthSigningKey` |
+| `SHUNTER_AUTH_ISSUERS` | `AuthIssuers` |
+| `SHUNTER_AUTH_AUDIENCES` | `AuthAudiences` |
+| `SHUNTER_AUTH_OIDC_ISSUERS` | `AuthOIDCIssuers` as `issuer,jwks-url;issuer,jwks-url` |
+| `SHUNTER_AUTH_EXTRA_CLAIMS` | `AuthExtraClaims` |
+| `SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES` | `AuthMaxExtraClaimBytes` |
+| `SHUNTER_AUTH_MAX_EXTRA_CLAIMS_BYTES` | `AuthMaxExtraClaimsBytes` |
 
 ## Protocol Field
 
@@ -115,3 +138,29 @@ cfg := shunter.Config{
 	AuthAudiences: []string{"chat"},
 }
 ```
+
+Strict protocol runtime with Supabase asymmetric signing keys:
+
+```go
+cfg := shunter.Config{
+	DataDir:        "./data/chat",
+	EnableProtocol: true,
+	ListenAddr:     "127.0.0.1:3000",
+	AuthMode:       shunter.AuthModeStrict,
+	AuthOIDCIssuers: []shunter.AuthOIDCIssuer{
+		{
+			Issuer:  "https://<project-ref>.supabase.co/auth/v1",
+			JWKSURL: "https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json",
+		},
+	},
+	AuthIssuers:             []string{"https://<project-ref>.supabase.co/auth/v1"},
+	AuthAudiences:           []string{"authenticated"},
+	AuthExtraClaims:         []string{"email", "role", "session_id", "aal", "is_anonymous"},
+	AuthMaxExtraClaimBytes:  4096,
+	AuthMaxExtraClaimsBytes: 16384,
+}
+```
+
+Supabase remains the delegated auth provider. Shunter validates the externally
+issued JWT, enforces `AuthIssuers` and `AuthAudiences`, and does not map
+Supabase `role` into Shunter permissions.
