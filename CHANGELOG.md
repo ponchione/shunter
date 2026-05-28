@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- TypeScript codegen now accepts an explicit `internal`, `full`, or `public`
+  profile through Go options and `shunter contract codegen --profile`, while
+  preserving the current generated output for every accepted profile.
 - Protocol one-off SQL ordered reads now avoid per-row ORDER BY key slices on
   single-table sorts and defer ordered join projection until after windowing,
   reducing allocation traffic on hot query paths.

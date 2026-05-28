@@ -282,6 +282,38 @@ func TestGenerateFileWritesDeterministicTypeScriptFromContractJSON(t *testing.T)
 	assertContains(t, first, `export function callSendMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`)
 }
 
+func TestGenerateFromFileProfilesPreserveDefaultOutput(t *testing.T) {
+	dir := t.TempDir()
+	contractPath := writeContractFixture(t, dir, "contract.json", workflowContractFixture())
+
+	want, err := GenerateFromFile(contractPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("GenerateFromFile default returned error: %v", err)
+	}
+	for _, tc := range []struct {
+		name    string
+		profile string
+	}{
+		{name: "blank", profile: codegen.ProfileDefault},
+		{name: "internal", profile: codegen.ProfileInternal},
+		{name: "full", profile: codegen.ProfileFull},
+		{name: "public", profile: codegen.ProfilePublic},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := GenerateFromFile(contractPath, codegen.Options{
+				Language: codegen.LanguageTypeScript,
+				Profile:  tc.profile,
+			})
+			if err != nil {
+				t.Fatalf("GenerateFromFile returned error: %v", err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("profile %q changed generated output\n--- got ---\n%s\n--- want ---\n%s", tc.profile, got, want)
+			}
+		})
+	}
+}
+
 func TestFindReducerUsesLocalContractDeclarations(t *testing.T) {
 	contract := workflowContractFixture()
 	contract.Schema.Reducers = append(contract.Schema.Reducers, schema.ReducerExport{
@@ -1843,6 +1875,37 @@ func TestGenerateRuntimeFileWritesDeterministicTypeScriptFromRuntime(t *testing.
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestGenerateRuntimeProfilesPreserveDefaultOutput(t *testing.T) {
+	rt := buildWorkflowRuntime(t)
+	want, err := GenerateRuntime(rt, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("GenerateRuntime default returned error: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		profile string
+	}{
+		{name: "blank", profile: codegen.ProfileDefault},
+		{name: "internal", profile: codegen.ProfileInternal},
+		{name: "full", profile: codegen.ProfileFull},
+		{name: "public", profile: codegen.ProfilePublic},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := GenerateRuntime(rt, codegen.Options{
+				Language: codegen.LanguageTypeScript,
+				Profile:  tc.profile,
+			})
+			if err != nil {
+				t.Fatalf("GenerateRuntime returned error: %v", err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("profile %q changed runtime generated output\n--- got ---\n%s\n--- want ---\n%s", tc.profile, got, want)
+			}
+		})
+	}
+}
+
 func TestGenerateRuntimeRejectsNilRuntimeWithoutMutatingOutput(t *testing.T) {
 	dir := t.TempDir()
 	outputPath := filepath.Join(dir, "client.ts")
@@ -1903,6 +1966,45 @@ func TestGenerateRuntimeRejectsUnsupportedLanguageBeforeRuntimeUse(t *testing.T)
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestGenerateRuntimeRejectsUnsupportedProfileBeforeRuntimeUse(t *testing.T) {
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("write existing output: %v", err)
+	}
+
+	_, err := GenerateRuntime(nil, codegen.Options{
+		Language: codegen.LanguageTypeScript,
+		Profile:  "private",
+	})
+	if err == nil {
+		t.Fatal("GenerateRuntime returned nil error for unsupported profile")
+	}
+	if !errors.Is(err, codegen.ErrUnsupportedProfile) {
+		t.Fatalf("GenerateRuntime error = %v, want ErrUnsupportedProfile", err)
+	}
+
+	err = GenerateRuntimeFile(nil, outputPath, codegen.Options{
+		Language: codegen.LanguageTypeScript,
+		Profile:  "private",
+	})
+	if err == nil {
+		t.Fatal("GenerateRuntimeFile returned nil error for unsupported profile")
+	}
+	if !errors.Is(err, codegen.ErrUnsupportedProfile) {
+		t.Fatalf("GenerateRuntimeFile error = %v, want ErrUnsupportedProfile", err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read existing output: %v", err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("unsupported runtime profile mutated output:\nobserved=%q\nexpected=%q", got, original)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateFileRejectsEmptyOutputPathBeforeReadingContract(t *testing.T) {
 	const trace = "trace=workflow-codegen-empty-output-path-before-input-read"
 	dir := t.TempDir()
@@ -1947,6 +2049,39 @@ func TestGenerateFileRejectsUnsupportedLanguageBeforeReadingContract(t *testing.
 	}
 	if !bytes.Equal(got, original) {
 		t.Fatalf("%s unsupported language mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
+func TestGenerateFileRejectsUnsupportedProfileBeforeReadingContract(t *testing.T) {
+	const trace = "trace=workflow-codegen-unsupported-profile-before-input-read"
+	dir := t.TempDir()
+	missingContractPath := filepath.Join(dir, "missing-contract.json")
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	err := GenerateFile(missingContractPath, outputPath, codegen.Options{
+		Language: codegen.LanguageTypeScript,
+		Profile:  "private",
+	})
+	if err == nil {
+		t.Fatalf("%s GenerateFile returned nil error for unsupported profile", trace)
+	}
+	if !errors.Is(err, codegen.ErrUnsupportedProfile) {
+		t.Fatalf("%s GenerateFile error = %v, want ErrUnsupportedProfile", trace, err)
+	}
+	if strings.Contains(err.Error(), "read contract input") {
+		t.Fatalf("%s GenerateFile read contract before rejecting profile: %v", trace, err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s unsupported profile mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
 	}
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }

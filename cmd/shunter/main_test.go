@@ -27,6 +27,7 @@ func TestHelpDocumentsAppOwnedContractExport(t *testing.T) {
 	assertContains(t, out, "shunter health --url http://127.0.0.1:3000")
 	assertContains(t, out, "shunter contract validate --contract shunter.contract.json")
 	assertContains(t, out, "shunter contract assert --contract shunter.contract.json")
+	assertContains(t, out, "--profile internal|full|public")
 	assertContains(t, out, "--section all|tables|reducers|procedures|queries|views|visibility")
 	assertContains(t, out, "shunter backup --data-dir ./data --out ./backup")
 	assertContains(t, out, "shunter restore --backup ./backup --data-dir ./data")
@@ -47,6 +48,7 @@ func TestContractHelpDocumentsAssertExamples(t *testing.T) {
 	assertContains(t, out, "Examples:")
 	assertContains(t, out, "shunter contract assert --contract shunter.contract.json --module chat --module-version v0.1.0 --contract-version 1 --tables 1 --reducers 1 --format json")
 	assertContains(t, out, "shunter contract assert --contract shunter.contract.json")
+	assertContains(t, out, "--profile internal|full|public")
 }
 
 func TestContractAssertHelpDocumentsExamples(t *testing.T) {
@@ -2048,6 +2050,49 @@ func TestContractCodegenCommandAcceptsTypeScriptRuntimeImport(t *testing.T) {
 	assertContains(t, stdout.String(), "wrote "+outputPath)
 }
 
+func TestContractCodegenCommandAcceptsProfile(t *testing.T) {
+	dir := t.TempDir()
+	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
+	defaultOutputPath := filepath.Join(dir, "client.default.ts")
+	publicOutputPath := filepath.Join(dir, "client.public.ts")
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "codegen",
+		"--contract", contractPath,
+		"--language", "typescript",
+		"--out", defaultOutputPath,
+	})
+	if code != 0 {
+		t.Fatalf("default contract codegen exit code = %d, stderr = %s", code, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run(&stdout, &stderr, []string{
+		"contract", "codegen",
+		"--contract", contractPath,
+		"--language", "typescript",
+		"--profile", "public",
+		"--out", publicOutputPath,
+	})
+	if code != 0 {
+		t.Fatalf("profile contract codegen exit code = %d, stderr = %s", code, stderr.String())
+	}
+	defaultData, err := os.ReadFile(defaultOutputPath)
+	if err != nil {
+		t.Fatalf("read default output: %v", err)
+	}
+	publicData, err := os.ReadFile(publicOutputPath)
+	if err != nil {
+		t.Fatalf("read public output: %v", err)
+	}
+	if !bytes.Equal(publicData, defaultData) {
+		t.Fatalf("public profile changed CLI output\n--- public ---\n%s\n--- default ---\n%s", publicData, defaultData)
+	}
+	assertContains(t, stdout.String(), "wrote "+publicOutputPath)
+}
+
 func TestContractCodegenRejectedInputsLeaveOutputUntouched(t *testing.T) {
 	validContract, err := cliContractFixture().MarshalCanonicalJSON()
 	if err != nil {
@@ -2059,6 +2104,7 @@ func TestContractCodegenRejectedInputsLeaveOutputUntouched(t *testing.T) {
 		trace        string
 		contractData []byte
 		language     string
+		profile      string
 		wantStderr   string
 	}{
 		{
@@ -2067,6 +2113,14 @@ func TestContractCodegenRejectedInputsLeaveOutputUntouched(t *testing.T) {
 			contractData: validContract,
 			language:     "go",
 			wantStderr:   `unsupported language "go"`,
+		},
+		{
+			name:         "unsupported-profile",
+			trace:        "trace=cli-codegen-rejected-profile-output-preservation",
+			contractData: validContract,
+			language:     "typescript",
+			profile:      "private",
+			wantStderr:   `unsupported codegen profile "private"`,
 		},
 		{
 			name:         "malformed-contract-json",
@@ -2096,12 +2150,16 @@ func TestContractCodegenRejectedInputsLeaveOutputUntouched(t *testing.T) {
 			}
 
 			var stdout, stderr bytes.Buffer
-			code := run(&stdout, &stderr, []string{
+			args := []string{
 				"contract", "codegen",
 				"--contract", contractPath,
 				"--language", tc.language,
 				"--out", outputPath,
-			})
+			}
+			if tc.profile != "" {
+				args = append(args, "--profile", tc.profile)
+			}
+			code := run(&stdout, &stderr, args)
 			if code != 1 {
 				t.Fatalf("%s contract codegen exit code = %d, stderr = %s", tc.trace, code, stderr.String())
 			}

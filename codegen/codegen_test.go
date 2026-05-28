@@ -549,6 +549,64 @@ func TestGeneratorRejectsInvalidTypeScriptRuntimeImportBeforeDecodingContractJSO
 	}
 }
 
+func TestGeneratorRejectsInvalidProfileBeforeDecodingContractJSON(t *testing.T) {
+	_, err := GenerateFromJSON([]byte(`{`), Options{
+		Language: LanguageTypeScript,
+		Profile:  "private",
+	})
+	if err == nil {
+		t.Fatal("GenerateFromJSON returned nil error, want invalid profile error")
+	}
+	if !errors.Is(err, ErrUnsupportedProfile) {
+		t.Fatalf("GenerateFromJSON error = %v, want ErrUnsupportedProfile", err)
+	}
+	if errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("GenerateFromJSON decoded contract before rejecting profile: %v", err)
+	}
+}
+
+func TestTypeScriptProfilesPreserveDefaultOutput(t *testing.T) {
+	contract := contractFixture()
+	want, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate default returned error: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		profile string
+	}{
+		{name: "blank", profile: ProfileDefault},
+		{name: "internal", profile: ProfileInternal},
+		{name: "full", profile: ProfileFull},
+		{name: "public", profile: ProfilePublic},
+		{name: "trimmed case", profile: " PUBLIC "},
+	} {
+		t.Run("Generate/"+tc.name, func(t *testing.T) {
+			got, err := Generate(contract, Options{
+				Language: LanguageTypeScript,
+				Profile:  tc.profile,
+			})
+			if err != nil {
+				t.Fatalf("Generate returned error: %v", err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("profile %q changed generated output\n--- got ---\n%s\n--- want ---\n%s", tc.profile, got, want)
+			}
+		})
+
+		t.Run("GenerateTypeScriptWithOptions/"+tc.name, func(t *testing.T) {
+			got, err := GenerateTypeScriptWithOptions(contract, TypeScriptOptions{Profile: tc.profile})
+			if err != nil {
+				t.Fatalf("GenerateTypeScriptWithOptions returned error: %v", err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("profile %q changed TypeScript output\n--- got ---\n%s\n--- want ---\n%s", tc.profile, got, want)
+			}
+		})
+	}
+}
+
 func TestGeneratorRejectsUnusableContractJSON(t *testing.T) {
 	_, err := GenerateFromJSON([]byte(`{"version":1,"tables":[],"reducers":[]}`), Options{Language: LanguageTypeScript})
 	if err == nil {

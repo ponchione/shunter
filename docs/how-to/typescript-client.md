@@ -59,11 +59,15 @@ Generate bindings from a reviewed contract artifact:
 rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --out src/shunter.gen.ts
 ```
 
+Use `--profile internal`, `--profile full`, or `--profile public` to make the
+generation profile explicit. All accepted profiles currently emit the same
+TypeScript output; public filtering is not active yet.
+
 If the app renames or vendors the runtime package, generate with the same import
-specifier:
+specifier. For example, with an explicit public profile:
 
 ```bash
-rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --runtime-import @app/shunter-runtime --out src/shunter.gen.ts
+rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --profile public --runtime-import @app/shunter-runtime --out src/shunter.gen.ts
 ```
 
 The Go API equivalent is:
@@ -72,6 +76,7 @@ The Go API equivalent is:
 codegen.Options{
 	Language:                codegen.LanguageTypeScript,
 	TypeScriptRuntimeImport: "@app/shunter-runtime",
+	Profile:                 codegen.ProfilePublic,
 }
 ```
 

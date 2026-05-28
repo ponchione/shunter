@@ -118,6 +118,11 @@ Or generate from an existing contract JSON file:
 rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
 ```
 
+Profile selection is explicit with `--profile internal`, `--profile full`, or
+`--profile public`. Blank, `internal`, `full`, and `public` currently emit the
+same TypeScript; public filtering waits for table visibility metadata. Go
+callers use `codegen.Options.Profile`.
+
 Generated TypeScript imports the Shunter SDK runtime package name
 `@shunter/client` by default. Use `codegen.Options.TypeScriptRuntimeImport` or
 `--runtime-import` only when an app vendors or renames the runtime package. The

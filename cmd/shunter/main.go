@@ -186,6 +186,7 @@ func runContractCodegen(stdout, stderr io.Writer, args []string) int {
 	fs := newFlagSet(stderr, "shunter contract codegen")
 	contractPath := fs.String("contract", "", "contract JSON path")
 	language := fs.String("language", codegen.LanguageTypeScript, "generator target language")
+	profile := fs.String("profile", codegen.ProfileDefault, "TypeScript generation profile: internal, full, or public")
 	runtimeImport := fs.String("runtime-import", "", "TypeScript runtime import specifier")
 	outputPath := fs.String("out", "", "generated output path")
 	if code, stop := parseFlags(fs, args); stop {
@@ -204,6 +205,7 @@ func runContractCodegen(stdout, stderr io.Writer, args []string) int {
 	if err := contractworkflow.GenerateFile(*contractPath, *outputPath, codegen.Options{
 		Language:                *language,
 		TypeScriptRuntimeImport: *runtimeImport,
+		Profile:                 *profile,
 	}); err != nil {
 		writeCLIError(stderr, err)
 		return 1
@@ -330,7 +332,7 @@ Usage:
   shunter contract plan --previous old.json --current current.json [--strict] [--require-previous-version] [--validate] [--format text|json]
   shunter contract validate --contract shunter.contract.json [--format text|json]
   shunter contract assert --contract shunter.contract.json [--module name] [--module-version v] [--contract-version n] [--schema-version n] [--tables n] [--columns n] [--indexes n] [--reducers n] [--procedures n] [--queries n] [--views n] [--visibility-filters n] [--format text|json]
-  shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
+  shunter contract codegen --contract shunter.contract.json --language typescript [--profile internal|full|public] --out client.ts
   shunter backup --data-dir ./data --out ./backup
   shunter restore --backup ./backup --data-dir ./data
 
@@ -350,7 +352,7 @@ func printContractHelp(w io.Writer) {
   shunter contract plan --previous old.json --current current.json [--strict] [--require-previous-version] [--validate] [--format text|json]
   shunter contract validate --contract shunter.contract.json [--format text|json]
   shunter contract assert --contract shunter.contract.json [--module name] [--module-version v] [--contract-version n] [--schema-version n] [--tables n] [--columns n] [--indexes n] [--reducers n] [--procedures n] [--queries n] [--views n] [--visibility-filters n] [--format text|json]
-  shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
+  shunter contract codegen --contract shunter.contract.json --language typescript [--profile internal|full|public] --out client.ts
 
 Contract commands operate on canonical ModuleContract JSON files only.
 Export app module contracts from an app-owned binary with Runtime.ExportContractJSON.

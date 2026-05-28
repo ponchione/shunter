@@ -15,11 +15,23 @@ const (
 
 	// DefaultTypeScriptRuntimeImport is the stable local package name imported by generated bindings.
 	DefaultTypeScriptRuntimeImport = "@shunter/client"
+
+	// ProfileDefault preserves the current generator profile.
+	ProfileDefault = ""
+	// ProfileInternal emits the complete internal TypeScript surface.
+	ProfileInternal = "internal"
+	// ProfileFull emits the complete TypeScript surface.
+	ProfileFull = "full"
+	// ProfilePublic selects the public TypeScript surface. It is currently a validated no-op.
+	ProfilePublic = "public"
 )
 
 var (
 	// ErrUnsupportedLanguage reports a requested generator target that does not exist.
 	ErrUnsupportedLanguage = errors.New("unsupported language")
+
+	// ErrUnsupportedProfile reports a requested generator profile that does not exist.
+	ErrUnsupportedProfile = errors.New("unsupported codegen profile")
 
 	// ErrInvalidContract reports canonical contract input that cannot be used for codegen.
 	ErrInvalidContract = errors.New("invalid module contract")
@@ -29,11 +41,13 @@ var (
 type Options struct {
 	Language                string
 	TypeScriptRuntimeImport string
+	Profile                 string
 }
 
 // TypeScriptOptions configures generated TypeScript bindings.
 type TypeScriptOptions struct {
 	RuntimeImport string
+	Profile       string
 }
 
 // GenerateFromJSON decodes canonical ModuleContract JSON and generates bindings.
@@ -57,6 +71,7 @@ func Generate(contract shunter.ModuleContract, opts Options) ([]byte, error) {
 	case LanguageTypeScript:
 		return GenerateTypeScriptWithOptions(contract, TypeScriptOptions{
 			RuntimeImport: opts.TypeScriptRuntimeImport,
+			Profile:       opts.Profile,
 		})
 	default:
 		return nil, fmt.Errorf("%w %q", ErrUnsupportedLanguage, opts.Language)
@@ -67,7 +82,10 @@ func Generate(contract shunter.ModuleContract, opts Options) ([]byte, error) {
 func ValidateOptions(opts Options) error {
 	switch normalizedLanguage(opts) {
 	case LanguageTypeScript:
-		_, err := normalizedTypeScriptRuntimeImport(opts.TypeScriptRuntimeImport)
+		if _, err := normalizedTypeScriptRuntimeImport(opts.TypeScriptRuntimeImport); err != nil {
+			return err
+		}
+		_, err := normalizedProfile(opts.Profile)
 		return err
 	default:
 		return fmt.Errorf("%w %q", ErrUnsupportedLanguage, opts.Language)
@@ -92,7 +110,14 @@ func GenerateTypeScriptWithOptions(contract shunter.ModuleContract, opts TypeScr
 	if err != nil {
 		return nil, err
 	}
-	return generateTypeScript(contract, typeScriptGenerationOptions{runtimeImport: runtimeImport})
+	profile, err := normalizedProfile(opts.Profile)
+	if err != nil {
+		return nil, err
+	}
+	return generateTypeScript(contract, typeScriptGenerationOptions{
+		runtimeImport: runtimeImport,
+		profile:       profile,
+	})
 }
 
 func normalizedTypeScriptRuntimeImport(specifier string) (string, error) {
@@ -106,6 +131,18 @@ func normalizedTypeScriptRuntimeImport(specifier string) (string, error) {
 		}
 	}
 	return trimmed, nil
+}
+
+func normalizedProfile(profile string) (string, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(profile))
+	switch trimmed {
+	case ProfileDefault:
+		return ProfileInternal, nil
+	case ProfileInternal, ProfileFull, ProfilePublic:
+		return trimmed, nil
+	default:
+		return "", fmt.Errorf("%w %q (supported profiles: %s, %s, %s)", ErrUnsupportedProfile, profile, ProfileInternal, ProfileFull, ProfilePublic)
+	}
 }
 
 func validateContract(contract shunter.ModuleContract) error {
