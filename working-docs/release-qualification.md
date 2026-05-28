@@ -31,12 +31,14 @@ rtk npm --prefix typescript/client test
 rtk npm --prefix typescript/client run build
 rtk npm --prefix typescript/client run pack:dry-run
 rtk npm --prefix typescript/client run smoke:package
-rtk bash scripts/hosted-chat-gate.sh
+rtk bash scripts/static-hosted-binary-gate.sh
 ```
 
-The hosted-chat gate is also the maintained release evidence for the current
-offline maintenance path: hosted-chat preflight, no-hook migration,
-backup/restore, and restored startup.
+The static hosted-binary gate wraps the maintained hosted-chat gate and focused
+binary-level Go gauntlets. It is the release evidence for the current static
+hosted-app shape, strict auth on the built hosted-chat binary, live
+subscriptions, clean and restored restarts, and the offline maintenance path:
+hosted-chat preflight, no-hook migration, backup/restore, and restored startup.
 
 Run from the sibling `opsboard-canary` checkout:
 
