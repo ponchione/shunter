@@ -587,19 +587,29 @@ func orderAndLimitOneOffRows(rows []types.ProductValue, orderBy []compiledSQLOrd
 	if len(orderBy) == 0 {
 		return sliceOneOffRows(rows, offset, limit), nil
 	}
-	ordered := make([]orderedOneOffRow, 0, len(rows))
 	for _, row := range rows {
-		keys := make([]types.Value, len(orderBy))
-		for i, term := range orderBy {
+		for _, term := range orderBy {
 			idx := term.Column.Schema.Index
 			if idx < 0 || idx >= len(row) {
 				return nil, fmt.Errorf("ORDER BY column %q is missing from row", term.Column.Schema.Name)
 			}
-			keys[i] = row[idx]
 		}
-		ordered = append(ordered, orderedOneOffRow{row: row, key: keys})
 	}
-	return materializeOrderedOneOffRows(ordered, orderBy, offset, limit), nil
+	slices.SortStableFunc(rows, func(a, b types.ProductValue) int {
+		for _, term := range orderBy {
+			idx := term.Column.Schema.Index
+			cmp := a[idx].Compare(b[idx])
+			if cmp == 0 {
+				continue
+			}
+			if term.Desc {
+				return -cmp
+			}
+			return cmp
+		}
+		return 0
+	})
+	return materializeSortedOneOffRows(rows, offset, limit), nil
 }
 
 func materializeOrderedOneOffRows(rows []orderedOneOffRow, orderBy []compiledSQLOrderBy, offset int, limit int) []types.ProductValue {
@@ -628,6 +638,23 @@ func materializeOrderedOneOffRows(rows []orderedOneOffRow, orderBy []compiledSQL
 	out := make([]types.ProductValue, 0, outLen)
 	for i := start; i < end; i++ {
 		out = append(out, rows[i].row)
+	}
+	return out
+}
+
+func materializeSortedOneOffRows(rows []types.ProductValue, offset int, limit int) []types.ProductValue {
+	start := offset
+	if start > len(rows) {
+		start = len(rows)
+	}
+	end := len(rows)
+	if limit >= 0 && limit < end-start {
+		end = start + limit
+	}
+	outLen := end - start
+	out := make([]types.ProductValue, 0, outLen)
+	for i := start; i < end; i++ {
+		out = append(out, rows[i])
 	}
 	return out
 }
@@ -926,19 +953,20 @@ func collectOneOffPairProjections(visitPairs func(func(types.ProductValue, types
 	return rows, err
 }
 
+type orderedOneOffPair struct {
+	leftRow  types.ProductValue
+	rightRow types.ProductValue
+}
+
 func collectOrderedOneOffPairProjections(visitPairs func(func(types.ProductValue, types.ProductValue) bool) error, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy, offset int, limit int) ([]types.ProductValue, error) {
-	var rows []orderedOneOffRow
+	var pairs []orderedOneOffPair
 	var orderErr error
 	err := visitPairs(func(leftRow, rightRow types.ProductValue) bool {
-		key, err := orderKeysFromJoinPair(leftRow, rightRow, leftID, leftAlias, rightID, rightAlias, orderBy)
-		if err != nil {
+		if err := validateOrderKeysFromJoinPair(leftRow, rightRow, leftID, leftAlias, rightID, rightAlias, orderBy); err != nil {
 			orderErr = err
 			return false
 		}
-		rows = append(rows, orderedOneOffRow{
-			row: projectOneOffJoinPair(leftRow, rightRow, leftID, leftAlias, rightID, rightAlias, columns),
-			key: key,
-		})
+		pairs = append(pairs, orderedOneOffPair{leftRow: leftRow, rightRow: rightRow})
 		return true
 	})
 	if err != nil {
@@ -947,7 +975,22 @@ func collectOrderedOneOffPairProjections(visitPairs func(func(types.ProductValue
 	if orderErr != nil {
 		return nil, orderErr
 	}
-	return materializeOrderedOneOffRows(rows, orderBy, offset, limit), nil
+	slices.SortStableFunc(pairs, func(a, b orderedOneOffPair) int {
+		for _, term := range orderBy {
+			leftValue, _ := orderValueFromJoinPair(a.leftRow, a.rightRow, leftID, leftAlias, rightID, rightAlias, term)
+			rightValue, _ := orderValueFromJoinPair(b.leftRow, b.rightRow, leftID, leftAlias, rightID, rightAlias, term)
+			cmp := leftValue.Compare(rightValue)
+			if cmp == 0 {
+				continue
+			}
+			if term.Desc {
+				return -cmp
+			}
+			return cmp
+		}
+		return 0
+	})
+	return projectSortedOneOffPairs(pairs, leftID, leftAlias, rightID, rightAlias, columns, offset, limit), nil
 }
 
 func projectOneOffJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, columns []compiledSQLProjectionColumn) types.ProductValue {
@@ -999,20 +1042,43 @@ func oneOffAggregateJoinColumnValue(leftRow, rightRow types.ProductValue, leftID
 	return source[idx], true
 }
 
-func orderKeysFromJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, orderBy []compiledSQLOrderBy) ([]types.Value, error) {
-	keys := make([]types.Value, len(orderBy))
-	for i, term := range orderBy {
-		source, ok := projectedJoinColumnSource(term.Column, leftID, leftAlias, leftRow, rightID, rightAlias, rightRow)
-		if !ok {
-			return nil, fmt.Errorf("ORDER BY column %q is not from the projected table", term.Column.Schema.Name)
-		}
-		idx := term.Column.Schema.Index
-		if idx < 0 || idx >= len(source) {
-			return nil, fmt.Errorf("ORDER BY column %q is missing from row", term.Column.Schema.Name)
-		}
-		keys[i] = source[idx]
+func orderValueFromJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, term compiledSQLOrderBy) (types.Value, error) {
+	source, ok := projectedJoinColumnSource(term.Column, leftID, leftAlias, leftRow, rightID, rightAlias, rightRow)
+	if !ok {
+		return types.Value{}, fmt.Errorf("ORDER BY column %q is not from the projected table", term.Column.Schema.Name)
 	}
-	return keys, nil
+	idx := term.Column.Schema.Index
+	if idx < 0 || idx >= len(source) {
+		return types.Value{}, fmt.Errorf("ORDER BY column %q is missing from row", term.Column.Schema.Name)
+	}
+	return source[idx], nil
+}
+
+func validateOrderKeysFromJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, orderBy []compiledSQLOrderBy) error {
+	for _, term := range orderBy {
+		if _, err := orderValueFromJoinPair(leftRow, rightRow, leftID, leftAlias, rightID, rightAlias, term); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func projectSortedOneOffPairs(pairs []orderedOneOffPair, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, columns []compiledSQLProjectionColumn, offset int, limit int) []types.ProductValue {
+	start := offset
+	if start > len(pairs) {
+		start = len(pairs)
+	}
+	end := len(pairs)
+	if limit >= 0 && limit < end-start {
+		end = start + limit
+	}
+	outLen := end - start
+	out := make([]types.ProductValue, 0, outLen)
+	for i := start; i < end; i++ {
+		pair := pairs[i]
+		out = append(out, projectOneOffJoinPair(pair.leftRow, pair.rightRow, leftID, leftAlias, rightID, rightAlias, columns))
+	}
+	return out
 }
 
 func evaluateOneOffCrossJoin(ctx context.Context, view store.CommittedReadView, projectedTable schema.TableID, cross subscription.CrossJoin, limit int) ([]types.ProductValue, error) {

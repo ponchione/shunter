@@ -514,6 +514,9 @@ func CompileSQLQueryStringWithVisibility(qs string, sl SchemaLookup, caller *typ
 	if err != nil {
 		return CompiledSQLQuery{}, err
 	}
+	if allowAll || len(filters) == 0 {
+		return compiled, nil
+	}
 	return ApplyVisibilityFilters(compiled, sl, caller, filters, allowAll)
 }
 
