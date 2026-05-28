@@ -90,6 +90,9 @@
           "permissions": [
             "messages:read"
           ]
+        },
+        "sdk": {
+          "visibility": "public"
         }
       },
       {
@@ -132,6 +135,9 @@
         "read_policy": {
           "access": "private",
           "permissions": []
+        },
+        "sdk": {
+          "visibility": "system"
         }
       },
       {
@@ -186,6 +192,9 @@
         "read_policy": {
           "access": "private",
           "permissions": []
+        },
+        "sdk": {
+          "visibility": "system"
         }
       }
     ],

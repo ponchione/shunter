@@ -22,12 +22,13 @@ type ProductColumnExport struct {
 
 // TableExport is the exported shape of one table.
 type TableExport struct {
-	ID         TableID        `json:"id"`
-	Name       string         `json:"name"`
-	IsEvent    bool           `json:"is_event,omitempty"`
-	Columns    []ColumnExport `json:"columns"`
-	Indexes    []IndexExport  `json:"indexes"`
-	ReadPolicy ReadPolicy     `json:"read_policy"`
+	ID         TableID           `json:"id"`
+	Name       string            `json:"name"`
+	IsEvent    bool              `json:"is_event,omitempty"`
+	Columns    []ColumnExport    `json:"columns"`
+	Indexes    []IndexExport     `json:"indexes"`
+	ReadPolicy ReadPolicy        `json:"read_policy"`
+	SDK        *TableSDKMetadata `json:"sdk,omitempty"`
 }
 
 // ColumnExport is the exported shape of one column.
@@ -78,7 +79,8 @@ func ExportSchemaRegistry(reg SchemaRegistry) *SchemaExport {
 		if !ok {
 			continue
 		}
-		te := TableExport{ID: ts.ID, Name: ts.Name, IsEvent: ts.IsEvent, ReadPolicy: normalizeReadPolicy(ts.ReadPolicy)}
+		sdk := tableSDKMetadataOrDefault(ts.SDK)
+		te := TableExport{ID: ts.ID, Name: ts.Name, IsEvent: ts.IsEvent, ReadPolicy: normalizeReadPolicy(ts.ReadPolicy), SDK: &sdk}
 		te.Columns = make([]ColumnExport, len(ts.Columns))
 		for i, col := range ts.Columns {
 			te.Columns[i] = ColumnExport{

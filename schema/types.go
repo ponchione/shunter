@@ -45,12 +45,13 @@ type IndexID uint32
 
 // TableSchema describes a registered table.
 type TableSchema struct {
-	ID         TableID        `json:"id"`
-	Name       string         `json:"name"`
-	IsEvent    bool           `json:"is_event,omitempty"`
-	Columns    []ColumnSchema `json:"columns"`
-	Indexes    []IndexSchema  `json:"indexes"`
-	ReadPolicy ReadPolicy     `json:"read_policy"`
+	ID         TableID          `json:"id"`
+	Name       string           `json:"name"`
+	IsEvent    bool             `json:"is_event,omitempty"`
+	Columns    []ColumnSchema   `json:"columns"`
+	Indexes    []IndexSchema    `json:"indexes"`
+	ReadPolicy ReadPolicy       `json:"read_policy"`
+	SDK        TableSDKMetadata `json:"-"`
 }
 
 // ColumnSchema describes a single column.

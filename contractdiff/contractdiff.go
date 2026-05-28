@@ -29,6 +29,7 @@ const (
 	SurfaceModule            Surface = "module"
 	SurfaceSchema            Surface = "schema"
 	SurfaceTable             Surface = "table"
+	SurfaceTableSDK          Surface = "table_sdk"
 	SurfaceTableReadPolicy   Surface = "table_read_policy"
 	SurfaceColumn            Surface = "column"
 	SurfaceIndex             Surface = "index"
@@ -155,6 +156,7 @@ func compareTables(out *Report, oldTables, currentTables []schema.TableExport) {
 		if old.ID != current.ID {
 			out.add(ChangeKindBreaking, SurfaceTable, name, fmt.Sprintf("table id changed from %d to %d", old.ID, current.ID))
 		}
+		compareTableSDKMetadata(out, old.Name, old.SDK, current.SDK)
 		compareTableReadPolicy(out, old.Name, old.ReadPolicy, current.ReadPolicy)
 		compareColumns(out, old.Name, old.Columns, current.Columns)
 		compareIndexes(out, old.Name, old.Indexes, current.Indexes)
@@ -174,6 +176,29 @@ func compareTableOrder(out *Report, oldTables, currentTables []schema.TableExpor
 			out.add(ChangeKindBreaking, SurfaceTable, table.Name, fmt.Sprintf("table order changed from %d to %d", oldPos, currentPos))
 		}
 	}
+}
+
+func compareTableSDKMetadata(out *Report, tableName string, oldMetadata, currentMetadata *schema.TableSDKMetadata) {
+	if tableSDKMetadataEqual(oldMetadata, currentMetadata) {
+		return
+	}
+	oldSignature := tableSDKMetadataSignature(oldMetadata)
+	currentSignature := tableSDKMetadataSignature(currentMetadata)
+	out.add(ChangeKindMetadata, SurfaceTableSDK, tableName, fmt.Sprintf("SDK metadata changed from %s to %s", oldSignature, currentSignature))
+}
+
+func tableSDKMetadataEqual(a, b *schema.TableSDKMetadata) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func tableSDKMetadataSignature(metadata *schema.TableSDKMetadata) string {
+	if metadata == nil {
+		return "unspecified"
+	}
+	return fmt.Sprintf("visibility=%s", metadata.Visibility)
 }
 
 func compareTableReadPolicy(out *Report, tableName string, oldPolicy, currentPolicy schema.ReadPolicy) {

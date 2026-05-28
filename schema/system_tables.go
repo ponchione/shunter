@@ -4,6 +4,7 @@ package schema
 func registerSystemTables(b *Builder) {
 	b.TableDef(TableDefinition{
 		Name: "sys_clients",
+		SDK:  systemTableSDKMetadata(),
 		Columns: []ColumnDefinition{
 			{Name: "connection_id", Type: KindBytes, PrimaryKey: true},
 			{Name: "identity", Type: KindBytes},
@@ -13,6 +14,7 @@ func registerSystemTables(b *Builder) {
 
 	b.TableDef(TableDefinition{
 		Name: "sys_scheduled",
+		SDK:  systemTableSDKMetadata(),
 		Columns: []ColumnDefinition{
 			{Name: "schedule_id", Type: KindUint64, PrimaryKey: true, AutoIncrement: true},
 			{Name: "reducer_name", Type: KindString},

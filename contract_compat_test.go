@@ -80,6 +80,7 @@ func TestV1CompatibilityModuleContractExportsAreDetached(t *testing.T) {
 	contract.Schema.Tables[0].Columns[0].Name = "mutated"
 	contract.Schema.Tables[0].Indexes[0].Name = "mutated"
 	contract.Schema.Tables[0].ReadPolicy.Permissions[0] = "mutated"
+	contract.Schema.Tables[0].SDK.Visibility = schema.TableSDKVisibilityPrivate
 	contract.Schema.Reducers[0].Name = "mutated"
 	contract.Queries[0].Name = "mutated"
 	contract.Queries[0].SQL = "SELECT * FROM mutated"
@@ -96,6 +97,7 @@ func TestV1CompatibilityModuleContractExportsAreDetached(t *testing.T) {
 	schemaExport.Tables[0].Columns[0].Name = "mutated_schema"
 	schemaExport.Tables[0].Indexes[0].Name = "mutated_schema"
 	schemaExport.Tables[0].ReadPolicy.Permissions[0] = "mutated_schema"
+	schemaExport.Tables[0].SDK.Visibility = schema.TableSDKVisibilityPrivate
 	schemaExport.Reducers[0].Name = "mutated_schema"
 
 	got, err := rt.ExportContractJSON()
@@ -127,6 +129,30 @@ func TestV1CompatibilityModuleContractJSONIgnoresUnknownFields(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("unknown fields affected canonical contract JSON\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+func TestV1CompatibilityModuleContractToleratesMissingTableSDKMetadata(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "v1_module_contract.json"))
+	if err != nil {
+		t.Fatalf("read v1 contract fixture: %v", err)
+	}
+	var contract ModuleContract
+	if err := json.Unmarshal(data, &contract); err != nil {
+		t.Fatalf("Unmarshal v1 contract fixture: %v", err)
+	}
+	for i := range contract.Schema.Tables {
+		contract.Schema.Tables[i].SDK = nil
+	}
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("contract without table SDK metadata did not validate: %v", err)
+	}
+	canonical, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+	if bytes.Contains(canonical, []byte(`"sdk"`)) {
+		t.Fatalf("legacy contract without table SDK metadata unexpectedly canonicalized sdk fields:\n%s", canonical)
 	}
 }
 
@@ -253,7 +279,7 @@ func TestV1CompatibilityModuleContractFixtureCoversStableJSONFields(t *testing.T
 	schemaJSON := assertJSONObjectKeys(t, top["schema"], "contract.schema", []string{"version", "tables", "reducers"})
 	tables := assertJSONArrayObjects(t, schemaJSON["tables"], "contract.schema.tables")
 	messagesTable := findJSONObjectByStringField(t, tables, "name", "messages", "contract.schema.tables")
-	assertJSONObjectKeys(t, mustMarshalRawObject(t, messagesTable), "contract.schema.tables.messages", []string{"id", "name", "columns", "indexes", "read_policy"})
+	assertJSONObjectKeys(t, mustMarshalRawObject(t, messagesTable), "contract.schema.tables.messages", []string{"id", "name", "columns", "indexes", "read_policy", "sdk"})
 	columns := assertJSONArrayObjects(t, messagesTable["columns"], "contract.schema.tables.messages.columns")
 	topicColumn := findJSONObjectByStringField(t, columns, "name", "topic", "contract.schema.tables.messages.columns")
 	assertJSONObjectKeys(t, mustMarshalRawObject(t, topicColumn), "contract.schema.tables.messages.columns.topic", []string{"index", "name", "type", "nullable", "auto_increment"})
@@ -261,6 +287,7 @@ func TestV1CompatibilityModuleContractFixtureCoversStableJSONFields(t *testing.T
 	pkIndex := findJSONObjectByStringField(t, indexes, "name", "pk", "contract.schema.tables.messages.indexes")
 	assertJSONObjectKeys(t, mustMarshalRawObject(t, pkIndex), "contract.schema.tables.messages.indexes.pk", []string{"id", "name", "columns", "column_ordinals", "unique", "primary"})
 	assertJSONObjectKeys(t, messagesTable["read_policy"], "contract.schema.tables.messages.read_policy", []string{"access", "permissions"})
+	assertJSONObjectKeys(t, messagesTable["sdk"], "contract.schema.tables.messages.sdk", []string{"visibility"})
 	reducers := assertJSONArrayObjects(t, schemaJSON["reducers"], "contract.schema.reducers")
 	createMessageReducer := findJSONObjectByStringField(t, reducers, "name", "create_message", "contract.schema.reducers")
 	assertJSONObjectKeys(t, mustMarshalRawObject(t, createMessageReducer), "contract.schema.reducers.create_message", []string{"name", "lifecycle", "args", "result"})
@@ -518,6 +545,9 @@ func assertV1FixtureTable(t *testing.T, contract ModuleContract) {
 		}
 		if len(table.ReadPolicy.Permissions) != 1 || table.ReadPolicy.Permissions[0] != "messages:read" {
 			t.Fatalf("messages read permissions = %#v, want [messages:read]", table.ReadPolicy.Permissions)
+		}
+		if table.SDK == nil || table.SDK.Visibility != schema.TableSDKVisibilityPublic {
+			t.Fatalf("messages SDK metadata = %#v, want public", table.SDK)
 		}
 		for _, column := range []string{"id", "sender", "topic", "body", "sent_at"} {
 			if !v1FixtureHasColumn(table.Columns, column) {
@@ -845,6 +875,10 @@ func v1ContractJSONWithUnknownFields(t *testing.T, data []byte) []byte {
 		{
 			old: "        \"read_policy\": {\n          \"access\": \"permissioned\",",
 			new: "        \"read_policy\": {\n          \"future_read_policy_field\": \"ignored\",\n          \"access\": \"permissioned\",",
+		},
+		{
+			old: "        \"sdk\": {\n          \"visibility\": \"public\"\n        }",
+			new: "        \"sdk\": {\n          \"future_sdk_field\": \"ignored\",\n          \"visibility\": \"public\"\n        }",
 		},
 		{
 			old: "      {\n        \"name\": \"create_message\",\n        \"lifecycle\": false,",

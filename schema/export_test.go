@@ -158,6 +158,73 @@ func TestExportSchemaIncludesTableReadPolicy(t *testing.T) {
 	}
 }
 
+func TestExportSchemaIncludesTableSDKVisibility(t *testing.T) {
+	b := NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(TableDefinition{
+		Name: "public_messages",
+		Columns: []ColumnDefinition{
+			{Name: "id", Type: KindUint64, PrimaryKey: true},
+		},
+	})
+	b.TableDef(TableDefinition{
+		Name: "internal_messages",
+		Columns: []ColumnDefinition{
+			{Name: "id", Type: KindUint64, PrimaryKey: true},
+		},
+	}, WithTableSDKVisibility(TableSDKVisibilityInternal))
+	b.TableDef(TableDefinition{
+		Name: "private_messages",
+		SDK:  TableSDKMetadata{Visibility: TableSDKVisibilityPrivate},
+		Columns: []ColumnDefinition{
+			{Name: "id", Type: KindUint64, PrimaryKey: true},
+		},
+	})
+
+	e, err := b.Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	export := e.ExportSchema()
+	assertExportTableSDKVisibility(t, export.Tables, "public_messages", TableSDKVisibilityPublic)
+	assertExportTableSDKVisibility(t, export.Tables, "internal_messages", TableSDKVisibilityInternal)
+	assertExportTableSDKVisibility(t, export.Tables, "private_messages", TableSDKVisibilityPrivate)
+	assertExportTableSDKVisibility(t, export.Tables, "sys_clients", TableSDKVisibilitySystem)
+	assertExportTableSDKVisibility(t, export.Tables, "sys_scheduled", TableSDKVisibilitySystem)
+
+	export.Tables[0].SDK.Visibility = TableSDKVisibilityPrivate
+	again := e.ExportSchema()
+	assertExportTableSDKVisibility(t, again.Tables, "public_messages", TableSDKVisibilityPublic)
+
+	_, table, ok := e.Registry().TableByName("public_messages")
+	if !ok {
+		t.Fatal("public_messages table missing")
+	}
+	table.SDK.Visibility = TableSDKVisibilityPrivate
+	_, againTable, ok := e.Registry().TableByName("public_messages")
+	if !ok || againTable.SDK.Visibility != TableSDKVisibilityPublic {
+		t.Fatalf("registry table SDK metadata was not detached: ok=%v table=%#v", ok, againTable)
+	}
+}
+
+func TestBuildInvalidTableSDKVisibilityFails(t *testing.T) {
+	b := NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(TableDefinition{
+		Name: "messages",
+		SDK:  TableSDKMetadata{Visibility: TableSDKVisibility("external")},
+		Columns: []ColumnDefinition{
+			{Name: "id", Type: KindUint64, PrimaryKey: true},
+		},
+	})
+
+	_, err := b.Build(EngineOptions{})
+	if !errors.Is(err, ErrInvalidTableSDKMetadata) {
+		t.Fatalf("Build error = %v, want ErrInvalidTableSDKMetadata", err)
+	}
+}
+
 func TestSchemaExportJSONRoundTripIncludesTableReadPolicy(t *testing.T) {
 	b := NewBuilder()
 	b.SchemaVersion(1)
@@ -183,6 +250,9 @@ func TestSchemaExportJSONRoundTripIncludesTableReadPolicy(t *testing.T) {
 	}
 	if decoded.Tables[0].ReadPolicy.Access != TableAccessPublic {
 		t.Fatalf("decoded read access = %s, want public; json=%s", decoded.Tables[0].ReadPolicy.Access, data)
+	}
+	if decoded.Tables[0].SDK == nil || decoded.Tables[0].SDK.Visibility != TableSDKVisibilityPublic {
+		t.Fatalf("decoded SDK metadata = %#v, want public; json=%s", decoded.Tables[0].SDK, data)
 	}
 }
 
@@ -399,4 +469,21 @@ func TestSchemaExportJSONRoundTrip(t *testing.T) {
 	if decoded.Tables[0].Columns[1].Type != ValueKindExportString(types.KindBytes) {
 		t.Fatalf("decoded bytes column type = %q, want bytes", decoded.Tables[0].Columns[1].Type)
 	}
+}
+
+func assertExportTableSDKVisibility(t *testing.T, tables []TableExport, name string, want TableSDKVisibility) {
+	t.Helper()
+	for _, table := range tables {
+		if table.Name != name {
+			continue
+		}
+		if table.SDK == nil {
+			t.Fatalf("table %q SDK metadata = nil, want %s", name, want)
+		}
+		if table.SDK.Visibility != want {
+			t.Fatalf("table %q SDK visibility = %q, want %q", name, table.SDK.Visibility, want)
+		}
+		return
+	}
+	t.Fatalf("table %q missing from export: %#v", name, tables)
 }

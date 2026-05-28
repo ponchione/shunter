@@ -379,6 +379,35 @@ func TestRuntimeExportContractIncludesTableReadPolicyMetadata(t *testing.T) {
 	}
 }
 
+func TestRuntimeExportContractIncludesTableSDKVisibilityMetadata(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	assertContractTableSDKVisibility(t, contract.Schema.Tables, "messages", schema.TableSDKVisibilityPublic)
+	assertContractTableSDKVisibility(t, contract.Schema.Tables, "sys_clients", schema.TableSDKVisibilitySystem)
+	assertContractTableSDKVisibility(t, contract.Schema.Tables, "sys_scheduled", schema.TableSDKVisibilitySystem)
+
+	mod := NewModule("chat").
+		SchemaVersion(1).
+		TableDef(messagesTableDef(), schema.WithTableSDKVisibility(schema.TableSDKVisibilityInternal))
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	assertContractTableSDKVisibility(t, rt.ExportContract().Schema.Tables, "messages", schema.TableSDKVisibilityInternal)
+}
+
+func TestModuleContractValidationRejectsInvalidTableSDKVisibilityMetadata(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Schema.Tables[0].SDK = &schema.TableSDKMetadata{Visibility: schema.TableSDKVisibility("external")}
+
+	err := ValidateModuleContract(contract)
+	if !errors.Is(err, schema.ErrInvalidTableSDKMetadata) {
+		t.Fatalf("ValidateModuleContract error = %v, want ErrInvalidTableSDKMetadata", err)
+	}
+	if !strings.Contains(err.Error(), "schema.tables.messages.sdk invalid") {
+		t.Fatalf("ValidateModuleContract error = %v, want table sdk context", err)
+	}
+}
+
 func TestContractSchemaLookupPreservesEventTableMetadata(t *testing.T) {
 	contract := ModuleContract{
 		ContractVersion: ModuleContractVersion,
@@ -2022,4 +2051,21 @@ func assertCanonicalDeclarationKeys(t *testing.T, raw json.RawMessage, name, sql
 	if gotSQL != sql {
 		t.Fatalf("declaration sql = %q, want %q", gotSQL, sql)
 	}
+}
+
+func assertContractTableSDKVisibility(t *testing.T, tables []schema.TableExport, name string, want schema.TableSDKVisibility) {
+	t.Helper()
+	for _, table := range tables {
+		if table.Name != name {
+			continue
+		}
+		if table.SDK == nil {
+			t.Fatalf("table %q SDK metadata = nil, want %s", name, want)
+		}
+		if table.SDK.Visibility != want {
+			t.Fatalf("table %q SDK visibility = %q, want %q", name, table.SDK.Visibility, want)
+		}
+		return
+	}
+	t.Fatalf("table %q missing from contract: %#v", name, tables)
 }

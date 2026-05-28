@@ -3,9 +3,9 @@
 Contracts are the handoff artifact between a Shunter-backed Go app and clients,
 review tools, or generated bindings.
 
-A contract includes app-facing schema, reducers, procedures, declared queries,
-declared views, visibility filters, permissions, read-model metadata,
-migration metadata, and codegen metadata.
+A contract includes app-facing schema, table SDK visibility metadata, reducers,
+procedures, declared queries, declared views, visibility filters, permissions,
+read-model metadata, migration metadata, and codegen metadata.
 
 ## Contract JSON Compatibility
 
@@ -13,8 +13,9 @@ Stable v1 producers emit `contract_version: 1`. The stable top-level fields
 are:
 
 - `module`: app module name, version, and string metadata
-- `schema`: schema version, tables, columns, indexes, read policy, reducers,
-  procedures, and optional reducer/procedure argument/result product schemas
+- `schema`: schema version, tables, columns, indexes, read policy, table SDK
+  visibility, reducers, procedures, and optional reducer/procedure
+  argument/result product schemas
 - `queries` and `views`: declaration names, optional executable SQL, optional
   parameter schemas, row schema metadata, and result-shape metadata
 - `visibility_filters`: validated SQL, returned table metadata, and
@@ -25,8 +26,9 @@ are:
 - `codegen`: contract format, contract version, and default snapshot filename
 
 `ModuleContract.MarshalCanonicalJSON` is the canonical emitted JSON format.
-`ValidateModuleContract` validates known v1 fields, reducer/procedure product
-schemas, declared-read parameter schemas, and SQL/read metadata.
+`ValidateModuleContract` validates known v1 fields, table SDK visibility when
+present, reducer/procedure product schemas, declared-read parameter schemas, and
+SQL/read metadata.
 
 V1 readers must ignore unknown JSON fields so additive metadata can be
 introduced without breaking older consumers. V1 producers must not change the
@@ -120,8 +122,9 @@ rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --lan
 
 Profile selection is explicit with `--profile internal`, `--profile full`, or
 `--profile public`. Blank, `internal`, `full`, and `public` currently emit the
-same TypeScript; public filtering waits for table visibility metadata. Go
-callers use `codegen.Options.Profile`.
+same TypeScript. Contracts now export table visibility metadata for later public
+filtering; this path does not filter TypeScript table helpers yet. Go callers
+use `codegen.Options.Profile`.
 
 Generated TypeScript imports the Shunter SDK runtime package name
 `@shunter/client` by default. Use `codegen.Options.TypeScriptRuntimeImport` or

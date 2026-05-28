@@ -32,6 +32,11 @@ func validateStructure(b *Builder) []error {
 		if err := ValidateReadPolicy(t.ReadPolicy); err != nil {
 			errs = append(errs, fmt.Errorf("table %q read policy: %w", t.Name, err))
 		}
+		if t.SDK.Visibility != "" {
+			if err := ValidateTableSDKMetadata(t.SDK); err != nil {
+				errs = append(errs, fmt.Errorf("table %q SDK metadata: %w", t.Name, err))
+			}
+		}
 
 		// Must have at least one column.
 		if len(t.Columns) == 0 {

@@ -34,6 +34,7 @@ type TableDefinition struct {
 	Columns    []ColumnDefinition
 	Indexes    []IndexDefinition
 	ReadPolicy ReadPolicy
+	SDK        TableSDKMetadata
 }
 
 // ColumnDefinition describes a column in a table definition.
@@ -59,6 +60,7 @@ type tableOptions struct {
 	name       string
 	readPolicy *ReadPolicy
 	isEvent    bool
+	sdk        *TableSDKMetadata
 }
 
 // WithTableName overrides the table name derived from the Go type name.
@@ -107,6 +109,14 @@ func WithReadPermissions(permissions ...string) TableOption {
 	}
 }
 
+// WithTableSDKVisibility records passive SDK visibility metadata for a table.
+// It does not change runtime authorization or table read policy behavior.
+func WithTableSDKVisibility(visibility TableSDKVisibility) TableOption {
+	return func(o *tableOptions) {
+		o.sdk = &TableSDKMetadata{Visibility: visibility}
+	}
+}
+
 // TableDef registers a table definition with the builder.
 func (b *Builder) TableDef(def TableDefinition, opts ...TableOption) *Builder {
 	var o tableOptions
@@ -122,6 +132,9 @@ func (b *Builder) TableDef(def TableDefinition, opts ...TableOption) *Builder {
 	if o.readPolicy != nil {
 		def.ReadPolicy = *o.readPolicy
 	}
+	if o.sdk != nil {
+		def.SDK = *o.sdk
+	}
 	b.tables = append(b.tables, copyTableDefinition(def))
 	return b
 }
@@ -135,6 +148,7 @@ func copyTableDefinition(def TableDefinition) TableDefinition {
 		out.Indexes[i] = idx
 	}
 	out.ReadPolicy = copyReadPolicy(def.ReadPolicy)
+	out.SDK = def.SDK
 	return out
 }
 

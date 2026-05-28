@@ -63,6 +63,7 @@ func (b *Builder) buildEngine(opts EngineOptions) (*Engine, error) {
 			Name:       td.Name,
 			IsEvent:    td.IsEvent,
 			ReadPolicy: copyReadPolicy(td.ReadPolicy),
+			SDK:        tableSDKMetadataOrDefault(td.SDK),
 		}
 
 		// Build columns.

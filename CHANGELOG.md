@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Contract table exports now include explicit `sdk.visibility` metadata for
+  public, internal, private, and system table classification without changing
+  TypeScript public-profile filtering.
 - TypeScript codegen now accepts an explicit `internal`, `full`, or `public`
   profile through Go options and `shunter contract codegen --profile`, while
   preserving the current generated output for every accepted profile.

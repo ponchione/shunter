@@ -459,6 +459,7 @@ func copyTableExport(in schema.TableExport) schema.TableExport {
 		Columns:    make([]schema.ColumnExport, len(in.Columns)),
 		Indexes:    make([]schema.IndexExport, len(in.Indexes)),
 		ReadPolicy: normalizeSchemaReadPolicy(in.ReadPolicy),
+		SDK:        copyTableSDKMetadataPtr(in.SDK),
 	}
 	copy(out.Columns, in.Columns)
 	for i, idx := range in.Indexes {
@@ -472,6 +473,14 @@ func copyTableExport(in schema.TableExport) schema.TableExport {
 		}
 	}
 	return out
+}
+
+func copyTableSDKMetadataPtr(in *schema.TableSDKMetadata) *schema.TableSDKMetadata {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
 
 func copyReducerExport(in schema.ReducerExport) schema.ReducerExport {

@@ -220,6 +220,9 @@ func tableSchemaFromExport(table schema.TableExport) (schema.TableSchema, error)
 		Columns:    make([]schema.ColumnSchema, len(table.Columns)),
 		Indexes:    make([]schema.IndexSchema, len(table.Indexes)),
 	}
+	if table.SDK != nil {
+		out.SDK = *table.SDK
+	}
 	for i, column := range table.Columns {
 		kind, ok := schema.ParseValueKindExportString(column.Type)
 		if !ok {

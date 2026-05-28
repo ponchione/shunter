@@ -297,6 +297,26 @@ func TestContractDiffDetectsTableReadPolicyChanges(t *testing.T) {
 	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceTableReadPolicy, "messages")
 }
 
+func TestContractDiffDetectsTableSDKMetadataChanges(t *testing.T) {
+	old := contractFixture()
+	old.Schema.Tables[0].SDK = &schema.TableSDKMetadata{Visibility: schema.TableSDKVisibilityPublic}
+	current := contractFixture()
+	current.Schema.Tables[0].SDK = &schema.TableSDKMetadata{Visibility: schema.TableSDKVisibilityPrivate}
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindMetadata, SurfaceTableSDK, "messages")
+	if text := report.Text(); !strings.Contains(text, "SDK metadata changed from visibility=public to visibility=private") {
+		t.Fatalf("diff text = %q, want SDK metadata change", text)
+	}
+
+	current.Schema.Tables[0].SDK = nil
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindMetadata, SurfaceTableSDK, "messages")
+	if text := report.Text(); !strings.Contains(text, "visibility=public to unspecified") {
+		t.Fatalf("diff text = %q, want SDK metadata removal", text)
+	}
+}
+
 func TestContractDiffIgnoresTableReadPolicyPermissionOrder(t *testing.T) {
 	old := contractFixture()
 	old.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{

@@ -598,6 +598,10 @@ func v1ContractJSONWithUnknownFields(t *testing.T, data []byte) []byte {
 			new: "        \"read_policy\": {\n          \"future_read_policy_field\": \"ignored\",\n          \"access\": \"permissioned\",",
 		},
 		{
+			old: "        \"sdk\": {\n          \"visibility\": \"public\"\n        }",
+			new: "        \"sdk\": {\n          \"future_sdk_field\": \"ignored\",\n          \"visibility\": \"public\"\n        }",
+		},
+		{
 			old: "      {\n        \"name\": \"create_message\",\n        \"lifecycle\": false,\n        \"args\": {",
 			new: "      {\n        \"future_reducer_field\": \"ignored\",\n        \"name\": \"create_message\",\n        \"lifecycle\": false,\n        \"args\": {",
 		},

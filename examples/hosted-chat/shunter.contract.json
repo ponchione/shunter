@@ -48,6 +48,9 @@
         "read_policy": {
           "access": "private",
           "permissions": []
+        },
+        "sdk": {
+          "visibility": "public"
         }
       },
       {
@@ -72,6 +75,9 @@
         "read_policy": {
           "access": "private",
           "permissions": []
+        },
+        "sdk": {
+          "visibility": "public"
         }
       },
       {
@@ -114,6 +120,9 @@
         "read_policy": {
           "access": "private",
           "permissions": []
+        },
+        "sdk": {
+          "visibility": "system"
         }
       },
       {
@@ -168,6 +177,9 @@
         "read_policy": {
           "access": "private",
           "permissions": []
+        },
+        "sdk": {
+          "visibility": "system"
         }
       }
     ],

@@ -76,6 +76,11 @@ func validateContractTables(tables []schema.TableExport, errs *[]error) map[stri
 		if err := schema.ValidateReadPolicy(table.ReadPolicy); err != nil {
 			*errs = append(*errs, fmt.Errorf("schema.tables.%s.read_policy invalid: %v", table.Name, err))
 		}
+		if table.SDK != nil {
+			if err := schema.ValidateTableSDKMetadata(*table.SDK); err != nil {
+				*errs = append(*errs, fmt.Errorf("schema.tables.%s.sdk invalid: %w", table.Name, err))
+			}
+		}
 		columnNames := make(map[string]struct{}, len(table.Columns))
 		columnIndexes := make(map[int]struct{}, len(table.Columns))
 		columnNameByIndex := make(map[int]string, len(table.Columns))
@@ -502,6 +507,9 @@ func newContractSchemaLookup(schemaExport schema.SchemaExport) contractSchemaLoo
 			Indexes:    make([]schema.IndexSchema, 0, len(table.Indexes)),
 			ReadPolicy: copyContractReadPolicy(table.ReadPolicy),
 		}
+		if table.SDK != nil {
+			ts.SDK = *table.SDK
+		}
 		columnByName := make(map[string]int, len(table.Columns))
 		for j, column := range table.Columns {
 			kind, _ := valueKindFromExportString(column.Type)
@@ -607,6 +615,7 @@ func cloneContractTableSchema(in schema.TableSchema) schema.TableSchema {
 		Columns:    append([]schema.ColumnSchema(nil), in.Columns...),
 		Indexes:    make([]schema.IndexSchema, len(in.Indexes)),
 		ReadPolicy: copyContractReadPolicy(in.ReadPolicy),
+		SDK:        in.SDK,
 	}
 	for i, index := range in.Indexes {
 		out.Indexes[i] = schema.NewIndexSchema(index.ID, index.Name, append([]int(nil), index.Columns...), index.Unique, index.Primary)
