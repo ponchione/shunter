@@ -48,6 +48,10 @@ Behavior:
 - `AuthOIDCDiscoveryIssuers` fetches OIDC discovery documents on demand,
   validates their issuer and `jwks_uri`, then uses the discovered JWKS URL for
   the same RS256/ES256 verification path.
+- Remote JWKS and discovery sources are key sources only. They are selected by
+  the token issuer during verification, but they do not populate `AuthIssuers`
+  or `AuthAudiences`; configure those allowlists explicitly for issuer and
+  audience policy.
 - A verification key's `KeyID` matches the token header `kid` for overlapping
   rotation. If a token supplies `kid`, keyed matches are preferred; unkeyed
   keys remain a fallback for legacy HS256 configurations.
@@ -140,7 +144,9 @@ Claim names are trimmed and must be non-empty, unique, no more than 256 bytes,
 free of control characters, and not Shunter-owned claims such as `iss`, `sub`,
 `aud`, `exp`, `iat`, `nbf`, `hex_identity`, or `permissions`. Missing
 configured claims are skipped. Values are re-marshaled from the parsed JWT claim
-map into compact JSON and copied on access.
+map into compact JSON and copied on access. The byte-limit env vars are
+decimal integers; unset or zero values use the 4096-byte per-claim and
+16384-byte total defaults, and negative values fail configuration validation.
 
 Extra claims do not expose JWT headers, `kid`, signatures, bearer tokens, or raw
 JWT text. They also do not affect permission checks.

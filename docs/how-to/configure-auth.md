@@ -120,7 +120,8 @@ When `DiscoveryURL` is blank, Shunter uses
 `<issuer>/.well-known/openid-configuration` only if the issuer is a URL.
 Non-URL issuer strings require an explicit discovery URL. Discovery and JWKS
 URLs must use HTTPS except for loopback HTTP in local development and tests.
-`AuthIssuers` and `AuthAudiences` remain the issuer and audience policy.
+`AuthIssuers` and `AuthAudiences` remain the issuer and audience policy;
+discovery entries are not added to those allowlists.
 
 ### Supabase
 
@@ -209,7 +210,9 @@ may use provider or URI-style names, and cannot be empty, duplicated,
 control-character-bearing, over 256 bytes, or Shunter-owned (`iss`, `sub`,
 `aud`, `exp`, `iat`, `nbf`, `hex_identity`, `permissions`). Missing configured
 claims are skipped. Present claims are compact JSON values copied out of the
-already parsed JWT claim map.
+already parsed JWT claim map. The byte-limit env vars are decimal integers;
+unset or zero values use the 4096-byte per-claim and 16384-byte total defaults,
+and negative values fail `ConfigFromEnvE`.
 
 Extra claims are application context only. They do not expose JWT headers,
 `kid`, signatures, bearer tokens, or raw JWT text, and provider claims such as

@@ -57,8 +57,8 @@ routing or more direct lifecycle control.
 - `SHUNTER_AUTH_OIDC_DISCOVERY_ISSUERS` as semicolon-separated `issuer` or
   `issuer,discovery-url` entries
 - `SHUNTER_AUTH_EXTRA_CLAIMS` as comma-separated claim names
-- `SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES`
-- `SHUNTER_AUTH_MAX_EXTRA_CLAIMS_BYTES`
+- `SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES` as a decimal byte limit
+- `SHUNTER_AUTH_MAX_EXTRA_CLAIMS_BYTES` as a decimal byte limit
 
 Local development can use dev auth. Public protocol serving should use strict
 auth with explicit issuer and audience policy plus local key material or
@@ -67,6 +67,8 @@ identity-provider tokens. `AuthOIDCDiscoveryIssuers` is available for generic
 OIDC providers when the app wants Shunter to resolve a discovery document into
 a JWKS key source. These key-source settings do not replace
 `SHUNTER_AUTH_ISSUERS` or `SHUNTER_AUTH_AUDIENCES`.
+Unset or zero extra-claim byte limits use the 4096-byte per-claim and
+16384-byte total defaults; negative values fail startup configuration.
 
 Supabase is a delegated-auth provider in this model. Configure Supabase
 asymmetric signing-key deployments with explicit JWKS verification:

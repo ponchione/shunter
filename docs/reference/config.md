@@ -61,6 +61,14 @@ only; they do not grant permissions.
 | `SHUNTER_AUTH_MAX_EXTRA_CLAIM_BYTES` | `AuthMaxExtraClaimBytes` |
 | `SHUNTER_AUTH_MAX_EXTRA_CLAIMS_BYTES` | `AuthMaxExtraClaimsBytes` |
 
+OIDC discovery env entries configure key discovery only. They do not add
+issuer or audience policy; keep `SHUNTER_AUTH_ISSUERS` and
+`SHUNTER_AUTH_AUDIENCES` explicit for strict deployments.
+
+Extra-claim byte-limit env vars are decimal integers. Unset or zero values use
+the 4096-byte per-claim and 16384-byte total defaults; negative values fail
+`ConfigFromEnvE`.
+
 ## Protocol Field
 
 `Protocol` contains WebSocket tuning:

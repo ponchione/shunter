@@ -311,6 +311,25 @@ func TestBuildAuthConfigStrictAcceptsOIDCDiscoveryIssuersWithoutLocalKey(t *test
 	}
 }
 
+func TestBuildAuthConfigStrictDoesNotPromoteDiscoveryIssuerToIssuerPolicy(t *testing.T) {
+	jwtCfg, _, err := buildAuthConfig(Config{
+		AuthMode:       AuthModeStrict,
+		AuthSigningKey: []byte("test-secret"),
+		AuthOIDCDiscoveryIssuers: []AuthOIDCDiscoveryIssuer{{
+			Issuer: "https://issuer.example",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("buildAuthConfig returned error: %v", err)
+	}
+	if len(jwtCfg.Issuers) != 0 {
+		t.Fatalf("Issuers = %#v, want discovery config not to populate issuer policy", jwtCfg.Issuers)
+	}
+	if len(jwtCfg.OIDCDiscovery) != 1 || jwtCfg.OIDCDiscovery[0].Issuer != "https://issuer.example" {
+		t.Fatalf("OIDCDiscovery = %#v, want configured discovery source preserved", jwtCfg.OIDCDiscovery)
+	}
+}
+
 func TestBuildAuthConfigStrictRejectsInvalidVerificationKey(t *testing.T) {
 	_, _, err := buildAuthConfig(Config{
 		AuthMode: AuthModeStrict,
