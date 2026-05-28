@@ -1,6 +1,6 @@
 # Dependency Considerations
 
-Last reviewed: 2026-05-27
+Last reviewed: 2026-05-28
 
 This note captures adopted dependencies, dependency suggestions, and explicit
 rejections from the dependency scan of the current Shunter codebase. Candidate
@@ -13,7 +13,9 @@ Current repo context:
 - Direct runtime dependencies are currently limited to `github.com/ponchione/websocket`,
   `github.com/golang-jwt/jwt/v5`, `github.com/prometheus/client_golang`,
   and `lukechampine.com/blake3`.
-- Direct test dependencies now include `github.com/google/go-cmp v0.6.0`,
+- Direct test and benchmark dependencies now include
+  `github.com/andybalholm/brotli v1.2.1`,
+  `github.com/google/go-cmp v0.6.0`,
   `github.com/prometheus/client_model v0.6.2`, `go.uber.org/goleak v1.3.0`,
   and `pgregory.net/rapid v1.2.0`.
 - Pinned Go tool dependencies now include
@@ -159,6 +161,22 @@ Notes:
 
 Docs: https://pkg.go.dev/pgregory.net/rapid
 
+### `github.com/andybalholm/brotli`
+
+Added as a direct benchmark-only dependency for compression-corpus evidence in
+`protocol/compression_bench_test.go`.
+
+Notes:
+
+- This is evidence tooling only, not Shunter runtime brotli support.
+- Keep all imports in `_test.go` files.
+- `CompressionBrotli` remains reserved and unsupported in production code.
+- Do not wire brotli into `WrapCompressed`, `UnwrapCompressed`, upgrade
+  negotiation, configuration, docs as supported behavior, or client/server
+  runtime paths without a separate product/runtime decision.
+
+Docs: https://pkg.go.dev/github.com/andybalholm/brotli
+
 ## Adopted Tool Dependencies
 
 ### `honnef.co/go/tools/cmd/staticcheck`
@@ -245,14 +263,16 @@ Why to wait:
 
 Docs: https://pkg.go.dev/go.opentelemetry.io/otel
 
-### `github.com/andybalholm/brotli`
+### Runtime brotli support
 
-Consider only if Shunter clients need brotli compression.
+Consider only if Shunter clients need brotli compression. The current
+`github.com/andybalholm/brotli` dependency is benchmark-only evidence tooling,
+not runtime support.
 
 Why it may fit:
 
 - SPEC-005 reserves brotli as recognized-but-unsupported.
-- This package provides Go brotli reader/writer support.
+- `github.com/andybalholm/brotli` provides Go brotli reader/writer support.
 
 Why to wait:
 

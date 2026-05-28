@@ -49,6 +49,38 @@ Every row is advisory.
 | Slow-reader WebSocket | `WebSocketSlowReaderBackpressureUnrelatedFanout-24` | one WebSocket client held in an unread 8 MiB write with a one-message outbound queue and configured `WriteTimeout`; unrelated healthy client receives one light-update fanout over its WebSocket | 6.962us +/- 2% | 2.586Ki +/- 0% | 39 | advisory |
 | Backpressure sender | `ClientSenderBackpressureFullBuffer-24` | one registered connection with a one-slot outbound queue already full; `SendTransactionUpdateLight` encodes a light update and rejects the non-blocking enqueue with `ErrClientBufferFull`; no WebSocket writer or async disconnect teardown in the timed loop | 382.8ns +/- 1% | 376 B +/- 0% | 10 | advisory |
 
+## Compression Corpus
+
+`protocol` includes a focused compression corpus benchmark for server-message
+frames. The corpus is built from `EncodeServerMessage` output and covers tiny
+messages below `DefaultGzipMinBytes`, the older 2 KiB repetitive compression
+fixture shape, large initial subscription rows, multi-table subscription
+updates, light and heavy transaction updates, one-off query results,
+string-heavy rows, mixed rows, and mostly-random bytes-heavy rows.
+
+Refresh command:
+
+```bash
+go test -run '^$' -bench 'BenchmarkCompressionCorpus' -benchmem -count=10 ./protocol
+```
+
+The corpus reports `wire_B/op`, `wire_pct`, and `saved_pct` for plain frames,
+`CompressionNone` envelopes, production gzip, and benchmark-local brotli q1/q4
+candidates. Advisory rows are intentionally not published here until a
+`-count=10` sample is summarized with `benchstat`; shorter local runs are useful
+for verification but are not evidence.
+
+Decision rubric:
+
+- Consider brotli only when real workload evidence shows large, compressible
+  frames are common or bandwidth is constrained.
+- A brotli candidate should beat gzip by a material wire-size margin on
+  realistic large compressible fixtures, roughly 15% or more smaller than gzip.
+- Encode cost must be acceptable for realtime fanout, especially at q1/q4.
+- Random or bytes-heavy fixtures are negative controls and should not drive the
+  decision.
+- Benchmark evidence alone is not enough without a client or product need.
+
 ## Executor
 
 | Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |

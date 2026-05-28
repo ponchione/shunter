@@ -5,6 +5,7 @@ go 1.25.5
 toolchain go1.26.3
 
 require (
+	github.com/andybalholm/brotli v1.2.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-cmp v0.6.0
 	github.com/ponchione/websocket v1.8.15-shunter.1
