@@ -66,9 +66,69 @@ go test -run '^$' -bench 'BenchmarkCompressionCorpus' -benchmem -count=10 ./prot
 
 The corpus reports `wire_B/op`, `wire_pct`, and `saved_pct` for plain frames,
 `CompressionNone` envelopes, production gzip, and benchmark-local brotli q1/q4
-candidates. Advisory rows are intentionally not published here until a
-`-count=10` sample is summarized with `benchstat`; shorter local runs are useful
-for verification but are not evidence.
+candidates.
+
+Focused snapshot:
+
+- Date: 2026-05-28
+- Shunter commit: `4385e358895cd917d4d45ffaeb7a63cb17f0237e`
+- Host: `Linux gernsback 6.17.0-29-generic`, linux/amd64
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`, 12 cores, 24 logical CPUs
+- Raw sample: 100 sub-benchmarks, `-count=10`, total package benchmark time
+  1387.460s
+- Raw output: `/tmp/shunter-compression-corpus-bench-raw-20260528.txt`
+- Benchstat output: `/tmp/shunter-compression-corpus-benchstat-20260528.txt`
+
+Command:
+
+```bash
+go test -run '^$' -bench 'BenchmarkCompressionCorpus' -benchmem -count=10 ./protocol > /tmp/shunter-compression-corpus-bench-raw-20260528.txt 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-compression-corpus-bench-raw-20260528.txt > /tmp/shunter-compression-corpus-benchstat-20260528.txt 2>&1
+```
+
+Representative production gzip standings:
+
+| Fixture | Encode sec/op | Decode sec/op | Wire % | Saved % | Encode B/op | Decode B/op | Gate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| tiny unsubscribe | 13.53ns +/- 1% | 32.34ns +/- 12% | 105.6% | -5.56% | 24 B +/- 0% | 48 B +/- 0% | advisory |
+| 2 KiB repetitive | 10.07us +/- 10% | 3.04us +/- 6% | 5.66% | 94.3% | 253 B +/- 5% | 9.60Ki +/- 0% | advisory |
+| single large initial | 628.20us +/- 2% | 78.21us +/- 7% | 22.3% | 77.7% | 32.32Ki +/- 2% | 171.71Ki +/- 0% | advisory |
+| multi-table initial | 455.97us +/- 2% | 69.16us +/- 2% | 16.5% | 83.5% | 16.34Ki +/- 3% | 193.37Ki +/- 0% | advisory |
+| light many changes | 730.45us +/- 1% | 109.08us +/- 6% | 16.8% | 83.2% | 32.39Ki +/- 1% | 270.18Ki +/- 0% | advisory |
+| heavy reducer args | 276.64us +/- 2% | 52.57us +/- 2% | 15.7% | 84.3% | 16.07Ki +/- 2% | 165.82Ki +/- 0% | advisory |
+| one-off several tables | 466.45us +/- 2% | 75.46us +/- 7% | 24.5% | 75.5% | 32.38Ki +/- 2% | 188.43Ki +/- 0% | advisory |
+| string-heavy rows | 260.28us +/- 5% | 54.98us +/- 15% | 7.23% | 92.8% | 7.87Ki +/- 2% | 243.18Ki +/- 0% | advisory |
+| mixed rows | 400.48us +/- 1% | 54.78us +/- 1% | 24.2% | 75.8% | 16.01Ki +/- 3% | 116.43Ki +/- 0% | advisory |
+| random bytes rows | 267.35us +/- 5% | 82.16us +/- 4% | 91.2% | 8.84% | 64.21Ki +/- 0% | 95.53Ki +/- 0% | advisory |
+
+Best benchmark-local brotli wire result compared with production gzip:
+
+| Fixture | Best brotli | Gzip wire % | Brotli wire % | Brotli wire delta vs gzip | Brotli encode | Brotli decode | Gate |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 2 KiB repetitive | `brotli_q4` | 5.66% | 3.62% | 36.1% smaller | 80.94us +/- 18% | 12.47us +/- 11% | advisory |
+| single large initial | `brotli_q4` | 22.3% | 22.5% | 0.9% larger | 469.23us +/- 2% | 114.21us +/- 1% | advisory |
+| multi-table initial | `brotli_q4` | 16.5% | 16.2% | 2.1% smaller | 479.70us +/- 16% | 101.82us +/- 1% | advisory |
+| light many changes | `brotli_q4` | 16.8% | 16.3% | 2.6% smaller | 683.31us +/- 3% | 143.84us +/- 3% | advisory |
+| heavy reducer args | `brotli_q4` | 15.7% | 14.8% | 6.1% smaller | 409.70us +/- 3% | 83.79us +/- 4% | advisory |
+| one-off several tables | `brotli_q4` | 24.5% | 23.6% | 3.9% smaller | 566.85us +/- 6% | 115.53us +/- 2% | advisory |
+| string-heavy rows | `brotli_q4` | 7.23% | 8.51% | 17.7% larger | 401.81us +/- 56% | 91.22us +/- 17% | advisory |
+| mixed rows | `brotli_q4` | 24.2% | 23.1% | 4.5% smaller | 353.00us +/- 14% | 81.13us +/- 7% | advisory |
+| random bytes rows | `brotli_q1` | 91.2% | 90.3% | 0.9% smaller | 177.88us +/- 4% | 100.30us +/- 3% | advisory |
+
+Current read:
+
+- Production gzip remains the right supported compression mode for the current
+  corpus.
+- Brotli only beats gzip by a material wire-size margin on the older synthetic
+  2 KiB repetitive fixture, where `brotli_q4` also costs about 8x gzip encode
+  time and about 4x gzip decode time.
+- On product-shaped large fixtures, best brotli wire savings range from worse
+  than gzip to 6.1% smaller, below the material-margin rubric.
+- Brotli decode is slower than gzip on every representative row above, and
+  brotli encode allocations are much larger in the full benchstat output.
+- Keep `github.com/andybalholm/brotli` as benchmark-only evidence tooling;
+  do not add runtime brotli support without client or product pressure.
 
 Decision rubric:
 
@@ -202,6 +262,9 @@ Representative standings:
 - Ordered subscription window coverage now has a focused `-count=10` baseline
   across bounded initial rows, full ordering, initial row collection,
   registration, comparator shape, and live ordered/limited delta fixtures.
+- Compression corpus coverage now has a focused `-count=10` baseline across
+  production gzip and benchmark-local brotli candidates. The current evidence
+  keeps brotli as benchmark-only tooling rather than runtime support.
 - Executor reducer commit coverage now includes one-at-a-time round trips and
   a queued 64-command burst fixture. These are internal executor fixtures, not
   end-to-end application throughput measurements.
