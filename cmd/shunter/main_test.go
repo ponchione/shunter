@@ -1057,6 +1057,48 @@ func TestBackupRejectsExistingOutputWithoutMutation(t *testing.T) {
 	assertFileBytes(t, filepath.Join(outputDir, "existing"), original)
 }
 
+func TestBackupCommandErrorsNameSourceDataDir(t *testing.T) {
+	dir := t.TempDir()
+	outputDir := filepath.Join(dir, "backup")
+	missingDataDir := filepath.Join(dir, "missing-data")
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"backup",
+		"--data-dir", missingDataDir,
+		"--out", outputDir,
+	})
+	if code != 1 {
+		t.Fatalf("backup missing source exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("backup missing source stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "read source data dir "+missingDataDir)
+	if _, statErr := os.Stat(outputDir); !os.IsNotExist(statErr) {
+		t.Fatalf("backup output stat after missing source = %v, want not exist", statErr)
+	}
+
+	dataFile := writeCLIBytes(t, dir, "data-file", []byte("not a data dir"))
+	stdout.Reset()
+	stderr.Reset()
+	code = run(&stdout, &stderr, []string{
+		"backup",
+		"--data-dir", dataFile,
+		"--out", outputDir,
+	})
+	if code != 1 {
+		t.Fatalf("backup file source exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("backup file source stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "source data dir "+dataFile+" is not a directory")
+	if _, statErr := os.Stat(outputDir); !os.IsNotExist(statErr) {
+		t.Fatalf("backup output stat after file source = %v, want not exist", statErr)
+	}
+}
+
 func TestRestoreRejectsNonEmptyDestinationWithoutMutation(t *testing.T) {
 	dir := t.TempDir()
 	backupDir := filepath.Join(dir, "backup")
@@ -1085,6 +1127,35 @@ func TestRestoreRejectsNonEmptyDestinationWithoutMutation(t *testing.T) {
 	}
 	assertContains(t, stderr.String(), "restore destination "+restoreDir+" is not empty")
 	assertFileBytes(t, filepath.Join(restoreDir, "existing"), original)
+}
+
+func TestRestoreRejectsFileDestinationWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	backupDir := filepath.Join(dir, "backup")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("create backup dir: %v", err)
+	}
+	writeCLIBytes(t, backupDir, "00000000000000000001.log", []byte("segment-1"))
+	restorePath := filepath.Join(dir, "data-file")
+	original := []byte("existing file data")
+	if err := os.WriteFile(restorePath, original, 0o666); err != nil {
+		t.Fatalf("write restore destination file: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"restore",
+		"--backup", backupDir,
+		"--data-dir", restorePath,
+	})
+	if code != 1 {
+		t.Fatalf("restore file destination exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("restore file destination stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "restore destination "+restorePath+" is not a directory")
+	assertFileBytes(t, restorePath, original)
 }
 
 func TestRestoreCommandErrorsNameBackupSource(t *testing.T) {
@@ -1196,6 +1267,174 @@ func TestBackupRejectsDestinationInsideSource(t *testing.T) {
 	assertContains(t, stderr.String(), "must not be inside source data dir")
 	if _, err := os.Stat(outputDir); !os.IsNotExist(err) {
 		t.Fatalf("nested output stat err = %v, want not exist", err)
+	}
+}
+
+func TestBackupRestoreCommandsRejectSymlinkPaths(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	writeCLIBytes(t, dataDir, "00000000000000000001.log", []byte("segment-1"))
+	backupTarget := filepath.Join(dir, "backup-target")
+	if err := os.MkdirAll(backupTarget, 0o755); err != nil {
+		t.Fatalf("create backup target: %v", err)
+	}
+	backupTargetData := []byte("existing backup target data")
+	writeCLIBytes(t, backupTarget, "existing", backupTargetData)
+	backupDir := filepath.Join(dir, "backup-source")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("create backup source: %v", err)
+	}
+	writeCLIBytes(t, backupDir, "00000000000000000001.log", []byte("segment-1"))
+	restoreTarget := filepath.Join(dir, "restore-target")
+	if err := os.MkdirAll(restoreTarget, 0o755); err != nil {
+		t.Fatalf("create restore target: %v", err)
+	}
+	dataLink := filepath.Join(dir, "data-link")
+	if err := os.Symlink(dataDir, dataLink); err != nil {
+		t.Skipf("create data symlink: %v", err)
+	}
+	backupLink := filepath.Join(dir, "backup-link")
+	if err := os.Symlink(backupTarget, backupLink); err != nil {
+		t.Skipf("create backup symlink: %v", err)
+	}
+	restoreLink := filepath.Join(dir, "restore-link")
+	if err := os.Symlink(restoreTarget, restoreLink); err != nil {
+		t.Skipf("create restore symlink: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "backup",
+			args:       []string{"backup", "--data-dir", dataLink, "--out", filepath.Join(dir, "backup")},
+			wantStderr: "is a symlink; refusing to copy",
+		},
+		{
+			name:       "backup-output",
+			args:       []string{"backup", "--data-dir", dataDir, "--out", backupLink},
+			wantStderr: "backup output " + backupLink + " already exists",
+		},
+		{
+			name:       "restore",
+			args:       []string{"restore", "--backup", dataLink, "--data-dir", filepath.Join(dir, "restore")},
+			wantStderr: "is a symlink; refusing to restore",
+		},
+		{
+			name:       "restore-destination",
+			args:       []string{"restore", "--backup", backupDir, "--data-dir", restoreLink},
+			wantStderr: "restore destination " + restoreLink + " is a symlink; refusing to restore",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(&stdout, &stderr, tc.args)
+			if code != 1 {
+				t.Fatalf("%s exit code = %d, stderr = %s", tc.name, code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("%s stdout = %s, want empty", tc.name, stdout.String())
+			}
+			assertContains(t, stderr.String(), tc.wantStderr)
+		})
+	}
+	if entries, err := os.ReadDir(restoreTarget); err != nil {
+		t.Fatalf("read restore target after rejected restore: %v", err)
+	} else if len(entries) != 0 {
+		t.Fatalf("restore target entries after rejected restore = %#v, want empty", entries)
+	}
+	assertFileBytes(t, filepath.Join(backupTarget, "existing"), backupTargetData)
+}
+
+func TestBackupRestoreCommandsRejectSymlinkEntries(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	sourceTarget := writeCLIBytes(t, dataDir, "target", []byte("target"))
+	if err := os.Symlink(sourceTarget, filepath.Join(dataDir, "entry-link")); err != nil {
+		t.Skipf("create data dir entry symlink: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	backupDir := filepath.Join(dir, "backup")
+	code := run(&stdout, &stderr, []string{
+		"backup",
+		"--data-dir", dataDir,
+		"--out", backupDir,
+	})
+	if code != 1 {
+		t.Fatalf("backup symlink entry exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("backup symlink entry stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "entry-link")
+	assertContains(t, stderr.String(), "is a symlink; refusing to copy")
+	if _, statErr := os.Lstat(filepath.Join(backupDir, "entry-link")); !os.IsNotExist(statErr) {
+		t.Fatalf("backup symlink entry stat = %v, want not exist", statErr)
+	}
+
+	restoreBackup := filepath.Join(dir, "restore-backup")
+	if err := os.MkdirAll(restoreBackup, 0o755); err != nil {
+		t.Fatalf("create restore backup dir: %v", err)
+	}
+	restoreTarget := writeCLIBytes(t, restoreBackup, "target", []byte("target"))
+	if err := os.Symlink(restoreTarget, filepath.Join(restoreBackup, "entry-link")); err != nil {
+		t.Skipf("create backup entry symlink: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	restoreDir := filepath.Join(dir, "restore")
+	code = run(&stdout, &stderr, []string{
+		"restore",
+		"--backup", restoreBackup,
+		"--data-dir", restoreDir,
+	})
+	if code != 1 {
+		t.Fatalf("restore symlink entry exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("restore symlink entry stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "entry-link")
+	assertContains(t, stderr.String(), "is a symlink; refusing to copy")
+	if _, statErr := os.Lstat(filepath.Join(restoreDir, "entry-link")); !os.IsNotExist(statErr) {
+		t.Fatalf("restore symlink entry stat = %v, want not exist", statErr)
+	}
+}
+
+func TestRestoreRejectsDestinationInsideBackup(t *testing.T) {
+	dir := t.TempDir()
+	backupDir := filepath.Join(dir, "backup")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("create backup dir: %v", err)
+	}
+	writeCLIBytes(t, backupDir, "00000000000000000001.log", []byte("segment-1"))
+
+	var stdout, stderr bytes.Buffer
+	restoreDir := filepath.Join(backupDir, "restore")
+	code := run(&stdout, &stderr, []string{
+		"restore",
+		"--backup", backupDir,
+		"--data-dir", restoreDir,
+	})
+	if code != 1 {
+		t.Fatalf("restore exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("restore stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "must not be inside source data dir")
+	if _, err := os.Stat(restoreDir); !os.IsNotExist(err) {
+		t.Fatalf("nested restore stat err = %v, want not exist", err)
 	}
 }
 

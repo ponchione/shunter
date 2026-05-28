@@ -34,6 +34,10 @@ rtk npm --prefix typescript/client run smoke:package
 rtk bash scripts/hosted-chat-gate.sh
 ```
 
+The hosted-chat gate is also the maintained release evidence for the current
+offline maintenance path: hosted-chat preflight, no-hook migration,
+backup/restore, and restored startup.
+
 Run from the sibling `opsboard-canary` checkout:
 
 ```bash

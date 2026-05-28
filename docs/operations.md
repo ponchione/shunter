@@ -126,8 +126,9 @@ CLI helper:
 rtk go run ./cmd/shunter backup --data-dir ./data/chat --out ./backups/chat-2026-05-04
 ```
 
-`BackupDataDir` refuses to copy into an existing output directory and refuses to
-copy into a nested path inside the source data directory.
+`BackupDataDir` refuses symlink sources, existing output paths, nested
+destinations inside the source data directory, symlink entries, unsupported
+special files, and source files that change while being copied.
 
 ## Restore
 
@@ -155,8 +156,10 @@ CLI helper:
 rtk go run ./cmd/shunter restore --backup ./backups/chat-2026-05-04 --data-dir ./data/chat
 ```
 
-`RestoreDataDir` refuses to merge into a non-empty destination. Restore into a
-fresh directory, then let `Build` validate compatibility.
+`RestoreDataDir` refuses symlink backup sources, symlink or non-directory
+destinations, nested destinations inside the backup source, symlink entries,
+unsupported special files, and non-empty destinations. Restore into a fresh
+directory, then let `Build` validate compatibility.
 
 ## Contract Review And Upgrade
 

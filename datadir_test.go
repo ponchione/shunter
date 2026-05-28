@@ -214,6 +214,66 @@ func TestBackupDataDirRejectsExistingOutputWithoutMutation(t *testing.T) {
 	assertDataDirFileBytes(t, filepath.Join(outputDir, "existing"), original)
 }
 
+func TestBackupDataDirRejectsSymlinkOutputWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	writeDataDirTestBytes(t, dataDir, "00000000000000000001.log", []byte("segment-1"))
+	targetDir := filepath.Join(dir, "target")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("create target dir: %v", err)
+	}
+	original := []byte("existing target data")
+	writeDataDirTestBytes(t, targetDir, "existing", original)
+	outputLink := filepath.Join(dir, "backup-link")
+	if err := os.Symlink(targetDir, outputLink); err != nil {
+		t.Skipf("create backup output symlink: %v", err)
+	}
+
+	err := BackupDataDir(dataDir, outputLink)
+	if err == nil {
+		t.Fatal("BackupDataDir returned nil, want symlink output error")
+	}
+	assertErrorContains(t, err, "backup output "+outputLink+" already exists")
+	assertDataDirFileBytes(t, filepath.Join(targetDir, "existing"), original)
+	if _, statErr := os.Lstat(outputLink); statErr != nil {
+		t.Fatalf("backup output symlink stat after rejected backup: %v", statErr)
+	}
+}
+
+func TestBackupDataDirRejectsSourceChangedDuringCopy(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	sourcePath := writeDataDirTestBytes(t, dataDir, "00000000000000000001.log", []byte("segment-1"))
+	backupDir := filepath.Join(dir, "backup")
+
+	previous := copyRegularFileAfterCopyHook
+	copyRegularFileAfterCopyHook = func(path string) {
+		if path != sourcePath {
+			return
+		}
+		if err := os.WriteFile(path, []byte("mutated-segment"), 0o666); err != nil {
+			t.Fatalf("mutate source during backup: %v", err)
+		}
+	}
+	defer func() { copyRegularFileAfterCopyHook = previous }()
+
+	err := BackupDataDir(dataDir, backupDir)
+	if err == nil {
+		t.Fatal("BackupDataDir returned nil, want source mutation error")
+	}
+	assertErrorContains(t, err, "changed while copying")
+	if _, statErr := os.Lstat(filepath.Join(backupDir, "00000000000000000001.log")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("backup file stat after rejected source mutation = %v, want not exist", statErr)
+	}
+	assertDataDirFileBytes(t, sourcePath, []byte("mutated-segment"))
+}
+
 func TestRestoreDataDirRejectsNonEmptyDestinationWithoutMutation(t *testing.T) {
 	dir := t.TempDir()
 	backupDir := filepath.Join(dir, "backup")
@@ -234,6 +294,58 @@ func TestRestoreDataDirRejectsNonEmptyDestinationWithoutMutation(t *testing.T) {
 	}
 	assertErrorContains(t, err, "restore destination "+restoreDir+" is not empty")
 	assertDataDirFileBytes(t, filepath.Join(restoreDir, "existing"), original)
+}
+
+func TestRestoreDataDirRejectsFileDestinationWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	backupDir := filepath.Join(dir, "backup")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("create backup dir: %v", err)
+	}
+	writeDataDirTestBytes(t, backupDir, "00000000000000000001.log", []byte("segment-1"))
+	restorePath := filepath.Join(dir, "data-file")
+	original := []byte("existing file data")
+	if err := os.WriteFile(restorePath, original, 0o666); err != nil {
+		t.Fatalf("write restore destination file: %v", err)
+	}
+
+	err := RestoreDataDir(backupDir, restorePath)
+	if err == nil {
+		t.Fatal("RestoreDataDir returned nil, want file destination error")
+	}
+	assertErrorContains(t, err, "restore destination "+restorePath+" is not a directory")
+	assertDataDirFileBytes(t, restorePath, original)
+}
+
+func TestRestoreDataDirRejectsSymlinkDestinationWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	backupDir := filepath.Join(dir, "backup")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("create backup dir: %v", err)
+	}
+	writeDataDirTestBytes(t, backupDir, "00000000000000000001.log", []byte("segment-1"))
+	targetDir := filepath.Join(dir, "target")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("create target dir: %v", err)
+	}
+	restoreLink := filepath.Join(dir, "restore-link")
+	if err := os.Symlink(targetDir, restoreLink); err != nil {
+		t.Skipf("create restore destination symlink: %v", err)
+	}
+
+	err := RestoreDataDir(backupDir, restoreLink)
+	if err == nil {
+		t.Fatal("RestoreDataDir returned nil, want symlink destination error")
+	}
+	assertErrorContains(t, err, "restore destination "+restoreLink+" is a symlink; refusing to restore")
+	if entries, readErr := os.ReadDir(targetDir); readErr != nil {
+		t.Fatalf("read target dir after rejected restore: %v", readErr)
+	} else if len(entries) != 0 {
+		t.Fatalf("target dir entries after rejected restore = %#v, want empty", entries)
+	}
+	if _, statErr := os.Lstat(restoreLink); statErr != nil {
+		t.Fatalf("restore destination symlink stat after rejected restore: %v", statErr)
+	}
 }
 
 func TestBackupDataDirErrorsNameSourceDataDir(t *testing.T) {

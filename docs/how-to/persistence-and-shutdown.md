@@ -104,6 +104,10 @@ if err := shunter.BackupDataDir("./data/chat", "./backups/chat-2026-05-04"); err
 rtk go run ./cmd/shunter backup --data-dir ./data/chat --out ./backups/chat-2026-05-04
 ```
 
+Backup refuses symlink sources, existing output paths, nested
+destinations inside the source `DataDir`, symlink entries, unsupported special
+files, and source files that change while being copied.
+
 ## Restore
 
 Restore is also offline-only.
@@ -125,7 +129,9 @@ if err := shunter.RestoreDataDir("./backups/chat-2026-05-04", "./data/chat"); er
 rtk go run ./cmd/shunter restore --backup ./backups/chat-2026-05-04 --data-dir ./data/chat
 ```
 
-Restore refuses to merge into a non-empty destination.
+Restore refuses symlink backup sources, symlink or non-directory destinations,
+nested destinations inside the backup source, symlink entries, unsupported
+special files, and non-empty destinations.
 
 ## Compatibility Preflight
 

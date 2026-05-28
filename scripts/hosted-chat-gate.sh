@@ -119,6 +119,8 @@ rtk go run ./examples/hosted-chat/cmd/maintain preflight \
   --format json > "$preflight_json"
 rtk grep '"status": "fresh"' "$preflight_json"
 rtk grep '"compatible": true' "$preflight_json"
+rtk grep '"requires_backup": false' "$preflight_json"
+rtk grep '"requires_offline_hook": false' "$preflight_json"
 start_server "$run_data" "$listen_port"
 wait_for_query_ready "$server_url"
 rtk go run ./cmd/shunter health \
@@ -181,11 +183,15 @@ rtk go run ./examples/hosted-chat/cmd/maintain preflight \
   --format json > "$preflight_json"
 rtk grep '"status": "compatible"' "$preflight_json"
 rtk grep '"compatible": true' "$preflight_json"
+rtk grep '"requires_backup": false' "$preflight_json"
+rtk grep '"requires_offline_hook": false' "$preflight_json"
 rtk go run ./examples/hosted-chat/cmd/maintain migrate \
   --data-dir "$run_data" \
   --format json > "$migrate_json"
 rtk grep '"DataDir": "' "$migrate_json"
+rtk grep '"RecoveredTxID": 0' "$migrate_json"
 rtk grep '"DurableTxID":' "$migrate_json"
+rtk grep '"Hooks": null' "$migrate_json"
 rtk go run ./cmd/shunter backup --data-dir "$run_data" --out "$backup_data"
 rtk go run ./cmd/shunter restore --backup "$backup_data" --data-dir "$restored_data"
 
