@@ -67,10 +67,12 @@ Implementation anchors:
 - `internal/gauntlettests` is the right place for hosted-runtime or protocol
   matrix coverage that should run through real runtime APIs.
 
-Exact gaps:
+Exact gaps after Stage A evidence publication:
 
-- `docs/performance-envelopes.md` records multi-way size rows, but not the
-  relation-shape fixture rows already present in benchmarks.
+- Stage B still lacks benchmark dimensions for cross joins,
+  selectivity/skew, changed row count, and aggregate relation-shape variants.
+  The current published relation-shape rows cover the existing `chain3`,
+  `self_alias3`, and `chain4` benchmark fixtures.
 - There is no hosted end-to-end type/index matrix crossing reducer writes,
   declared reads, live subscriptions, protocol payloads, generated TypeScript,
   and restart or backup/restore.
@@ -101,7 +103,8 @@ is insufficient for real hosted apps.
 ## Actionable Outcomes
 
 1. Refresh and publish relation-shape benchmark rows currently mentioned but
-   not included in the performance envelope.
+   not included in the performance envelope. Completed for existing
+   `chain3`, `self_alias3`, and `chain4` fixtures on 2026-05-28.
 2. Add missing benchmark dimensions for high-cardinality multi-way live views:
    - relation count
    - rows per relation
@@ -265,6 +268,12 @@ Stage A: publish existing evidence.
 - update `docs/performance-envelopes.md` with representative rows and known
   omissions
 - leave default guardrails unchanged
+
+Stage A status, 2026-05-28: completed for existing subscription evidence
+publication. The refreshed command covered
+`BenchmarkMultiWayLiveJoin(EvalSizes|RelationShapes)` at commit
+`69df08549a22d8c2bb135131b3cc18900f370771`; no new benchmark cases were
+needed, and default guardrails stayed unchanged.
 
 Stage B: add missing subscription dimensions.
 
