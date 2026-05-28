@@ -72,8 +72,11 @@ Review later:
 Owner: root `shunter`, `commitlog`, server/CLI surfaces if added
 
 Deferred decision:
-- Keep existing backup/restore and snapshot helpers as offline or
-  caller-coordinated maintenance primitives.
+- Keep `BackupDataDir` and `RestoreDataDir` as offline DataDir copy helpers.
+- Keep `Runtime.CreateSnapshot` and `Runtime.CompactCommitLog` as synchronous,
+  caller-coordinated maintenance helpers. Callers still own write quiescence
+  when they need a graceful maintenance point.
+- Defer coordinated online backup/checkpoint orchestration.
 
 Review later:
 - How a running runtime pauses or drains writes.
@@ -314,14 +317,17 @@ Review later:
 Owner: `executor`, `schema`, contracts, codegen, root runtime
 
 Deferred decision:
-- Keep current raw reducer-name plus args scheduler for v1.
+- Keep current raw reducer-name plus BSATN args scheduler for v1.
+- `sys_scheduled` is already represented as a private system table in schema,
+  contracts, and generated TypeScript table helpers. Defer a typed scheduling
+  model beyond that raw table representation.
 
 Review later:
 - Typed scheduled table declarations.
 - Scheduled procedures.
-- Interval/date semantics.
-- Contract and codegen representation.
-- Protocol/export metadata.
+- Higher-level interval/date semantics.
+- Public or filtered contract/codegen representation for schedules.
+- Protocol/export metadata beyond the raw system table.
 
 19. [ ] Module `init`/`update` lifecycle reducers.
 
@@ -359,24 +365,31 @@ Owner: `codegen`, contracts, `contractworkflow`, `cmd/shunter`
 Deferred decision:
 - Keep the current TypeScript single-output-file path until the contract and
   runtime surfaces stabilize.
+- Current workflow code can generate from a contract file or linked runtime
+  contract. Deployed schema fetch and source-module extraction remain deferred.
 
 Review later:
 - More language targets.
 - Multi-output generation.
 - Remote/deployed schema fetch.
-- Source-module schema extraction.
+- Source-module schema extraction without building a runtime.
 
-22. [ ] Codegen visibility profile.
+22. [ ] Public codegen visibility profile.
 
 Owner: `codegen`, contracts, root runtime
 
 Deferred decision:
-- Do not generate APIs for private/hidden surfaces without an explicit profile.
+- Current TypeScript generation emits table row types, decoders, metadata, and
+  table helpers for every table in the exported contract, including private
+  system tables and private app tables.
+- Defer a filtered public-SDK/profile model. Do not treat the current generated
+  surface as a public visibility boundary.
 
 Review later:
-- Internal/private declaration filtering.
-- Public SDK surface.
-- Contract metadata needed for generation.
+- Profile selection for public, internal, and private generated surfaces.
+- Filtering private system tables and private app tables from public facades.
+- Contract metadata needed to distinguish metadata-only exports from callable
+  SDK APIs.
 
 23. [ ] Contract workflow provenance and release automation hardening.
 
@@ -412,15 +425,18 @@ Review later:
 Owner: `observability/prometheus`, root runtime, future server boundary
 
 Deferred decision:
-- Keep current caller-assembled Prometheus wiring and current runtime metrics
+- Keep current caller-assembled Prometheus wiring and fixed runtime metrics
   surface.
+- `Runtime.HTTPHandler` can mount a caller-supplied metrics handler at
+  `/metrics` when diagnostics mounting is configured. Automatic Prometheus
+  adapter/route ownership remains deferred.
 
 Review later:
 - Metric series lifecycle/delete APIs.
 - Shared metric-family registry.
 - Additional runtime metrics.
 - Per-metric histogram bucket configuration.
-- Built-in Prometheus route if standalone serving is approved.
+- Automatically assembled Prometheus route if standalone serving is approved.
 
 26. [ ] `internal/atomicfile` hardening beyond current callers.
 
@@ -443,17 +459,20 @@ Owner: `types`, `bsatn`, `schema`, contracts, codegen, protocol
 
 Deferred decision:
 - Keep the flat value/schema/codegen model for current v1.
+- Current flat kinds already include wide integers, timestamp, duration, UUID,
+  JSON, and a narrow string-array kind. Float constructors currently reject
+  NaN values.
 
 Review later:
 - Nested products.
 - Sums.
 - Options/results.
-- Homogeneous arrays.
+- Homogeneous arrays beyond the current string-only array kind.
 - Identity/connection ID column kinds.
 - Recursive value system.
-- Checked or saturating `Value.AsDuration` conversion.
+- Checked, saturating, or explicitly documented `Value.AsDuration` overflow
+  behavior.
 - JSON numeric normalization.
-- NaN float policy.
 
 ## Deferred Test Harness Expansion
 
@@ -462,22 +481,24 @@ Review later:
 Owner: `internal/gauntlettests`, root runtime
 
 Deferred decision:
-- Keep named deterministic gauntlet workloads for current hardening unless
-  failures need shrinking/persistence support.
+- Keep named deterministic gauntlet workloads and the fixed seed corpus for
+  current hardening. Package-level fuzz and Rapid tests exist outside a
+  gauntlet-level property/state-machine harness.
 
 Review later:
 - Persisting failing seeds.
 - Trace shrinking.
 - Generated corpus management.
-- Relationship to existing fixed named workloads.
+- Relationship to existing fixed named workloads and package-level fuzz/Rapid
+  coverage.
 
 29. [ ] Broader storage fault-injection matrix.
 
 Owner: `internal/gauntlettests`, `commitlog`, root runtime
 
 Deferred decision:
-- Keep current package tests and focused crash/fault coverage unless storage
-  changes justify a broader matrix.
+- Keep current package tests and focused runtime crash/storage-fault gauntlets
+  unless storage changes justify a broader matrix.
 
 Review later:
 - Write, sync, rename, durable waiter, scheduler, snapshot, commitlog sidecar,
@@ -491,11 +512,13 @@ Owner: runtime packages with scheduler, idle timeout, fanout, and close-state
 tests
 
 Deferred decision:
-- Keep current timing-sensitive tests unless they become flaky or are touched
-  by related implementation work.
+- Scheduler tests already have package-local clock and enqueue-observation
+  hooks. Do not add broad deterministic-time or synchronization APIs across
+  runtime, protocol, subscription, and close-state tests unless flake or
+  implementation work justifies them.
 
 Review later:
-- Test clock hooks.
+- Test clock hooks outside the scheduler.
 - Explicit barriers for fanout absence and close behavior.
 - CI flake reduction.
 
