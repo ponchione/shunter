@@ -1,0 +1,57 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+                                                                 │ working-docs/release-evidence/2026-05-29-subscription-stage-i/multiway-aggregate-functions-raw.log │
+                                                                 │                                               sec/op                                               │
+MultiWayLiveJoinAggregateRelationShapes/chain3/count-24                                                                                                   2.352m ± 0%
+MultiWayLiveJoinAggregateRelationShapes/self_alias3/count-24                                                                                              100.9m ± 0%
+MultiWayLiveJoinAggregateRelationShapes/chain4/count-24                                                                                                   4.661m ± 0%
+MultiWayLiveJoinAggregateRelationShapes/chain5_rows_128/count-24                                                                                          7.601m ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_24/count-24                                                                                           305.7µ ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_32/count-24                                                                                           706.9µ ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_star-24                                                                                                   2.352m ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_column-24                                                                                                 2.356m ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_distinct-24                                                                                               2.389m ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/sum-24                                                                                                          2.375m ± 1%
+MultiWayLiveJoinAggregateFunctions/chain4/count_star-24                                                                                                   4.709m ± 1%
+MultiWayLiveJoinAggregateFunctions/chain4/count_column-24                                                                                                 4.693m ± 1%
+MultiWayLiveJoinAggregateFunctions/chain4/count_distinct-24                                                                                               4.765m ± 1%
+MultiWayLiveJoinAggregateFunctions/chain4/sum-24                                                                                                          4.699m ± 1%
+geomean                                                                                                                                                   3.406m
+
+                                                                 │ working-docs/release-evidence/2026-05-29-subscription-stage-i/multiway-aggregate-functions-raw.log │
+                                                                 │                                                B/op                                                │
+MultiWayLiveJoinAggregateRelationShapes/chain3/count-24                                                                                                  37.66Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/self_alias3/count-24                                                                                             39.46Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/chain4/count-24                                                                                                  50.66Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/chain5_rows_128/count-24                                                                                         62.55Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_24/count-24                                                                                          9.964Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_32/count-24                                                                                          12.63Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_star-24                                                                                                  37.66Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_column-24                                                                                                37.66Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_distinct-24                                                                                              117.8Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/sum-24                                                                                                         37.78Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_star-24                                                                                                  50.66Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_column-24                                                                                                50.66Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_distinct-24                                                                                              130.8Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/sum-24                                                                                                         50.78Ki ± 0%
+geomean                                                                                                                                                  42.55Ki
+
+                                                                 │ working-docs/release-evidence/2026-05-29-subscription-stage-i/multiway-aggregate-functions-raw.log │
+                                                                 │                                             allocs/op                                              │
+MultiWayLiveJoinAggregateRelationShapes/chain3/count-24                                                                                                    73.00 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/self_alias3/count-24                                                                                               77.00 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/chain4/count-24                                                                                                    93.00 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/chain5_rows_128/count-24                                                                                           110.0 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_24/count-24                                                                                            73.00 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_32/count-24                                                                                            73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_star-24                                                                                                    73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_column-24                                                                                                  73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_distinct-24                                                                                                347.0 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/sum-24                                                                                                           75.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_star-24                                                                                                    93.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_column-24                                                                                                  93.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_distinct-24                                                                                                367.0 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/sum-24                                                                                                           95.00 ± 0%
+geomean                                                                                                                                                    101.8

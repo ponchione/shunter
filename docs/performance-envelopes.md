@@ -509,6 +509,65 @@ Current read:
 - This evidence keeps the default multi-way join guardrails unchanged:
   unlimited by default, with app-owned opt-in limits available through config.
 
+## Focused Multi-Way Live Join Stage I Aggregate Function Shape
+
+This focused snapshot extends aggregate-function evidence from the existing
+128-row `chain3` fixture to the existing bounded 128-row `chain4` fixture.
+The new rows cover the aggregate functions already accepted by the subscription
+layer and remain advisory; runtime semantics and default multi-way join
+guardrails are unchanged.
+
+- Date: 2026-05-29
+- Shunter commit: `45acb8f76e3a6cec42dc48f1022d10ee1f6a93cc`
+- Measurement worktree: commit above plus Stage I benchmark and documentation
+  changes
+- Host: `Linux gernsback 6.17.0-29-generic #29~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Mon May 11 10:30:58 UTC 2 x86_64 GNU/Linux`
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`
+- Raw sample: 14 sub-benchmarks, `-count=10`, 140 benchmark rows, total
+  package benchmark time 216.219s
+- Raw output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-i/multiway-aggregate-functions-raw.log`
+- Benchstat output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-i/multiway-aggregate-functions-benchstat.log`
+
+Command:
+
+```bash
+go test -run '^$' -bench 'BenchmarkMultiWayLiveJoin(AggregateFunctions|AggregateRelationShapes)' -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-05-29-subscription-stage-i/multiway-aggregate-functions-raw.log 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-05-29-subscription-stage-i/multiway-aggregate-functions-raw.log > working-docs/release-evidence/2026-05-29-subscription-stage-i/multiway-aggregate-functions-benchstat.log 2>&1
+```
+
+Representative standings:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain3/count_star-24` | `COUNT(*)` over 3-relation chain, 128 rows per relation, one endpoint insert | 2.352ms +/- 0% | 37.66Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain3/count_column-24` | `COUNT(t3.id)` over 3-relation chain, 128 rows per relation, one endpoint insert | 2.356ms +/- 0% | 37.66Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain3/count_distinct-24` | `COUNT(DISTINCT t1.id)` over 3-relation chain, 128 rows per relation, one endpoint insert | 2.389ms +/- 0% | 117.8Ki +/- 0% | 347 | advisory |
+| Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain3/sum-24` | `SUM(t3.id)` over 3-relation chain, 128 rows per relation, one endpoint insert | 2.375ms +/- 1% | 37.78Ki +/- 0% | 75 | advisory |
+| Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain4/count_star-24` | `COUNT(*)` over 4-relation chain, 128 rows per relation, one endpoint insert | 4.709ms +/- 1% | 50.66Ki +/- 0% | 93 | advisory |
+| Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain4/count_column-24` | `COUNT(t3.id)` over 4-relation chain, 128 rows per relation, one endpoint insert | 4.693ms +/- 1% | 50.66Ki +/- 0% | 93 | advisory |
+| Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain4/count_distinct-24` | `COUNT(DISTINCT t1.id)` over 4-relation chain, 128 rows per relation, one endpoint insert | 4.765ms +/- 1% | 130.8Ki +/- 0% | 367 | advisory |
+| Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain4/sum-24` | `SUM(t3.id)` over 4-relation chain, 128 rows per relation, one endpoint insert | 4.699ms +/- 1% | 50.78Ki +/- 0% | 95 | advisory |
+| Multi-way Stage I aggregate geomean | all focused Stage I aggregate relation/function benchmarks | 14 sub-benchmark geomean | 3.406ms | 42.55Ki | 101.8 | advisory |
+
+Current read:
+
+- The bounded `chain4` aggregate-function rows remain local-review-sized under
+  `-count=10` while extending function-shape evidence beyond `chain3`.
+- On `chain4`, `COUNT(column)` and `SUM(column)` continue to track `COUNT(*)`
+  latency and allocation closely in this deterministic fixture.
+- `COUNT(DISTINCT column)` adds allocation and allocation count on both
+  `chain3` and `chain4`, but does not create a new latency standout here.
+- The repeated-table `self_alias3/count` relation-shape row remains the
+  standout aggregate latency case in this focused command.
+- Larger aggregate-function fixtures beyond the bounded 128-row `chain4`
+  chain, aggregate-function Cartesian/skew/self-alias distributions, and
+  app-derived workload distributions remain outside the current envelope.
+- This evidence keeps the default multi-way join guardrails unchanged:
+  unlimited by default, with app-owned opt-in limits available through config.
+
 ## Focused Ordered Subscription Window Baseline
 
 This focused snapshot records the ordered subscription window benchmarks added
@@ -584,7 +643,10 @@ Representative standings:
   chain for table-shaped projection and `COUNT(*)`, Stage G extends bounded
   skew/fanout evidence to `hot_key_16x16`, and Stage H extends bounded
   Cartesian evidence to `cross3_rows_32` for table-shaped projection and
-  `COUNT(*)`. This evidence does not justify changing the unlimited defaults.
+  `COUNT(*)`. Stage I extends aggregate-function evidence from `chain3` to
+  bounded `chain4` rows for `COUNT(*)`, `COUNT(column)`,
+  `COUNT(DISTINCT column)`, and `SUM(column)`. This evidence does not justify
+  changing the unlimited defaults.
 - Offline backup/restore is covered for small and larger complete local
   DataDir fixtures and is expected to be I/O dominated; these rows do not
   replace production-scale backup/restore timing.
