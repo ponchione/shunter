@@ -1,6 +1,7 @@
 # Subscription Evidence And Type/Index Matrix
 
-Status: Stage E aggregate semantics slice complete; remaining items stay evidence backlog
+Status: Stage F multi-way relation-count evidence slice complete; remaining
+items stay evidence backlog
 Primary backlog items: `deferred-functionality-backlog.md` items 10, 11, 24,
 and 31
 
@@ -41,8 +42,8 @@ Current evidence:
 
 - `subscription/bench_test.go` includes equality subscriptions, fanout,
   ordered-window paths, join delta eval, multi-way join size fixtures, relation
-  shape fixtures, bounded Stage B multi-way dimensions, delta index
-  construction, and candidate collection.
+  shape fixtures including a bounded 5-relation chain, bounded Stage B
+  multi-way dimensions, delta index construction, and candidate collection.
 - `docs/performance-envelopes.md` records advisory benchmark snapshots and
   known gaps.
 - Package tests already cover many subscription correctness paths.
@@ -70,7 +71,7 @@ Implementation anchors:
 - `internal/gauntlettests` is the right place for hosted-runtime or protocol
   matrix coverage that should run through real runtime APIs.
 
-Exact gaps after Stage E aggregate semantics publication:
+Exact gaps after Stage F relation-count evidence publication:
 
 - Stage B now has bounded benchmark rows for a 3-relation Cartesian
   multi-join, one-match vs 8x8 hot-key selectivity/skew, 1/10/100 changed
@@ -79,10 +80,12 @@ Exact gaps after Stage E aggregate semantics publication:
 - Stage D now has bounded aggregate-function rows over the existing 128-row
   `chain3` fixture for `COUNT(*)`, `COUNT(column)`,
   `COUNT(DISTINCT column)`, and `SUM(column)`.
+- Stage F now has bounded relation-count rows for a 5-relation, 128-row chain
+  fixture in both table-shaped projection and `COUNT(*)` aggregate variants.
 - Remaining multi-way evidence gaps include larger Cartesian fixtures, larger
-  skew/fanout distributions, relation counts beyond current bounded fixtures,
-  aggregate-function rows beyond the bounded 128-row `chain3` fixture, and
-  workload-derived application distributions.
+  skew/fanout distributions, relation counts beyond the bounded 5-relation
+  chain fixture, aggregate-function rows beyond the bounded 128-row `chain3`
+  fixture, and workload-derived application distributions.
 - The hosted type/index canary now crosses reducer writes, declared reads,
   live subscriptions, protocol payloads, index seeks, and restart. Generated
   TypeScript decoding and backup/restore remain outside this canary; package
@@ -134,6 +137,11 @@ is insufficient for real hosted apps.
    one-match vs `hot_key_8x8` selectivity, 1/10/100 changed endpoint rows, and
    `COUNT(*)` aggregate relation-shape variants. Keep the remaining dimensions
    evidence-first and bounded.
+
+   Stage F subset completed on 2026-05-29 for relation-count coverage beyond
+   `chain4`: a bounded 5-relation, 128-row chain with one endpoint insert for
+   table-shaped projection and `COUNT(*)`. The raw `-count=10` evidence is
+   saved under `working-docs/release-evidence/2026-05-29-subscription-stage-f/`.
 3. Decide whether default multi-way join limits need to change, using
    benchmark and canary evidence rather than speculation.
 
@@ -406,6 +414,22 @@ empty/non-empty transitions, accepted `SUM` result domains, and unsupported
 `SUM` rejection. Existing protocol and declared-query tests already cover
 one-off/declared-query nullable aggregate semantics. No aggregate feature set
 was broadened.
+
+Stage F: close one bounded multi-way evidence gap.
+
+- inventory current multi-way benchmark/docs coverage
+- add a cheap relation-count extension only if it stays local-review-sized
+- publish focused benchmark evidence and keep default guardrails unchanged
+
+Stage F status, 2026-05-29: completed a bounded 5-relation chain extension in
+`subscription/bench_test.go` and published the focused `-count=10` rows in
+`docs/performance-envelopes.md`. The slice covers
+`MultiWayLiveJoinRelationShapes/chain5_rows_128` and
+`MultiWayLiveJoinAggregateRelationShapes/chain5_rows_128/count` alongside the
+existing focused multi-way benchmark families. Runtime semantics and default
+multi-way join guardrails stayed unchanged. Larger relation counts, larger
+Cartesian/skew fixtures, broader aggregate-function shapes, and app-derived
+workload distributions remain evidence backlog.
 
 ## Risks
 

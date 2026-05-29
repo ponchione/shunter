@@ -348,6 +348,61 @@ Current read:
   The bounded rows remain advisory, the worst local rows are not enough to
   select safe defaults, and apps can still opt into guardrails through config.
 
+## Focused Multi-Way Live Join Stage F Relation Count
+
+This focused snapshot extends bounded relation-count evidence from the existing
+3- and 4-relation chain fixtures to a 5-relation chain. The new fixture keeps
+the same 128 rows per relation and one endpoint insert shape, and records both
+table-shaped projection and `COUNT(*)` aggregate rows. It is advisory and does
+not change default multi-way join guardrails.
+
+- Date: 2026-05-29
+- Shunter commit: `9ac9bba5d037acad1944ab2888d81ebf8b9adb4d`
+- Measurement worktree: commit above plus Stage F benchmark and documentation
+  changes
+- Host: `Linux gernsback 6.17.0-29-generic`, linux/amd64
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`, 12 cores, 24 logical CPUs
+- Raw sample: 25 sub-benchmarks, `-count=10`, 250 benchmark rows, total
+  package benchmark time 353.572s
+- Raw output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-f/multiway-bench-raw.log`
+- Benchstat output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-f/multiway-benchstat.log`
+
+Command:
+
+```bash
+rtk bash -lc 'go test -run "^$" -bench "BenchmarkMultiWayLiveJoin(EvalSizes|RelationShapes|Selectivity|ChangedRows|AggregateRelationShapes|AggregateFunctions)" -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-05-29-subscription-stage-f/multiway-bench-raw.log 2>&1'
+rtk bash -lc 'rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-05-29-subscription-stage-f/multiway-bench-raw.log > working-docs/release-evidence/2026-05-29-subscription-stage-f/multiway-benchstat.log 2>&1'
+```
+
+Representative standings:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Multi-way relation count | `MultiWayLiveJoinRelationShapes/chain3-24` | 3-relation chain, 128 rows per relation, one endpoint insert | 383.3us +/- 1% | 37.37Ki +/- 0% | 68 | advisory |
+| Multi-way relation count | `MultiWayLiveJoinRelationShapes/chain4-24` | 4-relation chain, 128 rows per relation, one endpoint insert | 1.055ms +/- 1% | 50.42Ki +/- 0% | 88 | advisory |
+| Multi-way relation count | `MultiWayLiveJoinRelationShapes/chain5_rows_128-24` | 5-relation chain, 128 rows per relation, one endpoint insert | 2.057ms +/- 0% | 62.38Ki +/- 0% | 105 | advisory |
+| Multi-way aggregate relation count | `MultiWayLiveJoinAggregateRelationShapes/chain3/count-24` | `COUNT(*)` over 3-relation chain, 128 rows per relation, one endpoint insert | 2.346ms +/- 0% | 37.67Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate relation count | `MultiWayLiveJoinAggregateRelationShapes/chain4/count-24` | `COUNT(*)` over 4-relation chain, 128 rows per relation, one endpoint insert | 4.648ms +/- 0% | 50.66Ki +/- 0% | 93 | advisory |
+| Multi-way aggregate relation count | `MultiWayLiveJoinAggregateRelationShapes/chain5_rows_128/count-24` | `COUNT(*)` over 5-relation chain, 128 rows per relation, one endpoint insert | 7.591ms +/- 0% | 62.55Ki +/- 0% | 110 | advisory |
+| Multi-way Stage F geomean | all focused Stage F multi-way live join benchmarks | 25 sub-benchmark geomean | 1.114ms | 44.16Ki | 84.28 | advisory |
+
+Current read:
+
+- The bounded 5-relation chain stays local-review-sized at 128 rows per
+  relation while extending relation-count evidence beyond the prior `chain4`
+  fixture.
+- The chain relation-count rows grow predictably in this deterministic fixture,
+  and the accepted `COUNT(*)` chain5 row remains well below the repeated-table
+  self-alias aggregate standout from Stage B.
+- Larger relation counts, larger Cartesian/skew fixtures, aggregate-function
+  rows beyond the bounded `chain3` fixture, and app-derived workload
+  distributions remain outside the current envelope.
+- This evidence keeps the default multi-way join guardrails unchanged:
+  unlimited by default, with app-owned opt-in limits available through config.
+
 ## Focused Ordered Subscription Window Baseline
 
 This focused snapshot records the ordered subscription window benchmarks added
@@ -418,8 +473,10 @@ Representative standings:
   snapshot above refreshes the relation-size fixtures and publishes the
   existing chain3, self_alias3, and chain4 relation-shape fixtures. The focused
   Stage B snapshot adds bounded cross-shape, selectivity/skew,
-  changed-row-count, and `COUNT(*)` aggregate relation-shape rows. This evidence
-  does not justify changing the unlimited defaults.
+  changed-row-count, and `COUNT(*)` aggregate relation-shape rows. The focused
+  Stage F snapshot extends relation-count evidence to a bounded 5-relation
+  chain for table-shaped projection and `COUNT(*)`. This evidence does not
+  justify changing the unlimited defaults.
 - Offline backup/restore is covered for small and larger complete local
   DataDir fixtures and is expected to be I/O dominated; these rows do not
   replace production-scale backup/restore timing.
@@ -581,11 +638,11 @@ These remain outside the current benchmark envelope:
   in-process same-query, varied single-table, skewed hot-key, and varied
   two-table predicate fixtures
 - application workload timing, including production-scale backup/restore timing
-- multi-way join evidence beyond the focused Stage B and Stage D snapshots,
-  including larger Cartesian fixtures, larger skew/fanout distributions,
-  relation counts beyond current bounded fixtures, aggregate-function rows
-  beyond the bounded 128-row `chain3` fixture, and app-derived workload
-  distributions
+- multi-way join evidence beyond the focused Stage B, Stage D, and Stage F
+  snapshots, including larger Cartesian fixtures, larger skew/fanout
+  distributions, relation counts beyond the bounded 5-relation chain fixture,
+  aggregate-function rows beyond the bounded 128-row `chain3` fixture, and
+  app-derived workload distributions
 - memory profiles outside the current subscription, single-WebSocket,
   16/64/128-client WebSocket fanout, sender-level backpressure, executor
   reducer commit, and small/larger local backup/restore fixtures, including

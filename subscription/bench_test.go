@@ -955,6 +955,10 @@ func BenchmarkMultiWayLiveJoinRelationShapes(b *testing.B) {
 		changed := types.ProductValue{types.NewUint64(uint64(size + 3000)), types.NewUint64(uint64(size/2 + 1))}
 		benchmarkMultiWayLiveJoinShape(b, multiJoinFourRelationTestSchema(), multiJoinFourRelationPredicate(), benchmarkMultiJoinFourRelationCommitted(size, false), benchmarkMultiJoinFourRelationCommitted(size, true), 4, changed)
 	})
+	b.Run("chain5_rows_128", func(b *testing.B) {
+		changed := types.ProductValue{types.NewUint64(uint64(size + 4000)), types.NewUint64(uint64(size/2 + 1))}
+		benchmarkMultiWayLiveJoinShape(b, benchmarkMultiJoinFiveRelationTestSchema(), benchmarkMultiJoinFiveRelationPredicate(), benchmarkMultiJoinFiveRelationCommitted(size, false), benchmarkMultiJoinFiveRelationCommitted(size, true), 5, changed)
+	})
 	b.Run("cross3_rows_24", func(b *testing.B) {
 		const crossSize = 24
 		changed := types.ProductValue{types.NewUint64(uint64(crossSize + 1000)), types.NewUint64(uint64(crossSize/2 + 1))}
@@ -1017,6 +1021,10 @@ func BenchmarkMultiWayLiveJoinAggregateRelationShapes(b *testing.B) {
 	b.Run("chain4/count", func(b *testing.B) {
 		changed := types.ProductValue{types.NewUint64(uint64(size + 3000)), types.NewUint64(uint64(size/2 + 1))}
 		benchmarkMultiWayLiveJoinShapeAggregate(b, multiJoinFourRelationTestSchema(), multiJoinFourRelationPredicate(), benchmarkMultiJoinFourRelationCommitted(size, false), benchmarkMultiJoinFourRelationCommitted(size, true), 4, changed, countStarAggregate())
+	})
+	b.Run("chain5_rows_128/count", func(b *testing.B) {
+		changed := types.ProductValue{types.NewUint64(uint64(size + 4000)), types.NewUint64(uint64(size/2 + 1))}
+		benchmarkMultiWayLiveJoinShapeAggregate(b, benchmarkMultiJoinFiveRelationTestSchema(), benchmarkMultiJoinFiveRelationPredicate(), benchmarkMultiJoinFiveRelationCommitted(size, false), benchmarkMultiJoinFiveRelationCommitted(size, true), 5, changed, countStarAggregate())
 	})
 	b.Run("cross3_rows_24/count", func(b *testing.B) {
 		const crossSize = 24
@@ -1081,6 +1089,46 @@ func benchmarkMultiJoinCross3Predicate() MultiJoin {
 			{Table: 1, Alias: 0},
 			{Table: 2, Alias: 1},
 			{Table: 3, Alias: 2},
+		},
+		ProjectedRelation: 0,
+	}
+}
+
+func benchmarkMultiJoinFiveRelationTestSchema() *fakeSchema {
+	s := newFakeSchema()
+	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
+	for table := TableID(1); table <= 5; table++ {
+		s.addTable(table, cols, 1)
+	}
+	return s
+}
+
+func benchmarkMultiJoinFiveRelationPredicate() MultiJoin {
+	return MultiJoin{
+		Relations: []MultiJoinRelation{
+			{Table: 1, Alias: 0},
+			{Table: 2, Alias: 1},
+			{Table: 3, Alias: 2},
+			{Table: 4, Alias: 3},
+			{Table: 5, Alias: 4},
+		},
+		Conditions: []MultiJoinCondition{
+			{
+				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
+				Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
+				Right: MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
+				Right: MultiJoinColumnRef{Relation: 3, Table: 4, Column: 1, Alias: 3},
+			},
+			{
+				Left:  MultiJoinColumnRef{Relation: 3, Table: 4, Column: 1, Alias: 3},
+				Right: MultiJoinColumnRef{Relation: 4, Table: 5, Column: 1, Alias: 4},
+			},
 		},
 		ProjectedRelation: 0,
 	}
@@ -1242,6 +1290,26 @@ func benchmarkMultiJoinFourRelationCommitted(size int, includeChanged bool) *moc
 	if includeChanged {
 		rows[4] = append(rows[4], types.ProductValue{
 			types.NewUint64(uint64(size + 3000)),
+			types.NewUint64(uint64(size/2 + 1)),
+		})
+	}
+	return buildMockCommitted(s, rows)
+}
+
+func benchmarkMultiJoinFiveRelationCommitted(size int, includeChanged bool) *mockCommitted {
+	s := benchmarkMultiJoinFiveRelationTestSchema()
+	rows := make(map[TableID][]types.ProductValue, 5)
+	for table := TableID(1); table <= 5; table++ {
+		tableRows := make([]types.ProductValue, size)
+		for i := 0; i < size; i++ {
+			key := types.NewUint64(uint64(i + 1))
+			tableRows[i] = types.ProductValue{types.NewUint64(uint64(i) + uint64(table)*1000), key}
+		}
+		rows[table] = tableRows
+	}
+	if includeChanged {
+		rows[5] = append(rows[5], types.ProductValue{
+			types.NewUint64(uint64(size + 4000)),
 			types.NewUint64(uint64(size/2 + 1)),
 		})
 	}
