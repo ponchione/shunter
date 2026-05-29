@@ -115,3 +115,24 @@ shapes differ by read surface:
   limits disabled.
 - Local ad hoc raw SQL is out of scope for v1. Use `Runtime.Read`,
   `Runtime.CallQuery`, or `Runtime.SubscribeView` instead.
+
+Aggregate semantics:
+
+- Accepted aggregate functions are `COUNT(*)`, `COUNT(column)`,
+  `COUNT(DISTINCT column)`, and `SUM(column)`. Grouped aggregates and aggregate
+  windows are not supported.
+- `COUNT(*)` counts matching rows or joined tuples. `COUNT(column)` counts
+  matching non-null argument values. `COUNT(DISTINCT column)` counts distinct
+  matching non-null argument values. All `COUNT` forms return non-null `Uint64`.
+- `SUM(column)` ignores nulls and supports `Int8`, `Int16`, `Int32`, `Int64`,
+  `Uint8`, `Uint16`, `Uint32`, `Uint64`, `Float32`, and `Float64` source
+  columns. Signed integer sums return `Int64`, unsigned integer sums return
+  `Uint64`, and float sums return `Float64`.
+- `SUM(column)` result nullability matches the source column. Nullable sums
+  return null when no non-null value contributes, including empty matches and
+  all-null matches. Non-nullable sums return the zero value for the result kind
+  when no value contributes.
+- Declared live aggregate views reject `ORDER BY`, `LIMIT`, and `OFFSET`.
+  `SUM(DISTINCT ...)` and unsupported `SUM` source kinds are rejected before
+  execution. Live aggregate deltas replace the single aggregate row by deleting
+  the old value and inserting the new value only when the value changes.

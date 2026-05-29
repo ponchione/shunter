@@ -219,6 +219,24 @@ Current read compatibility by surface:
   access. `Runtime.CallQuery` and `Runtime.SubscribeView` are the local
   declared-read APIs.
 
+Aggregate reads currently accept `COUNT(*)`, `COUNT(column)`,
+`COUNT(DISTINCT column)`, and `SUM(column)`. `COUNT` results are non-null
+`Uint64`; `COUNT(column)` and `COUNT(DISTINCT column)` ignore null argument
+values, and distinct counts are over the non-null values. `SUM` accepts signed
+integer columns through `Int64`, unsigned integer columns through `Uint64`, and
+`Float32`/`Float64`; signed sums return `Int64`, unsigned sums return `Uint64`,
+and float sums return `Float64`. `SUM` ignores null argument values. A nullable
+source column produces a nullable result; if no non-null value contributes, the
+result is null. A non-nullable `SUM` result with no contributing rows returns
+the zero value for its result kind.
+
+Declared live aggregate views emit one aggregate row at subscription time. When
+a later commit changes the aggregate value, the live delta deletes the previous
+aggregate row and inserts the new aggregate row; commits that leave the value
+unchanged emit no aggregate delta. Declared live aggregate views reject
+`ORDER BY`, `LIMIT`, and `OFFSET`. Shunter does not support grouped aggregates,
+aggregate windows, or `SUM(DISTINCT ...)`.
+
 Declared-read parameters are only for declared queries and declared views. Raw
 protocol `OneOffQuery`, `SubscribeSingle`, and `SubscribeMulti` do not accept
 client-side parameter payloads.

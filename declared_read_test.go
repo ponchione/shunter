@@ -939,7 +939,7 @@ func TestDeclaredViewRejectsSumStringAggregate(t *testing.T) {
 	if !errors.Is(err, ErrInvalidDeclarationSQL) {
 		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
 	}
-	if !strings.Contains(err.Error(), "SUM aggregate only supports 64-bit integer and float columns") {
+	if !strings.Contains(err.Error(), "SUM aggregate only supports integer and float columns") {
 		t.Fatalf("Build error = %v, want SUM numeric-column rejection", err)
 	}
 }

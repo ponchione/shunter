@@ -1123,7 +1123,7 @@ func TestModuleContractValidationRejectsSumStringAggregateViewSQL(t *testing.T) 
 	if !strings.Contains(err.Error(), "views.live_messages.sql") {
 		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
 	}
-	if !strings.Contains(err.Error(), "SUM aggregate only supports 64-bit integer and float columns") {
+	if !strings.Contains(err.Error(), "SUM aggregate only supports integer and float columns") {
 		t.Fatalf("ValidateModuleContract error = %v, want SUM numeric-column unsupported text", err)
 	}
 }

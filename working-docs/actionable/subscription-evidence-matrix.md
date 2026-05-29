@@ -1,6 +1,6 @@
 # Subscription Evidence And Type/Index Matrix
 
-Status: Stage D policy slice complete; remaining items stay evidence backlog
+Status: Stage E aggregate semantics slice complete; remaining items stay evidence backlog
 Primary backlog items: `deferred-functionality-backlog.md` items 10, 11, 24,
 and 31
 
@@ -70,7 +70,7 @@ Implementation anchors:
 - `internal/gauntlettests` is the right place for hosted-runtime or protocol
   matrix coverage that should run through real runtime APIs.
 
-Exact gaps after Stage D aggregate-function evidence publication:
+Exact gaps after Stage E aggregate semantics publication:
 
 - Stage B now has bounded benchmark rows for a 3-relation Cartesian
   multi-join, one-match vs 8x8 hot-key selectivity/skew, 1/10/100 changed
@@ -87,9 +87,10 @@ Exact gaps after Stage D aggregate-function evidence publication:
   live subscriptions, protocol payloads, index seeks, and restart. Generated
   TypeScript decoding and backup/restore remain outside this canary; package
   tests continue to cover TypeScript decoder shape separately.
-- Aggregate evidence includes package-level correctness coverage and focused
-  Stage D `chain3` performance rows. Larger aggregate shapes and
-  workload-derived distributions remain outside the current envelope.
+- Aggregate evidence includes package-level correctness coverage, focused
+  Stage D `chain3` performance rows, and Stage E documentation/tests for
+  current aggregate semantics. Larger aggregate shapes and workload-derived
+  distributions remain outside the current envelope.
 - Default multi-way join limits remain intentionally unlimited. The bounded
   Stage A through Stage D evidence is advisory, the worst local rows are not
   enough to select safe defaults, and apps can opt into guardrails through
@@ -309,6 +310,18 @@ Backlog item 24 stays mostly deferred. Actionable work now:
 Do not broaden `SUM`, nullable aggregate semantics, or distinct memory
 accounting without a concrete app-facing requirement.
 
+Stage E semantics status, 2026-05-29: completed focused live aggregate coverage
+and user-facing documentation for `COUNT(*)`, `COUNT(column)`,
+`COUNT(DISTINCT column)`, `SUM(column)`, empty matches, all-null nullable sums,
+supported `SUM` source/result kinds, rejected live aggregate window shapes,
+`SUM(DISTINCT ...)`, unsupported `SUM` source kinds, and replacement-row live
+deltas. Runtime semantics and default multi-way join guardrails stayed
+unchanged. Remaining aggregate gaps are broader product/functionality work:
+grouped aggregates, aggregate windows, live aggregate `ORDER BY`/`LIMIT` and
+`OFFSET`, `SUM(DISTINCT ...)`, unsupported numeric families such as wide
+integers, larger aggregate performance shapes, workload-derived distributions,
+and distinct-memory accounting beyond the current immutable row-value contract.
+
 ## Staging
 
 Stage A: publish existing evidence.
@@ -376,6 +389,23 @@ guardrails stayed unchanged. The policy decision is to keep defaults zero
 (`unlimited`) because the bounded evidence remains advisory, the worst local
 rows are not enough to select safe defaults, and apps can still opt into
 guardrails through config.
+
+Stage E: document and pin current aggregate semantics.
+
+- add focused correctness tests only for missing current behavior
+- document supported aggregate functions, null/empty behavior, numeric domains,
+  rejected live aggregate shapes, and replacement-row live deltas
+- leave runtime semantics and guardrail defaults unchanged
+
+Stage E status, 2026-05-29: completed in `subscription/aggregate_test.go`,
+`docs/how-to/reads-queries-views.md`, and `docs/reference/read-surface.md`.
+The slice pins live aggregate empty/all-null behavior, replacement deltas across
+empty/non-empty transitions, accepted `SUM` result domains, and unsupported
+`SUM` source kinds. Existing declared-read tests already cover live aggregate
+`ORDER BY`/`LIMIT`/`OFFSET` rejection, `SUM(DISTINCT ...)` rejection, and string
+`SUM` rejection. Existing protocol and declared-query tests already cover
+one-off/declared-query nullable aggregate semantics. No aggregate feature set
+was broadened.
 
 ## Risks
 

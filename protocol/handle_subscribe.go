@@ -1029,7 +1029,7 @@ func compileAggregateProjection(agg *sql.AggregateProjection, argument *compiled
 		}
 		resultKind, ok := valueagg.SumResultKind(argument.Schema.Type)
 		if !ok {
-			return nil, fmt.Errorf("SUM aggregate only supports 64-bit integer and float columns")
+			return nil, fmt.Errorf("SUM aggregate only supports integer and float columns")
 		}
 		return &compiledSQLAggregate{
 			Func:         "SUM",

@@ -45,6 +45,13 @@ func sumIDAggregate() *Aggregate {
 	}
 }
 
+func sumNullableIDAggregate() *Aggregate {
+	agg := sumIDAggregate()
+	agg.ResultColumn.Nullable = true
+	agg.Argument.Schema.Nullable = true
+	return agg
+}
+
 func countJoinRHSIDAggregate() *Aggregate {
 	return &Aggregate{
 		Func:         AggregateCount,
@@ -189,6 +196,74 @@ func TestRegisterSetCountDistinctAggregateReturnsOneInitialRow(t *testing.T) {
 	}
 	if len(update.Inserts) != 1 || update.Inserts[0][0].AsUint64() != 2 {
 		t.Fatalf("COUNT(DISTINCT) aggregate initial rows = %#v, want distinct count 2", update.Inserts)
+	}
+}
+
+func TestRegisterSetAggregateEmptyInputsReturnCurrentZeroOrNullRows(t *testing.T) {
+	allRows := AllRows{Table: 1}
+	noMatch := ColEq{Table: 1, Column: 0, Value: types.NewUint64(99)}
+	allNullBodyRows := []types.ProductValue{
+		{types.NewUint64(1), types.NewNull(types.KindString)},
+		{types.NewUint64(2), types.NewNull(types.KindString)},
+	}
+	allNullIDRows := []types.ProductValue{
+		{types.NewNull(types.KindUint64), types.NewString("a")},
+		{types.NewNull(types.KindUint64), types.NewString("b")},
+	}
+	nonMatchingRows := []types.ProductValue{
+		{types.NewUint64(1), types.NewString("a")},
+		{types.NewUint64(2), types.NewString("b")},
+	}
+
+	tests := []struct {
+		name      string
+		rows      []types.ProductValue
+		pred      Predicate
+		aggregate *Aggregate
+		want      types.Value
+	}{
+		{name: "count star empty table", pred: allRows, aggregate: countStarAggregate(), want: types.NewUint64(0)},
+		{name: "count column empty table", pred: allRows, aggregate: countBodyAggregate(), want: types.NewUint64(0)},
+		{name: "count distinct empty table", pred: allRows, aggregate: countDistinctBodyAggregate(), want: types.NewUint64(0)},
+		{name: "sum non-null empty table", pred: allRows, aggregate: sumIDAggregate(), want: types.NewUint64(0)},
+		{name: "count star empty predicate match", rows: nonMatchingRows, pred: noMatch, aggregate: countStarAggregate(), want: types.NewUint64(0)},
+		{name: "count column empty predicate match", rows: nonMatchingRows, pred: noMatch, aggregate: countBodyAggregate(), want: types.NewUint64(0)},
+		{name: "count distinct empty predicate match", rows: nonMatchingRows, pred: noMatch, aggregate: countDistinctBodyAggregate(), want: types.NewUint64(0)},
+		{name: "sum non-null empty predicate match", rows: nonMatchingRows, pred: noMatch, aggregate: sumIDAggregate(), want: types.NewUint64(0)},
+		{name: "sum nullable empty predicate match", rows: nonMatchingRows, pred: noMatch, aggregate: sumNullableIDAggregate(), want: types.NewNull(types.KindUint64)},
+		{name: "count column all null", rows: allNullBodyRows, pred: allRows, aggregate: countBodyAggregate(), want: types.NewUint64(0)},
+		{name: "count distinct all null", rows: allNullBodyRows, pred: allRows, aggregate: countDistinctBodyAggregate(), want: types.NewUint64(0)},
+		{name: "sum nullable all null", rows: allNullIDRows, pred: allRows, aggregate: sumNullableIDAggregate(), want: types.NewNull(types.KindUint64)},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := testSchema()
+			view := buildMockCommitted(s, map[TableID][]types.ProductValue{1: tt.rows})
+			mgr := NewManager(s, s)
+
+			res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+				ConnID:     types.ConnectionID{1},
+				QueryID:    uint32(100 + i),
+				Predicates: []Predicate{tt.pred},
+				Aggregates: []*Aggregate{tt.aggregate},
+			}, view)
+			if err != nil {
+				t.Fatalf("RegisterSet aggregate = %v", err)
+			}
+			if len(res.Update) != 1 {
+				t.Fatalf("initial update count = %d, want 1", len(res.Update))
+			}
+			update := res.Update[0]
+			if len(update.Deletes) != 0 {
+				t.Fatalf("initial aggregate deletes = %#v, want none", update.Deletes)
+			}
+			if len(update.Columns) != 1 || update.Columns[0].Type != tt.aggregate.ResultColumn.Type || update.Columns[0].Nullable != tt.aggregate.ResultColumn.Nullable {
+				t.Fatalf("aggregate columns = %#v, want result shape %#v", update.Columns, tt.aggregate.ResultColumn)
+			}
+			if len(update.Inserts) != 1 || len(update.Inserts[0]) != 1 || !update.Inserts[0][0].Equal(tt.want) {
+				t.Fatalf("aggregate initial rows = %#v, want %v", update.Inserts, tt.want)
+			}
+		})
 	}
 }
 
@@ -403,6 +478,78 @@ func TestEvalAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) 
 	msg = <-inbox
 	if len(msg.Fanout[connID]) != 0 {
 		t.Fatalf("unchanged aggregate fanout = %+v, want no updates", msg.Fanout)
+	}
+}
+
+func TestEvalAggregateEmptyTransitionEmitsReplacementRows(t *testing.T) {
+	tests := []struct {
+		name       string
+		aggregate  *Aggregate
+		beforeRows []types.ProductValue
+		inserts    []types.ProductValue
+		deletes    []types.ProductValue
+		afterRows  []types.ProductValue
+		wantDelete types.Value
+		wantInsert types.Value
+	}{
+		{
+			name:       "count star first insert",
+			aggregate:  countStarAggregate(),
+			inserts:    []types.ProductValue{{types.NewUint64(1), types.NewString("a")}},
+			afterRows:  []types.ProductValue{{types.NewUint64(1), types.NewString("a")}},
+			wantDelete: types.NewUint64(0),
+			wantInsert: types.NewUint64(1),
+		},
+		{
+			name:       "sum non-null last delete",
+			aggregate:  sumIDAggregate(),
+			beforeRows: []types.ProductValue{{types.NewUint64(7), types.NewString("a")}},
+			deletes:    []types.ProductValue{{types.NewUint64(7), types.NewString("a")}},
+			wantDelete: types.NewUint64(7),
+			wantInsert: types.NewUint64(0),
+		},
+		{
+			name:       "sum nullable first insert",
+			aggregate:  sumNullableIDAggregate(),
+			inserts:    []types.ProductValue{{types.NewUint64(7), types.NewString("a")}},
+			afterRows:  []types.ProductValue{{types.NewUint64(7), types.NewString("a")}},
+			wantDelete: types.NewNull(types.KindUint64),
+			wantInsert: types.NewUint64(7),
+		},
+		{
+			name:       "sum nullable last delete",
+			aggregate:  sumNullableIDAggregate(),
+			beforeRows: []types.ProductValue{{types.NewUint64(7), types.NewString("a")}},
+			deletes:    []types.ProductValue{{types.NewUint64(7), types.NewString("a")}},
+			wantDelete: types.NewUint64(7),
+			wantInsert: types.NewNull(types.KindUint64),
+		},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := testSchema()
+			inbox := make(chan FanOutMessage, 1)
+			mgr := NewManager(s, s, WithFanOutInbox(inbox))
+			connID := types.ConnectionID{1}
+			before := buildMockCommitted(s, map[TableID][]types.ProductValue{1: tt.beforeRows})
+			if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+				ConnID:     connID,
+				QueryID:    uint32(200 + i),
+				Predicates: []Predicate{AllRows{Table: 1}},
+				Aggregates: []*Aggregate{tt.aggregate},
+			}, before); err != nil {
+				t.Fatalf("RegisterSet aggregate = %v", err)
+			}
+
+			after := buildMockCommitted(s, map[TableID][]types.ProductValue{1: tt.afterRows})
+			mgr.EvalAndBroadcast(types.TxID(1), simpleChangeset(1, tt.inserts, tt.deletes), after, PostCommitMeta{})
+			msg := <-inbox
+			updates := msg.Fanout[connID]
+			if len(updates) != 1 {
+				t.Fatalf("aggregate fanout updates = %+v, want one update", updates)
+			}
+			requireAggregateValueDelta(t, updates[0], tt.wantDelete, tt.wantInsert, tt.name)
+		})
 	}
 }
 
@@ -837,6 +984,16 @@ func requireAggregateDelta(t *testing.T, update SubscriptionUpdate, wantDelete, 
 	}
 }
 
+func requireAggregateValueDelta(t *testing.T, update SubscriptionUpdate, wantDelete, wantInsert types.Value, label string) {
+	t.Helper()
+	if len(update.Deletes) != 1 || len(update.Deletes[0]) != 1 || !update.Deletes[0][0].Equal(wantDelete) {
+		t.Fatalf("%s deletes = %#v, want %v", label, update.Deletes, wantDelete)
+	}
+	if len(update.Inserts) != 1 || len(update.Inserts[0]) != 1 || !update.Inserts[0][0].Equal(wantInsert) {
+		t.Fatalf("%s inserts = %#v, want %v", label, update.Inserts, wantInsert)
+	}
+}
+
 func TestEvalCountDistinctAggregateEmitsDeleteOldInsertNewOnlyWhenValueChanges(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 2)
@@ -1045,6 +1202,116 @@ func TestRegisterSetAggregateDoesNotDedupWithTableShape(t *testing.T) {
 	}
 	if got := len(mgr.registry.byHash); got != 2 {
 		t.Fatalf("query-state count = %d, want table and aggregate states", got)
+	}
+}
+
+func TestRegisterSetSumAggregateResultKinds(t *testing.T) {
+	mustFloat32 := func(v float32) types.Value {
+		out, err := types.NewFloat32(v)
+		if err != nil {
+			t.Fatalf("NewFloat32(%v): %v", v, err)
+		}
+		return out
+	}
+	mustFloat64 := func(v float64) types.Value {
+		out, err := types.NewFloat64(v)
+		if err != nil {
+			t.Fatalf("NewFloat64(%v): %v", v, err)
+		}
+		return out
+	}
+
+	tests := []struct {
+		name           string
+		sourceKind     types.ValueKind
+		rows           []types.Value
+		wantResultKind types.ValueKind
+		want           types.Value
+	}{
+		{name: "int8", sourceKind: types.KindInt8, rows: []types.Value{types.NewInt8(1), types.NewInt8(2)}, wantResultKind: types.KindInt64, want: types.NewInt64(3)},
+		{name: "int16", sourceKind: types.KindInt16, rows: []types.Value{types.NewInt16(1), types.NewInt16(2)}, wantResultKind: types.KindInt64, want: types.NewInt64(3)},
+		{name: "int32", sourceKind: types.KindInt32, rows: []types.Value{types.NewInt32(1), types.NewInt32(2)}, wantResultKind: types.KindInt64, want: types.NewInt64(3)},
+		{name: "int64", sourceKind: types.KindInt64, rows: []types.Value{types.NewInt64(1), types.NewInt64(2)}, wantResultKind: types.KindInt64, want: types.NewInt64(3)},
+		{name: "uint8", sourceKind: types.KindUint8, rows: []types.Value{types.NewUint8(1), types.NewUint8(2)}, wantResultKind: types.KindUint64, want: types.NewUint64(3)},
+		{name: "uint16", sourceKind: types.KindUint16, rows: []types.Value{types.NewUint16(1), types.NewUint16(2)}, wantResultKind: types.KindUint64, want: types.NewUint64(3)},
+		{name: "uint32", sourceKind: types.KindUint32, rows: []types.Value{types.NewUint32(1), types.NewUint32(2)}, wantResultKind: types.KindUint64, want: types.NewUint64(3)},
+		{name: "uint64", sourceKind: types.KindUint64, rows: []types.Value{types.NewUint64(1), types.NewUint64(2)}, wantResultKind: types.KindUint64, want: types.NewUint64(3)},
+		{name: "float32", sourceKind: types.KindFloat32, rows: []types.Value{mustFloat32(1.5), mustFloat32(2.5)}, wantResultKind: types.KindFloat64, want: mustFloat64(4)},
+		{name: "float64", sourceKind: types.KindFloat64, rows: []types.Value{mustFloat64(1.5), mustFloat64(2.5)}, wantResultKind: types.KindFloat64, want: mustFloat64(4)},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newFakeSchema()
+			s.addTable(1, map[ColID]types.ValueKind{0: tt.sourceKind})
+			viewRows := make([]types.ProductValue, len(tt.rows))
+			for i, row := range tt.rows {
+				viewRows[i] = types.ProductValue{row}
+			}
+			aggregate := &Aggregate{
+				Func:         AggregateSum,
+				ResultColumn: schema.ColumnSchema{Index: 0, Name: "total", Type: tt.wantResultKind},
+				Argument: &AggregateColumn{
+					Schema: schema.ColumnSchema{Index: 0, Name: "value", Type: tt.sourceKind},
+					Table:  1,
+					Column: 0,
+				},
+			}
+			mgr := NewManager(s, s)
+			res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+				ConnID:     types.ConnectionID{1},
+				QueryID:    uint32(300 + i),
+				Predicates: []Predicate{AllRows{Table: 1}},
+				Aggregates: []*Aggregate{aggregate},
+			}, buildMockCommitted(s, map[TableID][]types.ProductValue{1: viewRows}))
+			if err != nil {
+				t.Fatalf("RegisterSet SUM(%s) aggregate = %v", tt.sourceKind, err)
+			}
+			if len(res.Update) != 1 {
+				t.Fatalf("initial update count = %d, want 1", len(res.Update))
+			}
+			update := res.Update[0]
+			if len(update.Columns) != 1 || update.Columns[0].Type != tt.wantResultKind {
+				t.Fatalf("SUM(%s) columns = %#v, want %s", tt.sourceKind, update.Columns, tt.wantResultKind)
+			}
+			if len(update.Inserts) != 1 || len(update.Inserts[0]) != 1 || !update.Inserts[0][0].Equal(tt.want) {
+				t.Fatalf("SUM(%s) initial rows = %#v, want %v", tt.sourceKind, update.Inserts, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateAggregateRejectsUnsupportedSumSourceKinds(t *testing.T) {
+	tests := []types.ValueKind{
+		types.KindBool,
+		types.KindString,
+		types.KindBytes,
+		types.KindInt128,
+		types.KindUint128,
+		types.KindInt256,
+		types.KindUint256,
+		types.KindTimestamp,
+		types.KindArrayString,
+		types.KindUUID,
+		types.KindDuration,
+		types.KindJSON,
+	}
+	for _, kind := range tests {
+		t.Run(kind.String(), func(t *testing.T) {
+			s := newFakeSchema()
+			s.addTable(1, map[ColID]types.ValueKind{0: kind})
+			aggregate := &Aggregate{
+				Func:         AggregateSum,
+				ResultColumn: schema.ColumnSchema{Index: 0, Name: "total", Type: types.KindUint64},
+				Argument: &AggregateColumn{
+					Schema: schema.ColumnSchema{Index: 0, Name: "value", Type: kind},
+					Table:  1,
+					Column: 0,
+				},
+			}
+			if err := ValidateAggregate(AllRows{Table: 1}, aggregate, s); err == nil {
+				t.Fatalf("ValidateAggregate SUM(%s) error = nil, want rejection", kind)
+			}
+		})
 	}
 }
 

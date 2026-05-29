@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Documented current aggregate semantics for `COUNT` and `SUM`, including
+  empty/null behavior, live replacement deltas, supported `SUM` result domains,
+  and rejected live aggregate shapes; clarified the unsupported `SUM` source
+  diagnostic to match the accepted integer and float domains.
 - Strict JWT extra-claim preservation now rejects excessive configured claim
   counts and non-JSON or overly deep JSON claim values before exposing caller
   context to reducers and procedures.

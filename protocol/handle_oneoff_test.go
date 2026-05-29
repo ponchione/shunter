@@ -7199,7 +7199,7 @@ func TestHandleOneOffQuery_ShunterSumNonNumericColumnRejected(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("expected SUM non-numeric rejection, got nil error")
 	}
-	if got, want := *result.Error, "SUM aggregate only supports 64-bit integer and float columns"; got != want {
+	if got, want := *result.Error, "SUM aggregate only supports integer and float columns"; got != want {
 		t.Fatalf("Error = %q, want %q", got, want)
 	}
 }
