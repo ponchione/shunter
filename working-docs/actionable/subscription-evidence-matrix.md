@@ -1,6 +1,6 @@
 # Subscription Evidence And Type/Index Matrix
 
-Status: Stage L aggregate self-alias function evidence slice complete; remaining
+Status: Stage M larger Cartesian evidence slice complete; remaining
 items stay evidence backlog
 Primary backlog items: `deferred-functionality-backlog.md` items 10, 11, 24,
 and 31
@@ -71,7 +71,7 @@ Implementation anchors:
 - `internal/gauntlettests` is the right place for hosted-runtime or protocol
   matrix coverage that should run through real runtime APIs.
 
-Exact gaps after Stage L aggregate self-alias function evidence publication:
+Exact gaps after Stage M larger Cartesian evidence publication:
 
 - Stage B now has bounded benchmark rows for a 3-relation Cartesian
   multi-join, one-match vs 8x8 hot-key selectivity/skew, 1/10/100 changed
@@ -97,8 +97,12 @@ Exact gaps after Stage L aggregate self-alias function evidence publication:
 - Stage L now extends aggregate-function rows to the existing bounded
   `self_alias3` repeated-table fixture for `COUNT(*)`, `COUNT(column)`,
   `COUNT(DISTINCT column)`, and `SUM(column)`.
+- Stage M now extends bounded Cartesian evidence to `cross3_rows_40` for
+  table-shaped projection, `COUNT(*)` aggregate relation-shape rows, and
+  aggregate-function rows for `COUNT(*)`, `COUNT(column)`,
+  `COUNT(DISTINCT column)`, and `SUM(column)`.
 - Remaining multi-way evidence gaps include larger Cartesian fixtures beyond
-  the bounded 32-row cross shape, larger skew/fanout distributions beyond the
+  the bounded 40-row cross shape, larger skew/fanout distributions beyond the
   bounded 16x16 row, relation counts beyond the bounded 5-relation chain
   fixture, larger aggregate-function self-alias distributions beyond the
   bounded `self_alias3` fixture, and workload-derived application
@@ -109,11 +113,12 @@ Exact gaps after Stage L aggregate self-alias function evidence publication:
   tests continue to cover TypeScript decoder shape separately.
 - Aggregate evidence includes package-level correctness coverage, focused
   Stage D `chain3`, Stage I `chain4`, Stage J `cross3_rows_32`, Stage K
-  `hot_key_16x16`, and Stage L `self_alias3` performance rows, and Stage E
-  documentation/tests for current aggregate semantics. Larger aggregate shapes
-  and workload-derived distributions remain outside the current envelope.
+  `hot_key_16x16`, Stage L `self_alias3`, and Stage M `cross3_rows_40`
+  performance rows, and Stage E documentation/tests for current aggregate
+  semantics. Larger aggregate shapes and workload-derived distributions remain
+  outside the current envelope.
 - Default multi-way join limits remain intentionally unlimited. The bounded
-  Stage A through Stage L evidence is advisory, the worst local rows are not
+  Stage A through Stage M evidence is advisory, the worst local rows are not
   enough to select safe defaults, and apps can opt into guardrails through
   config.
 - The codebase now has a canary app proving every supported flat kind through
@@ -201,6 +206,13 @@ is insufficient for real hosted apps.
    endpoint row inserted into table 2 alias 2. The raw `-count=10` evidence is
    saved under
    `working-docs/release-evidence/2026-05-29-subscription-stage-l/`.
+
+   Stage M subset completed on 2026-05-29 for larger bounded Cartesian
+   coverage: `cross3_rows_40` rows for table-shaped projection, `COUNT(*)`,
+   `COUNT(column)`, `COUNT(DISTINCT column)`, and `SUM(column)` over the
+   3-relation Cartesian fixture with one changed endpoint row emitting a 40x40
+   Cartesian fragment. The raw focused `-count=10` evidence is saved under
+   `working-docs/release-evidence/2026-05-29-subscription-stage-m/`.
 3. Decide whether default multi-way join limits need to change, using
    benchmark and canary evidence rather than speculation.
 
@@ -392,6 +404,13 @@ Backlog item 24 stays mostly deferred. Actionable work now:
   adding more latency spread. The self-alias aggregate rows remain the focused
   aggregate latency standout and make larger self-alias distributions better
   suited to a longer-running benchmark lane.
+
+  Stage M benchmark rows, 2026-05-29: extended the same aggregate-function
+  benchmark family to the larger bounded `cross3_rows_40` Cartesian fixture.
+  `COUNT(column)` and `SUM(column)` remain allocation-stable relative to
+  `COUNT(*)` while adding latency in this Cartesian distribution, and
+  `COUNT(DISTINCT column)` remains the slowest Stage M Cartesian aggregate row
+  without overtaking the existing `self_alias3` latency standout.
 - document current empty-set behavior
 - document current numeric-domain support
 - document rejected shapes such as aggregate `ORDER BY`/`LIMIT`/`OFFSET`,
@@ -625,6 +644,24 @@ focused `-count=10` rows in `docs/performance-envelopes.md`. The slice extends
 unchanged. The focused run remained local-review-sized but took 405.559s, so
 larger self-alias distributions, larger skew/fanout distributions beyond
 16x16, larger Cartesian fixtures beyond 32 rows, relation counts beyond the
+bounded 5-relation chain, and app-derived workload distributions remain
+evidence backlog.
+
+Stage M: close one larger bounded Cartesian evidence gap.
+
+- inventory current multi-way Cartesian benchmark/docs coverage
+- add a larger Cartesian extension only if it stays local-review-sized
+- publish focused benchmark evidence and keep default guardrails unchanged
+
+Stage M status, 2026-05-29: completed bounded `cross3_rows_40` Cartesian rows
+in `subscription/bench_test.go` and published the focused `-count=10` rows in
+`docs/performance-envelopes.md`. The slice extends the existing 3-relation
+Cartesian fixture beyond `cross3_rows_32` for table-shaped projection,
+`COUNT(*)`, `COUNT(column)`, `COUNT(DISTINCT column)`, and `SUM(column)`; one
+changed endpoint row emits a 40x40 Cartesian fragment. Runtime semantics and
+default multi-way join guardrails stayed unchanged. Larger Cartesian fixtures
+beyond 40 rows, larger skew/fanout distributions beyond 16x16, larger
+aggregate-function self-alias distributions, relation counts beyond the
 bounded 5-relation chain, and app-derived workload distributions remain
 evidence backlog.
 
