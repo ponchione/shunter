@@ -1,0 +1,21 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+                                                      │ working-docs/release-evidence/2026-05-29-subscription-stage-n/selectivity-hot-key-16x16-24x24.txt │
+                                                      │                                              sec/op                                               │
+MultiWayLiveJoinSelectivity/rows_128/hot_key_16x16-24                                                                                         388.1µ ± 0%
+MultiWayLiveJoinSelectivity/rows_128/hot_key_24x24-24                                                                                         427.4µ ± 1%
+geomean                                                                                                                                       407.3µ
+
+                                                      │ working-docs/release-evidence/2026-05-29-subscription-stage-n/selectivity-hot-key-16x16-24x24.txt │
+                                                      │                                               B/op                                                │
+MultiWayLiveJoinSelectivity/rows_128/hot_key_16x16-24                                                                                        74.61Ki ± 0%
+MultiWayLiveJoinSelectivity/rows_128/hot_key_24x24-24                                                                                        114.5Ki ± 0%
+geomean                                                                                                                                      92.42Ki
+
+                                                      │ working-docs/release-evidence/2026-05-29-subscription-stage-n/selectivity-hot-key-16x16-24x24.txt │
+                                                      │                                             allocs/op                                             │
+MultiWayLiveJoinSelectivity/rows_128/hot_key_16x16-24                                                                                          83.00 ± 0%
+MultiWayLiveJoinSelectivity/rows_128/hot_key_24x24-24                                                                                          85.00 ± 0%
+geomean                                                                                                                                        83.99
