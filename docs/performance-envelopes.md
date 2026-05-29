@@ -563,8 +563,67 @@ Current read:
 - The repeated-table `self_alias3/count` relation-shape row remains the
   standout aggregate latency case in this focused command.
 - Larger aggregate-function fixtures beyond the bounded 128-row `chain4`
-  chain, aggregate-function Cartesian/skew/self-alias distributions, and
+  chain, larger aggregate-function Cartesian fixtures beyond bounded
+  `cross3_rows_32`, aggregate-function skew/self-alias distributions, and
   app-derived workload distributions remain outside the current envelope.
+- This evidence keeps the default multi-way join guardrails unchanged:
+  unlimited by default, with app-owned opt-in limits available through config.
+
+## Focused Multi-Way Live Join Stage J Aggregate Cartesian Function Shape
+
+This focused snapshot extends aggregate-function evidence to the existing
+bounded `cross3_rows_32` Cartesian fixture. The new rows cover the aggregate
+functions already accepted by the subscription layer over the same 3-relation
+Cartesian shape used by Stage H; one changed endpoint row emits a 32x32
+Cartesian fragment. Runtime semantics and default multi-way join guardrails are
+unchanged.
+
+- Date: 2026-05-29
+- Shunter commit: `c4ae9f815cdeca3ead5758ab71f1af259fa8c660`
+- Measurement worktree: commit above plus Stage J benchmark and documentation
+  changes
+- Host: `Linux gernsback 6.17.0-29-generic #29~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Mon May 11 10:30:58 UTC 2 x86_64 GNU/Linux`
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`
+- Raw sample: 18 sub-benchmarks, `-count=10`, 180 benchmark rows, total
+  package benchmark time 272.615s
+- Raw output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-j/multiway-aggregate-functions-raw.log`
+- Benchstat output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-j/multiway-aggregate-functions-benchstat.log`
+
+Command:
+
+```bash
+go test -run '^$' -bench 'BenchmarkMultiWayLiveJoin(AggregateFunctions|AggregateRelationShapes)' -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-05-29-subscription-stage-j/multiway-aggregate-functions-raw.log 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-05-29-subscription-stage-j/multiway-aggregate-functions-raw.log > working-docs/release-evidence/2026-05-29-subscription-stage-j/multiway-aggregate-functions-benchstat.log 2>&1
+```
+
+Representative standings:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Multi-way aggregate Cartesian shape | `MultiWayLiveJoinAggregateRelationShapes/cross3_rows_32/count-24` | `COUNT(*)` over 3-relation Cartesian multi-join, 32 rows per relation, one endpoint insert | 709.4us +/- 0% | 12.63Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_32/count_star-24` | `COUNT(*)` over 3-relation Cartesian multi-join, 32 rows per relation, one endpoint insert | 710.2us +/- 1% | 12.63Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_32/count_column-24` | `COUNT(t3.id)` over 3-relation Cartesian multi-join, 32 rows per relation, one endpoint insert | 1.866ms +/- 1% | 12.63Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_32/count_distinct-24` | `COUNT(DISTINCT t1.id)` over 3-relation Cartesian multi-join, 32 rows per relation, one endpoint insert | 2.989ms +/- 1% | 31.42Ki +/- 0% | 147 | advisory |
+| Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_32/sum-24` | `SUM(t3.id)` over 3-relation Cartesian multi-join, 32 rows per relation, one endpoint insert | 2.254ms +/- 0% | 12.77Ki +/- 0% | 75 | advisory |
+| Multi-way Stage J aggregate geomean | all focused Stage J aggregate relation/function benchmarks | 18 sub-benchmark geomean | 2.947ms | 34.19Ki | 98.44 | advisory |
+
+Current read:
+
+- The bounded `cross3_rows_32` aggregate-function rows remain local-review-sized
+  under `-count=10` and close one Cartesian aggregate-function evidence gap.
+- `COUNT(*)` tracks the Stage H aggregate relation-shape row. `COUNT(column)`
+  and `SUM(column)` measure higher latency than `COUNT(*)` in this Cartesian
+  fixture while retaining similar allocation.
+- `COUNT(DISTINCT column)` is the slowest new Cartesian aggregate-function row
+  and adds allocation, but remains far below the existing `self_alias3/count`
+  aggregate latency standout in the same focused command.
+- Larger Cartesian fixtures beyond the bounded 32-row shape, larger
+  skew/fanout distributions, relation counts beyond the bounded 5-relation
+  chain, aggregate-function skew/self-alias distributions, and app-derived
+  workload distributions remain outside the current envelope.
 - This evidence keeps the default multi-way join guardrails unchanged:
   unlimited by default, with app-owned opt-in limits available through config.
 
@@ -645,8 +704,9 @@ Representative standings:
   Cartesian evidence to `cross3_rows_32` for table-shaped projection and
   `COUNT(*)`. Stage I extends aggregate-function evidence from `chain3` to
   bounded `chain4` rows for `COUNT(*)`, `COUNT(column)`,
-  `COUNT(DISTINCT column)`, and `SUM(column)`. This evidence does not justify
-  changing the unlimited defaults.
+  `COUNT(DISTINCT column)`, and `SUM(column)`. Stage J extends those
+  aggregate-function rows to bounded `cross3_rows_32` Cartesian rows. This
+  evidence does not justify changing the unlimited defaults.
 - Offline backup/restore is covered for small and larger complete local
   DataDir fixtures and is expected to be I/O dominated; these rows do not
   replace production-scale backup/restore timing.
@@ -809,11 +869,12 @@ These remain outside the current benchmark envelope:
   two-table predicate fixtures
 - application workload timing, including production-scale backup/restore timing
 - multi-way join evidence beyond the focused Stage B, Stage D, Stage F, Stage
-  G, and Stage H snapshots, including larger Cartesian fixtures beyond the
-  bounded 32-row cross shape, larger skew/fanout
+  G, Stage H, Stage I, and Stage J snapshots, including larger Cartesian
+  fixtures beyond the bounded 32-row cross shape, larger skew/fanout
   distributions, relation counts beyond the bounded 5-relation chain fixture,
-  aggregate-function rows beyond the bounded 128-row `chain3` fixture, and
-  app-derived workload distributions
+  aggregate-function rows beyond the bounded 128-row `chain4` and
+  `cross3_rows_32` fixtures, aggregate-function skew/self-alias
+  distributions, and app-derived workload distributions
 - memory profiles outside the current subscription, single-WebSocket,
   16/64/128-client WebSocket fanout, sender-level backpressure, executor
   reducer commit, and small/larger local backup/restore fixtures, including

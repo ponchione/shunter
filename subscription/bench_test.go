@@ -1068,6 +1068,13 @@ func BenchmarkMultiWayLiveJoinAggregateFunctions(b *testing.B) {
 			benchmarkMultiWayLiveJoinShapeAggregate(b, multiJoinFourRelationTestSchema(), multiJoinFourRelationPredicate(), benchmarkMultiJoinFourRelationCommitted(size, false), benchmarkMultiJoinFourRelationCommitted(size, true), 4, changed, tc.aggregate)
 		})
 	}
+	for _, tc := range cases {
+		b.Run("cross3_rows_32/"+tc.name, func(b *testing.B) {
+			const crossSize = 32
+			changed := types.ProductValue{types.NewUint64(uint64(crossSize + 1000)), types.NewUint64(uint64(crossSize/2 + 1))}
+			benchmarkMultiWayLiveJoinShapeAggregate(b, multiJoinTestSchema(), benchmarkMultiJoinCross3Predicate(), benchmarkMultiJoinCommitted(crossSize, false), benchmarkMultiJoinCommitted(crossSize, true), 3, changed, tc.aggregate)
+		})
+	}
 }
 
 func benchmarkMultiWayLiveJoinShapeAggregate(b *testing.B, s *fakeSchema, pred MultiJoin, before, after *mockCommitted, changedTable TableID, changed types.ProductValue, aggregate *Aggregate) {
