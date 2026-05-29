@@ -1217,6 +1217,76 @@ Current read:
 - This evidence keeps the default multi-way join guardrails unchanged:
   unlimited by default, with app-owned opt-in limits available through config.
 
+## Focused Multi-Way Live Join Stage T Larger Skew/Fanout Function Shape
+
+This focused snapshot extends the bounded 3-relation skew/fanout fixture from
+`hot_key_40x40` to `hot_key_48x48`. The new rows keep the same 128 rows per
+relation and one changed endpoint row; the changed row matches key `1`, the hot
+key shared by 48 rows on each upstream relation, so it emits a 48x48 fanout
+fragment. The snapshot records table-shaped projection and the aggregate
+functions already accepted by the subscription layer. Runtime semantics and
+default multi-way join guardrails are unchanged.
+
+- Date: 2026-05-29
+- Shunter commit: `92dbe5c4562399b976b0d53ffef7de0c3c1494e8`
+- Measurement worktree: commit above plus Stage T benchmark and documentation
+  changes
+- Host: `Linux gernsback 6.17.0-29-generic #29~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Mon May 11 10:30:58 UTC 2 x86_64 x86_64 x86_64 GNU/Linux`
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`
+- Raw sample: 10 sub-benchmarks, `-count=10`, 100 benchmark rows, total
+  package benchmark time 201.520s across two focused `go test` invocations
+- Raw output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-t/selectivity-hot-key-40x40-48x48.txt`
+  and
+  `working-docs/release-evidence/2026-05-29-subscription-stage-t/aggregate-functions-hot-key-40x40-48x48.txt`
+- Benchstat output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-t/selectivity-hot-key-40x40-48x48-benchstat.txt`
+  and
+  `working-docs/release-evidence/2026-05-29-subscription-stage-t/aggregate-functions-hot-key-40x40-48x48-benchstat.txt`
+
+Command:
+
+```bash
+rtk mkdir -p working-docs/release-evidence/2026-05-29-subscription-stage-t
+go test -run '^$' -bench '^BenchmarkMultiWayLiveJoinSelectivity$/^rows_128$/^hot_key_(40x40|48x48)$' -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-05-29-subscription-stage-t/selectivity-hot-key-40x40-48x48.txt 2>&1
+go test -run '^$' -bench '^BenchmarkMultiWayLiveJoinAggregateFunctions$/^hot_key_(40x40|48x48)$' -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-05-29-subscription-stage-t/aggregate-functions-hot-key-40x40-48x48.txt 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-05-29-subscription-stage-t/selectivity-hot-key-40x40-48x48.txt > working-docs/release-evidence/2026-05-29-subscription-stage-t/selectivity-hot-key-40x40-48x48-benchstat.txt 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-05-29-subscription-stage-t/aggregate-functions-hot-key-40x40-48x48.txt > working-docs/release-evidence/2026-05-29-subscription-stage-t/aggregate-functions-hot-key-40x40-48x48-benchstat.txt 2>&1
+```
+
+Representative standings:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Multi-way selectivity | `MultiWayLiveJoinSelectivity/rows_128/hot_key_40x40-24` | 128 rows per relation, one changed hot-key row matching 40 left rows by 40 middle rows | 563.5us +/- 1% | 275.2Ki +/- 0% | 91.00 +/- 1% | advisory |
+| Multi-way selectivity | `MultiWayLiveJoinSelectivity/rows_128/hot_key_48x48-24` | 128 rows per relation, one changed hot-key row matching 48 left rows by 48 middle rows | 664.4us +/- 1% | 404.0Ki +/- 0% | 93.00 +/- 0% | advisory |
+| Multi-way aggregate skew function | `MultiWayLiveJoinAggregateFunctions/hot_key_40x40/count_star-24` | `COUNT(*)` over 3-relation chain, 128 rows per relation, one changed hot-key endpoint row matching a 40x40 fragment | 16.39ms +/- 1% | 37.80Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate skew function | `MultiWayLiveJoinAggregateFunctions/hot_key_48x48/count_star-24` | `COUNT(*)` over 3-relation chain, 128 rows per relation, one changed hot-key endpoint row matching a 48x48 fragment | 22.77ms +/- 1% | 37.73Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate skew function | `MultiWayLiveJoinAggregateFunctions/hot_key_48x48/count_column-24` | `COUNT(t3.id)` over 3-relation chain, 128 rows per relation, one changed hot-key endpoint row matching a 48x48 fragment | 22.73ms +/- 0% | 37.73Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate skew function | `MultiWayLiveJoinAggregateFunctions/hot_key_48x48/count_distinct-24` | `COUNT(DISTINCT t1.id)` over 3-relation chain, 128 rows per relation, one changed hot-key endpoint row matching a 48x48 fragment | 22.80ms +/- 1% | 50.61Ki +/- 0% | 133 | advisory |
+| Multi-way aggregate skew function | `MultiWayLiveJoinAggregateFunctions/hot_key_48x48/sum-24` | `SUM(t3.id)` over 3-relation chain, 128 rows per relation, one changed hot-key endpoint row matching a 48x48 fragment | 22.74ms +/- 0% | 37.85Ki +/- 0% | 75 | advisory |
+| Multi-way Stage T selectivity geomean | focused Stage T selectivity hot-key benchmarks | 2 sub-benchmark geomean | 611.9us | 333.5Ki | 91.99 | advisory |
+| Multi-way Stage T aggregate geomean | focused Stage T aggregate hot-key benchmarks | 8 sub-benchmark geomean | 19.34ms | 40.51Ki | 84.73 | advisory |
+
+Current read:
+
+- The bounded `hot_key_48x48` rows remain local-review-sized under
+  `-count=10` while extending skew/fanout evidence beyond the 40x40 shape.
+- The table-shaped row's allocation growth tracks the larger materialized
+  48x48 fanout fragment.
+- The `hot_key_48x48` aggregate-function rows are stable around
+  22.73-22.80ms/op in this focused run. `COUNT(column)` and `SUM(column)`
+  remain allocation-stable relative to `COUNT(*)`, while
+  `COUNT(DISTINCT column)` adds allocation and allocation count without
+  becoming a latency standout.
+- Larger skew/fanout distributions beyond 48x48, larger Cartesian fixtures
+  beyond the bounded 64-row shape, relation counts beyond the bounded
+  5-relation chain, larger aggregate-function self-alias distributions, and
+  app-derived workload distributions remain outside the current envelope.
+- This evidence keeps the default multi-way join guardrails unchanged:
+  unlimited by default, with app-owned opt-in limits available through config.
+
 ## Focused Ordered Subscription Window Baseline
 
 This focused snapshot records the ordered subscription window benchmarks added
@@ -1467,9 +1537,9 @@ These remain outside the current benchmark envelope:
   two-table predicate fixtures
 - application workload timing, including production-scale backup/restore timing
 - multi-way join evidence beyond the focused Stage B, Stage D, and Stage F
-  through Stage S snapshots, including larger Cartesian fixtures beyond the
+  through Stage T snapshots, including larger Cartesian fixtures beyond the
   bounded 64-row cross shape, larger skew/fanout distributions beyond the
-  bounded 40x40 row, relation
+  bounded 48x48 row, relation
   counts beyond the bounded 5-relation chain fixture, larger
   aggregate-function self-alias distributions beyond the bounded `self_alias3`
   fixture, and app-derived workload distributions
