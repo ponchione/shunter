@@ -1075,6 +1075,15 @@ func BenchmarkMultiWayLiveJoinAggregateFunctions(b *testing.B) {
 			benchmarkMultiWayLiveJoinShapeAggregate(b, multiJoinTestSchema(), benchmarkMultiJoinCross3Predicate(), benchmarkMultiJoinCommitted(crossSize, false), benchmarkMultiJoinCommitted(crossSize, true), 3, changed, tc.aggregate)
 		})
 	}
+	for _, tc := range cases {
+		b.Run("hot_key_16x16/"+tc.name, func(b *testing.B) {
+			changed := types.ProductValue{types.NewUint64(9000), types.NewUint64(1)}
+			before := benchmarkMultiJoinSelectivityCommitted(size, 16, nil)
+			after := benchmarkMultiJoinSelectivityCommitted(size, 16, []types.ProductValue{changed})
+			cs := benchmarkMultiJoinInsertChangeset(3, []types.ProductValue{changed})
+			benchmarkMultiWayLiveJoinDelta(b, multiJoinTestSchema(), multiJoinTestPredicate(), before, after, cs, tc.aggregate)
+		})
+	}
 }
 
 func benchmarkMultiWayLiveJoinShapeAggregate(b *testing.B, s *fakeSchema, pred MultiJoin, before, after *mockCommitted, changedTable TableID, changed types.ProductValue, aggregate *Aggregate) {

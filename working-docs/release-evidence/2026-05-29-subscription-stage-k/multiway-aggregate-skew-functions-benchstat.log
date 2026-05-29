@@ -1,0 +1,72 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+                                                                    │ working-docs/release-evidence/2026-05-29-subscription-stage-k/multiway-aggregate-skew-functions-raw.log │
+                                                                    │                                                 sec/op                                                  │
+MultiWayLiveJoinSelectivity/rows_128/one_match-24                                                                                                                 352.8µ ± 1%
+MultiWayLiveJoinSelectivity/rows_128/hot_key_8x8-24                                                                                                               362.8µ ± 1%
+MultiWayLiveJoinSelectivity/rows_128/hot_key_16x16-24                                                                                                             390.4µ ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_star-24                                                                                                           2.421m ± 9%
+MultiWayLiveJoinAggregateFunctions/chain3/count_column-24                                                                                                         2.398m ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_distinct-24                                                                                                       2.431m ± 1%
+MultiWayLiveJoinAggregateFunctions/chain3/sum-24                                                                                                                  2.385m ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_star-24                                                                                                           4.719m ± 1%
+MultiWayLiveJoinAggregateFunctions/chain4/count_column-24                                                                                                         4.724m ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_distinct-24                                                                                                       4.758m ± 1%
+MultiWayLiveJoinAggregateFunctions/chain4/sum-24                                                                                                                  4.699m ± 1%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_32/count_star-24                                                                                                   710.9µ ± 1%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_32/count_column-24                                                                                                 1.862m ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_32/count_distinct-24                                                                                               3.023m ± 1%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_32/sum-24                                                                                                          2.248m ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_16x16/count_star-24                                                                                                    5.244m ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_16x16/count_column-24                                                                                                  5.267m ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_16x16/count_distinct-24                                                                                                5.286m ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_16x16/sum-24                                                                                                           5.256m ± 0%
+geomean                                                                                                                                                           2.269m
+
+                                                                    │ working-docs/release-evidence/2026-05-29-subscription-stage-k/multiway-aggregate-skew-functions-raw.log │
+                                                                    │                                                  B/op                                                   │
+MultiWayLiveJoinSelectivity/rows_128/one_match-24                                                                                                                37.36Ki ± 0%
+MultiWayLiveJoinSelectivity/rows_128/hot_key_8x8-24                                                                                                              45.79Ki ± 0%
+MultiWayLiveJoinSelectivity/rows_128/hot_key_16x16-24                                                                                                            74.61Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_star-24                                                                                                          37.66Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_column-24                                                                                                        37.66Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_distinct-24                                                                                                      117.8Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/sum-24                                                                                                                 37.78Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_star-24                                                                                                          50.66Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_column-24                                                                                                        50.66Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_distinct-24                                                                                                      130.8Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/sum-24                                                                                                                 50.78Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_32/count_star-24                                                                                                  12.63Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_32/count_column-24                                                                                                12.63Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_32/count_distinct-24                                                                                              31.43Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_32/sum-24                                                                                                         12.77Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_16x16/count_star-24                                                                                                   37.69Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_16x16/count_column-24                                                                                                 37.69Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_16x16/count_distinct-24                                                                                               42.61Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_16x16/sum-24                                                                                                          37.82Ki ± 0%
+geomean                                                                                                                                                          39.35Ki
+
+                                                                    │ working-docs/release-evidence/2026-05-29-subscription-stage-k/multiway-aggregate-skew-functions-raw.log │
+                                                                    │                                                allocs/op                                                │
+MultiWayLiveJoinSelectivity/rows_128/one_match-24                                                                                                                  68.00 ± 0%
+MultiWayLiveJoinSelectivity/rows_128/hot_key_8x8-24                                                                                                                79.00 ± 0%
+MultiWayLiveJoinSelectivity/rows_128/hot_key_16x16-24                                                                                                              83.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_star-24                                                                                                            73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_column-24                                                                                                          73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/count_distinct-24                                                                                                        347.0 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain3/sum-24                                                                                                                   75.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_star-24                                                                                                            93.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_column-24                                                                                                          93.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/count_distinct-24                                                                                                        367.0 ± 0%
+MultiWayLiveJoinAggregateFunctions/chain4/sum-24                                                                                                                   95.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_32/count_star-24                                                                                                    73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_32/count_column-24                                                                                                  73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_32/count_distinct-24                                                                                                147.0 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_32/sum-24                                                                                                           75.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_16x16/count_star-24                                                                                                     73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_16x16/count_column-24                                                                                                   73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_16x16/count_distinct-24                                                                                                 99.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_16x16/sum-24                                                                                                            75.00 ± 0%
+geomean                                                                                                                                                            95.70

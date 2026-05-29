@@ -1,6 +1,6 @@
 # Subscription Evidence And Type/Index Matrix
 
-Status: Stage J aggregate Cartesian function evidence slice complete; remaining
+Status: Stage K aggregate skew function evidence slice complete; remaining
 items stay evidence backlog
 Primary backlog items: `deferred-functionality-backlog.md` items 10, 11, 24,
 and 31
@@ -71,7 +71,7 @@ Implementation anchors:
 - `internal/gauntlettests` is the right place for hosted-runtime or protocol
   matrix coverage that should run through real runtime APIs.
 
-Exact gaps after Stage J aggregate Cartesian function evidence publication:
+Exact gaps after Stage K aggregate skew function evidence publication:
 
 - Stage B now has bounded benchmark rows for a 3-relation Cartesian
   multi-join, one-match vs 8x8 hot-key selectivity/skew, 1/10/100 changed
@@ -91,23 +91,25 @@ Exact gaps after Stage J aggregate Cartesian function evidence publication:
 - Stage J now extends aggregate-function rows to the existing bounded
   `cross3_rows_32` Cartesian fixture for `COUNT(*)`, `COUNT(column)`,
   `COUNT(DISTINCT column)`, and `SUM(column)`.
+- Stage K now extends aggregate-function rows to the existing bounded
+  `hot_key_16x16` skew/fanout fixture for `COUNT(*)`, `COUNT(column)`,
+  `COUNT(DISTINCT column)`, and `SUM(column)`.
 - Remaining multi-way evidence gaps include larger Cartesian fixtures beyond
   the bounded 32-row cross shape, larger skew/fanout distributions beyond the
   bounded 16x16 row, relation counts beyond the bounded 5-relation chain
-  fixture, aggregate-function rows beyond the bounded 128-row `chain4` and
-  `cross3_rows_32` fixtures, aggregate-function skew/self-alias
-  distributions, and workload-derived application distributions.
+  fixture, aggregate-function self-alias distributions, and workload-derived
+  application distributions.
 - The hosted type/index canary now crosses reducer writes, declared reads,
   live subscriptions, protocol payloads, index seeks, and restart. Generated
   TypeScript decoding and backup/restore remain outside this canary; package
   tests continue to cover TypeScript decoder shape separately.
 - Aggregate evidence includes package-level correctness coverage, focused
-  Stage D `chain3`, Stage I `chain4`, and Stage J `cross3_rows_32`
-  performance rows, and Stage E documentation/tests for current aggregate
-  semantics. Larger aggregate shapes and workload-derived distributions remain
-  outside the current envelope.
+  Stage D `chain3`, Stage I `chain4`, Stage J `cross3_rows_32`, and Stage K
+  `hot_key_16x16` performance rows, and Stage E documentation/tests for
+  current aggregate semantics. Larger aggregate shapes and workload-derived
+  distributions remain outside the current envelope.
 - Default multi-way join limits remain intentionally unlimited. The bounded
-  Stage A through Stage J evidence is advisory, the worst local rows are not
+  Stage A through Stage K evidence is advisory, the worst local rows are not
   enough to select safe defaults, and apps can opt into guardrails through
   config.
 - The codebase now has a canary app proving every supported flat kind through
@@ -179,6 +181,14 @@ is insufficient for real hosted apps.
    `SUM(column)` over the 3-relation Cartesian fixture with one changed
    endpoint row. The raw `-count=10` evidence is saved under
    `working-docs/release-evidence/2026-05-29-subscription-stage-j/`.
+
+   Stage K subset completed on 2026-05-29 for aggregate-function distribution
+   coverage across the existing skew/fanout fixture: bounded `hot_key_16x16`
+   rows for `COUNT(*)`, `COUNT(column)`, `COUNT(DISTINCT column)`, and
+   `SUM(column)` over the 3-relation chain fixture with one changed endpoint
+   row matching a 16x16 fanout fragment. The raw `-count=10` evidence is saved
+   under
+   `working-docs/release-evidence/2026-05-29-subscription-stage-k/`.
 3. Decide whether default multi-way join limits need to change, using
    benchmark and canary evidence rather than speculation.
 
@@ -356,6 +366,12 @@ Backlog item 24 stays mostly deferred. Actionable work now:
   distribution while retaining similar allocation, and `COUNT(DISTINCT column)`
   is the slowest new Cartesian aggregate-function row without overtaking the
   existing `self_alias3/count` latency standout.
+
+  Stage K benchmark rows, 2026-05-29: extended the same aggregate-function
+  benchmark family to the existing bounded `hot_key_16x16` skew/fanout
+  fixture. `COUNT(column)` and `SUM(column)` track `COUNT(*)` closely in this
+  skew fixture, and `COUNT(DISTINCT column)` adds allocation without becoming
+  a new latency standout.
 - document current empty-set behavior
 - document current numeric-domain support
 - document rejected shapes such as aggregate `ORDER BY`/`LIMIT`/`OFFSET`,
@@ -550,6 +566,26 @@ fragment. Runtime semantics and default multi-way join guardrails stayed
 unchanged. Larger Cartesian fixtures beyond 32 rows, aggregate-function
 skew/self-alias distributions, relation counts beyond the bounded 5-relation
 chain, and app-derived workload distributions remain evidence backlog.
+
+Stage K: close one bounded aggregate-function skew/fanout distribution gap.
+
+- inventory current aggregate-function skew/fanout benchmark/docs coverage
+- add a cheap skew/fanout aggregate-function extension only if it stays
+  local-review-sized
+- publish focused benchmark evidence and keep default guardrails unchanged
+
+Stage K status, 2026-05-29: completed bounded `hot_key_16x16`
+aggregate-function rows in `subscription/bench_test.go` and published the
+focused `-count=10` rows in `docs/performance-envelopes.md`. The slice extends
+`BenchmarkMultiWayLiveJoinAggregateFunctions` with
+`hot_key_16x16/count_star`, `hot_key_16x16/count_column`,
+`hot_key_16x16/count_distinct`, and `hot_key_16x16/sum` over the existing
+128-row, 3-relation skew/fanout fixture; one changed endpoint row matches a
+16x16 fanout fragment. Runtime semantics and default multi-way join guardrails
+stayed unchanged. Larger skew/fanout distributions beyond 16x16, larger
+Cartesian fixtures beyond 32 rows, aggregate-function self-alias
+distributions, relation counts beyond the bounded 5-relation chain, and
+app-derived workload distributions remain evidence backlog.
 
 ## Risks
 
