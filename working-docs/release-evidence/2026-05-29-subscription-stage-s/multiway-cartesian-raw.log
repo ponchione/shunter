@@ -1,0 +1,138 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_56-24         	    4293	    298853 ns/op	  583330 B/op	      96 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_56-24         	    3024	    485795 ns/op	  584004 B/op	      97 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_56-24         	    3406	    373581 ns/op	  583465 B/op	      96 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_56-24         	    3702	    340961 ns/op	  583555 B/op	      96 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_56-24         	    3702	    312361 ns/op	  583365 B/op	      96 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_56-24         	    3642	    362627 ns/op	  583693 B/op	      96 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_56-24         	    3950	    359298 ns/op	  583607 B/op	      96 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_56-24         	    4240	    292651 ns/op	  583450 B/op	      96 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_56-24         	    4077	    295140 ns/op	  583386 B/op	      96 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_56-24         	    4078	    295519 ns/op	  583300 B/op	      96 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_64-24         	    2974	    440654 ns/op	  836328 B/op	     100 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_64-24         	    3192	    374945 ns/op	  837018 B/op	     100 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_64-24         	    3246	    361236 ns/op	  836812 B/op	     100 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_64-24         	    3157	    366636 ns/op	  836633 B/op	     100 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_64-24         	    3439	    358303 ns/op	  836860 B/op	     100 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_64-24         	    3294	    353497 ns/op	  836610 B/op	     100 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_64-24         	    3336	    356930 ns/op	  836755 B/op	     100 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_64-24         	    3220	    361345 ns/op	  836869 B/op	     100 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_64-24         	    2978	    354481 ns/op	  837113 B/op	     100 allocs/op
+BenchmarkMultiWayLiveJoinRelationShapes/cross3_rows_64-24         	    3423	    356068 ns/op	  837026 B/op	     100 allocs/op
+PASS
+ok  	github.com/ponchione/shunter/subscription	26.867s
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24         	     326	   3667928 ns/op	   18740 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24         	     321	   3669350 ns/op	   18742 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24         	     324	   3686272 ns/op	   18737 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24         	     325	   3691050 ns/op	   18740 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24         	     322	   3687248 ns/op	   18741 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24         	     326	   3683996 ns/op	   18740 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24         	     325	   3669527 ns/op	   18737 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24         	     326	   3663404 ns/op	   18740 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24         	     325	   3714887 ns/op	   18740 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24         	     315	   3692725 ns/op	   18740 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_64/count-24         	     219	   5475999 ns/op	   22640 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_64/count-24         	     217	   5451372 ns/op	   22646 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_64/count-24         	     217	   5454120 ns/op	   22646 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_64/count-24         	     218	   5443345 ns/op	   22645 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_64/count-24         	     219	   5470168 ns/op	   22640 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_64/count-24         	     219	   5493900 ns/op	   22645 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_64/count-24         	     218	   5467969 ns/op	   22646 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_64/count-24         	     217	   5500357 ns/op	   22641 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_64/count-24         	     218	   5445254 ns/op	   22645 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_64/count-24         	     219	   5451317 ns/op	   22640 B/op	      73 allocs/op
+PASS
+ok  	github.com/ponchione/shunter/subscription	33.285s
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24         	     327	   3687267 ns/op	   18740 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24         	     327	   3686765 ns/op	   18740 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24         	     326	   3696614 ns/op	   18740 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24         	     324	   3694632 ns/op	   18741 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24         	     325	   3668629 ns/op	   18740 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24         	     325	   3658063 ns/op	   18742 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24         	     327	   3671674 ns/op	   18736 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24         	     326	   3672052 ns/op	   18740 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24         	     326	   3677319 ns/op	   18737 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24         	     320	   3688836 ns/op	   18742 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24       	     121	   9797853 ns/op	   18736 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24       	     120	   9814550 ns/op	   18729 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24       	     121	   9824850 ns/op	   18736 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24       	     121	   9830123 ns/op	   18736 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24       	     121	   9871726 ns/op	   18737 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24       	     121	   9831837 ns/op	   18736 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24       	     121	   9840611 ns/op	   18736 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24       	     121	   9808985 ns/op	   18729 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24       	     121	   9836215 ns/op	   18736 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24       	     121	   9831184 ns/op	   18728 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24     	      74	  16193887 ns/op	   46540 B/op	     195 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24     	      74	  16136041 ns/op	   46540 B/op	     195 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24     	      74	  16247271 ns/op	   46525 B/op	     195 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24     	      73	  16164318 ns/op	   46529 B/op	     195 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24     	      75	  16169047 ns/op	   46536 B/op	     195 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24     	      74	  16188381 ns/op	   46527 B/op	     195 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24     	      72	  16099982 ns/op	   46547 B/op	     195 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24     	      70	  16115352 ns/op	   46555 B/op	     195 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24     	      75	  16102561 ns/op	   46536 B/op	     195 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24     	      74	  16143539 ns/op	   46525 B/op	     195 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24                	      97	  11861265 ns/op	   18887 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24                	     100	  11871923 ns/op	   18883 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24                	      99	  11863356 ns/op	   18884 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24                	      96	  11892457 ns/op	   18888 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24                	      98	  11905504 ns/op	   18885 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24                	     100	  11907134 ns/op	   18872 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24                	     100	  11849304 ns/op	   18872 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24                	      96	  11938853 ns/op	   18888 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24                	      99	  11941034 ns/op	   18884 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24                	     100	  11874725 ns/op	   18884 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_star-24         	     219	   5446016 ns/op	   22645 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_star-24         	     219	   5446777 ns/op	   22645 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_star-24         	     218	   5486539 ns/op	   22640 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_star-24         	     218	   5508745 ns/op	   22646 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_star-24         	     213	   5486648 ns/op	   22647 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_star-24         	     218	   5474129 ns/op	   22645 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_star-24         	     218	   5474770 ns/op	   22645 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_star-24         	     217	   5453679 ns/op	   22646 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_star-24         	     218	   5481748 ns/op	   22645 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_star-24         	     218	   5545000 ns/op	   22645 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_column-24       	      87	  14716342 ns/op	   22663 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_column-24       	      97	  14741214 ns/op	   22663 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_column-24       	      96	  14676188 ns/op	   22664 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_column-24       	      93	  14675321 ns/op	   22657 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_column-24       	      96	  14694772 ns/op	   22654 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_column-24       	      93	  14678335 ns/op	   22667 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_column-24       	      96	  14687735 ns/op	   22653 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_column-24       	      91	  14664207 ns/op	   22670 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_column-24       	      94	  14651428 ns/op	   22666 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_column-24       	      96	  14659767 ns/op	   22664 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_distinct-24     	      49	  24151938 ns/op	   63192 B/op	     215 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_distinct-24     	      49	  24107795 ns/op	   63195 B/op	     215 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_distinct-24     	      50	  24153375 ns/op	   63184 B/op	     215 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_distinct-24     	      49	  24069803 ns/op	   63170 B/op	     215 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_distinct-24     	      49	  24106583 ns/op	   63192 B/op	     215 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_distinct-24     	      50	  24163146 ns/op	   63184 B/op	     215 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_distinct-24     	      49	  24274816 ns/op	   63170 B/op	     215 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_distinct-24     	      49	  24118751 ns/op	   63192 B/op	     215 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_distinct-24     	      50	  24255356 ns/op	   63163 B/op	     215 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/count_distinct-24     	      49	  24241180 ns/op	   63192 B/op	     215 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/sum-24                	      67	  17661118 ns/op	   22840 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/sum-24                	      64	  17683212 ns/op	   22850 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/sum-24                	      66	  17664105 ns/op	   22843 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/sum-24                	      67	  17679071 ns/op	   22840 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/sum-24                	      67	  17705148 ns/op	   22840 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/sum-24                	      62	  17697291 ns/op	   22838 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/sum-24                	      67	  17722613 ns/op	   22840 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/sum-24                	      67	  17736558 ns/op	   22840 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/sum-24                	      67	  17710632 ns/op	   22840 B/op	      75 allocs/op
+BenchmarkMultiWayLiveJoinAggregateFunctions/cross3_rows_64/sum-24                	      67	  17754940 ns/op	   22840 B/op	      75 allocs/op
+PASS
+ok  	github.com/ponchione/shunter/subscription	117.982s
