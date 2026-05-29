@@ -403,6 +403,57 @@ Current read:
 - This evidence keeps the default multi-way join guardrails unchanged:
   unlimited by default, with app-owned opt-in limits available through config.
 
+## Focused Multi-Way Live Join Stage G Skew/Fanout
+
+This focused snapshot extends bounded multi-way selectivity/skew evidence from
+the existing `hot_key_8x8` fixture to a `hot_key_16x16` fixture. The new row
+keeps the same 128 rows per relation and one changed endpoint row, but that
+changed row now matches 16 left rows by 16 middle rows. It is advisory and does
+not change default multi-way join guardrails.
+
+- Date: 2026-05-29
+- Shunter commit: `419e58055528c049b49a73dd898292911052ec50`
+- Measurement worktree: commit above plus Stage G benchmark and documentation
+  changes
+- Host: `Linux gernsback 6.17.0-29-generic`, linux/amd64
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`, 12 cores, 24 logical CPUs
+- Raw sample: 16 sub-benchmarks, `-count=10`, 160 benchmark rows, total
+  package benchmark time 225.201s
+- Raw output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-g/multiway-bench-raw.log`
+- Benchstat output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-g/multiway-benchstat.log`
+
+Command:
+
+```bash
+go test -run '^$' -bench 'BenchmarkMultiWayLiveJoin(RelationShapes|Selectivity|ChangedRows|AggregateRelationShapes)' -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-05-29-subscription-stage-g/multiway-bench-raw.log 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-05-29-subscription-stage-g/multiway-bench-raw.log > working-docs/release-evidence/2026-05-29-subscription-stage-g/multiway-benchstat.log 2>&1
+```
+
+Representative standings:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Multi-way selectivity | `MultiWayLiveJoinSelectivity/rows_128/one_match-24` | 128 rows per relation, one changed row matching one left/middle tuple | 350.1us +/- 3% | 37.37Ki +/- 0% | 68 | advisory |
+| Multi-way selectivity | `MultiWayLiveJoinSelectivity/rows_128/hot_key_8x8-24` | 128 rows per relation, one changed hot-key row matching 8 left rows by 8 middle rows | 361.8us +/- 0% | 45.79Ki +/- 0% | 79 | advisory |
+| Multi-way selectivity | `MultiWayLiveJoinSelectivity/rows_128/hot_key_16x16-24` | 128 rows per relation, one changed hot-key row matching 16 left rows by 16 middle rows | 388.3us +/- 1% | 74.63Ki +/- 0% | 83 | advisory |
+| Multi-way Stage G geomean | all focused Stage G multi-way live join benchmarks | 16 sub-benchmark geomean | 948.9us | 45.41Ki | 84.53 | advisory |
+
+Current read:
+
+- The bounded `hot_key_16x16` row remains local-review-sized under `-count=10`
+  and extends skew/fanout coverage without turning the benchmark into a load
+  test.
+- In this fixture, increasing fanout from 8x8 to 16x16 increases allocation
+  more visibly than latency for one changed endpoint row.
+- Larger skew/fanout distributions, larger Cartesian fixtures, aggregate
+  skew rows, relation counts beyond the bounded 5-relation chain, and
+  app-derived workload distributions remain outside the current envelope.
+- This evidence keeps the default multi-way join guardrails unchanged:
+  unlimited by default, with app-owned opt-in limits available through config.
+
 ## Focused Ordered Subscription Window Baseline
 
 This focused snapshot records the ordered subscription window benchmarks added

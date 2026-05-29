@@ -980,6 +980,7 @@ func BenchmarkMultiWayLiveJoinSelectivity(b *testing.B) {
 	}{
 		{name: "one_match", hotFanout: 1},
 		{name: "hot_key_8x8", hotFanout: 8},
+		{name: "hot_key_16x16", hotFanout: 16},
 	}
 
 	for _, tc := range cases {
