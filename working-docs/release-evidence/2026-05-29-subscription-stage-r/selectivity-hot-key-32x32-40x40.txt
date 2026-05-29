@@ -1,0 +1,26 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_32x32-24         	    2318	    484578 ns/op	  185325 B/op	      88 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_32x32-24         	    2479	    480777 ns/op	  185457 B/op	      88 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_32x32-24         	    2476	    481075 ns/op	  185426 B/op	      88 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_32x32-24         	    2475	    484181 ns/op	  185453 B/op	      88 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_32x32-24         	    2461	    485162 ns/op	  185458 B/op	      88 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_32x32-24         	    2409	    492098 ns/op	  185444 B/op	      88 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_32x32-24         	    2458	    493530 ns/op	  185455 B/op	      88 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_32x32-24         	    2492	    500571 ns/op	  185418 B/op	      88 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_32x32-24         	    2451	    495838 ns/op	  185438 B/op	      88 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_32x32-24         	    2481	    484458 ns/op	  185440 B/op	      88 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_40x40-24         	    2125	    562417 ns/op	  281736 B/op	      90 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_40x40-24         	    2128	    559414 ns/op	  281916 B/op	      91 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_40x40-24         	    2098	    560147 ns/op	  281696 B/op	      90 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_40x40-24         	    2006	    563162 ns/op	  281787 B/op	      91 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_40x40-24         	    2131	    567319 ns/op	  281889 B/op	      91 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_40x40-24         	    2133	    563014 ns/op	  281848 B/op	      91 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_40x40-24         	    2116	    574319 ns/op	  281793 B/op	      91 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_40x40-24         	    2071	    575040 ns/op	  281884 B/op	      91 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_40x40-24         	    2098	    569008 ns/op	  281839 B/op	      91 allocs/op
+BenchmarkMultiWayLiveJoinSelectivity/rows_128/hot_key_40x40-24         	    2096	    570709 ns/op	  281758 B/op	      90 allocs/op
+PASS
+ok  	github.com/ponchione/shunter/subscription	25.414s

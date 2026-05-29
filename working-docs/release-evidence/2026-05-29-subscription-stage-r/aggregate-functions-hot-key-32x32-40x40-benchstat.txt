@@ -1,0 +1,39 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+                                                                   │ working-docs/release-evidence/2026-05-29-subscription-stage-r/aggregate-functions-hot-key-32x32-40x40.txt │
+                                                                   │                                                  sec/op                                                   │
+MultiWayLiveJoinAggregateFunctions/hot_key_32x32/count_star-24                                                                                                     11.11m ± 1%
+MultiWayLiveJoinAggregateFunctions/hot_key_32x32/count_column-24                                                                                                   11.10m ± 2%
+MultiWayLiveJoinAggregateFunctions/hot_key_32x32/count_distinct-24                                                                                                 11.19m ± 1%
+MultiWayLiveJoinAggregateFunctions/hot_key_32x32/sum-24                                                                                                            11.12m ± 1%
+MultiWayLiveJoinAggregateFunctions/hot_key_40x40/count_star-24                                                                                                     16.39m ± 1%
+MultiWayLiveJoinAggregateFunctions/hot_key_40x40/count_column-24                                                                                                   16.40m ± 1%
+MultiWayLiveJoinAggregateFunctions/hot_key_40x40/count_distinct-24                                                                                                 16.47m ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_40x40/sum-24                                                                                                            16.41m ± 1%
+geomean                                                                                                                                                            13.52m
+
+                                                                   │ working-docs/release-evidence/2026-05-29-subscription-stage-r/aggregate-functions-hot-key-32x32-40x40.txt │
+                                                                   │                                                   B/op                                                    │
+MultiWayLiveJoinAggregateFunctions/hot_key_32x32/count_star-24                                                                                                    37.71Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_32x32/count_column-24                                                                                                  37.71Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_32x32/count_distinct-24                                                                                                47.66Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_32x32/sum-24                                                                                                           37.84Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_40x40/count_star-24                                                                                                    37.80Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_40x40/count_column-24                                                                                                  37.80Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_40x40/count_distinct-24                                                                                                49.12Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_40x40/sum-24                                                                                                           37.93Ki ± 0%
+geomean                                                                                                                                                           40.20Ki
+
+                                                                   │ working-docs/release-evidence/2026-05-29-subscription-stage-r/aggregate-functions-hot-key-32x32-40x40.txt │
+                                                                   │                                                 allocs/op                                                 │
+MultiWayLiveJoinAggregateFunctions/hot_key_32x32/count_star-24                                                                                                      73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_32x32/count_column-24                                                                                                    73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_32x32/count_distinct-24                                                                                                  117.0 ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_32x32/sum-24                                                                                                             75.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_40x40/count_star-24                                                                                                      73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_40x40/count_column-24                                                                                                    73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_40x40/count_distinct-24                                                                                                  125.0 ± 0%
+MultiWayLiveJoinAggregateFunctions/hot_key_40x40/sum-24                                                                                                             75.00 ± 0%
+geomean                                                                                                                                                             83.38
