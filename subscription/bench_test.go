@@ -1084,6 +1084,48 @@ func BenchmarkMultiWayLiveJoinAggregateFunctions(b *testing.B) {
 			benchmarkMultiWayLiveJoinDelta(b, multiJoinTestSchema(), multiJoinTestPredicate(), before, after, cs, tc.aggregate)
 		})
 	}
+
+	selfAliasCases := []struct {
+		name      string
+		aggregate *Aggregate
+	}{
+		{name: "count_star", aggregate: countStarAggregate()},
+		{name: "count_column", aggregate: countSelfAliasEndpointIDAggregate()},
+		{name: "count_distinct", aggregate: countDistinctMultiJoinTIDAggregate()},
+		{name: "sum", aggregate: sumSelfAliasEndpointIDAggregate()},
+	}
+	for _, tc := range selfAliasCases {
+		b.Run("self_alias3/"+tc.name, func(b *testing.B) {
+			changed := types.ProductValue{types.NewUint64(uint64(size + 2000)), types.NewUint64(uint64(size/2 + 1))}
+			benchmarkMultiWayLiveJoinShapeAggregate(b, multiJoinTestSchema(), repeatedMultiJoinConditionPredicate(), benchmarkMultiJoinCommitted(size, false), benchmarkMultiJoinSelfAliasCommitted(size, true), 2, changed, tc.aggregate)
+		})
+	}
+}
+
+func countSelfAliasEndpointIDAggregate() *Aggregate {
+	return &Aggregate{
+		Func:         AggregateCount,
+		ResultColumn: schema.ColumnSchema{Index: 0, Name: "n", Type: types.KindUint64},
+		Argument: &AggregateColumn{
+			Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+			Table:  2,
+			Column: 0,
+			Alias:  2,
+		},
+	}
+}
+
+func sumSelfAliasEndpointIDAggregate() *Aggregate {
+	return &Aggregate{
+		Func:         AggregateSum,
+		ResultColumn: schema.ColumnSchema{Index: 0, Name: "total", Type: types.KindUint64},
+		Argument: &AggregateColumn{
+			Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+			Table:  2,
+			Column: 0,
+			Alias:  2,
+		},
+	}
 }
 
 func benchmarkMultiWayLiveJoinShapeAggregate(b *testing.B, s *fakeSchema, pred MultiJoin, before, after *mockCommitted, changedTable TableID, changed types.ProductValue, aggregate *Aggregate) {

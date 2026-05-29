@@ -686,6 +686,63 @@ Current read:
 - This evidence keeps the default multi-way join guardrails unchanged:
   unlimited by default, with app-owned opt-in limits available through config.
 
+## Focused Multi-Way Live Join Stage L Aggregate Self-Alias Function Shape
+
+This focused snapshot extends aggregate-function evidence to the existing
+bounded `self_alias3` repeated-table fixture. The new rows cover the aggregate
+functions already accepted by the subscription layer over the same 3-alias,
+2-physical-table shape used by the Stage B `COUNT(*)` aggregate relation-shape
+row; one changed endpoint row is inserted into table 2 alias 2. Runtime
+semantics and default multi-way join guardrails are unchanged.
+
+- Date: 2026-05-29
+- Shunter commit: `75457879a256c4bbadd95fd750db3d221141a733`
+- Measurement worktree: commit above plus Stage L benchmark and documentation
+  changes
+- Host: `Linux gernsback 6.17.0-29-generic #29~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Mon May 11 10:30:58 UTC 2 x86_64 GNU/Linux`
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`
+- Raw sample: 26 sub-benchmarks, `-count=10`, 260 benchmark rows, total
+  package benchmark time 405.559s
+- Raw output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-l/multiway-aggregate-self-alias-functions-raw.log`
+- Benchstat output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-l/multiway-aggregate-self-alias-functions-benchstat.log`
+
+Command:
+
+```bash
+go test -run '^$' -bench 'BenchmarkMultiWayLiveJoin(AggregateFunctions|AggregateRelationShapes)' -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-05-29-subscription-stage-l/multiway-aggregate-self-alias-functions-raw.log 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-05-29-subscription-stage-l/multiway-aggregate-self-alias-functions-raw.log > working-docs/release-evidence/2026-05-29-subscription-stage-l/multiway-aggregate-self-alias-functions-benchstat.log 2>&1
+```
+
+Representative standings:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Multi-way aggregate self-alias shape | `MultiWayLiveJoinAggregateRelationShapes/self_alias3/count-24` | `COUNT(*)` over 3 aliases across 2 physical tables, 128-row fixture, one repeated-table insert | 101.2ms +/- 0% | 39.45Ki +/- 0% | 77.00 +/- 1% | advisory |
+| Multi-way aggregate self-alias function | `MultiWayLiveJoinAggregateFunctions/self_alias3/count_star-24` | `COUNT(*)` over 3 aliases across 2 physical tables, 128-row fixture, one repeated-table insert | 101.7ms +/- 1% | 39.45Ki +/- 0% | 77.00 +/- 1% | advisory |
+| Multi-way aggregate self-alias function | `MultiWayLiveJoinAggregateFunctions/self_alias3/count_column-24` | `COUNT(t2.id)` over table 2 alias 2 in the 3-alias repeated-table fixture | 102.4ms +/- 2% | 39.45Ki +/- 0% | 77.00 +/- 1% | advisory |
+| Multi-way aggregate self-alias function | `MultiWayLiveJoinAggregateFunctions/self_alias3/count_distinct-24` | `COUNT(DISTINCT t1.id)` over table 1 alias 0 in the 3-alias repeated-table fixture | 102.4ms +/- 1% | 119.3Ki +/- 0% | 351.0 +/- 0% | advisory |
+| Multi-way aggregate self-alias function | `MultiWayLiveJoinAggregateFunctions/self_alias3/sum-24` | `SUM(t2.id)` over table 2 alias 2 in the 3-alias repeated-table fixture | 101.8ms +/- 0% | 39.58Ki +/- 0% | 79.00 +/- 0% | advisory |
+| Multi-way Stage L aggregate geomean | all focused Stage L aggregate relation/function benchmarks | 26 sub-benchmark geomean | 5.542ms | 37.21Ki | 97.29 | advisory |
+
+Current read:
+
+- The bounded `self_alias3` aggregate-function rows are local-review-sized, but
+  they dominate the focused command wall time: the `-count=10` run took
+  405.559s.
+- `COUNT(column)` and `SUM(column)` over table 2 alias 2 track `COUNT(*)`
+  latency and allocation closely in this repeated-table fixture.
+- `COUNT(DISTINCT column)` adds allocation and allocation count, as in the
+  chain fixtures, but does not create additional latency spread in this shape.
+- Larger self-alias distributions, larger Cartesian fixtures beyond the
+  bounded 32-row shape, larger skew/fanout distributions beyond 16x16,
+  relation counts beyond the bounded 5-relation chain, and app-derived
+  workload distributions remain outside the current envelope.
+- This evidence keeps the default multi-way join guardrails unchanged:
+  unlimited by default, with app-owned opt-in limits available through config.
+
 ## Focused Ordered Subscription Window Baseline
 
 This focused snapshot records the ordered subscription window benchmarks added
@@ -765,7 +822,8 @@ Representative standings:
   bounded `chain4` rows for `COUNT(*)`, `COUNT(column)`,
   `COUNT(DISTINCT column)`, and `SUM(column)`. Stage J extends those
   aggregate-function rows to bounded `cross3_rows_32` Cartesian rows. Stage K
-  extends them to the bounded `hot_key_16x16` skew/fanout fixture. This
+  extends them to the bounded `hot_key_16x16` skew/fanout fixture. Stage L
+  extends them to the bounded `self_alias3` repeated-table fixture. This
   evidence does not justify changing the unlimited defaults.
 - Offline backup/restore is covered for small and larger complete local
   DataDir fixtures and is expected to be I/O dominated; these rows do not
@@ -929,11 +987,12 @@ These remain outside the current benchmark envelope:
   two-table predicate fixtures
 - application workload timing, including production-scale backup/restore timing
 - multi-way join evidence beyond the focused Stage B, Stage D, Stage F, Stage
-  G, Stage H, Stage I, Stage J, and Stage K snapshots, including larger
+  G, Stage H, Stage I, Stage J, Stage K, and Stage L snapshots, including larger
   Cartesian fixtures beyond the bounded 32-row cross shape, larger skew/fanout
   distributions beyond the bounded 16x16 row, relation counts beyond the
-  bounded 5-relation chain fixture, aggregate-function self-alias
-  distributions, and app-derived workload distributions
+  bounded 5-relation chain fixture, larger aggregate-function self-alias
+  distributions beyond the bounded `self_alias3` fixture, and app-derived
+  workload distributions
 - memory profiles outside the current subscription, single-WebSocket,
   16/64/128-client WebSocket fanout, sender-level backpressure, executor
   reducer commit, and small/larger local backup/restore fixtures, including
