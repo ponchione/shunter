@@ -46,8 +46,10 @@ Current evidence:
 - `docs/performance-envelopes.md` records advisory benchmark snapshots and
   known gaps.
 - Package tests already cover many subscription correctness paths.
-- Type/index coverage exists mostly at package level, not as broad
-  end-to-end hosted-runtime proof.
+- `internal/gauntlettests/type_index_canary_test.go` covers the flat-kind
+  type/index canary through a hosted runtime with reducer writes, local reads,
+  declared reads, protocol payloads, live subscription deltas, index seeks, and
+  restart.
 
 Implementation anchors:
 
@@ -78,15 +80,17 @@ Exact gaps after Stage B subset evidence publication:
   skew/fanout distributions, relation counts beyond current bounded fixtures,
   aggregate functions beyond the published `COUNT(*)` relation-shape rows, and
   workload-derived application distributions.
-- There is no hosted end-to-end type/index matrix crossing reducer writes,
-  declared reads, live subscriptions, protocol payloads, generated TypeScript,
-  and restart or backup/restore.
+- The hosted type/index canary now crosses reducer writes, declared reads,
+  live subscriptions, protocol payloads, index seeks, and restart. Generated
+  TypeScript decoding and backup/restore remain outside this canary; package
+  tests continue to cover TypeScript decoder shape separately.
 - Aggregate evidence is mostly package-level and does not yet publish enough
   performance rows to inform limit policy.
 - Default multi-way join limits remain intentionally unlimited; there is no
   evidence-backed proposal for changing them.
-- The codebase has package-level type and codegen coverage, but no canary app
-  proving every supported flat kind through the hosted protocol path.
+- The codebase now has a canary app proving every supported flat kind through
+  the hosted protocol path, plus existing package-level type and codegen
+  coverage.
 
 ## Non-Goals
 
@@ -132,6 +136,14 @@ is insufficient for real hosted apps.
    - protocol row encoding
    - generated TypeScript decoding where applicable
    - backup/restore or restart when durability matters
+
+   Stage C canary completed on 2026-05-29 for runtime writes, local reads,
+   declared queries/views, raw and declared protocol reads, declared protocol
+   live-view initial rows and deltas, protocol row-buffer detachment, equality
+   and range index seeks, unique-index rejection, nullable flat columns,
+   NaN rejection boundaries, and clean restart durability. Generated
+   TypeScript decoding stays package-level until it can run as a deterministic
+   hosted canary gate.
 5. Keep aggregate work limited to tests/benchmarks and small correctness fixes
    unless app requirements demand broader semantics.
 
@@ -301,8 +313,8 @@ Stage B status, 2026-05-28: completed a bounded benchmark subset in
 `one_match`, `hot_key_8x8`, `changed_1`, `changed_10`, `changed_100`, and
 `COUNT(*)` aggregate relation-shape variants for accepted `chain3`,
 `self_alias3`, `chain4`, and bounded `cross3` shapes. Runtime semantics and
-default multi-way join guardrails stayed unchanged. The type/index canary and
-default-limit policy remain deferred.
+default multi-way join guardrails stayed unchanged. The default-limit policy
+remains deferred.
 
 Stage C: add the type/index canary.
 
@@ -312,6 +324,17 @@ Stage C: add the type/index canary.
   protocol, and verify restart or backup/restore for durable values
 - include generated TypeScript decoding only when the local gate can run it
   deterministically
+
+Stage C status, 2026-05-29: completed the hosted runtime canary in
+`internal/gauntlettests/type_index_canary_test.go`. The canary table includes
+the current flat kinds (`bool`, signed/unsigned integer widths, wide integers,
+floats, timestamp, duration, UUID, string, bytes, JSON, `arrayString`, and a
+nullable string), primary/secondary/unique indexes, reducer insert/update/delete
+paths, local table and index reads, declared query/view reads, raw SQL and
+declared protocol reads, declared protocol live-view initial rows and deltas,
+protocol row-buffer detachment checks, NaN construction rejections, and restart
+verification. Backup/restore and generated TypeScript decoding remain outside
+this hosted canary.
 
 Stage D: decide policy.
 
