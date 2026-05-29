@@ -454,6 +454,61 @@ Current read:
 - This evidence keeps the default multi-way join guardrails unchanged:
   unlimited by default, with app-owned opt-in limits available through config.
 
+## Focused Multi-Way Live Join Stage H Cartesian
+
+This focused snapshot extends bounded Cartesian multi-way relation-shape
+evidence from `cross3_rows_24` to `cross3_rows_32`. The new fixture keeps the
+same 3-relation Cartesian shape and one changed endpoint row; the changed row
+emits a 32x32 Cartesian fragment. It records both table-shaped projection and
+`COUNT(*)` aggregate rows, remains advisory, and does not change default
+multi-way join guardrails.
+
+- Date: 2026-05-29
+- Shunter commit: `268ec7de52ea35cabfd56099760486fbeb2826ad`
+- Measurement worktree: commit above plus Stage H benchmark and documentation
+  changes
+- Host: `Linux 6.17.0-29-generic x86_64 GNU/Linux`
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`
+- Raw sample: 12 sub-benchmarks, `-count=10`, 120 benchmark rows, total
+  package benchmark time 183.066s
+- Raw output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-h/multiway-bench-raw.log`
+- Benchstat output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-h/multiway-benchstat.log`
+
+Command:
+
+```bash
+go test -run '^$' -bench 'BenchmarkMultiWayLiveJoin(RelationShapes|AggregateRelationShapes)' -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-05-29-subscription-stage-h/multiway-bench-raw.log 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-05-29-subscription-stage-h/multiway-bench-raw.log > working-docs/release-evidence/2026-05-29-subscription-stage-h/multiway-benchstat.log 2>&1
+```
+
+Representative standings:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Multi-way Cartesian shape | `MultiWayLiveJoinRelationShapes/cross3_rows_24-24` | 3-relation Cartesian multi-join, 24 rows per relation, one endpoint insert emits a 24x24 fragment | 50.05us +/- 3% | 86.71Ki +/- 0% | 85 | advisory |
+| Multi-way Cartesian shape | `MultiWayLiveJoinRelationShapes/cross3_rows_32-24` | 3-relation Cartesian multi-join, 32 rows per relation, one endpoint insert emits a 32x32 fragment | 86.73us +/- 2% | 155.9Ki +/- 0% | 88 | advisory |
+| Multi-way aggregate Cartesian shape | `MultiWayLiveJoinAggregateRelationShapes/cross3_rows_24/count-24` | `COUNT(*)` over 3-relation Cartesian multi-join, 24 rows per relation, one endpoint insert | 307.6us +/- 1% | 9.964Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate Cartesian shape | `MultiWayLiveJoinAggregateRelationShapes/cross3_rows_32/count-24` | `COUNT(*)` over 3-relation Cartesian multi-join, 32 rows per relation, one endpoint insert | 707.3us +/- 1% | 12.63Ki +/- 0% | 73 | advisory |
+| Multi-way Stage H geomean | all focused Stage H multi-way live join benchmarks | 12 sub-benchmark geomean | 1.116ms | 42.66Ki | 82.69 | advisory |
+
+Current read:
+
+- The bounded `cross3_rows_32` rows remain local-review-sized under
+  `-count=10` and extend Cartesian evidence without turning the benchmark into
+  a soak/load lane.
+- The table-shaped row's allocation growth tracks the larger materialized
+  Cartesian fragment. The `COUNT(*)` row avoids that output materialization,
+  but still pays the latency cost of counting the 32x32 combinations.
+- Larger Cartesian fixtures beyond the bounded 32-row shape, larger
+  skew/fanout distributions, relation counts beyond the bounded 5-relation
+  chain, broader aggregate-function shapes, and app-derived workload
+  distributions remain outside the current envelope.
+- This evidence keeps the default multi-way join guardrails unchanged:
+  unlimited by default, with app-owned opt-in limits available through config.
+
 ## Focused Ordered Subscription Window Baseline
 
 This focused snapshot records the ordered subscription window benchmarks added
@@ -526,8 +581,10 @@ Representative standings:
   Stage B snapshot adds bounded cross-shape, selectivity/skew,
   changed-row-count, and `COUNT(*)` aggregate relation-shape rows. The focused
   Stage F snapshot extends relation-count evidence to a bounded 5-relation
-  chain for table-shaped projection and `COUNT(*)`. This evidence does not
-  justify changing the unlimited defaults.
+  chain for table-shaped projection and `COUNT(*)`, Stage G extends bounded
+  skew/fanout evidence to `hot_key_16x16`, and Stage H extends bounded
+  Cartesian evidence to `cross3_rows_32` for table-shaped projection and
+  `COUNT(*)`. This evidence does not justify changing the unlimited defaults.
 - Offline backup/restore is covered for small and larger complete local
   DataDir fixtures and is expected to be I/O dominated; these rows do not
   replace production-scale backup/restore timing.
@@ -689,8 +746,9 @@ These remain outside the current benchmark envelope:
   in-process same-query, varied single-table, skewed hot-key, and varied
   two-table predicate fixtures
 - application workload timing, including production-scale backup/restore timing
-- multi-way join evidence beyond the focused Stage B, Stage D, and Stage F
-  snapshots, including larger Cartesian fixtures, larger skew/fanout
+- multi-way join evidence beyond the focused Stage B, Stage D, Stage F, Stage
+  G, and Stage H snapshots, including larger Cartesian fixtures beyond the
+  bounded 32-row cross shape, larger skew/fanout
   distributions, relation counts beyond the bounded 5-relation chain fixture,
   aggregate-function rows beyond the bounded 128-row `chain3` fixture, and
   app-derived workload distributions

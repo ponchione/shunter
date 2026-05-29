@@ -1,0 +1,51 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+                                                                 │ working-docs/release-evidence/2026-05-29-subscription-stage-h/multiway-bench-raw.log │
+                                                                 │                                        sec/op                                        │
+MultiWayLiveJoinRelationShapes/chain3-24                                                                                                   395.0µ ± 23%
+MultiWayLiveJoinRelationShapes/self_alias3-24                                                                                              498.8µ ±  1%
+MultiWayLiveJoinRelationShapes/chain4-24                                                                                                   1.094m ±  1%
+MultiWayLiveJoinRelationShapes/chain5_rows_128-24                                                                                          2.078m ±  1%
+MultiWayLiveJoinRelationShapes/cross3_rows_24-24                                                                                           50.05µ ±  3%
+MultiWayLiveJoinRelationShapes/cross3_rows_32-24                                                                                           86.73µ ±  2%
+MultiWayLiveJoinAggregateRelationShapes/chain3/count-24                                                                                    2.395m ±  1%
+MultiWayLiveJoinAggregateRelationShapes/self_alias3/count-24                                                                               102.1m ±  1%
+MultiWayLiveJoinAggregateRelationShapes/chain4/count-24                                                                                    4.700m ±  0%
+MultiWayLiveJoinAggregateRelationShapes/chain5_rows_128/count-24                                                                           7.650m ±  0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_24/count-24                                                                            307.6µ ±  1%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_32/count-24                                                                            707.3µ ±  1%
+geomean                                                                                                                                    1.116m
+
+                                                                 │ working-docs/release-evidence/2026-05-29-subscription-stage-h/multiway-bench-raw.log │
+                                                                 │                                         B/op                                         │
+MultiWayLiveJoinRelationShapes/chain3-24                                                                                                   37.37Ki ± 0%
+MultiWayLiveJoinRelationShapes/self_alias3-24                                                                                              38.55Ki ± 0%
+MultiWayLiveJoinRelationShapes/chain4-24                                                                                                   50.42Ki ± 0%
+MultiWayLiveJoinRelationShapes/chain5_rows_128-24                                                                                          62.38Ki ± 0%
+MultiWayLiveJoinRelationShapes/cross3_rows_24-24                                                                                           86.71Ki ± 0%
+MultiWayLiveJoinRelationShapes/cross3_rows_32-24                                                                                           155.9Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/chain3/count-24                                                                                    37.66Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/self_alias3/count-24                                                                               39.46Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/chain4/count-24                                                                                    50.66Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/chain5_rows_128/count-24                                                                           62.55Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_24/count-24                                                                            9.964Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_32/count-24                                                                            12.63Ki ± 0%
+geomean                                                                                                                                    42.66Ki
+
+                                                                 │ working-docs/release-evidence/2026-05-29-subscription-stage-h/multiway-bench-raw.log │
+                                                                 │                                      allocs/op                                       │
+MultiWayLiveJoinRelationShapes/chain3-24                                                                                                     68.00 ± 0%
+MultiWayLiveJoinRelationShapes/self_alias3-24                                                                                                71.00 ± 0%
+MultiWayLiveJoinRelationShapes/chain4-24                                                                                                     88.00 ± 0%
+MultiWayLiveJoinRelationShapes/chain5_rows_128-24                                                                                            105.0 ± 0%
+MultiWayLiveJoinRelationShapes/cross3_rows_24-24                                                                                             85.00 ± 0%
+MultiWayLiveJoinRelationShapes/cross3_rows_32-24                                                                                             88.00 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/chain3/count-24                                                                                      73.00 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/self_alias3/count-24                                                                                 77.00 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/chain4/count-24                                                                                      93.00 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/chain5_rows_128/count-24                                                                             110.0 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_24/count-24                                                                              73.00 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_32/count-24                                                                              73.00 ± 0%
+geomean                                                                                                                                      82.69
