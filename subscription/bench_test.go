@@ -1025,6 +1025,26 @@ func BenchmarkMultiWayLiveJoinAggregateRelationShapes(b *testing.B) {
 	})
 }
 
+func BenchmarkMultiWayLiveJoinAggregateFunctions(b *testing.B) {
+	const size = 128
+	cases := []struct {
+		name      string
+		aggregate *Aggregate
+	}{
+		{name: "count_star", aggregate: countStarAggregate()},
+		{name: "count_column", aggregate: countMultiJoinRIDAggregate()},
+		{name: "count_distinct", aggregate: countDistinctMultiJoinTIDAggregate()},
+		{name: "sum", aggregate: sumMultiJoinRIDAggregate()},
+	}
+
+	for _, tc := range cases {
+		b.Run("chain3/"+tc.name, func(b *testing.B) {
+			changed := types.ProductValue{types.NewUint64(uint64(size + 1000)), types.NewUint64(uint64(size/2 + 1))}
+			benchmarkMultiWayLiveJoinShapeAggregate(b, multiJoinTestSchema(), multiJoinTestPredicate(), benchmarkMultiJoinCommitted(size, false), benchmarkMultiJoinCommitted(size, true), 3, changed, tc.aggregate)
+		})
+	}
+}
+
 func benchmarkMultiWayLiveJoinShapeAggregate(b *testing.B, s *fakeSchema, pred MultiJoin, before, after *mockCommitted, changedTable TableID, changed types.ProductValue, aggregate *Aggregate) {
 	b.Helper()
 	cs := benchmarkMultiJoinInsertChangeset(changedTable, []types.ProductValue{changed})

@@ -1,6 +1,6 @@
 # Subscription Evidence And Type/Index Matrix
 
-Status: actionable implementation slice
+Status: Stage D policy slice complete; remaining items stay evidence backlog
 Primary backlog items: `deferred-functionality-backlog.md` items 10, 11, 24,
 and 31
 
@@ -70,24 +70,30 @@ Implementation anchors:
 - `internal/gauntlettests` is the right place for hosted-runtime or protocol
   matrix coverage that should run through real runtime APIs.
 
-Exact gaps after Stage B subset evidence publication:
+Exact gaps after Stage D aggregate-function evidence publication:
 
 - Stage B now has bounded benchmark rows for a 3-relation Cartesian
   multi-join, one-match vs 8x8 hot-key selectivity/skew, 1/10/100 changed
   endpoint rows, and `COUNT(*)` aggregate relation-shape variants across
   accepted `chain3`, `self_alias3`, `chain4`, and bounded `cross3` fixtures.
+- Stage D now has bounded aggregate-function rows over the existing 128-row
+  `chain3` fixture for `COUNT(*)`, `COUNT(column)`,
+  `COUNT(DISTINCT column)`, and `SUM(column)`.
 - Remaining multi-way evidence gaps include larger Cartesian fixtures, larger
   skew/fanout distributions, relation counts beyond current bounded fixtures,
-  aggregate functions beyond the published `COUNT(*)` relation-shape rows, and
+  aggregate-function rows beyond the bounded 128-row `chain3` fixture, and
   workload-derived application distributions.
 - The hosted type/index canary now crosses reducer writes, declared reads,
   live subscriptions, protocol payloads, index seeks, and restart. Generated
   TypeScript decoding and backup/restore remain outside this canary; package
   tests continue to cover TypeScript decoder shape separately.
-- Aggregate evidence is mostly package-level and does not yet publish enough
-  performance rows to inform limit policy.
-- Default multi-way join limits remain intentionally unlimited; there is no
-  evidence-backed proposal for changing them.
+- Aggregate evidence includes package-level correctness coverage and focused
+  Stage D `chain3` performance rows. Larger aggregate shapes and
+  workload-derived distributions remain outside the current envelope.
+- Default multi-way join limits remain intentionally unlimited. The bounded
+  Stage A through Stage D evidence is advisory, the worst local rows are not
+  enough to select safe defaults, and apps can opt into guardrails through
+  config.
 - The codebase now has a canary app proving every supported flat kind through
   the hosted protocol path, plus existing package-level type and codegen
   coverage.
@@ -129,6 +135,13 @@ is insufficient for real hosted apps.
    evidence-first and bounded.
 3. Decide whether default multi-way join limits need to change, using
    benchmark and canary evidence rather than speculation.
+
+   Stage D policy decision, 2026-05-29: keep default multi-way join limits
+   unlimited. The current bounded evidence does not justify release-facing
+   default rejections, and app authors can use
+   `Config.SubscriptionMaxMultiJoinRelations` and
+   `Config.SubscriptionMaxMultiJoinRowsPerRelation` when they need explicit
+   guardrails.
 4. Add an end-to-end type/index matrix that crosses:
    - runtime writes
    - declared reads
@@ -157,6 +170,7 @@ Start with existing benchmark names:
 - `BenchmarkMultiWayLiveJoinSelectivity`
 - `BenchmarkMultiWayLiveJoinChangedRows`
 - `BenchmarkMultiWayLiveJoinAggregateRelationShapes`
+- `BenchmarkMultiWayLiveJoinAggregateFunctions`
 - `BenchmarkJoinFragmentEval`
 - `BenchmarkFanOut1KClientsSameQuery`
 - `BenchmarkFanOut1KClientsVariedQueries`
@@ -216,6 +230,12 @@ If default limits are proposed, document:
 - error surface
 - release compatibility risk
 
+Stage D decision, 2026-05-29: no default-limit change. Defaults stay zero
+(`unlimited`) for compatibility. The published local rows are useful advisory
+envelope evidence, but they do not identify safe general defaults for natural
+application workloads. Hosted apps can still opt into relation-count and
+rows-per-relation guardrails through config.
+
 ## End-To-End Type/Index Matrix
 
 The matrix should exercise hosted-runtime behavior, not only package helpers.
@@ -273,6 +293,11 @@ Backlog item 24 stays mostly deferred. Actionable work now:
   numeric domains accepted by current validation
 - add benchmark rows for aggregate multi-way joins already accepted by the
   subscription layer
+
+  Stage D benchmark rows, 2026-05-29: published focused
+  `BenchmarkMultiWayLiveJoinAggregateFunctions` rows for `COUNT(*)`,
+  `COUNT(column)`, `COUNT(DISTINCT column)`, and `SUM(column)` over the
+  existing bounded `chain3` fixture.
 - document current empty-set behavior
 - document current numeric-domain support
 - document rejected shapes such as aggregate `ORDER BY`/`LIMIT`/`OFFSET`,
@@ -341,6 +366,16 @@ Stage D: decide policy.
 - review whether unlimited defaults remain acceptable
 - if changing defaults, document exact values, override behavior, error
   surface, compatibility risk, and benchmark evidence
+
+Stage D status, 2026-05-29: completed a bounded aggregate-function evidence
+slice in `subscription/bench_test.go` and published the focused `-count=10`
+rows in `docs/performance-envelopes.md`. The slice covers `COUNT(*)`,
+`COUNT(column)`, `COUNT(DISTINCT column)`, and `SUM(column)` over the existing
+128-row `chain3` fixture. Runtime semantics and default multi-way join
+guardrails stayed unchanged. The policy decision is to keep defaults zero
+(`unlimited`) because the bounded evidence remains advisory, the worst local
+rows are not enough to select safe defaults, and apps can still opt into
+guardrails through config.
 
 ## Risks
 

@@ -300,6 +300,54 @@ Current read:
 - The accepted `COUNT(*)` aggregate relation-shape rows show the repeated-table
   self-alias aggregate path is the standout latency case in this slice.
 
+## Focused Multi-Way Live Join Stage D Aggregate Functions
+
+This focused snapshot adds bounded aggregate-function evidence for the
+multi-way live join aggregate functions already accepted by the subscription
+layer. It uses the existing 128-row `chain3` fixture and is advisory for
+default-limit policy.
+
+- Date: 2026-05-29
+- Shunter commit: `2303f576344eecf62c73d5998aad0c7d01b7f344`
+- Measurement worktree: commit above plus Stage D benchmark and documentation
+  changes
+- Host: `Linux gernsback 6.17.0-29-generic`, linux/amd64
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`, 12 cores, 24 logical CPUs
+- Raw sample: 4 sub-benchmarks, `-count=10`, 40 benchmark rows, total package
+  benchmark time 57.571s
+- Raw output:
+  `/tmp/shunter-subscription-stage-d-aggregate-functions-raw-20260529.txt`
+- Benchstat output:
+  `/tmp/shunter-subscription-stage-d-aggregate-functions-benchstat-20260529.txt`
+
+Command:
+
+```bash
+rtk bash -lc 'go test -run "^$" -bench "BenchmarkMultiWayLiveJoinAggregateFunctions$" -benchmem -count=10 ./subscription > /tmp/shunter-subscription-stage-d-aggregate-functions-raw-20260529.txt 2>&1'
+rtk bash -lc 'rtk go run golang.org/x/perf/cmd/benchstat@latest /tmp/shunter-subscription-stage-d-aggregate-functions-raw-20260529.txt > /tmp/shunter-subscription-stage-d-aggregate-functions-benchstat-20260529.txt 2>&1'
+```
+
+Representative standings:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain3/count_star-24` | `COUNT(*)` over 3-relation chain, 128 rows per relation, one endpoint insert | 2.365ms +/- 1% | 37.66Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain3/count_column-24` | `COUNT(r.id)` over 3-relation chain, 128 rows per relation, one endpoint insert | 2.374ms +/- 1% | 37.66Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain3/count_distinct-24` | `COUNT(DISTINCT t.id)` over 3-relation chain, 128 rows per relation, one endpoint insert | 2.403ms +/- 0% | 117.8Ki +/- 0% | 347 | advisory |
+| Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain3/sum-24` | `SUM(r.id)` over 3-relation chain, 128 rows per relation, one endpoint insert | 2.365ms +/- 1% | 37.78Ki +/- 0% | 75 | advisory |
+| Multi-way Stage D aggregate geomean | all focused Stage D aggregate-function benchmarks | 4 sub-benchmark geomean | 2.377ms | 50.12Ki | 108.5 | advisory |
+
+Current read:
+
+- `COUNT(column)` and `SUM(column)` track the existing `COUNT(*)` chain3
+  latency envelope in this bounded fixture.
+- `COUNT(DISTINCT column)` increases allocation and allocation count, but does
+  not create a new latency standout in the bounded 128-row `chain3` sample.
+- This evidence supports keeping default multi-way join guardrails unlimited.
+  The bounded rows remain advisory, the worst local rows are not enough to
+  select safe defaults, and apps can still opt into guardrails through config.
+
 ## Focused Ordered Subscription Window Baseline
 
 This focused snapshot records the ordered subscription window benchmarks added
@@ -533,10 +581,11 @@ These remain outside the current benchmark envelope:
   in-process same-query, varied single-table, skewed hot-key, and varied
   two-table predicate fixtures
 - application workload timing, including production-scale backup/restore timing
-- multi-way join evidence beyond the focused Stage B snapshot, including
-  larger Cartesian fixtures, larger skew/fanout distributions, relation counts
-  beyond current bounded fixtures, aggregate functions beyond the published
-  `COUNT(*)` relation-shape rows, and app-derived workload distributions
+- multi-way join evidence beyond the focused Stage B and Stage D snapshots,
+  including larger Cartesian fixtures, larger skew/fanout distributions,
+  relation counts beyond current bounded fixtures, aggregate-function rows
+  beyond the bounded 128-row `chain3` fixture, and app-derived workload
+  distributions
 - memory profiles outside the current subscription, single-WebSocket,
   16/64/128-client WebSocket fanout, sender-level backpressure, executor
   reducer commit, and small/larger local backup/restore fixtures, including
