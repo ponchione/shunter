@@ -1017,6 +1017,71 @@ Current read:
 - This evidence keeps the default multi-way join guardrails unchanged:
   unlimited by default, with app-owned opt-in limits available through config.
 
+## Focused Multi-Way Live Join Stage Q Larger Cartesian Function Shape
+
+This focused snapshot extends the bounded 3-relation Cartesian fixture from
+`cross3_rows_48` to `cross3_rows_56`. The new rows keep the same Cartesian
+shape and one changed endpoint row; the changed row emits a 56x56 Cartesian
+fragment. The snapshot records table-shaped projection, `COUNT(*)`, and the
+aggregate functions already accepted by the subscription layer. Runtime
+semantics and default multi-way join guardrails are unchanged.
+
+- Date: 2026-05-29
+- Shunter commit: `6f06a56317c60ff508f6bca576f94d1de271c3a4`
+- Measurement worktree: commit above plus Stage Q benchmark and documentation
+  changes
+- Host: `Linux gernsback 6.17.0-29-generic #29~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Mon May 11 10:30:58 UTC 2 x86_64 x86_64 x86_64 GNU/Linux`
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`
+- Raw sample: 12 sub-benchmarks, `-count=10`, 120 benchmark rows, total
+  package benchmark time 179.936s across three focused `go test` invocations
+- Raw output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-q/multiway-cartesian-raw.log`
+- Benchstat output:
+  `working-docs/release-evidence/2026-05-29-subscription-stage-q/multiway-cartesian-benchstat.log`
+
+Command:
+
+```bash
+rtk mkdir -p working-docs/release-evidence/2026-05-29-subscription-stage-q
+rtk bash -lc 'go test -run "^$" -bench "^BenchmarkMultiWayLiveJoinRelationShapes$/^cross3_rows_(48|56)$" -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-05-29-subscription-stage-q/multiway-cartesian-raw.log 2>&1'
+rtk bash -lc 'go test -run "^$" -bench "^BenchmarkMultiWayLiveJoinAggregateRelationShapes$/^cross3_rows_(48|56)$/^count$" -benchmem -count=10 ./subscription >> working-docs/release-evidence/2026-05-29-subscription-stage-q/multiway-cartesian-raw.log 2>&1'
+rtk bash -lc 'go test -run "^$" -bench "^BenchmarkMultiWayLiveJoinAggregateFunctions$/^cross3_rows_(48|56)$" -benchmem -count=10 ./subscription >> working-docs/release-evidence/2026-05-29-subscription-stage-q/multiway-cartesian-raw.log 2>&1'
+rtk bash -lc 'rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-05-29-subscription-stage-q/multiway-cartesian-raw.log > working-docs/release-evidence/2026-05-29-subscription-stage-q/multiway-cartesian-benchstat.log 2>&1'
+```
+
+Representative standings:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Multi-way Cartesian shape | `MultiWayLiveJoinRelationShapes/cross3_rows_48-24` | 3-relation Cartesian multi-join, 48 rows per relation, one endpoint insert emits a 48x48 fragment | 200.5us +/- 8% | 383.0Ki +/- 0% | 93 | advisory |
+| Multi-way Cartesian shape | `MultiWayLiveJoinRelationShapes/cross3_rows_56-24` | 3-relation Cartesian multi-join, 56 rows per relation, one endpoint insert emits a 56x56 fragment | 285.2us +/- 4% | 569.7Ki +/- 0% | 96 | advisory |
+| Multi-way aggregate Cartesian shape | `MultiWayLiveJoinAggregateRelationShapes/cross3_rows_48/count-24` | `COUNT(*)` over 3-relation Cartesian multi-join, 48 rows per relation, one endpoint insert | 2.366ms +/- 0% | 16.79Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate Cartesian shape | `MultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24` | `COUNT(*)` over 3-relation Cartesian multi-join, 56 rows per relation, one endpoint insert | 3.727ms +/- 1% | 18.30Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24` | `COUNT(*)` over 3-relation Cartesian multi-join, 56 rows per relation, one endpoint insert | 3.699ms +/- 1% | 18.30Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24` | `COUNT(t3.id)` over 3-relation Cartesian multi-join, 56 rows per relation, one endpoint insert | 9.867ms +/- 1% | 18.30Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24` | `COUNT(DISTINCT t1.id)` over 3-relation Cartesian multi-join, 56 rows per relation, one endpoint insert | 16.60ms +/- 0% | 45.45Ki +/- 0% | 195 | advisory |
+| Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24` | `SUM(t3.id)` over 3-relation Cartesian multi-join, 56 rows per relation, one endpoint insert | 11.94ms +/- 1% | 18.44Ki +/- 0% | 75 | advisory |
+| Multi-way Stage Q Cartesian geomean | all focused Stage Q Cartesian benchmarks | 12 sub-benchmark geomean | 3.569ms | 35.26Ki | 89.53 | advisory |
+
+Current read:
+
+- The bounded `cross3_rows_56` rows remain local-review-sized under
+  `-count=10` while extending Cartesian size evidence beyond the 48-row shape.
+- The table-shaped row's allocation growth tracks the larger materialized
+  56x56 Cartesian fragment. The `COUNT(*)` row avoids that output
+  materialization, but latency still scales with counting the combinations.
+- `COUNT(column)` and `SUM(column)` remain allocation-stable relative to
+  `COUNT(*)` while measuring higher latency in this Cartesian fixture.
+- `COUNT(DISTINCT column)` is the slowest Stage Q Cartesian aggregate-function
+  row and adds allocation, but remains local-review-sized in the focused run.
+- Larger Cartesian fixtures beyond the bounded 56-row shape, larger
+  skew/fanout distributions beyond 32x32, relation counts beyond the bounded
+  5-relation chain, larger aggregate-function self-alias distributions, and
+  app-derived workload distributions remain outside the current envelope.
+- This evidence keeps the default multi-way join guardrails unchanged:
+  unlimited by default, with app-owned opt-in limits available through config.
+
 ## Focused Ordered Subscription Window Baseline
 
 This focused snapshot records the ordered subscription window benchmarks added

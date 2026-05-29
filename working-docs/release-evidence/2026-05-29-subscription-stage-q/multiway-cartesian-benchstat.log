@@ -1,0 +1,51 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+                                                                    │ working-docs/release-evidence/2026-05-29-subscription-stage-q/multiway-cartesian-raw.log │
+                                                                    │                                          sec/op                                          │
+MultiWayLiveJoinRelationShapes/cross3_rows_48-24                                                                                                   200.5µ ± 8%
+MultiWayLiveJoinRelationShapes/cross3_rows_56-24                                                                                                   285.2µ ± 4%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_48/count-24                                                                                    2.366m ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24                                                                                    3.727m ± 1%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_48/count_star-24                                                                                    2.363m ± 1%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_48/count_column-24                                                                                  6.267m ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_48/count_distinct-24                                                                                10.44m ± 1%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_48/sum-24                                                                                           7.582m ± 1%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24                                                                                    3.699m ± 1%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24                                                                                  9.867m ± 1%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24                                                                                16.60m ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24                                                                                           11.94m ± 1%
+geomean                                                                                                                                            3.569m
+
+                                                                    │ working-docs/release-evidence/2026-05-29-subscription-stage-q/multiway-cartesian-raw.log │
+                                                                    │                                           B/op                                           │
+MultiWayLiveJoinRelationShapes/cross3_rows_48-24                                                                                                  383.0Ki ± 0%
+MultiWayLiveJoinRelationShapes/cross3_rows_56-24                                                                                                  569.7Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_48/count-24                                                                                   16.79Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24                                                                                   18.30Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_48/count_star-24                                                                                   16.78Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_48/count_column-24                                                                                 16.82Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_48/count_distinct-24                                                                               41.13Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_48/sum-24                                                                                          16.90Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24                                                                                   18.30Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24                                                                                 18.30Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24                                                                               45.45Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24                                                                                          18.44Ki ± 0%
+geomean                                                                                                                                           35.26Ki
+
+                                                                    │ working-docs/release-evidence/2026-05-29-subscription-stage-q/multiway-cartesian-raw.log │
+                                                                    │                                        allocs/op                                         │
+MultiWayLiveJoinRelationShapes/cross3_rows_48-24                                                                                                    93.00 ± 0%
+MultiWayLiveJoinRelationShapes/cross3_rows_56-24                                                                                                    96.00 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_48/count-24                                                                                     73.00 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_56/count-24                                                                                     73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_48/count_star-24                                                                                     73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_48/count_column-24                                                                                   73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_48/count_distinct-24                                                                                 179.0 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_48/sum-24                                                                                            75.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_star-24                                                                                     73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_column-24                                                                                   73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_56/count_distinct-24                                                                                 195.0 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24                                                                                            75.00 ± 0%
+geomean                                                                                                                                             89.53
