@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"iter"
 	"math"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -108,6 +109,60 @@ func TestRuntimeGauntletFlatTypeIndexCanary(t *testing.T) {
 	rt = buildTypeIndexCanaryRuntime(t, dataDir)
 	assertTypeIndexCanaryLocalRead(t, rt, want, []string{"alpha", "beta"}, "after restart")
 	assertTypeIndexCanaryDeclaredQueryAndView(t, rt, want, 30, "after restart")
+}
+
+func TestRuntimeGauntletFlatTypeIndexCanaryBackupRestore(t *testing.T) {
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	backupDir := filepath.Join(root, "backup")
+	restoreDir := filepath.Join(root, "restored")
+
+	rt := buildTypeIndexCanaryRuntime(t, dataDir)
+	t.Cleanup(func() {
+		if rt != nil {
+			_ = rt.Close()
+		}
+	})
+
+	alphaNote := "alpha restore note"
+	gammaNote := "gamma restore note"
+	rows := []typeIndexCanaryInput{
+		{ID: 1, Label: "restore_alpha", Bucket: "active", Seq: 10, Note: &alphaNote},
+		{ID: 2, Label: "restore_beta", Bucket: "inactive", Seq: 20},
+		{ID: 3, Label: "restore_gamma", Bucket: "active", Seq: 30, Note: &gammaNote},
+	}
+	want := map[uint64]types.ProductValue{}
+	var last shunter.ReducerResult
+	for i, row := range rows {
+		last = callTypeIndexCanaryReducer(t, rt, 100+i, "insert_flat_value", row, shunter.StatusCommitted)
+		want[row.ID] = typeIndexCanaryRow(t, row)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if err := rt.WaitUntilDurable(ctx, last.TxID); err != nil {
+		cancel()
+		t.Fatalf("runtime_config=%s operation=WaitUntilDurable(before backup) tx_id=%d observed_error=%v expected=nil",
+			typeIndexCanaryRuntimeLabel, last.TxID, err)
+	}
+	cancel()
+	if err := rt.Close(); err != nil {
+		t.Fatalf("runtime_config=%s operation=Close(before backup) observed_error=%v expected=nil",
+			typeIndexCanaryRuntimeLabel, err)
+	}
+	rt = nil
+
+	if err := shunter.BackupDataDir(dataDir, backupDir); err != nil {
+		t.Fatalf("runtime_config=%s operation=BackupDataDir observed_error=%v expected=nil",
+			typeIndexCanaryRuntimeLabel, err)
+	}
+	if err := shunter.RestoreDataDir(backupDir, restoreDir); err != nil {
+		t.Fatalf("runtime_config=%s operation=RestoreDataDir observed_error=%v expected=nil",
+			typeIndexCanaryRuntimeLabel, err)
+	}
+
+	rt = buildTypeIndexCanaryRuntime(t, restoreDir)
+	assertTypeIndexCanaryLocalRead(t, rt, want, []string{"missing", "restore_missing"}, "after backup restore")
+	assertTypeIndexCanaryDeclaredQueryAndView(t, rt, want, 110, "after backup restore")
 }
 
 func buildTypeIndexCanaryRuntime(t *testing.T, dataDir string) *shunter.Runtime {
@@ -234,7 +289,7 @@ func findTypeIndexCanaryRow(ctx *schema.ReducerContext, id uint64) (types.RowID,
 	return 0, nil, false
 }
 
-func callTypeIndexCanaryReducer(t *testing.T, rt *shunter.Runtime, op int, reducer string, input typeIndexCanaryInput, wantStatus shunter.ReducerStatus) {
+func callTypeIndexCanaryReducer(t *testing.T, rt *shunter.Runtime, op int, reducer string, input typeIndexCanaryInput, wantStatus shunter.ReducerStatus) shunter.ReducerResult {
 	t.Helper()
 	body, err := json.Marshal(input)
 	if err != nil {
@@ -256,6 +311,7 @@ func callTypeIndexCanaryReducer(t *testing.T, rt *shunter.Runtime, op int, reduc
 		t.Fatalf("runtime_config=%s op=%d operation=CallReducer(%s) observed_txid=0 expected_nonzero",
 			typeIndexCanaryRuntimeLabel, op, reducer)
 	}
+	return res
 }
 
 func typeIndexCanaryRow(t *testing.T, input typeIndexCanaryInput) types.ProductValue {
@@ -371,10 +427,18 @@ func assertTypeIndexCanaryLocalRead(t *testing.T, rt *shunter.Runtime, want map[
 }
 
 func assertTypeIndexCanaryIndexRows(rt *shunter.Runtime, view shunter.LocalReadView, want map[uint64]types.ProductValue, absentLabels []string) error {
+	primaryIndex := schema.IndexID(0)
 	labelIndex := typeIndexCanaryIndexID(rt, "label_uniq")
 	bucketIndex := typeIndexCanaryIndexID(rt, "bucket_idx")
 	seqIndex := typeIndexCanaryIndexID(rt, "seq_idx")
 	for id, row := range want {
+		gotPrimary, err := collectTypeIndexCanaryRows(view.SeekIndex(typeIndexCanaryTableID, primaryIndex, row[0]))
+		if err != nil {
+			return fmt.Errorf("primary index id=%d: %w", id, err)
+		}
+		if err := compareTypeIndexCanaryRows(gotPrimary, map[uint64]types.ProductValue{id: row}); err != nil {
+			return fmt.Errorf("primary index id=%d: %w", id, err)
+		}
 		got, err := collectTypeIndexCanaryRows(view.SeekIndex(typeIndexCanaryTableID, labelIndex, row[1]))
 		if err != nil {
 			return fmt.Errorf("label index id=%d: %w", id, err)
