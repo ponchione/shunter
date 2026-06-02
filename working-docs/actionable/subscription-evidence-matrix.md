@@ -1,7 +1,8 @@
 # Subscription Evidence And Type/Index Matrix
 
-Status: Stage Z larger skew/fanout evidence slice complete; remaining
-items stay evidence backlog
+Status: synthetic multi-way evidence campaign closed after Stage Z; remaining
+items stay evidence backlog and generated TypeScript decoding is the next
+highest-value matrix gap
 Primary backlog items: `deferred-functionality-backlog.md` items 10, 11, 24,
 and 31
 
@@ -175,6 +176,15 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
 - The codebase now has a canary app proving every supported flat kind through
   the hosted protocol path, plus existing package-level type and codegen
   coverage.
+- Synthetic multi-way size expansion is capped here for the local advisory
+  envelope. Do not continue with Stage AA/AB size-only slices unless a real app
+  workload, regression investigation, release-gate threshold, or renewed
+  default-limit proposal needs the specific shape.
+- The next highest-value matrix gap is generated TypeScript decoding across
+  the existing type/index canary shape or an equivalent deterministic local
+  gate. This crosses contract export, codegen, protocol payloads, and the
+  TypeScript runtime without broadening Shunter's type system or subscription
+  semantics.
 
 ## Non-Goals
 
@@ -355,6 +365,13 @@ is insufficient for real hosted apps.
    3-relation chain fixture with one changed endpoint row matching a 72x72
    fanout fragment. The raw focused `-count=10` evidence is saved under
    `working-docs/release-evidence/2026-06-02-subscription-stage-z/`.
+
+   Close-out decision, 2026-06-02: stop synthetic multi-way size expansion at
+   the Stage Z envelope. The current evidence is sufficient to keep the
+   high-cardinality multi-way benchmark rows advisory and keep default
+   guardrails unchanged. Larger Cartesian, skew/fanout, relation-count,
+   self-alias, and workload-derived distributions remain backlog items with
+   explicit resume triggers, not the next active local-review campaign.
 3. Decide whether default multi-way join limits need to change, using
    benchmark and canary evidence rather than speculation.
 
@@ -379,6 +396,12 @@ is insufficient for real hosted apps.
    NaN rejection boundaries, and clean restart durability. Generated
    TypeScript decoding stays package-level until it can run as a deterministic
    hosted canary gate.
+
+   Next focus, 2026-06-02: close the generated TypeScript decoding gap for the
+   current flat-kind matrix if it can stay deterministic and local-review-sized.
+   Prefer a narrow gate or fixture that proves generated row decoders consume
+   protocol/contract-shaped payloads for the existing canary kinds. Do not add
+   new value kinds, new protocol semantics, or broad SDK surface in this step.
 5. Keep aggregate work limited to tests/benchmarks and small correctness fixes
    unless app requirements demand broader semantics.
 
@@ -1134,11 +1157,16 @@ Do not turn advisory rows into release-blocking gates without updating
 ## Implementation Sequence
 
 1. Refresh current relation-shape benchmarks and publish missing rows.
+   Completed through the Stage Z advisory envelope.
 2. Add benchmark dimensions that are cheap and deterministic.
+   Completed for the current synthetic multi-way campaign; further size-only
+   rows require an explicit resume trigger.
 3. Add type/index gauntlet module or root-runtime test fixture.
+   Completed for hosted Go/protocol paths.
 4. Add generated TypeScript coverage for the matrix only if it can run in a
    deterministic local gate.
 5. Review multi-way join limits after evidence exists.
+   Completed for the current envelope: defaults stay unlimited.
 6. Only then decide whether any implementation changes are warranted.
 
 ## Likely Touched Files
@@ -1199,3 +1227,15 @@ This slice is complete when:
   semantics Shunter already supports
 - no broader SQL, cross-table RLS composition, or richer type-system work was
   introduced by accident
+
+Close-out status, 2026-06-02:
+
+- Synthetic multi-way relation-shape and aggregate evidence is complete for
+  the current local advisory envelope through Stage Z.
+- Default multi-way join policy is decided for now: keep defaults unlimited and
+  rely on app-owned opt-in guardrails.
+- Current aggregate semantics have focused correctness and performance
+  evidence; semantic expansion remains product backlog.
+- The remaining active matrix gap is generated TypeScript decoding for the
+  current flat-kind canary shape. Broader workload-derived benchmark evidence
+  remains backlog until a real workload or release gate needs it.

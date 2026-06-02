@@ -1974,3 +1974,11 @@ These remain outside the current benchmark envelope:
   reducer commit, and small/larger local backup/restore fixtures, including
   application-scale fanout, slow-reader network paths, and production-sized
   backup/restore workloads
+
+Current campaign cap:
+
+- The synthetic multi-way size campaign is closed after Stage Z. Further
+  Cartesian, skew/fanout, relation-count, or self-alias expansion should resume
+  only for a concrete app workload, regression investigation, release-gate
+  threshold, or renewed default-limit proposal. The current evidence remains
+  advisory and keeps default multi-way join guardrails unchanged.
