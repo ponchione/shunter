@@ -1,0 +1,16 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+BenchmarkDeclaredReadHostedSubscriptionReducerFanout2-24    	      58	  23553328 ns/op	   35993 B/op	     498 allocs/op
+BenchmarkDeclaredReadHostedSubscriptionReducerFanout2-24    	      49	  21724228 ns/op	   35805 B/op	     497 allocs/op
+BenchmarkDeclaredReadHostedSubscriptionReducerFanout2-24    	      58	  20518105 ns/op	   35737 B/op	     497 allocs/op
+BenchmarkDeclaredReadHostedSubscriptionReducerFanout2-24    	      56	  20577712 ns/op	   35383 B/op	     495 allocs/op
+BenchmarkDeclaredReadHostedSubscriptionReducerFanout2-24    	      58	  20416767 ns/op	   35692 B/op	     496 allocs/op
+BenchmarkDeclaredReadHostedSubscriptionReducerFanout2-24    	      60	  20573119 ns/op	   35945 B/op	     498 allocs/op
+BenchmarkDeclaredReadHostedSubscriptionReducerFanout2-24    	      58	  21760232 ns/op	   35329 B/op	     495 allocs/op
+BenchmarkDeclaredReadHostedSubscriptionReducerFanout2-24    	      58	  21141085 ns/op	   35497 B/op	     495 allocs/op
+BenchmarkDeclaredReadHostedSubscriptionReducerFanout2-24    	      57	  20566105 ns/op	   35647 B/op	     496 allocs/op
+BenchmarkDeclaredReadHostedSubscriptionReducerFanout2-24    	      55	  21056731 ns/op	   35401 B/op	     495 allocs/op
+PASS
+ok  	github.com/ponchione/shunter	13.938s

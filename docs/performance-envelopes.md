@@ -1895,18 +1895,42 @@ go test -run '^$' -bench 'BenchmarkDeclaredReadHostedSubscriptionReducerDelta' -
 rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-06-02-workload-derived-subscription-hosted-timing/hosted-subscription-bench-raw.txt > working-docs/release-evidence/2026-06-02-workload-derived-subscription-hosted-timing/hosted-subscription-benchstat.txt 2>&1
 ```
 
+Additional fanout-2 snapshot:
+
+- Date: 2026-06-02
+- Shunter base commit: `554e2da`
+- Measurement worktree: local workload-derived hosted subscription fanout
+  benchmark slice before commit
+- Host: `Linux 6.17.0-35-generic`, linux/amd64
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`, 12 cores, 24 logical CPUs
+- Raw sample: 1 benchmark, `-count=10`, total package benchmark time 13.938s
+- Raw output:
+  `working-docs/release-evidence/2026-06-02-workload-derived-hosted-subscription-fanout2/hosted-subscription-fanout2-bench-raw.txt`
+- Benchstat output:
+  `working-docs/release-evidence/2026-06-02-workload-derived-hosted-subscription-fanout2/hosted-subscription-fanout2-benchstat.txt`
+
+Command:
+
+```bash
+go test -run '^$' -bench 'BenchmarkDeclaredReadHostedSubscriptionReducerFanout2' -benchmem -count=10 . > working-docs/release-evidence/2026-06-02-workload-derived-hosted-subscription-fanout2/hosted-subscription-fanout2-bench-raw.txt 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-06-02-workload-derived-hosted-subscription-fanout2/hosted-subscription-fanout2-bench-raw.txt > working-docs/release-evidence/2026-06-02-workload-derived-hosted-subscription-fanout2/hosted-subscription-fanout2-benchstat.txt 2>&1
+```
+
 Representative rows:
 
 | Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
 | --- | --- | --- | ---: | ---: | ---: | --- |
 | Workload-derived hosted live view | `DeclaredReadHostedSubscriptionReducerDelta-24` | strict-auth local WebSocket protocol over the existing chat declared-read workload; one subscriber receives insert and delete deltas for a real insert/delete reducer pair | 20.67ms +/- 10% | 29.63KiB +/- 1% | 408.0 +/- 0% | advisory |
+| Workload-derived hosted live view | `DeclaredReadHostedSubscriptionReducerFanout2-24` | strict-auth local WebSocket protocol over the existing chat declared-read workload; two subscribers receive insert and delete deltas for the same real insert/delete reducer pair | 20.82ms +/- 5% | 34.83KiB +/- 1% | 496.0 +/- 0% | advisory |
 
 Current read:
 
-- The first bounded workload-derived hosted subscription timing row is now
-  covered by a deterministic local benchmark.
-- This does not replace RC taskboard hosted timing, application-scale fanout,
-  multi-subscriber timing distributions, or multi-table/multi-way application
+- Bounded workload-derived hosted subscription timing is now covered for the
+  existing chat insert/delete reducer cycle with one subscriber and two
+  subscribers.
+- This does not replace RC taskboard hosted timing, application-scale fanout
+  distributions beyond two subscribers, or multi-table/multi-way application
   workloads.
 - Runtime semantics and default multi-way join guardrails remain unchanged.
 
@@ -2058,12 +2082,13 @@ These remain outside the current benchmark envelope:
   deterministic sender-level full-buffer rejection is covered separately
 - workload-derived application fanout distributions beyond the focused RC
   taskboard open-tasks live-view create/complete deltas, the bounded
-  two-subscriber RC protocol correctness gate, the bounded one-subscriber
+  two-subscriber RC protocol correctness gate, the bounded two-subscriber
   hosted chat insert/delete timing row, and the deterministic in-process
   same-query, varied single-table, skewed hot-key, and varied two-table
   predicate fixtures
 - application workload timing beyond the bounded hosted chat insert/delete
-  subscription cycle, including production-scale backup/restore timing
+  subscription cycle with one and two subscribers, including production-scale
+  backup/restore timing
 - multi-way join evidence beyond the focused Stage B, Stage D, and Stage F
   through Stage Z snapshots, including larger Cartesian fixtures beyond the
   bounded 88-row cross shape, larger skew/fanout distributions beyond the

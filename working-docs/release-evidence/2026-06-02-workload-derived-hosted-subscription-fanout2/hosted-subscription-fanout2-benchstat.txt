@@ -1,0 +1,15 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+                                                │ working-docs/release-evidence/2026-06-02-workload-derived-hosted-subscription-fanout2/hosted-subscription-fanout2-bench-raw.txt │
+                                                │                                                             sec/op                                                              │
+DeclaredReadHostedSubscriptionReducerFanout2-24                                                                                                                       20.82m ± 5%
+
+                                                │ working-docs/release-evidence/2026-06-02-workload-derived-hosted-subscription-fanout2/hosted-subscription-fanout2-bench-raw.txt │
+                                                │                                                              B/op                                                               │
+DeclaredReadHostedSubscriptionReducerFanout2-24                                                                                                                      34.83Ki ± 1%
+
+                                                │ working-docs/release-evidence/2026-06-02-workload-derived-hosted-subscription-fanout2/hosted-subscription-fanout2-bench-raw.txt │
+                                                │                                                            allocs/op                                                            │
+DeclaredReadHostedSubscriptionReducerFanout2-24                                                                                                                        496.0 ± 0%

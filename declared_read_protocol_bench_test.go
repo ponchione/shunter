@@ -2,6 +2,7 @@ package shunter
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,23 @@ import (
 )
 
 func BenchmarkDeclaredReadHostedSubscriptionReducerDelta(b *testing.B) {
+	benchmarkDeclaredReadHostedSubscriptionReducerDelta(b, 1)
+}
+
+func BenchmarkDeclaredReadHostedSubscriptionReducerFanout2(b *testing.B) {
+	benchmarkDeclaredReadHostedSubscriptionReducerDelta(b, 2)
+}
+
+type declaredReadHostedSubscriptionBenchmarkSubscriber struct {
+	client  *websocket.Conn
+	queryID uint32
+}
+
+func benchmarkDeclaredReadHostedSubscriptionReducerDelta(b *testing.B, subscriberCount int) {
+	b.Helper()
+	if subscriberCount < 1 {
+		b.Fatalf("subscriber count = %d, want at least one", subscriberCount)
+	}
 	rt := buildDeclaredReadHostedSubscriptionBenchmarkRuntime(b)
 	b.Cleanup(func() {
 		if err := rt.Close(); err != nil {
@@ -32,21 +50,39 @@ func BenchmarkDeclaredReadHostedSubscriptionReducerDelta(b *testing.B) {
 	b.Cleanup(func() {
 		_ = caller.CloseNow()
 	})
-	subscriber := dialDeclaredReadHostedSubscriptionBenchmarkProtocol(b, ctx, wsURL, "hosted-subscription-subscriber", "messages:subscribe")
-	b.Cleanup(func() {
-		_ = subscriber.CloseNow()
-	})
 
-	const queryID = uint32(9101)
-	benchmarkSubscribeDeclaredReadHostedView(b, ctx, subscriber, 9001, queryID)
+	subscribers := make([]declaredReadHostedSubscriptionBenchmarkSubscriber, 0, subscriberCount)
+	for i := 0; i < subscriberCount; i++ {
+		client := dialDeclaredReadHostedSubscriptionBenchmarkProtocol(
+			b,
+			ctx,
+			wsURL,
+			fmt.Sprintf("hosted-subscription-subscriber-%d", i+1),
+			"messages:subscribe",
+		)
+		b.Cleanup(func() {
+			_ = client.CloseNow()
+		})
+		subscribers = append(subscribers, declaredReadHostedSubscriptionBenchmarkSubscriber{
+			client:  client,
+			queryID: uint32(9101 + i),
+		})
+	}
+	for i, subscriber := range subscribers {
+		benchmarkSubscribeDeclaredReadHostedView(b, ctx, subscriber.client, uint32(9001+i), subscriber.queryID)
+	}
 
 	insertArgs := append([]byte{250}, []byte("hosted-delta")...)
 	deleteArgs := []byte{250}
 
 	benchmarkCallDeclaredReadHostedReducer(b, ctx, caller, 8001, "insert_message_with_body", insertArgs)
-	benchmarkRequireDeclaredReadHostedDelta(b, ctx, subscriber, queryID, 1, 0)
+	for _, subscriber := range subscribers {
+		benchmarkRequireDeclaredReadHostedDelta(b, ctx, subscriber.client, subscriber.queryID, 1, 0)
+	}
 	benchmarkCallDeclaredReadHostedReducer(b, ctx, caller, 8002, "delete_message_by_id", deleteArgs)
-	benchmarkRequireDeclaredReadHostedDelta(b, ctx, subscriber, queryID, 0, 1)
+	for _, subscriber := range subscribers {
+		benchmarkRequireDeclaredReadHostedDelta(b, ctx, subscriber.client, subscriber.queryID, 0, 1)
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -54,9 +90,13 @@ func BenchmarkDeclaredReadHostedSubscriptionReducerDelta(b *testing.B) {
 		insertRequestID := uint32(10000 + i*2)
 		deleteRequestID := insertRequestID + 1
 		benchmarkCallDeclaredReadHostedReducer(b, ctx, caller, insertRequestID, "insert_message_with_body", insertArgs)
-		benchmarkRequireDeclaredReadHostedDelta(b, ctx, subscriber, queryID, 1, 0)
+		for _, subscriber := range subscribers {
+			benchmarkRequireDeclaredReadHostedDelta(b, ctx, subscriber.client, subscriber.queryID, 1, 0)
+		}
 		benchmarkCallDeclaredReadHostedReducer(b, ctx, caller, deleteRequestID, "delete_message_by_id", deleteArgs)
-		benchmarkRequireDeclaredReadHostedDelta(b, ctx, subscriber, queryID, 0, 1)
+		for _, subscriber := range subscribers {
+			benchmarkRequireDeclaredReadHostedDelta(b, ctx, subscriber.client, subscriber.queryID, 0, 1)
+		}
 	}
 }
 

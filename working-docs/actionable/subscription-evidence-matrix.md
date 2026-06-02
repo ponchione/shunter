@@ -190,6 +190,14 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
   reads the subscriber delete `TransactionUpdateLight`. The table cardinality
   returns to baseline each iteration. Raw `-count=10` evidence is saved under
   `working-docs/release-evidence/2026-06-02-workload-derived-subscription-hosted-timing/`.
+- The next bounded workload-derived hosted fanout timing row is covered:
+  `BenchmarkDeclaredReadHostedSubscriptionReducerFanout2` drives the same
+  existing chat declared-read insert/delete reducer cycle through a strict-auth
+  local WebSocket caller plus two subscribers. Each subscriber receives the
+  insert and delete `TransactionUpdateLight` for the same real row mutation,
+  and the table cardinality returns to baseline each iteration. Raw
+  `-count=10` evidence is saved under
+  `working-docs/release-evidence/2026-06-02-workload-derived-hosted-subscription-fanout2/`.
 - The hosted type/index canary now crosses reducer writes, declared reads,
   live subscriptions, protocol payloads, index seeks, restart, and offline
   backup/restore. Generated TypeScript decoding now has deterministic
@@ -224,7 +232,7 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
   backup/restore gaps are closed for the deterministic local flat-kind gate.
   Remaining matrix gaps include broader workload-derived application fanout
   distributions beyond the bounded two-subscriber RC protocol gate and
-  one-subscriber hosted timing row, broader application timing, and
+  two-subscriber hosted timing row, broader application timing, and
   multi-table/multi-way distributions.
 
 ## Non-Goals
@@ -474,6 +482,7 @@ Start with existing benchmark names:
 - `BenchmarkFanOut1KClientsMultiTableVariedQueries`
 - `BenchmarkRCAppOpenTasksLiveViewDelta`
 - `BenchmarkDeclaredReadHostedSubscriptionReducerDelta`
+- `BenchmarkDeclaredReadHostedSubscriptionReducerFanout2`
 - `BenchmarkDeltaIndexConstruction`
 - `BenchmarkCandidateCollection`
 
@@ -1337,6 +1346,7 @@ Close-out status, 2026-06-02:
   deterministic local benchmark and published raw evidence. The same hosted
   protocol path has a bounded two-subscriber correctness gate. A bounded
   hosted timing row now covers the existing chat declared-read insert/delete
-  reducer cycle through a strict-auth local WebSocket caller and one
-  subscriber. Broader workload-derived fanout timing and distribution benchmark
-  evidence remains backlog until a real workload or release gate needs it.
+  reducer cycle through a strict-auth local WebSocket caller with one
+  subscriber and with two subscribers. Broader workload-derived fanout timing
+  and distribution benchmark evidence remains backlog until a real workload or
+  release gate needs it.
