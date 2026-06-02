@@ -1,0 +1,15 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+                                              │ working-docs/release-evidence/2026-06-02-workload-derived-subscription-hosted-timing/hosted-subscription-bench-raw.txt │
+                                              │                                                         sec/op                                                         │
+DeclaredReadHostedSubscriptionReducerDelta-24                                                                                                             20.67m ± 10%
+
+                                              │ working-docs/release-evidence/2026-06-02-workload-derived-subscription-hosted-timing/hosted-subscription-bench-raw.txt │
+                                              │                                                          B/op                                                          │
+DeclaredReadHostedSubscriptionReducerDelta-24                                                                                                             29.63Ki ± 1%
+
+                                              │ working-docs/release-evidence/2026-06-02-workload-derived-subscription-hosted-timing/hosted-subscription-bench-raw.txt │
+                                              │                                                       allocs/op                                                        │
+DeclaredReadHostedSubscriptionReducerDelta-24                                                                                                               408.0 ± 0%

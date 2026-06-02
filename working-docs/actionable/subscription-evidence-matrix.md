@@ -180,6 +180,16 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
   evidence; the current concrete RC reducer flow mutates task state across
   commits, so a steady hosted protocol benchmark would need additional real
   workload support rather than a size-only synthetic loop.
+- The first bounded workload-derived hosted subscription timing row is
+  covered: `BenchmarkDeclaredReadHostedSubscriptionReducerDelta` drives the
+  existing chat declared-read workload through a strict-auth local WebSocket
+  caller plus one subscriber. Each measured operation performs a real
+  `insert_message_with_body` reducer call, reads the caller
+  `TransactionUpdate`, reads the subscriber insert `TransactionUpdateLight`,
+  performs a real `delete_message_by_id` reducer call for the same row, and
+  reads the subscriber delete `TransactionUpdateLight`. The table cardinality
+  returns to baseline each iteration. Raw `-count=10` evidence is saved under
+  `working-docs/release-evidence/2026-06-02-workload-derived-subscription-hosted-timing/`.
 - The hosted type/index canary now crosses reducer writes, declared reads,
   live subscriptions, protocol payloads, index seeks, restart, and offline
   backup/restore. Generated TypeScript decoding now has deterministic
@@ -213,8 +223,9 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
 - The generated TypeScript decoding, hosted TypeScript client execution, and
   backup/restore gaps are closed for the deterministic local flat-kind gate.
   Remaining matrix gaps include broader workload-derived application fanout
-  distributions beyond the bounded two-subscriber RC protocol gate, application
-  timing, and multi-table/multi-way distributions.
+  distributions beyond the bounded two-subscriber RC protocol gate and
+  one-subscriber hosted timing row, broader application timing, and
+  multi-table/multi-way distributions.
 
 ## Non-Goals
 
@@ -462,6 +473,7 @@ Start with existing benchmark names:
 - `BenchmarkFanOut1KClientsSkewedHotKey`
 - `BenchmarkFanOut1KClientsMultiTableVariedQueries`
 - `BenchmarkRCAppOpenTasksLiveViewDelta`
+- `BenchmarkDeclaredReadHostedSubscriptionReducerDelta`
 - `BenchmarkDeltaIndexConstruction`
 - `BenchmarkCandidateCollection`
 
@@ -1323,6 +1335,8 @@ Close-out status, 2026-06-02:
   local gates.
 - The RC taskboard `open_tasks_live` workload-derived subscription delta has a
   deterministic local benchmark and published raw evidence. The same hosted
-  protocol path has a bounded two-subscriber correctness gate. Broader
-  workload-derived fanout timing and distribution benchmark evidence remains
-  backlog until a real workload or release gate needs it.
+  protocol path has a bounded two-subscriber correctness gate. A bounded
+  hosted timing row now covers the existing chat declared-read insert/delete
+  reducer cycle through a strict-auth local WebSocket caller and one
+  subscriber. Broader workload-derived fanout timing and distribution benchmark
+  evidence remains backlog until a real workload or release gate needs it.
