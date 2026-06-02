@@ -1,8 +1,8 @@
 # Subscription Evidence And Type/Index Matrix
 
-Status: synthetic multi-way evidence campaign closed after Stage Z; remaining
-items stay evidence backlog and generated TypeScript decoding is the next
-highest-value matrix gap
+Status: synthetic multi-way evidence campaign closed after Stage Z; generated
+TypeScript flat-kind decoding now has a deterministic package-level gate;
+remaining items stay evidence backlog
 Primary backlog items: `deferred-functionality-backlog.md` items 10, 11, 24,
 and 31
 
@@ -52,6 +52,9 @@ Current evidence:
   type/index canary through a hosted runtime with reducer writes, local reads,
   declared reads, protocol payloads, live subscription deltas, index seeks, and
   restart.
+- `typescript/client/test/generated-type-index-decoding.test.ts` executes a
+  generated flat-kind table decoder against protocol-shaped row-list payloads
+  for the same canary value families.
 
 Implementation anchors:
 
@@ -155,8 +158,10 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
   distributions.
 - The hosted type/index canary now crosses reducer writes, declared reads,
   live subscriptions, protocol payloads, index seeks, and restart. Generated
-  TypeScript decoding and backup/restore remain outside this canary; package
-  tests continue to cover TypeScript decoder shape separately.
+  TypeScript decoding now has a deterministic package-level gate that crosses
+  contract export, generated bindings, protocol-shaped row-list payloads, and
+  the TypeScript runtime. Backup/restore and a hosted TypeScript client canary
+  remain outside this gate.
 - Aggregate evidence includes package-level correctness coverage, focused
   Stage D `chain3`, Stage I `chain4`, Stage J `cross3_rows_32`, Stage K
   `hot_key_16x16`, Stage L `self_alias3`, Stage M `cross3_rows_40`, Stage N
@@ -174,17 +179,15 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
   enough to select safe defaults, and apps can opt into guardrails through
   config.
 - The codebase now has a canary app proving every supported flat kind through
-  the hosted protocol path, plus existing package-level type and codegen
-  coverage.
+  the hosted protocol path, plus package-level generated TypeScript decoder
+  execution for the same flat-kind shape.
 - Synthetic multi-way size expansion is capped here for the local advisory
   envelope. Do not continue with Stage AA/AB size-only slices unless a real app
   workload, regression investigation, release-gate threshold, or renewed
   default-limit proposal needs the specific shape.
-- The next highest-value matrix gap is generated TypeScript decoding across
-  the existing type/index canary shape or an equivalent deterministic local
-  gate. This crosses contract export, codegen, protocol payloads, and the
-  TypeScript runtime without broadening Shunter's type system or subscription
-  semantics.
+- The generated TypeScript decoding gap is closed for the deterministic local
+  flat-kind gate. Remaining matrix gaps include backup/restore, hosted
+  TypeScript client execution, and workload-derived application distributions.
 
 ## Non-Goals
 
@@ -393,15 +396,13 @@ is insufficient for real hosted apps.
    declared queries/views, raw and declared protocol reads, declared protocol
    live-view initial rows and deltas, protocol row-buffer detachment, equality
    and range index seeks, unique-index rejection, nullable flat columns,
-   NaN rejection boundaries, and clean restart durability. Generated
-   TypeScript decoding stays package-level until it can run as a deterministic
-   hosted canary gate.
+   NaN rejection boundaries, and clean restart durability.
 
-   Next focus, 2026-06-02: close the generated TypeScript decoding gap for the
-   current flat-kind matrix if it can stay deterministic and local-review-sized.
-   Prefer a narrow gate or fixture that proves generated row decoders consume
-   protocol/contract-shaped payloads for the existing canary kinds. Do not add
-   new value kinds, new protocol semantics, or broad SDK surface in this step.
+   TypeScript decoding add-on, 2026-06-02: added a generated flat-kind fixture
+   and runtime TypeScript test that decode protocol-shaped row-list payloads
+   for the canary value families, including nullable string present/null cases.
+   This stays package-level and deterministic; hosted TypeScript client
+   execution and backup/restore remain outside the gate.
 5. Keep aggregate work limited to tests/benchmarks and small correctness fixes
    unless app requirements demand broader semantics.
 
@@ -522,7 +523,8 @@ Behavior to assert:
 - declared live view initial rows decode correctly
 - subscription delta rows decode correctly
 - protocol row payloads are detached from source buffers
-- generated TypeScript row decoder shape matches contract metadata
+- generated TypeScript row decoder shape matches contract metadata and executes
+  against protocol-shaped row-list payloads
 - snapshot/restart or backup/restore preserves values that are durable
 - indexes seek equality and range values correctly
 
@@ -714,6 +716,18 @@ declared protocol reads, declared protocol live-view initial rows and deltas,
 protocol row-buffer detachment checks, NaN construction rejections, and restart
 verification. Backup/restore and generated TypeScript decoding remain outside
 this hosted canary.
+
+Stage C TypeScript decoding add-on, 2026-06-02: added
+`typescript/client/test/fixtures/flat_type_index_canary.ts` as a generated
+fixture, guarded by a Go golden test, and
+`typescript/client/test/generated-type-index-decoding.test.ts` as an executed
+runtime test. The gate decodes protocol-shaped row-list payloads through the
+generated `flat_values` decoder for bool, signed/unsigned integer widths,
+128/256-bit integers, float32/float64 finite values, timestamp, duration, UUID,
+string, bytes, JSON, `arrayString`, and nullable string present/null cases.
+No new value kinds, protocol semantics, subscription semantics, or hosted app
+dependencies were added. Backup/restore and hosted TypeScript client execution
+remain known gaps.
 
 Stage D: decide policy.
 
@@ -1165,6 +1179,8 @@ Do not turn advisory rows into release-blocking gates without updating
    Completed for hosted Go/protocol paths.
 4. Add generated TypeScript coverage for the matrix only if it can run in a
    deterministic local gate.
+   Completed for package-level generated decoder execution over the flat-kind
+   canary shape.
 5. Review multi-way join limits after evidence exists.
    Completed for the current envelope: defaults stay unlimited.
 6. Only then decide whether any implementation changes are warranted.
@@ -1236,6 +1252,7 @@ Close-out status, 2026-06-02:
   rely on app-owned opt-in guardrails.
 - Current aggregate semantics have focused correctness and performance
   evidence; semantic expansion remains product backlog.
-- The remaining active matrix gap is generated TypeScript decoding for the
-  current flat-kind canary shape. Broader workload-derived benchmark evidence
-  remains backlog until a real workload or release gate needs it.
+- Generated TypeScript decoding for the current flat-kind canary shape has a
+  deterministic package-level gate. Backup/restore, hosted TypeScript client
+  execution, and broader workload-derived benchmark evidence remain backlog
+  until a real workload or release gate needs them.

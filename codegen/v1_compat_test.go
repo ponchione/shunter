@@ -433,6 +433,18 @@ func TestV1CompatibilityTypeScriptCoversCurrentValueKindMappings(t *testing.T) {
 	}
 }
 
+func TestV1CompatibilityTypeScriptFlatTypeIndexCanaryRuntimeFixtureGolden(t *testing.T) {
+	got, err := Generate(flatTypeIndexCanaryContractFixture(), Options{
+		Language:                LanguageTypeScript,
+		TypeScriptRuntimeImport: "../../src/index.js",
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	assertCodegenGoldenBytes(t, filepath.Join("..", "typescript", "client", "test", "fixtures", "flat_type_index_canary.ts"), got)
+}
+
 func TestV1CompatibilityTypeScriptIgnoresUnknownContractJSONFields(t *testing.T) {
 	contractJSON, err := os.ReadFile(filepath.Join("..", "testdata", "v1_module_contract.json"))
 	if err != nil {
@@ -562,6 +574,73 @@ func v1IdentifierNormalizationContract() shunter.ModuleContract {
 			Tags:    []string{"realtime-default"},
 		},
 	)
+	return contract
+}
+
+func flatTypeIndexCanaryContractFixture() shunter.ModuleContract {
+	contract := contractFixture()
+	contract.Module = shunter.ModuleContractIdentity{
+		Name:    "type_index_canary",
+		Version: "v0.0.0-test",
+	}
+	contract.Schema = schema.SchemaExport{
+		Version: 1,
+		Tables: []schema.TableExport{
+			{
+				Name: "flat_values",
+				Columns: []schema.ColumnExport{
+					{Name: "id", Type: "uint64"},
+					{Name: "label", Type: "string"},
+					{Name: "bucket", Type: "string"},
+					{Name: "seq", Type: "uint64"},
+					{Name: "flag", Type: "bool"},
+					{Name: "i8", Type: "int8"},
+					{Name: "u8", Type: "uint8"},
+					{Name: "i16", Type: "int16"},
+					{Name: "u16", Type: "uint16"},
+					{Name: "i32", Type: "int32"},
+					{Name: "u32", Type: "uint32"},
+					{Name: "i64", Type: "int64"},
+					{Name: "u64", Type: "uint64"},
+					{Name: "i128", Type: "int128"},
+					{Name: "u128", Type: "uint128"},
+					{Name: "i256", Type: "int256"},
+					{Name: "u256", Type: "uint256"},
+					{Name: "f32", Type: "float32"},
+					{Name: "f64", Type: "float64"},
+					{Name: "created_at", Type: "timestamp"},
+					{Name: "ttl", Type: "duration"},
+					{Name: "uuid", Type: "uuid"},
+					{Name: "blob", Type: "bytes"},
+					{Name: "metadata", Type: "json"},
+					{Name: "tags", Type: "arrayString"},
+					{Name: "optional_note", Type: "string", Nullable: true},
+				},
+				Indexes: []schema.IndexExport{
+					{Name: "flat_values_pk", Columns: []string{"id"}, Unique: true, Primary: true},
+					{Name: "label_uniq", Columns: []string{"label"}, Unique: true},
+					{Name: "bucket_idx", Columns: []string{"bucket"}},
+					{Name: "seq_idx", Columns: []string{"seq"}},
+				},
+				ReadPolicy: schema.ReadPolicy{Access: schema.TableAccessPublic},
+			},
+		},
+		Reducers: []schema.ReducerExport{},
+	}
+	contract.Queries = []shunter.QueryDescription{}
+	contract.Views = []shunter.ViewDescription{}
+	contract.VisibilityFilters = []shunter.VisibilityFilterDescription{}
+	contract.Permissions = shunter.PermissionContract{
+		Reducers: []shunter.PermissionContractDeclaration{},
+		Queries:  []shunter.PermissionContractDeclaration{},
+		Views:    []shunter.PermissionContractDeclaration{},
+	}
+	contract.ReadModel = shunter.ReadModelContract{
+		Declarations: []shunter.ReadModelContractDeclaration{},
+	}
+	contract.Migrations = shunter.MigrationContract{
+		Declarations: []shunter.MigrationContractDeclaration{},
+	}
 	return contract
 }
 

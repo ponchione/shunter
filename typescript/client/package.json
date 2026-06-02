@@ -22,7 +22,7 @@
     "build": "npm exec --yes --package typescript -- tsc -p tsconfig.build.json",
     "pack:dry-run": "npm pack --dry-run",
     "smoke:package": "node test/package-smoke.mjs",
-    "test": "npm run typecheck && npm exec --yes --package typescript -- tsc -p tsconfig.runtime-test.json && node test/runtime-behavior.test.mjs",
+    "test": "npm run typecheck && npm exec --yes --package typescript -- tsc -p tsconfig.runtime-test.json && node test/runtime-behavior.test.mjs && node .tmp_runtime_test/test/generated-type-index-decoding.test.js",
     "typecheck": "npm exec --yes --package typescript -- tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

@@ -6,6 +6,8 @@
     "rootDir": "."
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "test/fixtures/flat_type_index_canary.ts",
+    "test/generated-type-index-decoding.test.ts"
   ]
 }
