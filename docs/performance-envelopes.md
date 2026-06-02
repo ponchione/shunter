@@ -1422,6 +1422,73 @@ Current read:
 - This evidence keeps the default multi-way join guardrails unchanged:
   unlimited by default, with app-owned opt-in limits available through config.
 
+## Focused Multi-Way Live Join Stage W Larger Cartesian Function Shape
+
+This focused snapshot extends the bounded 3-relation Cartesian fixture from
+`cross3_rows_72` to `cross3_rows_80`. The new rows keep the same Cartesian
+shape and one changed endpoint row; the changed row emits an 80x80 Cartesian
+fragment. The snapshot records table-shaped projection, `COUNT(*)`, and the
+aggregate functions already accepted by the subscription layer. Runtime
+semantics and default multi-way join guardrails are unchanged.
+
+- Date: 2026-06-02
+- Shunter commit: `d9863a446e624197fb0aad7e5cf84b68aade956b`
+- Measurement worktree: commit above plus Stage W benchmark and documentation
+  changes
+- Host: `Linux gernsback 6.17.0-35-generic #35~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Tue May 26 19:30:42 UTC 2 x86_64 x86_64 x86_64 GNU/Linux`
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`
+- Raw sample: 12 sub-benchmarks, `-count=10`, 120 benchmark rows, total
+  package benchmark time 165.169s across three focused `go test` invocations
+- Raw output:
+  `working-docs/release-evidence/2026-06-02-subscription-stage-w/multiway-cartesian-raw.log`
+- Benchstat output:
+  `working-docs/release-evidence/2026-06-02-subscription-stage-w/multiway-cartesian-benchstat.log`
+
+Command:
+
+```bash
+rtk mkdir -p working-docs/release-evidence/2026-06-02-subscription-stage-w
+go test -run '^$' -bench '^BenchmarkMultiWayLiveJoinRelationShapes$/^cross3_rows_(72|80)$' -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-06-02-subscription-stage-w/relation-shapes-cross3-72-80.txt 2>&1
+go test -run '^$' -bench '^BenchmarkMultiWayLiveJoinAggregateRelationShapes$/^cross3_rows_(72|80)$/^count$' -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-06-02-subscription-stage-w/aggregate-relation-shapes-cross3-72-80.txt 2>&1
+go test -run '^$' -bench '^BenchmarkMultiWayLiveJoinAggregateFunctions$/^cross3_rows_(72|80)$' -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-06-02-subscription-stage-w/aggregate-functions-cross3-72-80.txt 2>&1
+rtk awk '1' working-docs/release-evidence/2026-06-02-subscription-stage-w/relation-shapes-cross3-72-80.txt working-docs/release-evidence/2026-06-02-subscription-stage-w/aggregate-relation-shapes-cross3-72-80.txt working-docs/release-evidence/2026-06-02-subscription-stage-w/aggregate-functions-cross3-72-80.txt > working-docs/release-evidence/2026-06-02-subscription-stage-w/multiway-cartesian-raw.log
+rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-06-02-subscription-stage-w/multiway-cartesian-raw.log > working-docs/release-evidence/2026-06-02-subscription-stage-w/multiway-cartesian-benchstat.log 2>&1
+```
+
+Representative standings:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Multi-way Cartesian shape | `MultiWayLiveJoinRelationShapes/cross3_rows_72-24` | 3-relation Cartesian multi-join, 72 rows per relation, one endpoint insert emits a 72x72 fragment | 465.3us +/- 3% | 1.130Mi +/- 0% | 105.0 +/- 1% | advisory |
+| Multi-way Cartesian shape | `MultiWayLiveJoinRelationShapes/cross3_rows_80-24` | 3-relation Cartesian multi-join, 80 rows per relation, one endpoint insert emits an 80x80 fragment | 558.7us +/- 4% | 1.157Mi +/- 0% | 105.0 +/- 1% | advisory |
+| Multi-way aggregate Cartesian shape | `MultiWayLiveJoinAggregateRelationShapes/cross3_rows_72/count-24` | `COUNT(*)` over 3-relation Cartesian multi-join, 72 rows per relation, one endpoint insert | 7.777ms +/- 1% | 22.53Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate Cartesian shape | `MultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24` | `COUNT(*)` over 3-relation Cartesian multi-join, 80 rows per relation, one endpoint insert | 10.59ms +/- 1% | 25.13Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_80/count_star-24` | `COUNT(*)` over 3-relation Cartesian multi-join, 80 rows per relation, one endpoint insert | 10.59ms +/- 0% | 25.13Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_80/count_column-24` | `COUNT(t3.id)` over 3-relation Cartesian multi-join, 80 rows per relation, one endpoint insert | 28.59ms +/- 0% | 25.24Ki +/- 0% | 73 | advisory |
+| Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_80/count_distinct-24` | `COUNT(DISTINCT t1.id)` over 3-relation Cartesian multi-join, 80 rows per relation, one endpoint insert | 47.08ms +/- 0% | 70.22Ki +/- 0% | 247 | advisory |
+| Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_80/sum-24` | `SUM(t3.id)` over 3-relation Cartesian multi-join, 80 rows per relation, one endpoint insert | 34.64ms +/- 1% | 25.47Ki +/- 0% | 75 | advisory |
+| Multi-way Stage W Cartesian geomean | all focused Stage W Cartesian benchmarks | 12 sub-benchmark geomean | 10.33ms | 54.31Ki | 94.93 | advisory |
+
+Current read:
+
+- The bounded `cross3_rows_80` rows remain local-review-sized under
+  `-count=10` while extending Cartesian size evidence beyond the 72-row shape.
+- The table-shaped row's allocation growth tracks the larger materialized
+  80x80 Cartesian fragment. The `COUNT(*)` row avoids that output
+  materialization, but latency still scales with counting the combinations.
+- `COUNT(column)` and `SUM(column)` remain allocation-stable relative to
+  `COUNT(*)` while measuring higher latency in this Cartesian fixture.
+- `COUNT(DISTINCT column)` remains the slowest Stage W Cartesian
+  aggregate-function row and adds allocation, but remains local-review-sized
+  in the focused run.
+- Larger Cartesian fixtures beyond the bounded 80-row shape, larger
+  skew/fanout distributions beyond 56x56, relation counts beyond the bounded
+  5-relation chain, larger aggregate-function self-alias distributions, and
+  app-derived workload distributions remain outside the current envelope.
+- This evidence keeps the default multi-way join guardrails unchanged:
+  unlimited by default, with app-owned opt-in limits available through config.
+
 ## Focused Ordered Subscription Window Baseline
 
 This focused snapshot records the ordered subscription window benchmarks added
@@ -1513,7 +1580,9 @@ Representative standings:
   Stage R extends skew/fanout evidence to `hot_key_40x40`, Stage S extends
   Cartesian evidence to `cross3_rows_64`, Stage T extends skew/fanout evidence
   to `hot_key_48x48`, and Stage U extends Cartesian evidence to
-  `cross3_rows_72`. This evidence does not justify changing the unlimited
+  `cross3_rows_72`. Stage V extends skew/fanout evidence to
+  `hot_key_56x56`, and Stage W extends Cartesian evidence to
+  `cross3_rows_80`. This evidence does not justify changing the unlimited
   defaults.
 - Offline backup/restore is covered for small and larger complete local
   DataDir fixtures and is expected to be I/O dominated; these rows do not
@@ -1677,9 +1746,9 @@ These remain outside the current benchmark envelope:
   two-table predicate fixtures
 - application workload timing, including production-scale backup/restore timing
 - multi-way join evidence beyond the focused Stage B, Stage D, and Stage F
-  through Stage U snapshots, including larger Cartesian fixtures beyond the
-  bounded 72-row cross shape, larger skew/fanout distributions beyond the
-  bounded 48x48 row, relation
+  through Stage W snapshots, including larger Cartesian fixtures beyond the
+  bounded 80-row cross shape, larger skew/fanout distributions beyond the
+  bounded 56x56 row, relation
   counts beyond the bounded 5-relation chain fixture, larger
   aggregate-function self-alias distributions beyond the bounded `self_alias3`
   fixture, and app-derived workload distributions
