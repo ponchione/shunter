@@ -177,9 +177,16 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
   two strict-auth WebSocket clients to the same RC taskboard
   `open_tasks_live` declared view and verifies that both receive the same
   `create_task` insert and `complete_task` delete deltas. This is not timing
-  evidence; the current concrete RC reducer flow mutates task state across
-  commits, so a steady hosted protocol benchmark would need additional real
-  workload support rather than a size-only synthetic loop.
+  evidence. The 2026-06-02 RC hosted timing inventory checked
+  `internal/gauntlettests/rc_app_workload_test.go`,
+  `declared_read_protocol_bench_test.go`, and `subscription/bench_test.go`:
+  the real RC hosted path exposes `create_task` and `complete_task`, but no
+  real reducer deletes or reopens a task. A repeated `create_task` then
+  `complete_task` protocol loop would return `open_tasks_live` membership to
+  baseline while still accumulating completed task rows in the `tasks` table;
+  keeping total state bounded would require rebuilding/resetting the runtime or
+  adding benchmark-only workload support. No RC hosted timing row is added for
+  that reason.
 - The first bounded workload-derived hosted subscription timing row is
   covered: `BenchmarkDeclaredReadHostedSubscriptionReducerDelta` drives the
   existing chat declared-read workload through a strict-auth local WebSocket
@@ -232,8 +239,9 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
   backup/restore gaps are closed for the deterministic local flat-kind gate.
   Remaining matrix gaps include broader workload-derived application fanout
   distributions beyond the bounded two-subscriber RC protocol gate and
-  two-subscriber hosted timing row, broader application timing, and
-  multi-table/multi-way distributions.
+  two-subscriber hosted timing row, RC hosted timing until the taskboard app
+  has a real bounded create/delete or reopen/complete cycle, broader
+  application timing, and multi-table/multi-way distributions.
 
 ## Non-Goals
 
@@ -1344,9 +1352,11 @@ Close-out status, 2026-06-02:
   local gates.
 - The RC taskboard `open_tasks_live` workload-derived subscription delta has a
   deterministic local benchmark and published raw evidence. The same hosted
-  protocol path has a bounded two-subscriber correctness gate. A bounded
-  hosted timing row now covers the existing chat declared-read insert/delete
-  reducer cycle through a strict-auth local WebSocket caller with one
-  subscriber and with two subscribers. Broader workload-derived fanout timing
-  and distribution benchmark evidence remains backlog until a real workload or
-  release gate needs it.
+  protocol path has a bounded two-subscriber correctness gate, but no bounded
+  hosted timing source yet because the real RC reducers cannot return total
+  task-table state to baseline inside a measured loop. A bounded hosted timing
+  row now covers the existing chat declared-read insert/delete reducer cycle
+  through a strict-auth local WebSocket caller with one subscriber and with two
+  subscribers. Broader workload-derived fanout timing and distribution
+  benchmark evidence remains backlog until a real workload or release gate
+  needs it.

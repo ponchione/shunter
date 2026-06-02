@@ -1932,6 +1932,15 @@ Current read:
 - This does not replace RC taskboard hosted timing, application-scale fanout
   distributions beyond two subscribers, or multi-table/multi-way application
   workloads.
+- The 2026-06-02 RC hosted timing inventory checked
+  `internal/gauntlettests/rc_app_workload_test.go`,
+  `declared_read_protocol_bench_test.go`, and `subscription/bench_test.go`.
+  The RC taskboard app has real `create_task` and `complete_task` reducers, but
+  no real delete or reopen reducer; a repeated hosted protocol loop would
+  accumulate completed rows even if `open_tasks_live` membership returned to
+  baseline. A bounded RC hosted timing row still needs a real workload source
+  that returns total state to baseline without rebuilding or resetting the
+  runtime inside the measured loop.
 - Runtime semantics and default multi-way join guardrails remain unchanged.
 
 ## Memory Profile Notes
@@ -2085,7 +2094,8 @@ These remain outside the current benchmark envelope:
   two-subscriber RC protocol correctness gate, the bounded two-subscriber
   hosted chat insert/delete timing row, and the deterministic in-process
   same-query, varied single-table, skewed hot-key, and varied two-table
-  predicate fixtures
+  predicate fixtures; RC taskboard hosted timing remains blocked by the lack of
+  a real bounded taskboard reducer cycle that removes or reopens tasks
 - application workload timing beyond the bounded hosted chat insert/delete
   subscription cycle with one and two subscribers, including production-scale
   backup/restore timing
