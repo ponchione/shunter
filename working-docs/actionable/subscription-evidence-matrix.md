@@ -49,6 +49,9 @@ Current evidence:
 - `subscription/bench_test.go` includes one workload-derived RC taskboard
   `open_tasks_live` live-view delta fixture for the concrete `create_task`
   insert-open and `complete_task` delete-open reducer flows.
+- `internal/gauntlettests/rc_app_workload_test.go` includes a bounded
+  two-subscriber hosted protocol fanout gate for the same RC taskboard
+  `open_tasks_live` declared view and reducer flow.
 - `docs/performance-envelopes.md` records advisory benchmark snapshots and
   known gaps.
 - Package tests already cover many subscription correctness paths.
@@ -169,6 +172,14 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
   and measures `create_task` insert-open and `complete_task` delete-open
   deltas. Raw `-count=10` evidence is saved under
   `working-docs/release-evidence/2026-06-02-workload-derived-subscription/`.
+- The first bounded workload-derived protocol fanout correctness gate is
+  covered: `TestReleaseCandidateExampleAppProtocolFanoutStrictAuth` subscribes
+  two strict-auth WebSocket clients to the same RC taskboard
+  `open_tasks_live` declared view and verifies that both receive the same
+  `create_task` insert and `complete_task` delete deltas. This is not timing
+  evidence; the current concrete RC reducer flow mutates task state across
+  commits, so a steady hosted protocol benchmark would need additional real
+  workload support rather than a size-only synthetic loop.
 - The hosted type/index canary now crosses reducer writes, declared reads,
   live subscriptions, protocol payloads, index seeks, restart, and offline
   backup/restore. Generated TypeScript decoding now has deterministic
@@ -201,7 +212,8 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
   default-limit proposal needs the specific shape.
 - The generated TypeScript decoding, hosted TypeScript client execution, and
   backup/restore gaps are closed for the deterministic local flat-kind gate.
-  Remaining matrix gaps include broader workload-derived application fanout,
+  Remaining matrix gaps include broader workload-derived application fanout
+  distributions beyond the bounded two-subscriber RC protocol gate, application
   timing, and multi-table/multi-way distributions.
 
 ## Non-Goals
@@ -1310,6 +1322,7 @@ Close-out status, 2026-06-02:
   backup/restore for the current flat-kind canary shape have deterministic
   local gates.
 - The RC taskboard `open_tasks_live` workload-derived subscription delta has a
-  deterministic local benchmark and published raw evidence. Broader
-  workload-derived benchmark evidence remains backlog until a real workload or
-  release gate needs it.
+  deterministic local benchmark and published raw evidence. The same hosted
+  protocol path has a bounded two-subscriber correctness gate. Broader
+  workload-derived fanout timing and distribution benchmark evidence remains
+  backlog until a real workload or release gate needs it.

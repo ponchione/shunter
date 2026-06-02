@@ -1855,8 +1855,10 @@ Current read:
 
 - The first concrete app-shaped subscription delta fixture is now covered by a
   deterministic local package benchmark.
-- This does not replace WebSocket, multi-subscriber, production-scale, or
-  multi-table application workload timing.
+- This does not replace WebSocket timing, benchmarked multi-subscriber fanout,
+  production-scale, or multi-table application workload timing. The RC
+  taskboard hosted protocol path has a separate bounded two-subscriber
+  correctness gate in `internal/gauntlettests/rc_app_workload_test.go`.
 - Runtime semantics and default multi-way join guardrails remain unchanged.
 
 ## Memory Profile Notes
@@ -2006,7 +2008,8 @@ These remain outside the current benchmark envelope:
   slow-reader backpressure fixtures, including application-scale fanout;
   deterministic sender-level full-buffer rejection is covered separately
 - workload-derived application fanout distributions beyond the focused RC
-  taskboard open-tasks live-view create/complete deltas and the deterministic
+  taskboard open-tasks live-view create/complete deltas, the bounded
+  two-subscriber RC protocol correctness gate, and the deterministic
   in-process same-query, varied single-table, skewed hot-key, and varied
   two-table predicate fixtures
 - application workload timing, including production-scale backup/restore timing

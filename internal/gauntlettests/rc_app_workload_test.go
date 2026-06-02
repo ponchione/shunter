@@ -158,6 +158,65 @@ func TestReleaseCandidateExampleAppProtocolWorkloadStrictAuth(t *testing.T) {
 	assertRCExampleAllTasks(t, rt, model, 19, "protocol final")
 }
 
+func TestReleaseCandidateExampleAppProtocolFanoutStrictAuth(t *testing.T) {
+	dataDir := t.TempDir()
+	rt := buildRCExampleAppRuntime(t, dataDir)
+	defer rt.Close()
+	model := map[uint64]rcExampleTask{}
+
+	srv := httptest.NewServer(rt.HTTPHandler())
+	defer srv.Close()
+	url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/subscribe"
+	caller := dialRCExampleProtocol(t, url, "fanout op 0 caller dial", "tasks:write", "tasks:read")
+	defer caller.CloseNow()
+	subscribers := []struct {
+		label   string
+		queryID uint32
+		client  *websocket.Conn
+	}{
+		{
+			label:   "subscriber-a",
+			queryID: 7201,
+			client:  dialRCExampleProtocol(t, url, "fanout op 0 subscriber-a dial", "tasks:read"),
+		},
+		{
+			label:   "subscriber-b",
+			queryID: 7202,
+			client:  dialRCExampleProtocol(t, url, "fanout op 0 subscriber-b dial", "tasks:read"),
+		},
+	}
+	for _, sub := range subscribers {
+		defer sub.client.CloseNow()
+	}
+
+	callRCExampleProtocolReducer(t, caller, 20, "create_task", rcExampleCreateTaskArgs{ID: 1, Owner: "alice", Title: "fanout seed"}, true)
+	model[1] = rcExampleTask{Owner: "alice", Title: "fanout seed"}
+	for i, sub := range subscribers {
+		initialRows := subscribeRCExampleProtocolOpenTasks(t, sub.client, uint32(7200+i), sub.queryID, "fanout subscribe "+sub.label)
+		if !maps.Equal(initialRows, openRCExampleTasks(model)) {
+			t.Fatalf("seed=%#x runtime_config=%s operation=SubscribeDeclaredView(fanout %s) observed_rows=%v expected_rows=%v",
+				rcExampleAppSeed, rcExampleAppRuntimeLabel, sub.label, initialRows, openRCExampleTasks(model))
+		}
+	}
+
+	callRCExampleProtocolReducer(t, caller, 21, "create_task", rcExampleCreateTaskArgs{ID: 2, Owner: "bob", Title: "fanout insert"}, true)
+	wantInsert := map[uint64]rcExampleTask{2: {Owner: "bob", Title: "fanout insert"}}
+	for _, sub := range subscribers {
+		delta := readRCExampleProtocolTaskDelta(t, sub.client, sub.queryID, "fanout create_task "+sub.label)
+		assertRCExampleProtocolTaskDelta(t, delta, wantInsert, nil, "fanout create_task "+sub.label)
+	}
+	model[2] = rcExampleTask{Owner: "bob", Title: "fanout insert"}
+
+	callRCExampleProtocolReducer(t, caller, 22, "complete_task", rcExampleCompleteTaskArgs{ID: 1}, true)
+	wantDelete := map[uint64]rcExampleTask{1: {Owner: "alice", Title: "fanout seed"}}
+	for _, sub := range subscribers {
+		delta := readRCExampleProtocolTaskDelta(t, sub.client, sub.queryID, "fanout complete_task "+sub.label)
+		assertRCExampleProtocolTaskDelta(t, delta, nil, wantDelete, "fanout complete_task "+sub.label)
+	}
+	model[1] = rcExampleTask{Owner: "alice", Title: "fanout seed", Done: true}
+	assertRCExampleAllTasks(t, rt, model, 23, "protocol fanout final")
+}
+
 type rcExampleTask struct {
 	Owner string
 	Title string
@@ -445,6 +504,14 @@ func readRCExampleProtocolTaskDelta(t *testing.T, client *websocket.Conn, queryI
 		maps.Copy(delta.deletes, decodeRCExampleProtocolTasks(t, entry.Deletes, label+" deletes"))
 	}
 	return delta
+}
+
+func assertRCExampleProtocolTaskDelta(t *testing.T, got rcExampleProtocolDelta, wantInserts, wantDeletes map[uint64]rcExampleTask, label string) {
+	t.Helper()
+	if !maps.Equal(got.inserts, wantInserts) || !maps.Equal(got.deletes, wantDeletes) {
+		t.Fatalf("seed=%#x runtime_config=%s operation=ReadDeclaredViewDelta(%s) observed_delta=%+v expected_inserts=%v expected_deletes=%v",
+			rcExampleAppSeed, rcExampleAppRuntimeLabel, label, got, wantInserts, wantDeletes)
+	}
 }
 
 func decodeRCExampleProtocolTasks(t *testing.T, encoded []byte, label string) map[uint64]rcExampleTask {
