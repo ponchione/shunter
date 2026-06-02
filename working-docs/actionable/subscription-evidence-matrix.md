@@ -1,8 +1,9 @@
 # Subscription Evidence And Type/Index Matrix
 
 Status: synthetic multi-way evidence campaign closed after Stage Z; generated
-TypeScript flat-kind decoding and flat-kind backup/restore now have
-deterministic local gates; remaining items stay evidence backlog
+TypeScript flat-kind decoding, hosted TypeScript client execution, and
+flat-kind backup/restore now have deterministic local gates; remaining items
+stay evidence backlog
 Primary backlog items: `deferred-functionality-backlog.md` items 10, 11, 24,
 and 31
 
@@ -55,6 +56,9 @@ Current evidence:
 - `typescript/client/test/generated-type-index-decoding.test.ts` executes a
   generated flat-kind table decoder against protocol-shaped row-list payloads
   for the same canary value families.
+- `typescript/client/test/hosted-type-index-canary.test.mjs` executes the
+  TypeScript client runtime against a local hosted canary runtime and decodes
+  declared query/view rows with the generated flat-kind decoder.
 
 Implementation anchors:
 
@@ -158,10 +162,10 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
   distributions.
 - The hosted type/index canary now crosses reducer writes, declared reads,
   live subscriptions, protocol payloads, index seeks, restart, and offline
-  backup/restore. Generated TypeScript decoding now has a deterministic
-  package-level gate that crosses contract export, generated bindings,
-  protocol-shaped row-list payloads, and the TypeScript runtime. A hosted
-  TypeScript client canary remains outside this gate.
+  backup/restore. Generated TypeScript decoding now has deterministic
+  package-level gates that cross contract export, generated bindings,
+  protocol-shaped row-list payloads, the TypeScript runtime, and a local hosted
+  runtime reached through the TypeScript client.
 - Aggregate evidence includes package-level correctness coverage, focused
   Stage D `chain3`, Stage I `chain4`, Stage J `cross3_rows_32`, Stage K
   `hot_key_16x16`, Stage L `self_alias3`, Stage M `cross3_rows_40`, Stage N
@@ -179,15 +183,16 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
   enough to select safe defaults, and apps can opt into guardrails through
   config.
 - The codebase now has a canary app proving every supported flat kind through
-  the hosted protocol path, offline backup/restore, and package-level
-  generated TypeScript decoder execution for the same flat-kind shape.
+  the hosted protocol path, offline backup/restore, package-level generated
+  TypeScript decoder execution, and hosted TypeScript client execution for the
+  same flat-kind shape.
 - Synthetic multi-way size expansion is capped here for the local advisory
   envelope. Do not continue with Stage AA/AB size-only slices unless a real app
   workload, regression investigation, release-gate threshold, or renewed
   default-limit proposal needs the specific shape.
-- The generated TypeScript decoding and backup/restore gaps are closed for
-  the deterministic local flat-kind gate. Remaining matrix gaps include hosted
-  TypeScript client execution and workload-derived application distributions.
+- The generated TypeScript decoding, hosted TypeScript client execution, and
+  backup/restore gaps are closed for the deterministic local flat-kind gate.
+  Remaining matrix gaps include workload-derived application distributions.
 
 ## Non-Goals
 
@@ -401,8 +406,13 @@ is insufficient for real hosted apps.
    TypeScript decoding add-on, 2026-06-02: added a generated flat-kind fixture
    and runtime TypeScript test that decode protocol-shaped row-list payloads
    for the canary value families, including nullable string present/null cases.
-   This stays package-level and deterministic; hosted TypeScript client
-   execution remains outside the gate.
+   This stays package-level and deterministic.
+
+   Hosted TypeScript client add-on, 2026-06-02: added a deterministic package
+   test that starts a local hosted canary runtime, connects through the
+   TypeScript client, performs protocol reducer writes, declared query reads,
+   and declared live-view subscription updates, then decodes hosted row bytes
+   with the generated flat-kind decoder.
 
    Backup/restore add-on, 2026-06-02: added a deterministic hosted-runtime
    restore gate that writes the current flat-kind canary rows, waits for
@@ -732,8 +742,22 @@ generated `flat_values` decoder for bool, signed/unsigned integer widths,
 128/256-bit integers, float32/float64 finite values, timestamp, duration, UUID,
 string, bytes, JSON, `arrayString`, and nullable string present/null cases.
 No new value kinds, protocol semantics, subscription semantics, or hosted app
-dependencies were added. Hosted TypeScript client execution remains a known
-gap.
+dependencies were added.
+
+Stage C hosted TypeScript client add-on, 2026-06-02: added
+`typescript/client/test/fixtures/hosted_type_index_canary` as a narrow local Go
+server fixture and `typescript/client/test/hosted-type-index-canary.test.mjs`
+as an executed package test. The gate starts a real hosted canary runtime on an
+ephemeral loopback port, connects through `createShunterClient`, writes rows
+through protocol reducer calls, runs the declared active-row query, subscribes
+to the declared active-row live view, receives a live update after a reducer
+write, and decodes hosted protocol row bytes with the generated `flat_values`
+decoder. The representative rows assert bool, signed/unsigned integer widths,
+128/256-bit integers, finite float32/float64 values, timestamp, duration, UUID,
+string, bytes, JSON, `arrayString`, and nullable string present/null cases. No
+new value kinds, protocol semantics, subscription semantics, broad SDK surface,
+external hosted-app dependency, or synthetic multi-way benchmark rows were
+added.
 
 Stage C backup/restore add-on, 2026-06-02: added
 `TestRuntimeGauntletFlatTypeIndexCanaryBackupRestore` in
@@ -745,8 +769,8 @@ restores the DataDir; rebuilds from the restored DataDir; and reuses local
 scan, declared query/view, primary key, unique index, secondary equality index,
 and secondary range index assertions. No new value kinds, backup semantics,
 storage semantics, protocol semantics, subscription semantics, SDK surface, or
-hosted external-app dependencies were added. Hosted TypeScript client execution
-and workload-derived application distributions remain known gaps.
+hosted external-app dependencies were added. Workload-derived application
+distributions remain a known gap.
 
 Stage D: decide policy.
 
@@ -1271,7 +1295,7 @@ Close-out status, 2026-06-02:
   rely on app-owned opt-in guardrails.
 - Current aggregate semantics have focused correctness and performance
   evidence; semantic expansion remains product backlog.
-- Generated TypeScript decoding and backup/restore for the current flat-kind
-  canary shape have deterministic local gates. Hosted TypeScript client
-  execution and broader workload-derived benchmark evidence remain backlog
-  until a real workload or release gate needs them.
+- Generated TypeScript decoding, hosted TypeScript client execution, and
+  backup/restore for the current flat-kind canary shape have deterministic
+  local gates. Broader workload-derived benchmark evidence remains backlog
+  until a real workload or release gate needs it.
