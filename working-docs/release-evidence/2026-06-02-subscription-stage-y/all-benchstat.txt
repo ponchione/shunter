@@ -1,0 +1,51 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+                                                                    │ working-docs/release-evidence/2026-06-02-subscription-stage-y/all-raw.txt │
+                                                                    │                                  sec/op                                   │
+MultiWayLiveJoinRelationShapes/cross3_rows_80-24                                                                                    563.5µ ± 5%
+MultiWayLiveJoinRelationShapes/cross3_rows_88-24                                                                                    715.3µ ± 5%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24                                                                     10.58m ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_88/count-24                                                                     14.10m ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_80/count_star-24                                                                     10.79m ± 3%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_80/count_column-24                                                                   29.15m ± 1%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_80/count_distinct-24                                                                 47.74m ± 2%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_80/sum-24                                                                            35.03m ± 3%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_88/count_star-24                                                                     14.50m ± 2%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_88/count_column-24                                                                   38.67m ± 1%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_88/count_distinct-24                                                                 64.01m ± 1%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_88/sum-24                                                                            46.66m ± 0%
+geomean                                                                                                                             13.92m
+
+                                                                    │ working-docs/release-evidence/2026-06-02-subscription-stage-y/all-raw.txt │
+                                                                    │                                   B/op                                    │
+MultiWayLiveJoinRelationShapes/cross3_rows_80-24                                                                                   1.157Mi ± 0%
+MultiWayLiveJoinRelationShapes/cross3_rows_88-24                                                                                   1.587Mi ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24                                                                    25.13Ki ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_88/count-24                                                                    27.77Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_80/count_star-24                                                                    25.13Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_80/count_column-24                                                                  25.24Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_80/count_distinct-24                                                                70.23Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_80/sum-24                                                                           25.47Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_88/count_star-24                                                                    27.78Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_88/count_column-24                                                                  27.94Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_88/count_distinct-24                                                                75.75Ki ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_88/sum-24                                                                           28.19Ki ± 0%
+geomean                                                                                                                            60.75Ki
+
+                                                                    │ working-docs/release-evidence/2026-06-02-subscription-stage-y/all-raw.txt │
+                                                                    │                                 allocs/op                                 │
+MultiWayLiveJoinRelationShapes/cross3_rows_80-24                                                                                     105.0 ± 1%
+MultiWayLiveJoinRelationShapes/cross3_rows_88-24                                                                                     112.0 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24                                                                      73.00 ± 0%
+MultiWayLiveJoinAggregateRelationShapes/cross3_rows_88/count-24                                                                      73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_80/count_star-24                                                                      73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_80/count_column-24                                                                    73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_80/count_distinct-24                                                                  247.0 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_80/sum-24                                                                             75.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_88/count_star-24                                                                      73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_88/count_column-24                                                                    73.00 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_88/count_distinct-24                                                                  263.5 ± 0%
+MultiWayLiveJoinAggregateFunctions/cross3_rows_88/sum-24                                                                             75.00 ± 0%
+geomean                                                                                                                              96.49

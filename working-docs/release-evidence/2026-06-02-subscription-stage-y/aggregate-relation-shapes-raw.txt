@@ -1,0 +1,26 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24         	     100	  10574222 ns/op	   25732 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24         	     100	  10569121 ns/op	   25732 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24         	     100	  10545035 ns/op	   25731 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24         	     100	  10579224 ns/op	   25731 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24         	     100	  10599231 ns/op	   25732 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24         	     100	  10552126 ns/op	   25731 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24         	     100	  10625974 ns/op	   25731 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24         	     100	  10630566 ns/op	   25732 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24         	     100	  10647864 ns/op	   25731 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_80/count-24         	     100	  10588037 ns/op	   25720 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_88/count-24         	      79	  14166147 ns/op	   28448 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_88/count-24         	      84	  14024064 ns/op	   28440 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_88/count-24         	      84	  14104127 ns/op	   28440 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_88/count-24         	      82	  14140394 ns/op	   28431 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_88/count-24         	      80	  14042783 ns/op	   28433 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_88/count-24         	      84	  14051991 ns/op	   28440 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_88/count-24         	      84	  14093442 ns/op	   28440 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_88/count-24         	      84	  14180991 ns/op	   28440 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_88/count-24         	      78	  14115720 ns/op	   28450 B/op	      73 allocs/op
+BenchmarkMultiWayLiveJoinAggregateRelationShapes/cross3_rows_88/count-24         	      82	  14068933 ns/op	   28443 B/op	      73 allocs/op
+PASS
+ok  	github.com/ponchione/shunter/subscription	22.699s

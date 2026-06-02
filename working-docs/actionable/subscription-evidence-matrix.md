@@ -1,6 +1,6 @@
 # Subscription Evidence And Type/Index Matrix
 
-Status: Stage X larger skew/fanout evidence slice complete; remaining
+Status: Stage Y larger Cartesian evidence slice complete; remaining
 items stay evidence backlog
 Primary backlog items: `deferred-functionality-backlog.md` items 10, 11, 24,
 and 31
@@ -71,7 +71,7 @@ Implementation anchors:
 - `internal/gauntlettests` is the right place for hosted-runtime or protocol
   matrix coverage that should run through real runtime APIs.
 
-Exact gaps after Stage X larger skew/fanout evidence publication:
+Exact gaps after Stage Y larger Cartesian evidence publication:
 
 - Stage B now has bounded benchmark rows for a 3-relation Cartesian
   multi-join, one-match vs 8x8 hot-key selectivity/skew, 1/10/100 changed
@@ -139,8 +139,12 @@ Exact gaps after Stage X larger skew/fanout evidence publication:
 - Stage X now extends bounded skew/fanout evidence to `hot_key_64x64` for
   table-shaped projection and aggregate-function rows for `COUNT(*)`,
   `COUNT(column)`, `COUNT(DISTINCT column)`, and `SUM(column)`.
+- Stage Y now extends bounded Cartesian evidence to `cross3_rows_88` for
+  table-shaped projection, `COUNT(*)` aggregate relation-shape rows, and
+  aggregate-function rows for `COUNT(*)`, `COUNT(column)`,
+  `COUNT(DISTINCT column)`, and `SUM(column)`.
 - Remaining multi-way evidence gaps include larger Cartesian fixtures beyond
-  the bounded 80-row cross shape, larger skew/fanout distributions beyond the
+  the bounded 88-row cross shape, larger skew/fanout distributions beyond the
   bounded 64x64 row, relation counts beyond the bounded 5-relation chain
   fixture, larger aggregate-function self-alias distributions beyond the
   bounded `self_alias3` fixture, and workload-derived application
@@ -156,11 +160,12 @@ Exact gaps after Stage X larger skew/fanout evidence publication:
   Stage Q `cross3_rows_56`, Stage R `hot_key_40x40`, Stage S
   `cross3_rows_64`, Stage T `hot_key_48x48`, Stage U `cross3_rows_72`,
   Stage V `hot_key_56x56`, Stage W `cross3_rows_80`, and Stage X
-  `hot_key_64x64` performance rows, plus Stage E documentation/tests for
-  current aggregate semantics. Larger aggregate shapes and workload-derived
-  distributions remain outside the current envelope.
+  `hot_key_64x64`, and Stage Y `cross3_rows_88` performance rows, plus
+  Stage E documentation/tests for current aggregate semantics. Larger
+  aggregate shapes and workload-derived distributions remain outside the
+  current envelope.
 - Default multi-way join limits remain intentionally unlimited. The bounded
-  Stage A through Stage X evidence is advisory, the worst local rows are not
+  Stage A through Stage Y evidence is advisory, the worst local rows are not
   enough to select safe defaults, and apps can opt into guardrails through
   config.
 - The codebase now has a canary app proving every supported flat kind through
@@ -332,6 +337,13 @@ is insufficient for real hosted apps.
    3-relation chain fixture with one changed endpoint row matching a 64x64
    fanout fragment. The raw focused `-count=10` evidence is saved under
    `working-docs/release-evidence/2026-06-02-subscription-stage-x/`.
+
+   Stage Y subset completed on 2026-06-02 for larger bounded Cartesian
+   coverage: `cross3_rows_88` rows for table-shaped projection, `COUNT(*)`,
+   `COUNT(column)`, `COUNT(DISTINCT column)`, and `SUM(column)` over the
+   3-relation Cartesian fixture with one changed endpoint row emitting an
+   88x88 Cartesian fragment. The raw focused `-count=10` evidence is saved
+   under `working-docs/release-evidence/2026-06-02-subscription-stage-y/`.
 3. Decide whether default multi-way join limits need to change, using
    benchmark and canary evidence rather than speculation.
 
@@ -1042,6 +1054,24 @@ skew/fanout fixture beyond `hot_key_56x56` for table-shaped projection,
 changed endpoint row matches a 64x64 fanout fragment. Runtime semantics and
 default multi-way join guardrails stayed unchanged. Larger skew/fanout
 distributions beyond 64x64, larger Cartesian fixtures beyond 80 rows, larger
+aggregate-function self-alias distributions, relation counts beyond the
+bounded 5-relation chain, and app-derived workload distributions remain
+evidence backlog.
+
+Stage Y: close one larger bounded Cartesian evidence gap.
+
+- inventory current multi-way Cartesian benchmark/docs coverage
+- add a larger Cartesian extension only if it stays local-review-sized
+- publish focused benchmark evidence and keep default guardrails unchanged
+
+Stage Y status, 2026-06-02: completed bounded `cross3_rows_88` Cartesian rows
+in `subscription/bench_test.go` and published the focused `-count=10` rows in
+`docs/performance-envelopes.md`. The slice extends the existing 3-relation
+Cartesian fixture beyond `cross3_rows_80` for table-shaped projection,
+`COUNT(*)`, `COUNT(column)`, `COUNT(DISTINCT column)`, and `SUM(column)`; one
+changed endpoint row emits an 88x88 Cartesian fragment. Runtime semantics and
+default multi-way join guardrails stayed unchanged. Larger Cartesian fixtures
+beyond 88 rows, larger skew/fanout distributions beyond 64x64, larger
 aggregate-function self-alias distributions, relation counts beyond the
 bounded 5-relation chain, and app-derived workload distributions remain
 evidence backlog.
