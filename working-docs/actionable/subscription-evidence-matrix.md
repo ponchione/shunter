@@ -46,6 +46,9 @@ Current evidence:
   ordered-window paths, join delta eval, multi-way join size fixtures, relation
   shape fixtures including a bounded 5-relation chain, bounded Stage B
   multi-way dimensions, delta index construction, and candidate collection.
+- `subscription/bench_test.go` includes one workload-derived RC taskboard
+  `open_tasks_live` live-view delta fixture for the concrete `create_task`
+  insert-open and `complete_task` delete-open reducer flows.
 - `docs/performance-envelopes.md` records advisory benchmark snapshots and
   known gaps.
 - Package tests already cover many subscription correctness paths.
@@ -158,8 +161,14 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
   the bounded 88-row cross shape, larger skew/fanout distributions beyond the
   bounded 72x72 row, relation counts beyond the bounded 5-relation chain
   fixture, larger aggregate-function self-alias distributions beyond the
-  bounded `self_alias3` fixture, and workload-derived application
+  bounded `self_alias3` fixture, and workload-derived multi-way application
   distributions.
+- The first concrete workload-derived subscription delta benchmark is covered:
+  `BenchmarkRCAppOpenTasksLiveViewDelta` maps the release-candidate taskboard
+  app's `open_tasks_live` declared view to the in-process subscription manager
+  and measures `create_task` insert-open and `complete_task` delete-open
+  deltas. Raw `-count=10` evidence is saved under
+  `working-docs/release-evidence/2026-06-02-workload-derived-subscription/`.
 - The hosted type/index canary now crosses reducer writes, declared reads,
   live subscriptions, protocol payloads, index seeks, restart, and offline
   backup/restore. Generated TypeScript decoding now has deterministic
@@ -192,7 +201,8 @@ Exact gaps after Stage Z larger skew/fanout evidence publication:
   default-limit proposal needs the specific shape.
 - The generated TypeScript decoding, hosted TypeScript client execution, and
   backup/restore gaps are closed for the deterministic local flat-kind gate.
-  Remaining matrix gaps include workload-derived application distributions.
+  Remaining matrix gaps include broader workload-derived application fanout,
+  timing, and multi-table/multi-way distributions.
 
 ## Non-Goals
 
@@ -439,6 +449,7 @@ Start with existing benchmark names:
 - `BenchmarkFanOut1KClientsVariedQueries`
 - `BenchmarkFanOut1KClientsSkewedHotKey`
 - `BenchmarkFanOut1KClientsMultiTableVariedQueries`
+- `BenchmarkRCAppOpenTasksLiveViewDelta`
 - `BenchmarkDeltaIndexConstruction`
 - `BenchmarkCandidateCollection`
 
@@ -1297,5 +1308,8 @@ Close-out status, 2026-06-02:
   evidence; semantic expansion remains product backlog.
 - Generated TypeScript decoding, hosted TypeScript client execution, and
   backup/restore for the current flat-kind canary shape have deterministic
-  local gates. Broader workload-derived benchmark evidence remains backlog
-  until a real workload or release gate needs it.
+  local gates.
+- The RC taskboard `open_tasks_live` workload-derived subscription delta has a
+  deterministic local benchmark and published raw evidence. Broader
+  workload-derived benchmark evidence remains backlog until a real workload or
+  release gate needs it.

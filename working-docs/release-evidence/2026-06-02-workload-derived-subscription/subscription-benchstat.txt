@@ -1,0 +1,21 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+                                                         │ working-docs/release-evidence/2026-06-02-workload-derived-subscription/subscription-bench-raw.txt │
+                                                         │                                              sec/op                                               │
+RCAppOpenTasksLiveViewDelta/create_task_insert_open-24                                                                                           960.7n ± 1%
+RCAppOpenTasksLiveViewDelta/complete_task_delete_open-24                                                                                         1.135µ ± 1%
+geomean                                                                                                                                          1.044µ
+
+                                                         │ working-docs/release-evidence/2026-06-02-workload-derived-subscription/subscription-bench-raw.txt │
+                                                         │                                               B/op                                                │
+RCAppOpenTasksLiveViewDelta/create_task_insert_open-24                                                                                            750.0 ± 0%
+RCAppOpenTasksLiveViewDelta/complete_task_delete_open-24                                                                                          774.0 ± 0%
+geomean                                                                                                                                           761.9
+
+                                                         │ working-docs/release-evidence/2026-06-02-workload-derived-subscription/subscription-bench-raw.txt │
+                                                         │                                             allocs/op                                             │
+RCAppOpenTasksLiveViewDelta/create_task_insert_open-24                                                                                            9.000 ± 0%
+RCAppOpenTasksLiveViewDelta/complete_task_delete_open-24                                                                                          10.00 ± 0%
+geomean                                                                                                                                           9.487

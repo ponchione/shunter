@@ -655,6 +655,96 @@ func BenchmarkFanOut1KClientsMultiTableVariedQueries(b *testing.B) {
 	}
 }
 
+func BenchmarkRCAppOpenTasksLiveViewDelta(b *testing.B) {
+	// Derived from internal/gauntlettests/rc_app_workload_test.go:
+	// SELECT * FROM tasks WHERE done = false over the taskboard app.
+	createBefore := []types.ProductValue{
+		benchmarkRCAppTaskRow(1, "alice", "ship gauntlet", true),
+		benchmarkRCAppTaskRow(2, "bob", "review release", false),
+	}
+	createInserted := benchmarkRCAppTaskRow(3, "alice", "publish notes", false)
+	completeDeleted := benchmarkRCAppTaskRow(1, "alice", "protocol ship", false)
+	completeInserted := benchmarkRCAppTaskRow(1, "alice", "protocol ship", true)
+	completePeer := benchmarkRCAppTaskRow(2, "bob", "protocol review", false)
+
+	cases := []struct {
+		name       string
+		beforeRows []types.ProductValue
+		afterRows  []types.ProductValue
+		inserted   []types.ProductValue
+		deleted    []types.ProductValue
+	}{
+		{
+			name:       "create_task_insert_open",
+			beforeRows: createBefore,
+			afterRows:  append(append([]types.ProductValue(nil), createBefore...), createInserted),
+			inserted:   []types.ProductValue{createInserted},
+		},
+		{
+			name:       "complete_task_delete_open",
+			beforeRows: []types.ProductValue{completeDeleted, completePeer},
+			afterRows:  []types.ProductValue{completeInserted, completePeer},
+			inserted:   []types.ProductValue{completeInserted},
+			deleted:    []types.ProductValue{completeDeleted},
+		},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			s := benchmarkRCAppTaskSchema()
+			before := buildMockCommitted(s, map[TableID][]types.ProductValue{benchmarkRCAppTasksTable: tc.beforeRows})
+			after := buildMockCommitted(s, map[TableID][]types.ProductValue{benchmarkRCAppTasksTable: tc.afterRows})
+			cs := simpleChangeset(benchmarkRCAppTasksTable, tc.inserted, tc.deleted)
+			inbox := make(chan FanOutMessage, 1024)
+			mgr := NewManager(s, s, WithFanOutInbox(inbox))
+			res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+				ConnID:     types.ConnectionID{0x72, 0x63},
+				QueryID:    7105,
+				Predicates: []Predicate{benchmarkRCAppOpenTasksPredicate()},
+			}, before)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(res.Update) != 1 || len(res.Update[0].Inserts) == 0 {
+				b.Fatalf("RC app open-tasks initial rows = %+v, want at least one open task", res.Update)
+			}
+			drainBenchmarkInbox(b, inbox)
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				mgr.EvalAndBroadcast(types.TxID(uint64(i+1)), cs, after, PostCommitMeta{})
+			}
+		})
+	}
+}
+
+const benchmarkRCAppTasksTable = TableID(1)
+
+func benchmarkRCAppTaskSchema() *fakeSchema {
+	s := newFakeSchema()
+	s.addTable(benchmarkRCAppTasksTable, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindString,
+		2: types.KindString,
+		3: types.KindBool,
+	})
+	return s
+}
+
+func benchmarkRCAppOpenTasksPredicate() Predicate {
+	return ColEq{Table: benchmarkRCAppTasksTable, Column: 3, Value: types.NewBool(false)}
+}
+
+func benchmarkRCAppTaskRow(id uint64, owner, title string, done bool) types.ProductValue {
+	return types.ProductValue{
+		types.NewUint64(id),
+		types.NewString(owner),
+		types.NewString(title),
+		types.NewBool(done),
+	}
+}
+
 func BenchmarkEvalOrderedLimitedWindowDelta(b *testing.B) {
 	cases := []struct {
 		totalRows  int

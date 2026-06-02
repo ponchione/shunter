@@ -1,0 +1,26 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+BenchmarkRCAppOpenTasksLiveViewDelta/create_task_insert_open-24         	 1251218	       961.0 ns/op	     750 B/op	       9 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/create_task_insert_open-24         	 1248950	       954.0 ns/op	     750 B/op	       9 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/create_task_insert_open-24         	 1236830	       963.4 ns/op	     750 B/op	       9 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/create_task_insert_open-24         	 1247972	       953.6 ns/op	     750 B/op	       9 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/create_task_insert_open-24         	 1248806	       969.8 ns/op	     750 B/op	       9 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/create_task_insert_open-24         	 1240810	       956.6 ns/op	     750 B/op	       9 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/create_task_insert_open-24         	 1259199	       960.4 ns/op	     750 B/op	       9 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/create_task_insert_open-24         	 1249782	       951.4 ns/op	     750 B/op	       9 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/create_task_insert_open-24         	 1226900	       961.7 ns/op	     750 B/op	       9 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/create_task_insert_open-24         	 1245474	       980.3 ns/op	     750 B/op	       9 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/complete_task_delete_open-24       	 1000000	      1128 ns/op	     774 B/op	      10 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/complete_task_delete_open-24       	 1000000	      1124 ns/op	     774 B/op	      10 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/complete_task_delete_open-24       	 1000000	      1137 ns/op	     774 B/op	      10 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/complete_task_delete_open-24       	 1000000	      1152 ns/op	     774 B/op	      10 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/complete_task_delete_open-24       	  994287	      1130 ns/op	     774 B/op	      10 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/complete_task_delete_open-24       	 1000000	      1135 ns/op	     774 B/op	      10 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/complete_task_delete_open-24       	 1000000	      1167 ns/op	     774 B/op	      10 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/complete_task_delete_open-24       	 1000000	      1135 ns/op	     774 B/op	      10 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/complete_task_delete_open-24       	 1000000	      1151 ns/op	     774 B/op	      10 allocs/op
+BenchmarkRCAppOpenTasksLiveViewDelta/complete_task_delete_open-24       	 1000000	      1130 ns/op	     774 B/op	      10 allocs/op
+PASS
+ok  	github.com/ponchione/shunter/subscription	33.235s

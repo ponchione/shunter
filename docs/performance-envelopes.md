@@ -1812,6 +1812,53 @@ Representative standings:
 - The current rows are not release-blocking thresholds. Treat regressions here
   as investigation triggers until the release process defines hard limits.
 
+## Focused Workload-Derived Subscription Evidence
+
+This focused snapshot adds one application-derived subscription benchmark from
+the release-candidate taskboard workload in
+`internal/gauntlettests/rc_app_workload_test.go`. The measured shape is the
+existing `open_tasks_live` declared view, `SELECT * FROM tasks WHERE done =
+false`, over the app's `tasks(id uint64, owner string, title string, done
+bool)` rows. It measures the in-process subscription manager delta path for
+the concrete `create_task` and `complete_task` reducer flows; it does not add
+WebSocket timing, multi-subscriber fanout, or new subscription semantics.
+
+- Date: 2026-06-02
+- Shunter base commit: `d95bc44`
+- Measurement worktree: local workload-derived benchmark/docs slice before
+  commit
+- Host: `Linux 6.17.0-35-generic`, linux/amd64
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`, 12 cores, 24 logical CPUs
+- Raw sample: 2 sub-benchmarks, `-count=10`, total package benchmark time
+  33.235s
+- Raw output:
+  `working-docs/release-evidence/2026-06-02-workload-derived-subscription/subscription-bench-raw.txt`
+- Benchstat output:
+  `working-docs/release-evidence/2026-06-02-workload-derived-subscription/subscription-benchstat.txt`
+
+Command:
+
+```bash
+go test -run '^$' -bench 'BenchmarkRCAppOpenTasksLiveViewDelta' -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-06-02-workload-derived-subscription/subscription-bench-raw.txt 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-06-02-workload-derived-subscription/subscription-bench-raw.txt > working-docs/release-evidence/2026-06-02-workload-derived-subscription/subscription-benchstat.txt 2>&1
+```
+
+Representative rows:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Workload-derived live view | `RCAppOpenTasksLiveViewDelta/create_task_insert_open-24` | RC taskboard `create_task` inserts one open task into `open_tasks_live` with one existing open peer and one completed task | 960.7ns +/- 1% | 750 B +/- 0% | 9 | advisory |
+| Workload-derived live view | `RCAppOpenTasksLiveViewDelta/complete_task_delete_open-24` | RC taskboard `complete_task` changes one open task to done, producing one live-view delete with one open peer | 1.135us +/- 1% | 774 B +/- 0% | 10 | advisory |
+
+Current read:
+
+- The first concrete app-shaped subscription delta fixture is now covered by a
+  deterministic local package benchmark.
+- This does not replace WebSocket, multi-subscriber, production-scale, or
+  multi-table application workload timing.
+- Runtime semantics and default multi-way join guardrails remain unchanged.
+
 ## Memory Profile Notes
 
 Subscription large-fixture memory profiles were spot-checked on 2026-05-09 at
@@ -1958,7 +2005,8 @@ These remain outside the current benchmark envelope:
   single-connection subscribe, 16/64/128-client light-update fanout, and
   slow-reader backpressure fixtures, including application-scale fanout;
   deterministic sender-level full-buffer rejection is covered separately
-- workload-derived application fanout distributions beyond the deterministic
+- workload-derived application fanout distributions beyond the focused RC
+  taskboard open-tasks live-view create/complete deltas and the deterministic
   in-process same-query, varied single-table, skewed hot-key, and varied
   two-table predicate fixtures
 - application workload timing, including production-scale backup/restore timing
