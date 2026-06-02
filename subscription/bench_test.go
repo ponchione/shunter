@@ -1027,6 +1027,7 @@ func BenchmarkMultiWayLiveJoinSelectivity(b *testing.B) {
 		{name: "hot_key_48x48", hotFanout: 48},
 		{name: "hot_key_56x56", hotFanout: 56},
 		{name: "hot_key_64x64", hotFanout: 64},
+		{name: "hot_key_72x72", hotFanout: 72},
 	}
 
 	for _, tc := range cases {
@@ -1211,6 +1212,7 @@ func BenchmarkMultiWayLiveJoinAggregateFunctions(b *testing.B) {
 		{name: "hot_key_48x48", hotFanout: 48},
 		{name: "hot_key_56x56", hotFanout: 56},
 		{name: "hot_key_64x64", hotFanout: 64},
+		{name: "hot_key_72x72", hotFanout: 72},
 	} {
 		for _, tc := range cases {
 			b.Run(skew.name+"/"+tc.name, func(b *testing.B) {

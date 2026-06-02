@@ -1632,6 +1632,78 @@ Current read:
 - This evidence keeps the default multi-way join guardrails unchanged:
   unlimited by default, with app-owned opt-in limits available through config.
 
+## Focused Multi-Way Live Join Stage Z Larger Skew/Fanout Function Shape
+
+This focused snapshot extends the bounded 3-relation skew/fanout fixture from
+`hot_key_64x64` to `hot_key_72x72`. The new rows keep the same 128 rows per
+relation and one changed endpoint row; the changed row matches key `1`, the hot
+key shared by 72 rows on each upstream relation, so it emits a 72x72 fanout
+fragment. The snapshot records table-shaped projection and the aggregate
+functions already accepted by the subscription layer. Runtime semantics and
+default multi-way join guardrails are unchanged.
+
+- Date: 2026-06-02
+- Shunter commit: `054c5c26371aa2d3882ae96219730eb365e0ce66`
+- Measurement worktree: commit above plus Stage Z benchmark and documentation
+  changes
+- Host: `Linux gernsback 6.17.0-35-generic #35~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Tue May 26 19:30:42 UTC 2 x86_64 x86_64 x86_64 GNU/Linux`
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`
+- Raw sample: 10 sub-benchmarks, `-count=10`, 100 benchmark rows, total
+  package benchmark time 206.497s across two focused `go test` invocations
+- Raw output:
+  `working-docs/release-evidence/2026-06-02-subscription-stage-z/selectivity-hot-key-64x64-72x72.txt`
+  and
+  `working-docs/release-evidence/2026-06-02-subscription-stage-z/aggregate-functions-hot-key-64x64-72x72.txt`
+- Benchstat output:
+  `working-docs/release-evidence/2026-06-02-subscription-stage-z/selectivity-hot-key-64x64-72x72-benchstat.txt`,
+  `working-docs/release-evidence/2026-06-02-subscription-stage-z/aggregate-functions-hot-key-64x64-72x72-benchstat.txt`,
+  and
+  `working-docs/release-evidence/2026-06-02-subscription-stage-z/all-benchstat.txt`
+
+Command:
+
+```bash
+rtk mkdir -p working-docs/release-evidence/2026-06-02-subscription-stage-z
+go test -run '^$' -bench '^BenchmarkMultiWayLiveJoinSelectivity$/^rows_128$/^hot_key_(64x64|72x72)$' -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-06-02-subscription-stage-z/selectivity-hot-key-64x64-72x72.txt 2>&1
+go test -run '^$' -bench '^BenchmarkMultiWayLiveJoinAggregateFunctions$/^hot_key_(64x64|72x72)$' -benchmem -count=10 ./subscription > working-docs/release-evidence/2026-06-02-subscription-stage-z/aggregate-functions-hot-key-64x64-72x72.txt 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-06-02-subscription-stage-z/selectivity-hot-key-64x64-72x72.txt > working-docs/release-evidence/2026-06-02-subscription-stage-z/selectivity-hot-key-64x64-72x72-benchstat.txt 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-06-02-subscription-stage-z/aggregate-functions-hot-key-64x64-72x72.txt > working-docs/release-evidence/2026-06-02-subscription-stage-z/aggregate-functions-hot-key-64x64-72x72-benchstat.txt 2>&1
+rtk go run golang.org/x/perf/cmd/benchstat@latest working-docs/release-evidence/2026-06-02-subscription-stage-z/selectivity-hot-key-64x64-72x72.txt working-docs/release-evidence/2026-06-02-subscription-stage-z/aggregate-functions-hot-key-64x64-72x72.txt > working-docs/release-evidence/2026-06-02-subscription-stage-z/all-benchstat.txt 2>&1
+```
+
+Representative standings:
+
+| Workload area | Benchmark | Fixture | sec/op | B/op | allocs/op | Gate |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Multi-way selectivity | `MultiWayLiveJoinSelectivity/rows_128/hot_key_64x64-24` | 128 rows per relation, one changed hot-key row matching 64 left rows by 64 middle rows | 906.6us +/- 1% | 833.9Ki +/- 0% | 101.0 +/- 0% | advisory |
+| Multi-way selectivity | `MultiWayLiveJoinSelectivity/rows_128/hot_key_72x72-24` | 128 rows per relation, one changed hot-key row matching 72 left rows by 72 middle rows | 1.066ms +/- 0% | 1.147Mi +/- 0% | 106.0 +/- 1% | advisory |
+| Multi-way aggregate skew function | `MultiWayLiveJoinAggregateFunctions/hot_key_64x64/count_star-24` | `COUNT(*)` over 3-relation chain, 128 rows per relation, one changed hot-key endpoint row matching a 64x64 fragment | 39.00ms +/- 0% | 37.88Ki +/- 0% | 73.00 +/- 0% | advisory |
+| Multi-way aggregate skew function | `MultiWayLiveJoinAggregateFunctions/hot_key_72x72/count_star-24` | `COUNT(*)` over 3-relation chain, 128 rows per relation, one changed hot-key endpoint row matching a 72x72 fragment | 48.90ms +/- 1% | 37.97Ki +/- 0% | 73.00 +/- 0% | advisory |
+| Multi-way aggregate skew function | `MultiWayLiveJoinAggregateFunctions/hot_key_72x72/count_column-24` | `COUNT(t3.id)` over 3-relation chain, 128 rows per relation, one changed hot-key endpoint row matching a 72x72 fragment | 49.01ms +/- 0% | 37.97Ki +/- 0% | 73.00 +/- 0% | advisory |
+| Multi-way aggregate skew function | `MultiWayLiveJoinAggregateFunctions/hot_key_72x72/count_distinct-24` | `COUNT(DISTINCT t1.id)` over 3-relation chain, 128 rows per relation, one changed hot-key endpoint row matching a 72x72 fragment | 49.10ms +/- 0% | 59.57Ki +/- 0% | 159.0 +/- 0% | advisory |
+| Multi-way aggregate skew function | `MultiWayLiveJoinAggregateFunctions/hot_key_72x72/sum-24` | `SUM(t3.id)` over 3-relation chain, 128 rows per relation, one changed hot-key endpoint row matching a 72x72 fragment | 48.96ms +/- 2% | 38.09Ki +/- 0% | 75.00 +/- 0% | advisory |
+| Multi-way Stage Z selectivity geomean | focused Stage Z selectivity hot-key benchmarks | 2 sub-benchmark geomean | 982.9us | 989.5Ki | 103.5 | advisory |
+| Multi-way Stage Z aggregate geomean | focused Stage Z aggregate hot-key benchmarks | 8 sub-benchmark geomean | 43.79ms | 42.36Ki | 88.71 | advisory |
+
+Current read:
+
+- The bounded `hot_key_72x72` rows remain local-review-sized under
+  `-count=10` while extending skew/fanout evidence beyond the 64x64 shape.
+- The table-shaped row's allocation growth tracks the larger materialized
+  72x72 fanout fragment.
+- The `hot_key_72x72` aggregate-function rows are stable around
+  48.90-49.10ms/op in this focused run. `COUNT(column)` and `SUM(column)`
+  remain allocation-stable relative to `COUNT(*)`, while
+  `COUNT(DISTINCT column)` adds allocation and allocation count without
+  becoming a latency standout.
+- Larger skew/fanout distributions beyond 72x72, larger Cartesian fixtures
+  beyond the bounded 88-row shape, relation counts beyond the bounded
+  5-relation chain, larger aggregate-function self-alias distributions, and
+  app-derived workload distributions remain outside the current envelope.
+- This evidence keeps the default multi-way join guardrails unchanged:
+  unlimited by default, with app-owned opt-in limits available through config.
+
 ## Focused Ordered Subscription Window Baseline
 
 This focused snapshot records the ordered subscription window benchmarks added
@@ -1726,8 +1798,9 @@ Representative standings:
   `cross3_rows_72`. Stage V extends skew/fanout evidence to
   `hot_key_56x56`, Stage W extends Cartesian evidence to `cross3_rows_80`,
   Stage X extends skew/fanout evidence to `hot_key_64x64`, and Stage Y
-  extends Cartesian evidence to `cross3_rows_88`. This evidence does not
-  justify changing the unlimited defaults.
+  extends Cartesian evidence to `cross3_rows_88`. Stage Z extends
+  skew/fanout evidence to `hot_key_72x72`. This evidence does not justify
+  changing the unlimited defaults.
 - Offline backup/restore is covered for small and larger complete local
   DataDir fixtures and is expected to be I/O dominated; these rows do not
   replace production-scale backup/restore timing.
@@ -1890,9 +1963,9 @@ These remain outside the current benchmark envelope:
   two-table predicate fixtures
 - application workload timing, including production-scale backup/restore timing
 - multi-way join evidence beyond the focused Stage B, Stage D, and Stage F
-  through Stage Y snapshots, including larger Cartesian fixtures beyond the
+  through Stage Z snapshots, including larger Cartesian fixtures beyond the
   bounded 88-row cross shape, larger skew/fanout distributions beyond the
-  bounded 64x64 row, relation counts beyond the bounded 5-relation chain
+  bounded 72x72 row, relation counts beyond the bounded 5-relation chain
   fixture, larger
   aggregate-function self-alias distributions beyond the bounded `self_alias3`
   fixture, and app-derived workload distributions
