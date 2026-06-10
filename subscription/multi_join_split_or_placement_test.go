@@ -106,13 +106,6 @@ func splitOrNonKeyPreservingMultiHopFilterMultiJoinPredicate() MultiJoin {
 	}
 }
 
-func fourTableDualIndexedMultiJoinTestSchema() *fakeSchema {
-	s := dualIndexedMultiJoinTestSchema()
-	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
-	s.addTable(4, cols, 0, 1)
-	return s
-}
-
 func splitOrLongNonKeyPreservingMultiHopFilterMultiJoinPredicate() MultiJoin {
 	return splitOrLinearPathFilterMultiJoinPredicate(3)
 }
@@ -128,48 +121,6 @@ func threeHopMultiJoinTestSchema() *fakeSchema {
 	s.addTable(2, cols, 1)
 	s.addTable(3, cols, 1)
 	s.addTable(4, cols, 1)
-	return s
-}
-
-func fiveTableDualIndexedMultiJoinTestSchema() *fakeSchema {
-	s := fourTableDualIndexedMultiJoinTestSchema()
-	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
-	s.addTable(5, cols, 0, 1)
-	return s
-}
-
-func sixTableDualIndexedMultiJoinTestSchema() *fakeSchema {
-	s := fiveTableDualIndexedMultiJoinTestSchema()
-	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
-	s.addTable(6, cols, 0, 1)
-	return s
-}
-
-func sevenTableDualIndexedMultiJoinTestSchema() *fakeSchema {
-	s := sixTableDualIndexedMultiJoinTestSchema()
-	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
-	s.addTable(7, cols, 0, 1)
-	return s
-}
-
-func eightTableDualIndexedMultiJoinTestSchema() *fakeSchema {
-	s := sevenTableDualIndexedMultiJoinTestSchema()
-	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
-	s.addTable(8, cols, 0, 1)
-	return s
-}
-
-func nineTableDualIndexedMultiJoinTestSchema() *fakeSchema {
-	s := eightTableDualIndexedMultiJoinTestSchema()
-	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
-	s.addTable(9, cols, 0, 1)
-	return s
-}
-
-func tenTableDualIndexedMultiJoinTestSchema() *fakeSchema {
-	s := nineTableDualIndexedMultiJoinTestSchema()
-	cols := map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}
-	s.addTable(10, cols, 0, 1)
 	return s
 }
 
@@ -263,126 +214,6 @@ func linearPathReverseToCols(hops int) []ColID {
 		cols[len(cols)-1] = 1
 	}
 	return cols
-}
-
-func splitOrFourHopFilterMultiJoinPredicate() MultiJoin {
-	return splitOrLinearPathFilterMultiJoinPredicate(4)
-}
-
-func splitOrFiveHopFilterMultiJoinPredicate() MultiJoin {
-	return splitOrLinearPathFilterMultiJoinPredicate(5)
-}
-
-func splitOrSixHopFilterMultiJoinPredicate() MultiJoin {
-	return splitOrLinearPathFilterMultiJoinPredicate(6)
-}
-
-func splitOrSevenHopFilterMultiJoinPredicate() MultiJoin {
-	return splitOrLinearPathFilterMultiJoinPredicate(7)
-}
-
-func splitOrEightHopFilterMultiJoinPredicate() MultiJoin {
-	return MultiJoin{
-		Relations: []MultiJoinRelation{
-			{Table: 1, Alias: 0},
-			{Table: 2, Alias: 1},
-			{Table: 3, Alias: 2},
-			{Table: 4, Alias: 3},
-			{Table: 5, Alias: 4},
-			{Table: 6, Alias: 5},
-			{Table: 7, Alias: 6},
-			{Table: 8, Alias: 7},
-			{Table: 9, Alias: 8},
-		},
-		Conditions: []MultiJoinCondition{
-			{
-				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
-				Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 1, Table: 2, Column: 0, Alias: 1},
-				Right: MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 2, Table: 3, Column: 0, Alias: 2},
-				Right: MultiJoinColumnRef{Relation: 3, Table: 4, Column: 1, Alias: 3},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 3, Table: 4, Column: 0, Alias: 3},
-				Right: MultiJoinColumnRef{Relation: 4, Table: 5, Column: 1, Alias: 4},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 4, Table: 5, Column: 0, Alias: 4},
-				Right: MultiJoinColumnRef{Relation: 5, Table: 6, Column: 1, Alias: 5},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 5, Table: 6, Column: 0, Alias: 5},
-				Right: MultiJoinColumnRef{Relation: 6, Table: 7, Column: 1, Alias: 6},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 6, Table: 7, Column: 0, Alias: 6},
-				Right: MultiJoinColumnRef{Relation: 7, Table: 8, Column: 1, Alias: 7},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 7, Table: 8, Column: 0, Alias: 7},
-				Right: MultiJoinColumnRef{Relation: 8, Table: 9, Column: 1, Alias: 8},
-			},
-		},
-		ProjectedRelation: 0,
-		Filter: Or{
-			Left: ColEq{
-				Table:  1,
-				Column: 0,
-				Alias:  0,
-				Value:  types.NewUint64(7),
-			},
-			Right: ColRange{
-				Table:  9,
-				Column: 0,
-				Alias:  8,
-				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
-				Upper:  Bound{Unbounded: true},
-			},
-		},
-	}
-}
-
-func splitOrNineHopFilterMultiJoinPredicate() MultiJoin {
-	relations := make([]MultiJoinRelation, 10)
-	for i := range relations {
-		relations[i] = MultiJoinRelation{Table: TableID(i + 1), Alias: uint8(i)}
-	}
-	conditions := make([]MultiJoinCondition, 9)
-	conditions[0] = MultiJoinCondition{
-		Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
-		Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
-	}
-	for i := 1; i < len(conditions); i++ {
-		conditions[i] = MultiJoinCondition{
-			Left:  MultiJoinColumnRef{Relation: i, Table: TableID(i + 1), Column: 0, Alias: uint8(i)},
-			Right: MultiJoinColumnRef{Relation: i + 1, Table: TableID(i + 2), Column: 1, Alias: uint8(i + 1)},
-		}
-	}
-	return MultiJoin{
-		Relations:         relations,
-		Conditions:        conditions,
-		ProjectedRelation: 0,
-		Filter: Or{
-			Left: ColEq{
-				Table:  1,
-				Column: 0,
-				Alias:  0,
-				Value:  types.NewUint64(7),
-			},
-			Right: ColRange{
-				Table:  10,
-				Column: 0,
-				Alias:  9,
-				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
-				Upper:  Bound{Unbounded: true},
-			},
-		},
-	}
 }
 
 func splitOrRepeatedAliasMultiHopFilterMultiJoinPredicate() MultiJoin {
@@ -1521,9 +1352,9 @@ func TestCollectCandidatesMultiJoinSplitOrThreeHopPathEdgesUseSameTransactionRow
 }
 
 func TestMultiJoinPlacementSplitOrFourHopUsesGenericPathEdges(t *testing.T) {
-	s := fiveTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(5)
 	idx := NewPruningIndexes()
-	pred := splitOrFourHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(4)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
@@ -1570,9 +1401,9 @@ func TestMultiJoinPlacementSplitOrFourHopUsesGenericPathEdges(t *testing.T) {
 }
 
 func TestCollectCandidatesMultiJoinSplitOrFourHopPathEdgesUseCommittedRows(t *testing.T) {
-	s := fiveTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(5)
 	idx := NewPruningIndexes()
-	pred := splitOrFourHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(4)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
@@ -1600,9 +1431,9 @@ func TestCollectCandidatesMultiJoinSplitOrFourHopPathEdgesUseCommittedRows(t *te
 }
 
 func TestCollectCandidatesMultiJoinSplitOrFourHopPathEdgesUseSameTransactionRows(t *testing.T) {
-	s := fiveTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(5)
 	idx := NewPruningIndexes()
-	pred := splitOrFourHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(4)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
@@ -1659,9 +1490,9 @@ func TestCollectCandidatesMultiJoinSplitOrFourHopPathEdgesUseSameTransactionRows
 }
 
 func TestMultiJoinPlacementSplitOrFiveHopUsesGenericPathEdges(t *testing.T) {
-	s := sixTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(6)
 	idx := NewPruningIndexes()
-	pred := splitOrFiveHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(5)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
@@ -1708,9 +1539,9 @@ func TestMultiJoinPlacementSplitOrFiveHopUsesGenericPathEdges(t *testing.T) {
 }
 
 func TestCollectCandidatesMultiJoinSplitOrFiveHopPathEdgesUseCommittedRows(t *testing.T) {
-	s := sixTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(6)
 	idx := NewPruningIndexes()
-	pred := splitOrFiveHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(5)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
@@ -1740,9 +1571,9 @@ func TestCollectCandidatesMultiJoinSplitOrFiveHopPathEdgesUseCommittedRows(t *te
 }
 
 func TestCollectCandidatesMultiJoinSplitOrFiveHopPathEdgesUseSameTransactionRows(t *testing.T) {
-	s := sixTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(6)
 	idx := NewPruningIndexes()
-	pred := splitOrFiveHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(5)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
@@ -1820,9 +1651,9 @@ func TestCollectCandidatesMultiJoinSplitOrFiveHopPathEdgesUseSameTransactionRows
 }
 
 func TestMultiJoinPlacementSplitOrSixHopUsesGenericPathEdges(t *testing.T) {
-	s := sevenTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(7)
 	idx := NewPruningIndexes()
-	pred := splitOrSixHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(6)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
@@ -1869,9 +1700,9 @@ func TestMultiJoinPlacementSplitOrSixHopUsesGenericPathEdges(t *testing.T) {
 }
 
 func TestCollectCandidatesMultiJoinSplitOrSixHopPathEdgesUseCommittedRows(t *testing.T) {
-	s := sevenTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(7)
 	idx := NewPruningIndexes()
-	pred := splitOrSixHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(6)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
@@ -1903,9 +1734,9 @@ func TestCollectCandidatesMultiJoinSplitOrSixHopPathEdgesUseCommittedRows(t *tes
 }
 
 func TestCollectCandidatesMultiJoinSplitOrSixHopPathEdgesUseSameTransactionRows(t *testing.T) {
-	s := sevenTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(7)
 	idx := NewPruningIndexes()
-	pred := splitOrSixHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(6)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
@@ -1987,9 +1818,9 @@ func TestCollectCandidatesMultiJoinSplitOrSixHopPathEdgesUseSameTransactionRows(
 }
 
 func TestMultiJoinPlacementSplitOrSevenHopUsesGenericPathEdges(t *testing.T) {
-	s := eightTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(8)
 	idx := NewPruningIndexes()
-	pred := splitOrSevenHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(7)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
@@ -2036,9 +1867,9 @@ func TestMultiJoinPlacementSplitOrSevenHopUsesGenericPathEdges(t *testing.T) {
 }
 
 func TestCollectCandidatesMultiJoinSplitOrSevenHopPathEdgesUseCommittedRows(t *testing.T) {
-	s := eightTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(8)
 	idx := NewPruningIndexes()
-	pred := splitOrSevenHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(7)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
@@ -2072,9 +1903,9 @@ func TestCollectCandidatesMultiJoinSplitOrSevenHopPathEdgesUseCommittedRows(t *t
 }
 
 func TestCollectCandidatesMultiJoinSplitOrSevenHopPathEdgesUseSameTransactionRows(t *testing.T) {
-	s := eightTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(8)
 	idx := NewPruningIndexes()
-	pred := splitOrSevenHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(7)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
@@ -2160,9 +1991,9 @@ func TestCollectCandidatesMultiJoinSplitOrSevenHopPathEdgesUseSameTransactionRow
 }
 
 func TestMultiJoinPlacementSplitOrEightHopUsesGenericPathEdges(t *testing.T) {
-	s := nineTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(9)
 	idx := NewPruningIndexes()
-	pred := splitOrEightHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(8)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
@@ -2209,9 +2040,9 @@ func TestMultiJoinPlacementSplitOrEightHopUsesGenericPathEdges(t *testing.T) {
 }
 
 func TestCollectCandidatesMultiJoinSplitOrEightHopPathEdgesUseCommittedRows(t *testing.T) {
-	s := nineTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(9)
 	idx := NewPruningIndexes()
-	pred := splitOrEightHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(8)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
@@ -2247,9 +2078,9 @@ func TestCollectCandidatesMultiJoinSplitOrEightHopPathEdgesUseCommittedRows(t *t
 }
 
 func TestCollectCandidatesMultiJoinSplitOrEightHopPathEdgesUseSameTransactionRows(t *testing.T) {
-	s := nineTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(9)
 	idx := NewPruningIndexes()
-	pred := splitOrEightHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(8)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
@@ -2339,9 +2170,9 @@ func TestCollectCandidatesMultiJoinSplitOrEightHopPathEdgesUseSameTransactionRow
 }
 
 func TestMultiJoinPlacementSplitOrNineHopUsesGenericPathEdges(t *testing.T) {
-	s := tenTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(10)
 	idx := NewPruningIndexes()
-	pred := splitOrNineHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(9)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 
@@ -2465,9 +2296,9 @@ func TestMultiJoinPlacementSplitOrBeyondMaxHopFallsBackToExistenceEdge(t *testin
 }
 
 func TestCollectCandidatesMultiJoinSplitOrNineHopPathEdgesUseCommittedRows(t *testing.T) {
-	s := tenTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(10)
 	idx := NewPruningIndexes()
-	pred := splitOrNineHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(9)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
@@ -2505,9 +2336,9 @@ func TestCollectCandidatesMultiJoinSplitOrNineHopPathEdgesUseCommittedRows(t *te
 }
 
 func TestCollectCandidatesMultiJoinSplitOrNineHopPathEdgesUseSameTransactionRows(t *testing.T) {
-	s := tenTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(10)
 	idx := NewPruningIndexes()
-	pred := splitOrNineHopFilterMultiJoinPredicate()
+	pred := splitOrLinearPathFilterMultiJoinPredicate(9)
 	hash := ComputeQueryHash(pred, nil)
 	placeSubscriptionForResolver(idx, pred, hash, s)
 	changed := []types.ProductValue{{types.NewUint64(8), types.NewUint64(20)}}
@@ -2649,7 +2480,7 @@ func TestMultiJoinPlacementSplitOrNonKeyPreservingPathFallsBackWhenRHSUnindexed(
 }
 
 func TestMultiJoinPlacementSplitOrLongNonKeyPreservingMultiHopUsesGenericPathEdges(t *testing.T) {
-	s := fourTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(4)
 	idx := NewPruningIndexes()
 	pred := splitOrLongNonKeyPreservingMultiHopFilterMultiJoinPredicate()
 	hash := ComputeQueryHash(pred, nil)
@@ -2778,7 +2609,7 @@ func TestMultiJoinPlacementSplitOrLongNonKeyPreservingGenericPathFallsBackWhenUn
 }
 
 func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingGenericPathPrunesMismatch(t *testing.T) {
-	s := fourTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(4)
 	idx := NewPruningIndexes()
 	pred := splitOrLongNonKeyPreservingMultiHopFilterMultiJoinPredicate()
 	hash := ComputeQueryHash(pred, nil)
@@ -2832,7 +2663,7 @@ func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingGenericPathPrunesM
 }
 
 func TestCollectCandidatesMultiJoinSplitOrLongNonKeyPreservingGenericPathUsesDeltaRows(t *testing.T) {
-	s := fourTableDualIndexedMultiJoinTestSchema()
+	s := linearDualIndexedMultiJoinTestSchema(4)
 	mgr := NewManager(s, s)
 	pred := splitOrLongNonKeyPreservingMultiHopFilterMultiJoinPredicate()
 	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
