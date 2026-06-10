@@ -121,14 +121,8 @@ func TestDialAndCallReducerAllowsNilContext(t *testing.T) {
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, wantIdentity)
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		call, ok := msg.(protocol.CallReducerMsg)
@@ -207,14 +201,8 @@ func TestClientSendAndReadUseProtocolCodecs(t *testing.T) {
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		call, ok := msg.(protocol.CallReducerMsg)
@@ -279,14 +267,8 @@ func TestClientCallReducerWaitsForMatchingTransactionUpdate(t *testing.T) {
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		call, ok := msg.(protocol.CallReducerMsg)
@@ -335,14 +317,8 @@ func TestClientCallReducerSurfacesFailedStatus(t *testing.T) {
 		ws := acceptProtocolClientTestConn(t, w, r)
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		call := msg.(protocol.CallReducerMsg)
@@ -371,14 +347,8 @@ func TestClientCallReducerRejectsMismatchedResponse(t *testing.T) {
 		ws := acceptProtocolClientTestConn(t, w, r)
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		call := msg.(protocol.CallReducerMsg)
@@ -415,14 +385,8 @@ func TestDialAndCallReducerUsesExplicitTokenAndCloses(t *testing.T) {
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, wantIdentity)
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		call, ok := msg.(protocol.CallReducerMsg)
@@ -438,7 +402,7 @@ func TestDialAndCallReducerUsesExplicitTokenAndCloses(t *testing.T) {
 
 		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		_, _, err = ws.Read(readCtx)
+		_, _, err := ws.Read(readCtx)
 		if err != nil {
 			closed <- struct{}{}
 		}
@@ -559,14 +523,8 @@ func TestDialAndCallReducerClosesAfterReducerError(t *testing.T) {
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, wantIdentity)
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		call, ok := msg.(protocol.CallReducerMsg)
@@ -581,7 +539,7 @@ func TestDialAndCallReducerClosesAfterReducerError(t *testing.T) {
 
 		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		_, _, err = ws.Read(readCtx)
+		_, _, err := ws.Read(readCtx)
 		if err != nil {
 			closed <- struct{}{}
 		}
@@ -615,14 +573,8 @@ func TestDialAndCallReducerClosesAfterMismatchedResponse(t *testing.T) {
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		call, ok := msg.(protocol.CallReducerMsg)
@@ -637,7 +589,7 @@ func TestDialAndCallReducerClosesAfterMismatchedResponse(t *testing.T) {
 
 		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		_, _, err = ws.Read(readCtx)
+		_, _, err := ws.Read(readCtx)
 		if err != nil {
 			closed <- struct{}{}
 		}
@@ -665,20 +617,14 @@ func TestDialAndCallReducerClosesAfterUnexpectedResponse(t *testing.T) {
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		if _, _, err := protocol.DecodeClientMessage(frame); err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		if _, ok := readProtocolClientMessage(t, r, ws); !ok {
 			return
 		}
 		writeProtocolClientServerMessage(t, ws, protocol.OneOffQueryResponse{MessageID: []byte{1}})
 
 		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		_, _, err = ws.Read(readCtx)
+		_, _, err := ws.Read(readCtx)
 		if err != nil {
 			closed <- struct{}{}
 		}
@@ -706,14 +652,8 @@ func TestClientDeclaredQueryWaitsForMatchingResponse(t *testing.T) {
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		query, ok := msg.(protocol.DeclaredQueryMsg)
@@ -756,13 +696,7 @@ func TestClientDeclaredQueryRejectsMismatchedResponse(t *testing.T) {
 		ws := acceptProtocolClientTestConn(t, w, r)
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		if _, _, err := protocol.DecodeClientMessage(frame); err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		if _, ok := readProtocolClientMessage(t, r, ws); !ok {
 			return
 		}
 		writeProtocolClientServerMessage(t, ws, protocol.OneOffQueryResponse{MessageID: []byte{99}})
@@ -789,14 +723,8 @@ func TestClientDeclaredQueryWithParametersWaitsForMatchingResponse(t *testing.T)
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		query, ok := msg.(protocol.DeclaredQueryWithParametersMsg)
@@ -839,14 +767,8 @@ func TestClientDeclaredQueryWithParametersSurfacesQueryError(t *testing.T) {
 		ws := acceptProtocolClientTestConn(t, w, r)
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		query := msg.(protocol.DeclaredQueryWithParametersMsg)
@@ -897,14 +819,8 @@ func TestClientExecuteDeclaredQueryChoosesNoParameterRequest(t *testing.T) {
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		query, ok := msg.(protocol.DeclaredQueryMsg)
@@ -949,14 +865,8 @@ func TestClientExecuteDeclaredQueryChoosesParameterizedRequest(t *testing.T) {
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		query, ok := msg.(protocol.DeclaredQueryWithParametersMsg)
@@ -1038,13 +948,7 @@ func TestClientExecuteDeclaredQueryReusesResponseValidation(t *testing.T) {
 		ws := acceptProtocolClientTestConn(t, w, r)
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		if _, _, err := protocol.DecodeClientMessage(frame); err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		if _, ok := readProtocolClientMessage(t, r, ws); !ok {
 			return
 		}
 		writeProtocolClientServerMessage(t, ws, protocol.OneOffQueryResponse{MessageID: []byte{99}})
@@ -1081,14 +985,8 @@ func TestDialAndExecuteDeclaredQueryUsesExplicitTokenAndCloses(t *testing.T) {
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, wantIdentity)
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		query, ok := msg.(protocol.DeclaredQueryWithParametersMsg)
@@ -1101,7 +999,7 @@ func TestDialAndExecuteDeclaredQueryUsesExplicitTokenAndCloses(t *testing.T) {
 
 		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		_, _, err = ws.Read(readCtx)
+		_, _, err := ws.Read(readCtx)
 		if err != nil {
 			closed <- struct{}{}
 		}
@@ -1263,14 +1161,8 @@ func TestDialAndExecuteDeclaredQueryClosesAfterQueryError(t *testing.T) {
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, wantIdentity)
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		query, ok := msg.(protocol.DeclaredQueryMsg)
@@ -1286,7 +1178,7 @@ func TestDialAndExecuteDeclaredQueryClosesAfterQueryError(t *testing.T) {
 
 		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		_, _, err = ws.Read(readCtx)
+		_, _, err := ws.Read(readCtx)
 		if err != nil {
 			closed <- struct{}{}
 		}
@@ -1320,20 +1212,14 @@ func TestDialAndExecuteDeclaredQueryClosesAfterMismatchedResponse(t *testing.T) 
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		if _, _, err := protocol.DecodeClientMessage(frame); err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		if _, ok := readProtocolClientMessage(t, r, ws); !ok {
 			return
 		}
 		writeProtocolClientServerMessage(t, ws, protocol.OneOffQueryResponse{MessageID: []byte{99}})
 
 		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		_, _, err = ws.Read(readCtx)
+		_, _, err := ws.Read(readCtx)
 		if err != nil {
 			closed <- struct{}{}
 		}
@@ -1361,14 +1247,8 @@ func TestDialAndExecuteDeclaredQueryClosesAfterUnexpectedResponse(t *testing.T) 
 		defer ws.CloseNow()
 		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
 
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read client message: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
 			return
 		}
 		if _, ok := msg.(protocol.DeclaredQueryMsg); !ok {
@@ -1382,7 +1262,7 @@ func TestDialAndExecuteDeclaredQueryClosesAfterUnexpectedResponse(t *testing.T) 
 
 		readCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		_, _, err = ws.Read(readCtx)
+		_, _, err := ws.Read(readCtx)
 		if err != nil {
 			closed <- struct{}{}
 		}
@@ -1482,4 +1362,19 @@ func writeProtocolClientServerMessage(t *testing.T, ws *websocket.Conn, msg any)
 	if err := ws.Write(ctx, websocket.MessageBinary, frame); err != nil {
 		t.Fatalf("server write %T: %v", msg, err)
 	}
+}
+
+func readProtocolClientMessage(t *testing.T, r *http.Request, ws *websocket.Conn) (any, bool) {
+	t.Helper()
+	_, frame, err := ws.Read(r.Context())
+	if err != nil {
+		t.Errorf("server read client message: %v", err)
+		return nil, false
+	}
+	_, msg, err := protocol.DecodeClientMessage(frame)
+	if err != nil {
+		t.Errorf("DecodeClientMessage: %v", err)
+		return nil, false
+	}
+	return msg, true
 }

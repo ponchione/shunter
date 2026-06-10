@@ -760,28 +760,12 @@ func TestDeclaredViewMultiWayJoinObeysRuntimeInputLimit(t *testing.T) {
 func TestDeclaredViewMultiWayJoinAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x31)
 	bob := visibilityRuntimeIdentity(0x32)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_visible_message_chain",
-			SQL:         "SELECT a.* FROM messages AS a JOIN messages AS b ON a.id = b.id JOIN messages AS c ON b.id = c.id",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_visible_message_chain", "SELECT a.* FROM messages AS a JOIN messages AS b ON a.id = b.id JOIN messages AS c ON b.id = c.id")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_visible_message_chain", 17,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_visible_message_chain", 17, alice, "SubscribeView")
 	if len(sub.InitialRows) != 1 || sub.InitialRows[0][0].AsUint64() != 1 || sub.InitialRows[0][1].AsString() != alice.Hex() {
 		t.Fatalf("visible multi-way view rows = %#v, want only caller row", sub.InitialRows)
 	}
@@ -1556,28 +1540,12 @@ func TestDeclaredQueryNullableAggregateSemantics(t *testing.T) {
 func TestDeclaredViewAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x23)
 	bob := visibilityRuntimeIdentity(0x24)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_messages",
-			SQL:         "SELECT * FROM messages ORDER BY body",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_messages", "SELECT * FROM messages ORDER BY body")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_messages", 8,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_messages", 8, alice, "SubscribeView")
 	if len(sub.InitialRows) != 1 || sub.InitialRows[0][1].AsString() != alice.Hex() {
 		t.Fatalf("visible view rows = %#v, want only caller row", sub.InitialRows)
 	}
@@ -1586,29 +1554,13 @@ func TestDeclaredViewAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 func TestDeclaredViewOrderByAppliesAfterVisibility(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x35)
 	bob := visibilityRuntimeIdentity(0x36)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_visible_ordered_messages",
-			SQL:         "SELECT * FROM messages ORDER BY id DESC",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_visible_ordered_messages", "SELECT * FROM messages ORDER BY id DESC")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 3, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_visible_ordered_messages", 24,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView ordered visibility: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_visible_ordered_messages", 24, alice, "SubscribeView ordered visibility")
 	if got, want := rowUint64IDs(sub.InitialRows), []uint64{3, 1}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("visible ordered initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
 	}
@@ -1617,30 +1569,14 @@ func TestDeclaredViewOrderByAppliesAfterVisibility(t *testing.T) {
 func TestDeclaredViewLimitAppliesAfterVisibility(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x37)
 	bob := visibilityRuntimeIdentity(0x38)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_visible_limited_messages",
-			SQL:         "SELECT * FROM messages ORDER BY id DESC LIMIT 1",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_visible_limited_messages", "SELECT * FROM messages ORDER BY id DESC LIMIT 1")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 3, alice.Hex())
 	insertMessageWithBody(t, rt, 4, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_visible_limited_messages", 27,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView limited visibility: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_visible_limited_messages", 27, alice, "SubscribeView limited visibility")
 	if got, want := rowUint64IDs(sub.InitialRows), []uint64{4}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("visible limited initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
 	}
@@ -1649,30 +1585,14 @@ func TestDeclaredViewLimitAppliesAfterVisibility(t *testing.T) {
 func TestDeclaredViewOffsetAppliesAfterVisibility(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x39)
 	bob := visibilityRuntimeIdentity(0x3a)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_visible_offset_messages",
-			SQL:         "SELECT * FROM messages ORDER BY id DESC OFFSET 1",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_visible_offset_messages", "SELECT * FROM messages ORDER BY id DESC OFFSET 1")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 3, alice.Hex())
 	insertMessageWithBody(t, rt, 4, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_visible_offset_messages", 30,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView offset visibility: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_visible_offset_messages", 30, alice, "SubscribeView offset visibility")
 	if got, want := rowUint64IDs(sub.InitialRows), []uint64{3, 1}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("visible offset initial ids = %v, want %v; rows=%#v", got, want, sub.InitialRows)
 	}
@@ -1681,28 +1601,12 @@ func TestDeclaredViewOffsetAppliesAfterVisibility(t *testing.T) {
 func TestDeclaredViewColumnProjectionAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x31)
 	bob := visibilityRuntimeIdentity(0x32)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_message_bodies",
-			SQL:         "SELECT body AS text FROM messages",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_message_bodies", "SELECT body AS text FROM messages")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_message_bodies", 9,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_message_bodies", 9, alice, "SubscribeView")
 	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsString() != alice.Hex() {
 		t.Fatalf("visible projected view rows = %#v, want only caller body", sub.InitialRows)
 	}
@@ -1711,29 +1615,13 @@ func TestDeclaredViewColumnProjectionAppliesVisibilityAfterPermissionSucceeds(t 
 func TestDeclaredViewAggregateCountAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x33)
 	bob := visibilityRuntimeIdentity(0x34)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_visible_message_count",
-			SQL:         "SELECT COUNT(body) AS n FROM messages",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_visible_message_count", "SELECT COUNT(body) AS n FROM messages")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 	insertMessageWithBody(t, rt, 3, alice.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_visible_message_count", 20,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView aggregate visibility: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_visible_message_count", 20, alice, "SubscribeView aggregate visibility")
 	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 2 {
 		t.Fatalf("visible aggregate view rows = %#v, want count 2", sub.InitialRows)
 	}
@@ -1742,29 +1630,13 @@ func TestDeclaredViewAggregateCountAppliesVisibilityAfterPermissionSucceeds(t *t
 func TestDeclaredViewAggregateCountDistinctAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x3d)
 	bob := visibilityRuntimeIdentity(0x3e)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_visible_distinct_message_ids",
-			SQL:         "SELECT COUNT(DISTINCT id) AS n FROM messages",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_visible_distinct_message_ids", "SELECT COUNT(DISTINCT id) AS n FROM messages")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 	insertMessageWithBody(t, rt, 3, alice.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_visible_distinct_message_ids", 32,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView COUNT(DISTINCT) visibility: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_visible_distinct_message_ids", 32, alice, "SubscribeView COUNT(DISTINCT) visibility")
 	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 2 {
 		t.Fatalf("visible COUNT(DISTINCT) view rows = %#v, want distinct count 2", sub.InitialRows)
 	}
@@ -1773,29 +1645,13 @@ func TestDeclaredViewAggregateCountDistinctAppliesVisibilityAfterPermissionSucce
 func TestDeclaredViewJoinAggregateCountAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x3f)
 	bob := visibilityRuntimeIdentity(0x40)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_visible_self_join_count",
-			SQL:         "SELECT COUNT(*) AS n FROM messages AS a JOIN messages AS b ON a.id = b.id",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_visible_self_join_count", "SELECT COUNT(*) AS n FROM messages AS a JOIN messages AS b ON a.id = b.id")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 	insertMessageWithBody(t, rt, 3, alice.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_visible_self_join_count", 34,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView join COUNT(*) visibility: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_visible_self_join_count", 34, alice, "SubscribeView join COUNT(*) visibility")
 	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 2 {
 		t.Fatalf("visible join COUNT(*) view rows = %#v, want count 2", sub.InitialRows)
 	}
@@ -1804,29 +1660,13 @@ func TestDeclaredViewJoinAggregateCountAppliesVisibilityAfterPermissionSucceeds(
 func TestDeclaredViewJoinAggregateSumAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x41)
 	bob := visibilityRuntimeIdentity(0x42)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_visible_self_join_total",
-			SQL:         "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b ON a.id = b.id",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_visible_self_join_total", "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b ON a.id = b.id")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 	insertMessageWithBody(t, rt, 3, alice.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_visible_self_join_total", 37,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView join SUM visibility: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_visible_self_join_total", 37, alice, "SubscribeView join SUM visibility")
 	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 4 {
 		t.Fatalf("visible join SUM view rows = %#v, want total 4", sub.InitialRows)
 	}
@@ -1835,29 +1675,13 @@ func TestDeclaredViewJoinAggregateSumAppliesVisibilityAfterPermissionSucceeds(t 
 func TestDeclaredViewCrossJoinAggregateSumAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x43)
 	bob := visibilityRuntimeIdentity(0x44)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_visible_self_cross_join_total",
-			SQL:         "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_visible_self_cross_join_total", "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 	insertMessageWithBody(t, rt, 3, alice.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_visible_self_cross_join_total", 42,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView cross-join SUM visibility: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_visible_self_cross_join_total", 42, alice, "SubscribeView cross-join SUM visibility")
 	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 8 {
 		t.Fatalf("visible cross-join SUM view rows = %#v, want total 8", sub.InitialRows)
 	}
@@ -1866,29 +1690,13 @@ func TestDeclaredViewCrossJoinAggregateSumAppliesVisibilityAfterPermissionSuccee
 func TestDeclaredViewMultiWayJoinAggregateSumAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x45)
 	bob := visibilityRuntimeIdentity(0x46)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_visible_self_multi_join_total",
-			SQL:         "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b ON a.id = b.id JOIN messages AS c ON b.id = c.id",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_visible_self_multi_join_total", "SELECT SUM(a.id) AS total FROM messages AS a JOIN messages AS b ON a.id = b.id JOIN messages AS c ON b.id = c.id")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 	insertMessageWithBody(t, rt, 3, alice.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_visible_self_multi_join_total", 48,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView multi-way join SUM visibility: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_visible_self_multi_join_total", 48, alice, "SubscribeView multi-way join SUM visibility")
 	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 4 {
 		t.Fatalf("visible multi-way join SUM view rows = %#v, want total 4", sub.InitialRows)
 	}
@@ -1897,29 +1705,13 @@ func TestDeclaredViewMultiWayJoinAggregateSumAppliesVisibilityAfterPermissionSuc
 func TestDeclaredViewAggregateSumAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x3b)
 	bob := visibilityRuntimeIdentity(0x3c)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_visible_message_total",
-			SQL:         "SELECT SUM(id) AS total FROM messages",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_visible_message_total", "SELECT SUM(id) AS total FROM messages")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 	insertMessageWithBody(t, rt, 3, alice.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_visible_message_total", 31,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView SUM visibility: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_visible_message_total", 31, alice, "SubscribeView SUM visibility")
 	if len(sub.InitialRows) != 1 || len(sub.InitialRows[0]) != 1 || sub.InitialRows[0][0].AsUint64() != 4 {
 		t.Fatalf("visible SUM view rows = %#v, want total 4", sub.InitialRows)
 	}
@@ -1928,28 +1720,12 @@ func TestDeclaredViewAggregateSumAppliesVisibilityAfterPermissionSucceeds(t *tes
 func TestDeclaredViewJoinWhereColumnComparisonAppliesVisibility(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x25)
 	bob := visibilityRuntimeIdentity(0x26)
-	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
-		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
-		VisibilityFilter(VisibilityFilterDeclaration{
-			Name: "own_messages",
-			SQL:  "SELECT * FROM messages WHERE body = :sender",
-		}).
-		View(ViewDeclaration{
-			Name:        "live_matching_messages",
-			SQL:         "SELECT a.* FROM messages AS a JOIN messages AS b ON a.id = b.id WHERE a.body = b.body",
-			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
-		}))
+	rt := buildStartedVisibleMessagesViewRuntime(t, "live_matching_messages", "SELECT a.* FROM messages AS a JOIN messages AS b ON a.id = b.id WHERE a.body = b.body")
 	defer rt.Close()
 	insertMessageWithBody(t, rt, 1, alice.Hex())
 	insertMessageWithBody(t, rt, 2, bob.Hex())
 
-	sub, err := rt.SubscribeView(context.Background(), "live_matching_messages", 15,
-		WithDeclaredReadIdentity(alice),
-		WithDeclaredReadPermissions("messages:subscribe"),
-	)
-	if err != nil {
-		t.Fatalf("SubscribeView: %v", err)
-	}
+	sub := subscribeVisibleMessagesView(t, rt, "live_matching_messages", 15, alice, "SubscribeView")
 	if len(sub.InitialRows) != 1 || sub.InitialRows[0][0].AsUint64() != 1 || sub.InitialRows[0][1].AsString() != alice.Hex() {
 		t.Fatalf("visible join view rows = %#v, want only caller row", sub.InitialRows)
 	}
@@ -2720,6 +2496,33 @@ func buildStartedDeclaredReadRuntimeWithConfig(t *testing.T, mod *Module, cfg Co
 		t.Fatalf("Start: %v", err)
 	}
 	return rt
+}
+
+func buildStartedVisibleMessagesViewRuntime(t *testing.T, name, sql string) *Runtime {
+	t.Helper()
+	return buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        name,
+			SQL:         sql,
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+}
+
+func subscribeVisibleMessagesView(t *testing.T, rt *Runtime, name string, queryID uint32, identity types.Identity, label string) DeclaredViewSubscription {
+	t.Helper()
+	sub, err := rt.SubscribeView(context.Background(), name, queryID,
+		WithDeclaredReadIdentity(identity),
+		WithDeclaredReadPermissions("messages:subscribe"),
+	)
+	if err != nil {
+		t.Fatalf("%s: %v", label, err)
+	}
+	return sub
 }
 
 func insertMessageReducer(ctx *schema.ReducerContext, args []byte) ([]byte, error) {

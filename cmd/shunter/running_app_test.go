@@ -29,14 +29,8 @@ func TestCallCommandInvokesRunningAppReducerJSON(t *testing.T) {
 		ws := acceptRunningAppProtocolConn(t, w, r)
 		defer ws.CloseNow()
 		writeRunningAppServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read reducer call: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readRunningAppClientMessage(t, r, ws, "reducer call")
+		if !ok {
 			return
 		}
 		call, ok := msg.(protocol.CallReducerMsg)
@@ -112,14 +106,8 @@ func TestQueryCommandInvokesRunningAppDeclaredQueryAndDecodesRows(t *testing.T) 
 		ws := acceptRunningAppProtocolConn(t, w, r)
 		defer ws.CloseNow()
 		writeRunningAppServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{3}, ConnectionID: [16]byte{4}})
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read query: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readRunningAppClientMessage(t, r, ws, "query")
+		if !ok {
 			return
 		}
 		query, ok := msg.(protocol.DeclaredQueryMsg)
@@ -204,14 +192,8 @@ func TestQueryCommandInvokesRunningAppSQLAndDecodesRows(t *testing.T) {
 		ws := acceptRunningAppProtocolConn(t, w, r)
 		defer ws.CloseNow()
 		writeRunningAppServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{5}, ConnectionID: [16]byte{6}})
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read SQL query: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readRunningAppClientMessage(t, r, ws, "SQL query")
+		if !ok {
 			return
 		}
 		query, ok := msg.(protocol.OneOffQueryMsg)
@@ -661,14 +643,8 @@ func TestRunningAppCommandTokenFileAndArgsFile(t *testing.T) {
 		ws := acceptRunningAppProtocolConn(t, w, r)
 		defer ws.CloseNow()
 		writeRunningAppServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read reducer call: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readRunningAppClientMessage(t, r, ws, "reducer call")
+		if !ok {
 			return
 		}
 		call := msg.(protocol.CallReducerMsg)
@@ -758,14 +734,8 @@ func TestRunningAppCommandTokenPrecedenceAndDevAnonymous(t *testing.T) {
 				ws := acceptRunningAppProtocolConn(t, w, r)
 				defer ws.CloseNow()
 				writeRunningAppServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, Token: "minted-token", ConnectionID: [16]byte{2}})
-				_, frame, err := ws.Read(r.Context())
-				if err != nil {
-					t.Errorf("server read query: %v", err)
-					return
-				}
-				_, msg, err := protocol.DecodeClientMessage(frame)
-				if err != nil {
-					t.Errorf("DecodeClientMessage: %v", err)
+				msg, ok := readRunningAppClientMessage(t, r, ws, "query")
+				if !ok {
 					return
 				}
 				query := msg.(protocol.DeclaredQueryMsg)
@@ -855,14 +825,8 @@ func TestRunningAppCommandArgsHexSendsRawBytes(t *testing.T) {
 		ws := acceptRunningAppProtocolConn(t, w, r)
 		defer ws.CloseNow()
 		writeRunningAppServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read reducer call: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readRunningAppClientMessage(t, r, ws, "reducer call")
+		if !ok {
 			return
 		}
 		call := msg.(protocol.CallReducerMsg)
@@ -906,14 +870,8 @@ func TestRunningAppCommandRuntimeFailuresExitOne(t *testing.T) {
 			ws := acceptRunningAppProtocolConn(t, w, r)
 			defer ws.CloseNow()
 			writeRunningAppServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
-			_, frame, err := ws.Read(r.Context())
-			if err != nil {
-				t.Errorf("server read reducer call: %v", err)
-				return
-			}
-			_, msg, err := protocol.DecodeClientMessage(frame)
-			if err != nil {
-				t.Errorf("DecodeClientMessage: %v", err)
+			msg, ok := readRunningAppClientMessage(t, r, ws, "reducer call")
+			if !ok {
 				return
 			}
 			call := msg.(protocol.CallReducerMsg)
@@ -946,14 +904,8 @@ func TestRunningAppCommandRuntimeFailuresExitOne(t *testing.T) {
 			ws := acceptRunningAppProtocolConn(t, w, r)
 			defer ws.CloseNow()
 			writeRunningAppServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
-			_, frame, err := ws.Read(r.Context())
-			if err != nil {
-				t.Errorf("server read query: %v", err)
-				return
-			}
-			_, msg, err := protocol.DecodeClientMessage(frame)
-			if err != nil {
-				t.Errorf("DecodeClientMessage: %v", err)
+			msg, ok := readRunningAppClientMessage(t, r, ws, "query")
+			if !ok {
 				return
 			}
 			query := msg.(protocol.DeclaredQueryMsg)
@@ -989,14 +941,8 @@ func TestRunningAppCommandMalformedServerResponseIsProtocolError(t *testing.T) {
 		ws := acceptRunningAppProtocolConn(t, w, r)
 		defer ws.CloseNow()
 		writeRunningAppServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
-		_, frame, err := ws.Read(r.Context())
-		if err != nil {
-			t.Errorf("server read query: %v", err)
-			return
-		}
-		_, msg, err := protocol.DecodeClientMessage(frame)
-		if err != nil {
-			t.Errorf("DecodeClientMessage: %v", err)
+		msg, ok := readRunningAppClientMessage(t, r, ws, "query")
+		if !ok {
 			return
 		}
 		if _, ok := msg.(protocol.DeclaredQueryMsg); !ok {
@@ -1111,6 +1057,21 @@ func writeRunningAppServerMessage(t *testing.T, ws *websocket.Conn, msg any) {
 	if err := ws.Write(ctx, websocket.MessageBinary, frame); err != nil {
 		t.Fatalf("server write %T: %v", msg, err)
 	}
+}
+
+func readRunningAppClientMessage(t *testing.T, r *http.Request, ws *websocket.Conn, label string) (any, bool) {
+	t.Helper()
+	_, frame, err := ws.Read(r.Context())
+	if err != nil {
+		t.Errorf("server read %s: %v", label, err)
+		return nil, false
+	}
+	_, msg, err := protocol.DecodeClientMessage(frame)
+	if err != nil {
+		t.Errorf("DecodeClientMessage: %v", err)
+		return nil, false
+	}
+	return msg, true
 }
 
 func readRunningAppClientClose(t *testing.T, r *http.Request, ws *websocket.Conn) {
