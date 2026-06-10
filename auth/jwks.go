@@ -242,18 +242,22 @@ func keysForJWKS(source JWKSConfig, forceRefresh bool) ([]resolvedJWTVerificatio
 }
 
 func jwksCacheKey(source JWKSConfig) string {
-	algs := append([]JWTAlgorithm(nil), source.Algorithms...)
+	return jwtSourceCacheKey(source.Issuer, source.JWKSURL, source.Algorithms, source.CacheTTL)
+}
+
+func jwtSourceCacheKey(issuer, endpoint string, algorithms []JWTAlgorithm, ttl time.Duration) string {
+	algs := slices.Clone(algorithms)
 	slices.Sort(algs)
 	var b strings.Builder
-	b.WriteString(strings.TrimSpace(source.Issuer))
+	b.WriteString(strings.TrimSpace(issuer))
 	b.WriteString("\x00")
-	b.WriteString(strings.TrimSpace(source.JWKSURL))
+	b.WriteString(strings.TrimSpace(endpoint))
 	b.WriteString("\x00")
 	for _, alg := range algs {
 		b.WriteString(string(alg))
 		b.WriteString("\x00")
 	}
-	b.WriteString(source.CacheTTL.String())
+	b.WriteString(ttl.String())
 	return b.String()
 }
 

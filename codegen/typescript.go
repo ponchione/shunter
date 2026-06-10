@@ -154,12 +154,8 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	b.WriteString("export type UUID = string;\n")
 	b.WriteString("\n")
 
-	tableNames := make([]string, len(profileTables))
-	for i, table := range profileTables {
-		tableNames[i] = table.Name
-	}
-	tableTypes := uniqueTypeScriptIdentifiers(tableNames, typeScriptPascalIdentifier)
-	tableConstants := uniqueTypeScriptIdentifiers(tableNames, typeScriptCamelIdentifier)
+	tableTypes := typeScriptIdentifiersByName(profileTables, schemaTableExportName, typeScriptPascalIdentifier)
+	tableConstants := typeScriptIdentifiersByName(profileTables, schemaTableExportName, typeScriptCamelIdentifier)
 	topLevelValueNames := typeScriptTopLevelValueNames()
 	tableRowTypes := typeScriptTableRowTypes(tableTypes, topLevelValueNames)
 	for i, table := range profileTables {
@@ -260,11 +256,7 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 	writeTypeScriptConstMap(&b, "lifecycleReducers", lifecycleReducerIdentifiers)
 	b.WriteString("export type LifecycleReducerName = (typeof lifecycleReducers)[keyof typeof lifecycleReducers];\n\n")
 
-	procedureNames := make([]string, len(contract.Procedures))
-	for i, procedure := range contract.Procedures {
-		procedureNames[i] = procedure.Name
-	}
-	procedureIdentifiers := uniqueTypeScriptIdentifiers(procedureNames, typeScriptCamelIdentifier)
+	procedureIdentifiers := typeScriptIdentifiersByName(contract.Procedures, procedureDescriptionName, typeScriptCamelIdentifier)
 	writeTypeScriptConstMap(&b, "procedures", procedureIdentifiers)
 	b.WriteString("export type ProcedureName = (typeof procedures)[keyof typeof procedures];\n\n")
 	proceduresByName := make(map[string]shunter.ProcedureDescription, len(contract.Procedures))
@@ -303,14 +295,10 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 		procedureFacades = append(procedureFacades, procedureFacade)
 	}
 
-	queryNames := make([]string, len(contract.Queries))
-	for i, query := range contract.Queries {
-		queryNames[i] = query.Name
-	}
-	queryIdentifiers := uniqueTypeScriptIdentifiers(queryNames, typeScriptCamelIdentifier)
+	queryIdentifiers := typeScriptIdentifiersByName(contract.Queries, queryDescriptionName, typeScriptCamelIdentifier)
 	writeTypeScriptConstMap(&b, "queries", queryIdentifiers)
 	b.WriteString("export type QueryName = (typeof queries)[keyof typeof queries];\n\n")
-	executableQueries := executableQueryIdentifiers(contract.Queries, queryIdentifiers)
+	executableQueries := executableTypeScriptReadIdentifiers(contract.Queries, queryIdentifiers, queryDescriptionSQL)
 	writeTypeScriptSQLConstMap(&b, "querySQL", executableQueries)
 	b.WriteString("export type ExecutableQueryName = (typeof queries)[keyof typeof querySQL];\n\n")
 	queryFacades := make([]typeScriptQueryFacade, 0, len(executableQueries))
@@ -390,14 +378,10 @@ func generateTypeScript(contract shunter.ModuleContract, opts typeScriptGenerati
 		queryFacades = append(queryFacades, queryFacade)
 	}
 
-	viewNames := make([]string, len(contract.Views))
-	for i, view := range contract.Views {
-		viewNames[i] = view.Name
-	}
-	viewIdentifiers := uniqueTypeScriptIdentifiers(viewNames, typeScriptCamelIdentifier)
+	viewIdentifiers := typeScriptIdentifiersByName(contract.Views, viewDescriptionName, typeScriptCamelIdentifier)
 	writeTypeScriptConstMap(&b, "views", viewIdentifiers)
 	b.WriteString("export type ViewName = (typeof views)[keyof typeof views];\n\n")
-	executableViews := executableViewIdentifiers(contract.Views, viewIdentifiers)
+	executableViews := executableTypeScriptReadIdentifiers(contract.Views, viewIdentifiers, viewDescriptionSQL)
 	writeTypeScriptSQLConstMap(&b, "viewSQL", executableViews)
 	b.WriteString("export type ExecutableViewName = (typeof views)[keyof typeof viewSQL];\n\n")
 	viewFacades := make([]typeScriptViewFacade, 0, len(executableViews))
@@ -582,6 +566,26 @@ func typeScriptTableRowTypes(tableTypes []namedTypeScriptIdentifier, topLevelVal
 	}
 	return out
 }
+
+func typeScriptIdentifiersByName[T any](values []T, name func(T) string, style func(string) string) []namedTypeScriptIdentifier {
+	names := make([]string, len(values))
+	for i, value := range values {
+		names[i] = name(value)
+	}
+	return uniqueTypeScriptIdentifiers(names, style)
+}
+
+func schemaTableExportName(table schema.TableExport) string { return table.Name }
+
+func procedureDescriptionName(procedure shunter.ProcedureDescription) string { return procedure.Name }
+
+func queryDescriptionName(query shunter.QueryDescription) string { return query.Name }
+
+func queryDescriptionSQL(query shunter.QueryDescription) string { return query.SQL }
+
+func viewDescriptionName(view shunter.ViewDescription) string { return view.Name }
+
+func viewDescriptionSQL(view shunter.ViewDescription) string { return view.SQL }
 
 func writeTypeScriptRuntimeImports(b *bytes.Buffer, runtimeImport string) {
 	b.WriteString("import type {\n")
@@ -942,28 +946,15 @@ func writeTypeScriptVisibilityFilters(b *bytes.Buffer, filters []shunter.Visibil
 	b.WriteString("} as const;\n\n")
 }
 
-func executableQueryIdentifiers(queries []shunter.QueryDescription, identifiers []namedTypeScriptIdentifier) []namedTypeScriptIdentifier {
-	out := make([]namedTypeScriptIdentifier, 0, len(queries))
-	for i, query := range queries {
-		if strings.TrimSpace(query.SQL) == "" {
+func executableTypeScriptReadIdentifiers[T any](reads []T, identifiers []namedTypeScriptIdentifier, sqlText func(T) string) []namedTypeScriptIdentifier {
+	out := make([]namedTypeScriptIdentifier, 0, len(reads))
+	for i, read := range reads {
+		sql := sqlText(read)
+		if strings.TrimSpace(sql) == "" {
 			continue
 		}
 		identifier := identifiers[i]
-		identifier.sql = query.SQL
-		identifier.contractIndex = i
-		out = append(out, identifier)
-	}
-	return out
-}
-
-func executableViewIdentifiers(views []shunter.ViewDescription, identifiers []namedTypeScriptIdentifier) []namedTypeScriptIdentifier {
-	out := make([]namedTypeScriptIdentifier, 0, len(views))
-	for i, view := range views {
-		if strings.TrimSpace(view.SQL) == "" {
-			continue
-		}
-		identifier := identifiers[i]
-		identifier.sql = view.SQL
+		identifier.sql = sql
 		identifier.contractIndex = i
 		out = append(out, identifier)
 	}
@@ -1102,11 +1093,11 @@ func writeTypeScriptPermissionCategory(b *bytes.Buffer, category string, declara
 }
 
 func permissionTypeScriptIdentifiers(declarations []shunter.PermissionContractDeclaration) []namedTypeScriptIdentifier {
-	names := make([]string, len(declarations))
-	for i, declaration := range declarations {
-		names[i] = declaration.Name
-	}
-	return uniqueTypeScriptIdentifiers(names, typeScriptCamelIdentifier)
+	return typeScriptIdentifiersByName(declarations, permissionDeclarationName, typeScriptCamelIdentifier)
+}
+
+func permissionDeclarationName(declaration shunter.PermissionContractDeclaration) string {
+	return declaration.Name
 }
 
 func writeTypeScriptReadModels(b *bytes.Buffer, declarations []shunter.ReadModelContractDeclaration) {
@@ -1140,19 +1131,19 @@ func writeTypeScriptReadModelCategory(b *bytes.Buffer, category string, declarat
 }
 
 func readModelTypeScriptIdentifiers(declarations []shunter.ReadModelContractDeclaration) []namedTypeScriptIdentifier {
-	names := make([]string, len(declarations))
-	for i, declaration := range declarations {
-		names[i] = declaration.Name
-	}
-	return uniqueTypeScriptIdentifiers(names, typeScriptCamelIdentifier)
+	return typeScriptIdentifiersByName(declarations, readModelDeclarationName, typeScriptCamelIdentifier)
+}
+
+func readModelDeclarationName(declaration shunter.ReadModelContractDeclaration) string {
+	return declaration.Name
 }
 
 func visibilityFilterTypeScriptIdentifiers(filters []shunter.VisibilityFilterDescription) []namedTypeScriptIdentifier {
-	names := make([]string, len(filters))
-	for i, filter := range filters {
-		names[i] = filter.Name
-	}
-	return uniqueTypeScriptIdentifiers(names, typeScriptCamelIdentifier)
+	return typeScriptIdentifiersByName(filters, visibilityFilterDescriptionName, typeScriptCamelIdentifier)
+}
+
+func visibilityFilterDescriptionName(filter shunter.VisibilityFilterDescription) string {
+	return filter.Name
 }
 
 func typeScriptStringArray(values []string) string {

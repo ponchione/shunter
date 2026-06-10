@@ -3,6 +3,7 @@ package shunter
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/ponchione/shunter/protocol"
@@ -329,15 +330,7 @@ func productSchemasEqual(a, b *ProductSchema) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	if len(a.Columns) != len(b.Columns) {
-		return false
-	}
-	for i := range a.Columns {
-		if a.Columns[i] != b.Columns[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(a.Columns, b.Columns)
 }
 
 func validateVisibilityFilterContract(filters []VisibilityFilterDescription, lookup contractSchemaLookup, errs *[]error) {

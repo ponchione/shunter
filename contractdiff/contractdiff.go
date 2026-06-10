@@ -753,15 +753,7 @@ func productSchemasEqual(old, current *shunter.ProductSchema) bool {
 	if old == nil || current == nil {
 		return old == current
 	}
-	if len(old.Columns) != len(current.Columns) {
-		return false
-	}
-	for i := range old.Columns {
-		if old.Columns[i] != current.Columns[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(old.Columns, current.Columns)
 }
 
 func nonEmptyName(first, fallback string) string {

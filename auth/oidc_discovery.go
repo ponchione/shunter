@@ -132,19 +132,7 @@ func jwksForOIDCDiscovery(source OIDCDiscoveryConfig) (JWKSConfig, error) {
 }
 
 func oidcDiscoveryCacheKey(source OIDCDiscoveryConfig) string {
-	algs := append([]JWTAlgorithm(nil), source.Algorithms...)
-	slices.Sort(algs)
-	var b strings.Builder
-	b.WriteString(strings.TrimSpace(source.Issuer))
-	b.WriteString("\x00")
-	b.WriteString(strings.TrimSpace(source.DiscoveryURL))
-	b.WriteString("\x00")
-	for _, alg := range algs {
-		b.WriteString(string(alg))
-		b.WriteString("\x00")
-	}
-	b.WriteString(source.CacheTTL.String())
-	return b.String()
+	return jwtSourceCacheKey(source.Issuer, source.DiscoveryURL, source.Algorithms, source.CacheTTL)
 }
 
 func fetchOIDCDiscovery(source OIDCDiscoveryConfig) (JWKSConfig, error) {
