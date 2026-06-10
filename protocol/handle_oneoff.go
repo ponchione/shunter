@@ -578,6 +578,18 @@ func oneOffLimitReached(count int, limit int) bool {
 	return limit >= 0 && count >= limit
 }
 
+func oneOffWindowBounds(length int, offset int, limit int) (int, int) {
+	start := offset
+	if start > length {
+		start = length
+	}
+	end := length
+	if limit >= 0 && limit < end-start {
+		end = start + limit
+	}
+	return start, end
+}
+
 type orderedOneOffRow struct {
 	row types.ProductValue
 	key []types.Value
@@ -626,14 +638,7 @@ func materializeOrderedOneOffRows(rows []orderedOneOffRow, orderBy []compiledSQL
 		}
 		return 0
 	})
-	start := offset
-	if start > len(rows) {
-		start = len(rows)
-	}
-	end := len(rows)
-	if limit >= 0 && limit < end-start {
-		end = start + limit
-	}
+	start, end := oneOffWindowBounds(len(rows), offset, limit)
 	outLen := end - start
 	out := make([]types.ProductValue, 0, outLen)
 	for i := start; i < end; i++ {
@@ -643,14 +648,7 @@ func materializeOrderedOneOffRows(rows []orderedOneOffRow, orderBy []compiledSQL
 }
 
 func materializeSortedOneOffRows(rows []types.ProductValue, offset int, limit int) []types.ProductValue {
-	start := offset
-	if start > len(rows) {
-		start = len(rows)
-	}
-	end := len(rows)
-	if limit >= 0 && limit < end-start {
-		end = start + limit
-	}
+	start, end := oneOffWindowBounds(len(rows), offset, limit)
 	outLen := end - start
 	out := make([]types.ProductValue, 0, outLen)
 	for i := start; i < end; i++ {
@@ -660,14 +658,7 @@ func materializeSortedOneOffRows(rows []types.ProductValue, offset int, limit in
 }
 
 func sliceOneOffRows(rows []types.ProductValue, offset int, limit int) []types.ProductValue {
-	start := offset
-	if start > len(rows) {
-		start = len(rows)
-	}
-	end := len(rows)
-	if limit >= 0 && limit < end-start {
-		end = start + limit
-	}
+	start, end := oneOffWindowBounds(len(rows), offset, limit)
 	return rows[start:end]
 }
 
@@ -1064,14 +1055,7 @@ func validateOrderKeysFromJoinPair(leftRow, rightRow types.ProductValue, leftID 
 }
 
 func projectSortedOneOffPairs(pairs []orderedOneOffPair, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, columns []compiledSQLProjectionColumn, offset int, limit int) []types.ProductValue {
-	start := offset
-	if start > len(pairs) {
-		start = len(pairs)
-	}
-	end := len(pairs)
-	if limit >= 0 && limit < end-start {
-		end = start + limit
-	}
+	start, end := oneOffWindowBounds(len(pairs), offset, limit)
 	outLen := end - start
 	out := make([]types.ProductValue, 0, outLen)
 	for i := start; i < end; i++ {

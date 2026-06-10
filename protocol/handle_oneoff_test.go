@@ -302,6 +302,22 @@ func requireOneOffQueryError(t *testing.T, conn *Conn, stateAccess CommittedStat
 	return result
 }
 
+func requireOneOffResult(t *testing.T, conn *Conn, stateAccess CommittedStateAccess, sl SchemaLookup, msg *OneOffQueryMsg) OneOffQueryResponse {
+	t.Helper()
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil", *result.Error)
+	}
+	return result
+}
+
+func requireOneOffRows(t *testing.T, conn *Conn, stateAccess CommittedStateAccess, sl SchemaLookup, msg *OneOffQueryMsg, ts *schema.TableSchema) []types.ProductValue {
+	t.Helper()
+	result := requireOneOffResult(t, conn, stateAccess, sl, msg)
+	return decodeRows(t, firstTableRows(result), ts)
+}
+
 // firstTableRows returns the Rows payload of the first OneOffTable, or
 // nil if Tables is empty. Most one-off message-id handler tests populate
 // exactly one table matching `compiled.TableName`.
@@ -402,14 +418,9 @@ func TestHandleOneOffQuery_Valid(t *testing.T) {
 		QueryString: "SELECT * FROM users WHERE id = 2",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
+	result := requireOneOffResult(t, conn, stateAccess, sl, msg)
 	if !bytes.Equal(result.MessageID, msg.MessageID) {
 		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
-	}
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 
 	pvs := decodeRows(t, firstTableRows(result), ts)
@@ -453,13 +464,7 @@ func TestHandleOneOffQuery_UUIDLiteralFiltersRows(t *testing.T) {
 		QueryString: "SELECT * FROM entities WHERE id = '00112233-4455-6677-8899-aabbccddeeff'",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -489,28 +494,18 @@ func TestHandleOneOffQuery_NullPredicatesFilterRows(t *testing.T) {
 	}
 	stateAccess := &mockStateAccess{snap: snap}
 
-	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+	nullRows := requireOneOffRows(t, conn, stateAccess, sl, &OneOffQueryMsg{
 		MessageID:   []byte{0x13},
 		QueryString: "SELECT * FROM users WHERE nickname IS NULL",
-	}, stateAccess, sl)
-	nullResult := drainOneOff(t, conn)
-	if nullResult.Error != nil {
-		t.Fatalf("IS NULL error = %q, want nil", *nullResult.Error)
-	}
-	nullRows := decodeRows(t, firstTableRows(nullResult), ts)
+	}, ts)
 	if len(nullRows) != 1 || !nullRows[0][0].Equal(types.NewUint32(1)) || !nullRows[0][1].IsNull() {
 		t.Fatalf("IS NULL rows = %+v, want id=1 null nickname", nullRows)
 	}
 
-	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+	notNullRows := requireOneOffRows(t, conn, stateAccess, sl, &OneOffQueryMsg{
 		MessageID:   []byte{0x14},
 		QueryString: "SELECT * FROM users WHERE nickname IS NOT NULL",
-	}, stateAccess, sl)
-	notNullResult := drainOneOff(t, conn)
-	if notNullResult.Error != nil {
-		t.Fatalf("IS NOT NULL error = %q, want nil", *notNullResult.Error)
-	}
-	notNullRows := decodeRows(t, firstTableRows(notNullResult), ts)
+	}, ts)
 	if len(notNullRows) != 1 || !notNullRows[0][0].Equal(types.NewUint32(2)) || notNullRows[0][1].IsNull() {
 		t.Fatalf("IS NOT NULL rows = %+v, want id=2 non-null nickname", notNullRows)
 	}
@@ -545,13 +540,7 @@ func TestHandleOneOffQuery_JSONLiteralFiltersRows(t *testing.T) {
 		QueryString: `SELECT * FROM documents WHERE metadata = '{"a":1,"b":2}'`,
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -614,16 +603,10 @@ func TestHandleOneOffQueryOffsetSkipsMatchedRowsBeforeLimit(t *testing.T) {
 	}}
 	stateAccess := &mockStateAccess{snap: snap}
 
-	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, &OneOffQueryMsg{
 		MessageID:   []byte{0x14},
 		QueryString: "SELECT * FROM users WHERE id >= 2 LIMIT 1 OFFSET 1",
-	}, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	}, ts)
 	assertProductRowsEqual(t, pvs, []types.ProductValue{
 		{types.NewUint64(3), types.NewString("second-match")},
 	})
@@ -658,16 +641,10 @@ func TestHandleOneOffQueryOrderByDescSortsBeforeLimitAndProjection(t *testing.T)
 	}}
 	stateAccess := &mockStateAccess{snap: snap}
 
-	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, &OneOffQueryMsg{
 		MessageID:   []byte{0x13},
 		QueryString: "SELECT id, label FROM metrics ORDER BY score DESC LIMIT 2",
-	}, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), projectedTS)
+	}, projectedTS)
 	assertProductRowsEqual(t, pvs, []types.ProductValue{
 		{types.NewUint32(2), types.NewString("high")},
 		{types.NewUint32(3), types.NewString("mid")},
@@ -703,16 +680,10 @@ func TestHandleOneOffQueryOrderByProjectionAliasSortsBeforeProjection(t *testing
 	}}
 	stateAccess := &mockStateAccess{snap: snap}
 
-	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, &OneOffQueryMsg{
 		MessageID:   []byte{0x16},
 		QueryString: "SELECT score AS rank, label FROM metrics ORDER BY rank DESC LIMIT 2",
-	}, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), projectedTS)
+	}, projectedTS)
 	assertProductRowsEqual(t, pvs, []types.ProductValue{
 		{types.NewUint32(30), types.NewString("high")},
 		{types.NewUint32(20), types.NewString("mid")},
@@ -768,16 +739,10 @@ func TestHandleOneOffQueryOrderByDescSortsBeforeOffsetLimitAndProjection(t *test
 	}}
 	stateAccess := &mockStateAccess{snap: snap}
 
-	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, &OneOffQueryMsg{
 		MessageID:   []byte{0x15},
 		QueryString: "SELECT id, label FROM metrics ORDER BY score DESC LIMIT 1 OFFSET 1",
-	}, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), projectedTS)
+	}, projectedTS)
 	assertProductRowsEqual(t, pvs, []types.ProductValue{
 		{types.NewUint32(3), types.NewString("mid")},
 	})
@@ -805,16 +770,10 @@ func TestHandleOneOffQueryMultiColumnOrderByTableScan(t *testing.T) {
 	}}
 	stateAccess := &mockStateAccess{snap: snap}
 
-	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, &OneOffQueryMsg{
 		MessageID:   []byte{0x18},
 		QueryString: "SELECT * FROM users ORDER BY active DESC, name ASC",
-	}, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	}, ts)
 	assertProductRowsEqual(t, pvs, []types.ProductValue{
 		{types.NewUint32(2), types.NewBool(true), types.NewString("alpha")},
 		{types.NewUint32(1), types.NewBool(true), types.NewString("bravo")},
@@ -1851,16 +1810,10 @@ func TestHandleOneOffQueryMultiColumnOrderByStableTies(t *testing.T) {
 	}}
 	stateAccess := &mockStateAccess{snap: snap}
 
-	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, &OneOffQueryMsg{
 		MessageID:   []byte{0x1a},
 		QueryString: "SELECT * FROM metrics ORDER BY score DESC, bucket ASC",
-	}, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	}, ts)
 	assertProductRowsEqual(t, pvs, []types.ProductValue{
 		{types.NewUint32(3), types.NewUint32(20), types.NewUint32(2)},
 		{types.NewUint32(1), types.NewUint32(10), types.NewUint32(1)},
@@ -1923,14 +1876,9 @@ func TestHandleOneOffQuery_QualifiedStarAlias(t *testing.T) {
 		QueryString: "SELECT item.* FROM users AS item WHERE item.name = 'alice'",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
+	result := requireOneOffResult(t, conn, stateAccess, sl, msg)
 	if !bytes.Equal(result.MessageID, msg.MessageID) {
 		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
-	}
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 
 	pvs := decodeRows(t, firstTableRows(result), ts)
@@ -1973,13 +1921,7 @@ func TestHandleOneOffQuery_LessThanOrEqualComparison(t *testing.T) {
 		QueryString: "SELECT * FROM metrics WHERE score <= 10",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -2016,13 +1958,7 @@ func TestHandleOneOffQuery_NotEqualComparison(t *testing.T) {
 		QueryString: "SELECT * FROM metrics WHERE score <> 10",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -2059,13 +1995,7 @@ func TestHandleOneOffQuery_OrComparison(t *testing.T) {
 		QueryString: "SELECT * FROM metrics WHERE score = 9 OR score = 11",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -2484,13 +2414,7 @@ func TestHandleOneOffQuery_OrComparisonWithAlias(t *testing.T) {
 		QueryString: "SELECT item.* FROM users AS item WHERE item.id = 1 OR name = 'alice'",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -2529,13 +2453,7 @@ func TestHandleOneOffQuery_WhereTrueLiteralReturnsAllRows(t *testing.T) {
 		QueryString: "SELECT * FROM t WHERE TRUE",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -2571,13 +2489,7 @@ func TestHandleOneOffQuery_TrueAndComparisonMatchesComparison(t *testing.T) {
 		QueryString: "SELECT * FROM t WHERE TRUE AND id = 7",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -2613,13 +2525,7 @@ func TestHandleOneOffQuery_TrueOrComparisonReturnsAllRows(t *testing.T) {
 		QueryString: "SELECT * FROM t WHERE TRUE OR id = 7",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -2652,13 +2558,7 @@ func TestHandleOneOffQuery_SQLWhereFalseReturnsNoRows(t *testing.T) {
 		QueryString: "SELECT * FROM t WHERE FALSE",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 0 {
 		t.Fatalf("got %d rows, want 0", len(pvs))
 	}
@@ -2691,13 +2591,7 @@ func TestHandleOneOffQuery_SQLWhereFalseOrComparisonReturnsComparisonRows(t *tes
 		QueryString: "SELECT * FROM t WHERE FALSE OR id = 7",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -2733,13 +2627,7 @@ func TestHandleOneOffQuery_SQLWhereFalseAndComparisonReturnsNoRows(t *testing.T)
 		QueryString: "SELECT * FROM t WHERE FALSE AND id = 7",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 0 {
 		t.Fatalf("got %d rows, want 0", len(pvs))
 	}
@@ -2772,13 +2660,7 @@ func TestHandleOneOffQuery_QuotedSpecialCharacterIdentifiers(t *testing.T) {
 		QueryString: `SELECT * FROM "Balance$" WHERE "id" = 7`,
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -2814,13 +2696,7 @@ func TestHandleOneOffQuery_QuotedReservedIdentifiers(t *testing.T) {
 		QueryString: `SELECT * FROM "Order" WHERE "id" = 7`,
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ts)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -2883,13 +2759,7 @@ func TestHandleOneOffQuery_JoinFilterOnLeftFloatColumn(t *testing.T) {
 		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE t.f32 = 0.1",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), tTS)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, tTS)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -3172,13 +3042,7 @@ func TestHandleOneOffQuery_JoinFilterCrossSideOrDoesNotPassEveryPair(t *testing.
 		MessageID:   []byte{0x7e},
 		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE t.id = 1 OR s.id = 30",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil", *result.Error)
-	}
-	gotRows := decodeRows(t, firstTableRows(result), tTS)
+	gotRows := requireOneOffRows(t, conn, stateAccess, sl, msg, tTS)
 	wantRows := []types.ProductValue{
 		{types.NewUint32(1), types.NewUint32(10)},
 		{types.NewUint32(3), types.NewUint32(30)},
@@ -3295,13 +3159,7 @@ func TestHandleOneOffQuery_JoinProjectionOnLeftTable(t *testing.T) {
 		QueryString: "SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id WHERE product.quantity < 10",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	pvs := decodeRows(t, firstTableRows(result), ordersTS)
+	pvs := requireOneOffRows(t, conn, stateAccess, sl, msg, ordersTS)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
