@@ -114,85 +114,11 @@ func fourTableDualIndexedMultiJoinTestSchema() *fakeSchema {
 }
 
 func splitOrLongNonKeyPreservingMultiHopFilterMultiJoinPredicate() MultiJoin {
-	return MultiJoin{
-		Relations: []MultiJoinRelation{
-			{Table: 1, Alias: 0},
-			{Table: 2, Alias: 1},
-			{Table: 3, Alias: 2},
-			{Table: 4, Alias: 3},
-		},
-		Conditions: []MultiJoinCondition{
-			{
-				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
-				Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 1, Table: 2, Column: 0, Alias: 1},
-				Right: MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 2, Table: 3, Column: 0, Alias: 2},
-				Right: MultiJoinColumnRef{Relation: 3, Table: 4, Column: 1, Alias: 3},
-			},
-		},
-		ProjectedRelation: 0,
-		Filter: Or{
-			Left: ColEq{
-				Table:  1,
-				Column: 0,
-				Alias:  0,
-				Value:  types.NewUint64(7),
-			},
-			Right: ColRange{
-				Table:  4,
-				Column: 0,
-				Alias:  3,
-				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
-				Upper:  Bound{Unbounded: true},
-			},
-		},
-	}
+	return splitOrLinearPathFilterMultiJoinPredicate(3)
 }
 
 func splitOrThreeHopFilterMultiJoinPredicate() MultiJoin {
-	return MultiJoin{
-		Relations: []MultiJoinRelation{
-			{Table: 1, Alias: 0},
-			{Table: 2, Alias: 1},
-			{Table: 3, Alias: 2},
-			{Table: 4, Alias: 3},
-		},
-		Conditions: []MultiJoinCondition{
-			{
-				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
-				Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 1, Table: 2, Column: 0, Alias: 1},
-				Right: MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 2, Table: 3, Column: 0, Alias: 2},
-				Right: MultiJoinColumnRef{Relation: 3, Table: 4, Column: 1, Alias: 3},
-			},
-		},
-		ProjectedRelation: 0,
-		Filter: Or{
-			Left: ColEq{
-				Table:  1,
-				Column: 0,
-				Alias:  0,
-				Value:  types.NewUint64(7),
-			},
-			Right: ColRange{
-				Table:  4,
-				Column: 0,
-				Alias:  3,
-				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
-				Upper:  Bound{Unbounded: true},
-			},
-		},
-	}
+	return splitOrLinearPathFilterMultiJoinPredicate(3)
 }
 
 func threeHopMultiJoinTestSchema() *fakeSchema {
@@ -340,217 +266,19 @@ func linearPathReverseToCols(hops int) []ColID {
 }
 
 func splitOrFourHopFilterMultiJoinPredicate() MultiJoin {
-	return MultiJoin{
-		Relations: []MultiJoinRelation{
-			{Table: 1, Alias: 0},
-			{Table: 2, Alias: 1},
-			{Table: 3, Alias: 2},
-			{Table: 4, Alias: 3},
-			{Table: 5, Alias: 4},
-		},
-		Conditions: []MultiJoinCondition{
-			{
-				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
-				Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 1, Table: 2, Column: 0, Alias: 1},
-				Right: MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 2, Table: 3, Column: 0, Alias: 2},
-				Right: MultiJoinColumnRef{Relation: 3, Table: 4, Column: 1, Alias: 3},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 3, Table: 4, Column: 0, Alias: 3},
-				Right: MultiJoinColumnRef{Relation: 4, Table: 5, Column: 1, Alias: 4},
-			},
-		},
-		ProjectedRelation: 0,
-		Filter: Or{
-			Left: ColEq{
-				Table:  1,
-				Column: 0,
-				Alias:  0,
-				Value:  types.NewUint64(7),
-			},
-			Right: ColRange{
-				Table:  5,
-				Column: 0,
-				Alias:  4,
-				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
-				Upper:  Bound{Unbounded: true},
-			},
-		},
-	}
+	return splitOrLinearPathFilterMultiJoinPredicate(4)
 }
 
 func splitOrFiveHopFilterMultiJoinPredicate() MultiJoin {
-	return MultiJoin{
-		Relations: []MultiJoinRelation{
-			{Table: 1, Alias: 0},
-			{Table: 2, Alias: 1},
-			{Table: 3, Alias: 2},
-			{Table: 4, Alias: 3},
-			{Table: 5, Alias: 4},
-			{Table: 6, Alias: 5},
-		},
-		Conditions: []MultiJoinCondition{
-			{
-				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
-				Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 1, Table: 2, Column: 0, Alias: 1},
-				Right: MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 2, Table: 3, Column: 0, Alias: 2},
-				Right: MultiJoinColumnRef{Relation: 3, Table: 4, Column: 1, Alias: 3},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 3, Table: 4, Column: 0, Alias: 3},
-				Right: MultiJoinColumnRef{Relation: 4, Table: 5, Column: 1, Alias: 4},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 4, Table: 5, Column: 0, Alias: 4},
-				Right: MultiJoinColumnRef{Relation: 5, Table: 6, Column: 1, Alias: 5},
-			},
-		},
-		ProjectedRelation: 0,
-		Filter: Or{
-			Left: ColEq{
-				Table:  1,
-				Column: 0,
-				Alias:  0,
-				Value:  types.NewUint64(7),
-			},
-			Right: ColRange{
-				Table:  6,
-				Column: 0,
-				Alias:  5,
-				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
-				Upper:  Bound{Unbounded: true},
-			},
-		},
-	}
+	return splitOrLinearPathFilterMultiJoinPredicate(5)
 }
 
 func splitOrSixHopFilterMultiJoinPredicate() MultiJoin {
-	return MultiJoin{
-		Relations: []MultiJoinRelation{
-			{Table: 1, Alias: 0},
-			{Table: 2, Alias: 1},
-			{Table: 3, Alias: 2},
-			{Table: 4, Alias: 3},
-			{Table: 5, Alias: 4},
-			{Table: 6, Alias: 5},
-			{Table: 7, Alias: 6},
-		},
-		Conditions: []MultiJoinCondition{
-			{
-				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
-				Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 1, Table: 2, Column: 0, Alias: 1},
-				Right: MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 2, Table: 3, Column: 0, Alias: 2},
-				Right: MultiJoinColumnRef{Relation: 3, Table: 4, Column: 1, Alias: 3},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 3, Table: 4, Column: 0, Alias: 3},
-				Right: MultiJoinColumnRef{Relation: 4, Table: 5, Column: 1, Alias: 4},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 4, Table: 5, Column: 0, Alias: 4},
-				Right: MultiJoinColumnRef{Relation: 5, Table: 6, Column: 1, Alias: 5},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 5, Table: 6, Column: 0, Alias: 5},
-				Right: MultiJoinColumnRef{Relation: 6, Table: 7, Column: 1, Alias: 6},
-			},
-		},
-		ProjectedRelation: 0,
-		Filter: Or{
-			Left: ColEq{
-				Table:  1,
-				Column: 0,
-				Alias:  0,
-				Value:  types.NewUint64(7),
-			},
-			Right: ColRange{
-				Table:  7,
-				Column: 0,
-				Alias:  6,
-				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
-				Upper:  Bound{Unbounded: true},
-			},
-		},
-	}
+	return splitOrLinearPathFilterMultiJoinPredicate(6)
 }
 
 func splitOrSevenHopFilterMultiJoinPredicate() MultiJoin {
-	return MultiJoin{
-		Relations: []MultiJoinRelation{
-			{Table: 1, Alias: 0},
-			{Table: 2, Alias: 1},
-			{Table: 3, Alias: 2},
-			{Table: 4, Alias: 3},
-			{Table: 5, Alias: 4},
-			{Table: 6, Alias: 5},
-			{Table: 7, Alias: 6},
-			{Table: 8, Alias: 7},
-		},
-		Conditions: []MultiJoinCondition{
-			{
-				Left:  MultiJoinColumnRef{Relation: 0, Table: 1, Column: 1, Alias: 0},
-				Right: MultiJoinColumnRef{Relation: 1, Table: 2, Column: 1, Alias: 1},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 1, Table: 2, Column: 0, Alias: 1},
-				Right: MultiJoinColumnRef{Relation: 2, Table: 3, Column: 1, Alias: 2},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 2, Table: 3, Column: 0, Alias: 2},
-				Right: MultiJoinColumnRef{Relation: 3, Table: 4, Column: 1, Alias: 3},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 3, Table: 4, Column: 0, Alias: 3},
-				Right: MultiJoinColumnRef{Relation: 4, Table: 5, Column: 1, Alias: 4},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 4, Table: 5, Column: 0, Alias: 4},
-				Right: MultiJoinColumnRef{Relation: 5, Table: 6, Column: 1, Alias: 5},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 5, Table: 6, Column: 0, Alias: 5},
-				Right: MultiJoinColumnRef{Relation: 6, Table: 7, Column: 1, Alias: 6},
-			},
-			{
-				Left:  MultiJoinColumnRef{Relation: 6, Table: 7, Column: 0, Alias: 6},
-				Right: MultiJoinColumnRef{Relation: 7, Table: 8, Column: 1, Alias: 7},
-			},
-		},
-		ProjectedRelation: 0,
-		Filter: Or{
-			Left: ColEq{
-				Table:  1,
-				Column: 0,
-				Alias:  0,
-				Value:  types.NewUint64(7),
-			},
-			Right: ColRange{
-				Table:  8,
-				Column: 0,
-				Alias:  7,
-				Lower:  Bound{Value: types.NewUint64(50), Inclusive: false},
-				Upper:  Bound{Unbounded: true},
-			},
-		},
-	}
+	return splitOrLinearPathFilterMultiJoinPredicate(7)
 }
 
 func splitOrEightHopFilterMultiJoinPredicate() MultiJoin {
