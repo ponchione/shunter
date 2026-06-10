@@ -67,6 +67,14 @@ func requireSubscribeError(t *testing.T, conn *Conn, queryID uint32) Subscriptio
 	return se
 }
 
+func requireSubscribeSingleError(t *testing.T, conn *Conn, exec *mockSubExecutor, sl SchemaLookup, msg *SubscribeSingleMsg, queryID uint32) SubscriptionError {
+	t.Helper()
+	handleSubscribeSingle(context.Background(), conn, msg, exec, sl)
+	se := requireSubscribeError(t, conn, queryID)
+	requireNoSubscribeRegistration(t, exec)
+	return se
+}
+
 func requireNoSubscribeRegistration(t *testing.T, exec *mockSubExecutor) {
 	t.Helper()
 	if req := exec.getRegisterSetReq(); req != nil {
@@ -3370,15 +3378,7 @@ func TestHandleSubscribeSingle_StringLiteralOnIntegerColumnRejected(t *testing.T
 		QueryID:     81,
 		QueryString: "SELECT * FROM t WHERE u32 = 'str'",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 81, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 81)
 }
 
 // TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected pins the
@@ -3400,15 +3400,7 @@ func TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected(t *testing.T)
 		QueryID:     83,
 		QueryString: "SELECT * FROM t WHERE t.u32 = 1.3",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 83, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 83)
 }
 
 // TestHandleSubscribeSingle_ShunterStringDigitsOnIntegerColumnWidens pins
@@ -4099,15 +4091,7 @@ func TestHandleSubscribeSingle_ShunterUnqualifiedWhereInJoinRejected(t *testing.
 		QueryID:     103,
 		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE bytes = 0xABCD",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 103, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 103)
 }
 
 // TestHandleSubscribeSingle_ShunterScientificNotationUnsignedInteger pins the
@@ -4292,15 +4276,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeIntOnUnsignedRejecte
 		QueryID:     119,
 		QueryString: "SELECT * FROM t WHERE u8 = -1",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 119, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 119)
 }
 
 // TestHandleSubscribeSingle_ShunterInvalidLiteralScientificOverflowRejected
@@ -4321,15 +4297,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralScientificOverflowRejected(t
 		QueryID:     121,
 		QueryString: "SELECT * FROM t WHERE u8 = 1e3",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 121, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 121)
 }
 
 // TestHandleSubscribeSingle_ShunterInvalidLiteralFloatOnUnsignedRejected pins
@@ -4350,15 +4318,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralFloatOnUnsignedRejected(t *t
 		QueryID:     123,
 		QueryString: "SELECT * FROM t WHERE u8 = 0.1",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 123, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 123)
 }
 
 // TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected
@@ -4379,15 +4339,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnUnsignedRe
 		QueryID:     125,
 		QueryString: "SELECT * FROM t WHERE u32 = 1e-3",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 125, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 125)
 }
 
 // TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnSignedRejected
@@ -4408,15 +4360,7 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnSignedReje
 		QueryID:     127,
 		QueryString: "SELECT * FROM t WHERE i32 = 1e-3",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 127, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 127)
 }
 
 // TestHandleSubscribeSingle_ShunterValidLiteralOnEachIntegerWidth pins integer
@@ -4559,15 +4503,7 @@ func TestHandleSubscribeSingle_ShunterUint256NegativeRejected(t *testing.T) {
 		QueryID:     243,
 		QueryString: "SELECT * FROM t WHERE u256 = -1",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 243, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 243)
 }
 
 // TestHandleSubscribeSingle_ShunterTimestampLiteralAccepted pins the reference
@@ -4786,15 +4722,7 @@ func TestHandleSubscribeSingle_ShunterUint128NegativeRejected(t *testing.T) {
 		QueryID:     241,
 		QueryString: "SELECT * FROM t WHERE u128 = -1",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 241, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 241)
 }
 
 // TestHandleSubscribeSingle_ShunterDMLStatementRejected pins the reference
@@ -4828,15 +4756,7 @@ func TestHandleSubscribeSingle_ShunterDMLStatementRejected(t *testing.T) {
 				QueryID:     queryID,
 				QueryString: tt.sql,
 			}
-			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-			tag, decoded := drainServerMsgEventually(t, conn)
-			if tag != TagSubscriptionError {
-				t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-			}
-			se := decoded.(SubscriptionError)
-			requireOptionalUint32(t, se.QueryID, queryID, "QueryID")
-			requireNoSubscribeRegistration(t, executor)
+			requireSubscribeSingleError(t, conn, executor, sl, msg, queryID)
 		})
 	}
 }
@@ -4859,15 +4779,7 @@ func TestHandleSubscribeSingle_ShunterEmptyStatementRejected(t *testing.T) {
 		QueryID:     133,
 		QueryString: "",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 133, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 133)
 }
 
 // TestHandleSubscribeSingle_ShunterWhitespaceOnlyStatementRejected pins the
@@ -4888,15 +4800,7 @@ func TestHandleSubscribeSingle_ShunterWhitespaceOnlyStatementRejected(t *testing
 		QueryID:     135,
 		QueryString: "   ",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 135, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 135)
 }
 
 // TestHandleSubscribeSingle_ShunterDistinctProjectionRejected pins the reference
@@ -4991,15 +4895,7 @@ func TestHandleSubscribeSingle_ShunterSubqueryInFromRejected(t *testing.T) {
 		QueryID:     139,
 		QueryString: "SELECT * FROM (SELECT * FROM t) JOIN (SELECT * FROM s) ON a = b",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 139, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 139)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected
@@ -5021,15 +4917,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedSelectLiteralWithoutFromReje
 		QueryID:     141,
 		QueryString: "SELECT 1",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 141, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 141)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedMultiPartTableNameRejected pins
@@ -5051,15 +4939,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedMultiPartTableNameRejected(t
 		QueryID:     143,
 		QueryString: "SELECT a FROM s.t",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 143, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 143)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedBitStringLiteralRejected pins
@@ -5081,15 +4961,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedBitStringLiteralRejected(t *
 		QueryID:     145,
 		QueryString: "SELECT * FROM t WHERE u32 = B'1010'",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 145, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 145)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedWildcardWithBareColumnsRejected
@@ -5111,15 +4983,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedWildcardWithBareColumnsRejec
 		QueryID:     147,
 		QueryString: "SELECT t.*, b, c FROM t",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 147, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 147)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected
@@ -5141,15 +5005,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedOrderByWithLimitExpressionRe
 		QueryID:     149,
 		QueryString: "SELECT * FROM t ORDER BY u32 LIMIT u32",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 149, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 149)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedAggregateWithGroupByRejected
@@ -5171,15 +5027,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedAggregateWithGroupByRejected
 		QueryID:     151,
 		QueryString: "SELECT u32, COUNT(*) FROM t GROUP BY u32",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 151, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 151)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedImplicitCommaJoinRejected pins
@@ -5201,15 +5049,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedImplicitCommaJoinRejected(t 
 		QueryID:     153,
 		QueryString: "SELECT a.* FROM t AS a, s AS b WHERE a.u32 = b.u32",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 153, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 153)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected
@@ -5231,15 +5071,7 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejecte
 		QueryID:     155,
 		QueryString: "SELECT t.* FROM t JOIN s ON int = u32",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 155, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 155)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidEmptySelectRejected pins the
@@ -5261,15 +5093,7 @@ func TestHandleSubscribeSingle_ShunterSqlInvalidEmptySelectRejected(t *testing.T
 		QueryID:     157,
 		QueryString: "SELECT FROM t",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 157, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 157)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidEmptyFromRejected pins the
@@ -5290,15 +5114,7 @@ func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyFromRejected(t *testing.T) 
 		QueryID:     159,
 		QueryString: "SELECT a FROM WHERE b = 1",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 159, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 159)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidEmptyWhereRejected pins the
@@ -5319,15 +5135,7 @@ func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyWhereRejected(t *testing.T)
 		QueryID:     161,
 		QueryString: "SELECT a FROM t WHERE",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 161, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 161)
 }
 
 // TestHandleSubscribeSingle_ShunterSqlInvalidEmptyGroupByRejected pins the
@@ -5349,15 +5157,7 @@ func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyGroupByRejected(t *testing.
 		QueryID:     163,
 		QueryString: "SELECT a, COUNT(*) FROM t GROUP BY",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 163, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 163)
 }
 
 // TestHandleSubscribeSingle_ShunterCountAliasRejected pins the deliberate
@@ -5376,15 +5176,7 @@ func TestHandleSubscribeSingle_ShunterCountAliasRejected(t *testing.T) {
 		QueryID:     165,
 		QueryString: "SELECT COUNT(*) AS n FROM t",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 165, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 165)
 }
 
 func TestHandleSubscribeSingle_ShunterCountColumnAliasRejected(t *testing.T) {
@@ -5399,15 +5191,7 @@ func TestHandleSubscribeSingle_ShunterCountColumnAliasRejected(t *testing.T) {
 		QueryID:     167,
 		QueryString: "SELECT COUNT(u32) AS n FROM t",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 167, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 167)
 }
 
 func TestHandleSubscribeSingle_ShunterCountDistinctColumnAliasRejected(t *testing.T) {
@@ -5422,15 +5206,7 @@ func TestHandleSubscribeSingle_ShunterCountDistinctColumnAliasRejected(t *testin
 		QueryID:     173,
 		QueryString: "SELECT COUNT(DISTINCT u32) AS n FROM t",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 173, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 173)
 }
 
 func TestHandleSubscribeSingle_ShunterSumColumnAliasRejected(t *testing.T) {
@@ -5445,15 +5221,7 @@ func TestHandleSubscribeSingle_ShunterSumColumnAliasRejected(t *testing.T) {
 		QueryID:     171,
 		QueryString: "SELECT SUM(u32) AS total FROM t",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 171, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 171)
 }
 
 func TestHandleSubscribeSingle_ShunterCountBareAliasRejected(t *testing.T) {
@@ -5468,15 +5236,7 @@ func TestHandleSubscribeSingle_ShunterCountBareAliasRejected(t *testing.T) {
 		QueryID:     175,
 		QueryString: "SELECT COUNT(*) n FROM t",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 175, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 175)
 }
 
 // TestHandleSubscribeSingle_ShunterCountAliasWithLimitRejected pins the
@@ -5562,15 +5322,7 @@ func TestHandleSubscribeSingle_ShunterAliasedBareColumnProjectionRejected(t *tes
 		QueryID:     167,
 		QueryString: "SELECT u32 AS n FROM t",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 167, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 167)
 }
 
 func TestHandleSubscribeSingle_ShunterJoinColumnProjectionRejected(t *testing.T) {
@@ -5636,15 +5388,7 @@ func TestHandleSubscribeSingle_ShunterSqlInvalidAggregateWithoutAliasRejected(t 
 		QueryID:     165,
 		QueryString: "SELECT COUNT(*) FROM t",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 165, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 165)
 }
 
 // TestHandleSubscribeSingle_ShunterArraySenderRejected pins reference
@@ -5666,15 +5410,7 @@ func TestHandleSubscribeSingle_ShunterArraySenderRejected(t *testing.T) {
 		QueryID:     401,
 		QueryString: "SELECT * FROM t WHERE arr = :sender",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 401, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 401)
 }
 
 // TestHandleSubscribeSingle_ShunterArrayJoinOnRejected pins reference
@@ -5704,15 +5440,7 @@ func TestHandleSubscribeSingle_ShunterArrayJoinOnRejected(t *testing.T) {
 		QueryID:     403,
 		QueryString: "SELECT t.* FROM t JOIN s ON t.arr = s.arr",
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 403, "QueryID")
-	requireNoSubscribeRegistration(t, executor)
+	requireSubscribeSingleError(t, conn, executor, sl, msg, 403)
 }
 
 // TestHandleSubscribeSingle_ShunterJoinOnStrictEqualityRejectText pins the

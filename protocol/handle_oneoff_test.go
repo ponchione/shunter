@@ -292,6 +292,16 @@ func requireAnyOneOffError(t *testing.T, conn *Conn) OneOffQueryResponse {
 	return result
 }
 
+func requireOneOffQueryError(t *testing.T, conn *Conn, stateAccess CommittedStateAccess, sl SchemaLookup, msg *OneOffQueryMsg, want string) OneOffQueryResponse {
+	t.Helper()
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+	result := requireAnyOneOffError(t, conn)
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q", *result.Error, want)
+	}
+	return result
+}
+
 // firstTableRows returns the Rows payload of the first OneOffTable, or
 // nil if Tables is empty. Most one-off message-id handler tests populate
 // exactly one table matching `compiled.TableName`.
@@ -2443,13 +2453,7 @@ func TestHandleOneOffQuery_LowercaseXEscapedStringOnBytesRejected(t *testing.T) 
 		QueryString: "SELECT * FROM s WHERE bytes = 'x''AB'",
 	}
 
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "The literal expression `x'AB` cannot be parsed as type `Array<U8>`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `x'AB` cannot be parsed as type `Array<U8>`")
 }
 
 func TestHandleOneOffQuery_OrComparisonWithAlias(t *testing.T) {
@@ -4910,13 +4914,7 @@ func TestHandleOneOffQuery_ShunterNonNumericStringOnIntegerEmitsInvalidLiteral(t
 		MessageID:   []byte{0x92},
 		QueryString: "SELECT * FROM t WHERE u32 = 'foo'",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "The literal expression `foo` cannot be parsed as type `U32`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `foo` cannot be parsed as type `U32`")
 }
 
 // TestHandleOneOffQuery_ShunterNumericLiteralOnStringColumnWidens pins the
@@ -5002,13 +5000,7 @@ func TestHandleOneOffQuery_ShunterScientificLiteralOverflowPreservesSourceText(t
 		MessageID:   []byte{0x93},
 		QueryString: "SELECT * FROM t WHERE u8 = 1e3",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "The literal expression `1e3` cannot be parsed as type `U8`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `1e3` cannot be parsed as type `U8`")
 }
 
 // TestHandleOneOffQuery_ShunterHexLiteralWidensOntoStringColumn pins the
@@ -5761,13 +5753,7 @@ func TestHandleOneOffQuery_ShunterJoinStarProjectionRejectText(t *testing.T) {
 		MessageID:   []byte{0x88},
 		QueryString: "SELECT * FROM t JOIN s",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "SELECT * is not supported for joins"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "SELECT * is not supported for joins")
 }
 
 // TestHandleOneOffQuery_ShunterSelfJoinWithoutAliasesRejected pins the
@@ -6355,13 +6341,7 @@ func TestHandleOneOffQuery_ShunterTimestampMalformedRejected(t *testing.T) {
 		MessageID:   []byte{0xD5},
 		QueryString: "SELECT * FROM t WHERE ts = 'not-a-timestamp'",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "The literal expression `not-a-timestamp` cannot be parsed as type `(__timestamp_micros_since_unix_epoch__: I64)`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `not-a-timestamp` cannot be parsed as type `(__timestamp_micros_since_unix_epoch__: I64)`")
 }
 
 // TestHandleOneOffQuery_ShunterBoolLiteralOnTimestampRejectText pins the
@@ -6382,13 +6362,7 @@ func TestHandleOneOffQuery_ShunterBoolLiteralOnTimestampRejectText(t *testing.T)
 		MessageID:   []byte{0xD6},
 		QueryString: "SELECT * FROM t WHERE ts = TRUE",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Unexpected type: (expected) Bool != (__timestamp_micros_since_unix_epoch__: I64) (inferred)"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Unexpected type: (expected) Bool != (__timestamp_micros_since_unix_epoch__: I64) (inferred)")
 }
 
 // TestHandleOneOffQuery_ShunterStringLiteralOnArrayStringRejectText pins
@@ -6409,13 +6383,7 @@ func TestHandleOneOffQuery_ShunterStringLiteralOnArrayStringRejectText(t *testin
 		MessageID:   []byte{0xD7},
 		QueryString: "SELECT * FROM t WHERE arr = 'x'",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "The literal expression `x` cannot be parsed as type `Array<String>`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `x` cannot be parsed as type `Array<String>`")
 }
 
 // TestHandleOneOffQuery_ShunterBoolLiteralOnArrayStringRejectText pins the
@@ -6434,13 +6402,7 @@ func TestHandleOneOffQuery_ShunterBoolLiteralOnArrayStringRejectText(t *testing.
 		MessageID:   []byte{0xD8},
 		QueryString: "SELECT * FROM t WHERE arr = TRUE",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Unexpected type: (expected) Bool != Array<String> (inferred)"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Unexpected type: (expected) Bool != Array<String> (inferred)")
 }
 
 // TestHandleOneOffQuery_ShunterUint128NegativeRejected extends the
@@ -6560,13 +6522,7 @@ func TestHandleOneOffQuery_ShunterDistinctProjectionRejected(t *testing.T) {
 		MessageID:   []byte{0xB3},
 		QueryString: sqlText,
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Unsupported: " + sqlText
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Unsupported: "+sqlText)
 }
 
 // TestHandleOneOffQuery_ShunterAllModifierRejected pins the reference SQL
@@ -6589,13 +6545,7 @@ func TestHandleOneOffQuery_ShunterAllModifierRejected(t *testing.T) {
 		MessageID:   []byte{0xEE},
 		QueryString: sqlText,
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Unsupported: " + sqlText
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Unsupported: "+sqlText)
 }
 
 // TestHandleOneOffQuery_ShunterSubqueryInFromRejected pins the reference
@@ -7931,13 +7881,7 @@ func TestHandleOneOffQuery_ShunterJoinOnStrictEqualityRejectText(t *testing.T) {
 		MessageID:   []byte{0x1e},
 		QueryString: "SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Non-inner joins are not supported"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Non-inner joins are not supported")
 }
 
 func TestHandleOneOffQuery_ShunterCrossJoinKeywordNotAlias(t *testing.T) {
@@ -7962,13 +7906,7 @@ func TestHandleOneOffQuery_ShunterCrossJoinKeywordNotAlias(t *testing.T) {
 		MessageID:   []byte{0x1f},
 		QueryString: "SELECT CROSS.* FROM t CROSS JOIN s",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "`CROSS` is not in scope"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`CROSS` is not in scope")
 }
 
 func TestHandleOneOffQuery_ShunterLeftJoinKeywordRejected(t *testing.T) {
@@ -7993,13 +7931,7 @@ func TestHandleOneOffQuery_ShunterLeftJoinKeywordRejected(t *testing.T) {
 		MessageID:   []byte{0x20},
 		QueryString: "SELECT LEFT.* FROM t LEFT JOIN s ON LEFT.id = s.id",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Non-inner joins are not supported"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Non-inner joins are not supported")
 }
 
 // TestHandleOneOffQuery_ShunterUnknownTableRejectText pins the reference
@@ -8021,13 +7953,7 @@ func TestHandleOneOffQuery_ShunterUnknownTableRejectText(t *testing.T) {
 		MessageID:   []byte{0x90},
 		QueryString: "SELECT * FROM r",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "no such table: `r`. If the table exists, it may be marked private."
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "no such table: `r`. If the table exists, it may be marked private.")
 }
 
 func TestHandleOneOffQuery_AmbiguousCaseFoldedTableNameRejected(t *testing.T) {
@@ -8084,13 +8010,7 @@ func TestHandleOneOffQuery_ShunterUnknownFieldRejectText(t *testing.T) {
 		MessageID:   []byte{0x91},
 		QueryString: "SELECT * FROM t WHERE t.missing_col = 1",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "`missing_col` is not in scope"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`missing_col` is not in scope")
 }
 
 // TestHandleOneOffQuery_ShunterBoolLiteralOnIntegerColumnRejectText pins
@@ -8107,13 +8027,7 @@ func TestHandleOneOffQuery_ShunterBoolLiteralOnIntegerColumnRejectText(t *testin
 		MessageID:   []byte{0x92},
 		QueryString: "SELECT * FROM t WHERE u32 = TRUE",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Unexpected type: (expected) Bool != U32 (inferred)"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Unexpected type: (expected) Bool != U32 (inferred)")
 }
 
 // TestHandleOneOffQuery_ShunterIntOverflowOnUint8RejectText pins
@@ -8130,13 +8044,7 @@ func TestHandleOneOffQuery_ShunterIntOverflowOnUint8RejectText(t *testing.T) {
 		MessageID:   []byte{0x93},
 		QueryString: "SELECT * FROM t WHERE u8 = 1000",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "The literal expression `1000` cannot be parsed as type `U8`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `1000` cannot be parsed as type `U8`")
 }
 
 // TestHandleOneOffQuery_ShunterNegativeIntOnUint8RejectText pins the same
@@ -8158,13 +8066,7 @@ func TestHandleOneOffQuery_ShunterNegativeIntOnUint8RejectText(t *testing.T) {
 		MessageID:   []byte{0x94},
 		QueryString: "SELECT * FROM t WHERE u8 = -1",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "The literal expression `-1` cannot be parsed as type `U8`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `-1` cannot be parsed as type `U8`")
 }
 
 // TestHandleOneOffQuery_ShunterIntOverflowOnInt8RejectText pins the signed
@@ -8185,13 +8087,7 @@ func TestHandleOneOffQuery_ShunterIntOverflowOnInt8RejectText(t *testing.T) {
 		MessageID:   []byte{0x95},
 		QueryString: "SELECT * FROM t WHERE i8 = 200",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "The literal expression `200` cannot be parsed as type `I8`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `200` cannot be parsed as type `I8`")
 }
 
 // TestHandleOneOffQuery_ShunterNegativeIntOnUint128RejectText pins the
@@ -8213,13 +8109,7 @@ func TestHandleOneOffQuery_ShunterNegativeIntOnUint128RejectText(t *testing.T) {
 		MessageID:   []byte{0x96},
 		QueryString: "SELECT * FROM t WHERE u128 = -1",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "The literal expression `-1` cannot be parsed as type `U128`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `-1` cannot be parsed as type `U128`")
 }
 
 // TestHandleOneOffQuery_ShunterBigIntOverflowOnUint128RejectText pins the
@@ -8241,13 +8131,7 @@ func TestHandleOneOffQuery_ShunterBigIntOverflowOnUint128RejectText(t *testing.T
 		MessageID:   []byte{0x97},
 		QueryString: "SELECT * FROM t WHERE u128 = " + bigOverflow,
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "The literal expression `" + bigOverflow + "` cannot be parsed as type `U128`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `"+bigOverflow+"` cannot be parsed as type `U128`")
 }
 
 // TestHandleOneOffQuery_ShunterBigIntOverflowOnInt128RejectText pins the
@@ -8268,13 +8152,7 @@ func TestHandleOneOffQuery_ShunterBigIntOverflowOnInt128RejectText(t *testing.T)
 		MessageID:   []byte{0x98},
 		QueryString: "SELECT * FROM t WHERE i128 = " + bigOverflow,
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "The literal expression `" + bigOverflow + "` cannot be parsed as type `I128`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `"+bigOverflow+"` cannot be parsed as type `I128`")
 }
 
 // TestHandleOneOffQuery_ShunterNegativeIntOnUint256RejectText pins the
@@ -8292,13 +8170,7 @@ func TestHandleOneOffQuery_ShunterNegativeIntOnUint256RejectText(t *testing.T) {
 		MessageID:   []byte{0x99},
 		QueryString: "SELECT * FROM t WHERE u256 = -1",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "The literal expression `-1` cannot be parsed as type `U256`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `-1` cannot be parsed as type `U256`")
 }
 
 // TestHandleOneOffQuery_ShunterFloatLiteralOnUint32RejectText pins
@@ -8315,13 +8187,7 @@ func TestHandleOneOffQuery_ShunterFloatLiteralOnUint32RejectText(t *testing.T) {
 		MessageID:   []byte{0x9a},
 		QueryString: "SELECT * FROM t WHERE u32 = 1.3",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "The literal expression `1.3` cannot be parsed as type `U32`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `1.3` cannot be parsed as type `U32`")
 }
 
 // TestHandleOneOffQuery_ShunterNonBoolLiteralOnBoolRejectText pins
@@ -8349,13 +8215,7 @@ func TestHandleOneOffQuery_ShunterNonBoolLiteralOnBoolRejectText(t *testing.T) {
 				MessageID:   []byte{0x9b},
 				QueryString: tc.queryString,
 			}
-			handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-			result := requireAnyOneOffError(t, conn)
-			want := "The literal expression `" + tc.wantLit + "` cannot be parsed as type `Bool`"
-			if *result.Error != want {
-				t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-			}
+			requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `"+tc.wantLit+"` cannot be parsed as type `Bool`")
 		})
 	}
 }
@@ -8381,13 +8241,7 @@ func TestHandleOneOffQuery_ShunterDuplicateProjectionAliasRejectText(t *testing.
 		MessageID:   []byte{0xE0},
 		QueryString: "SELECT u32 AS dup, i32 AS dup FROM t",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Duplicate name `dup`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Duplicate name `dup`")
 }
 
 func TestHandleOneOffQuery_DuplicateProjectionAliasWithOrderByRejects(t *testing.T) {
@@ -8403,13 +8257,7 @@ func TestHandleOneOffQuery_DuplicateProjectionAliasWithOrderByRejects(t *testing
 		MessageID:   []byte{0xE2},
 		QueryString: "SELECT u32 AS dup, i32 AS dup FROM t ORDER BY dup",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Duplicate name `dup`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Duplicate name `dup`")
 }
 
 func TestHandleOneOffQuery_MultiColumnOrderByAmbiguousProjectionNameRejects(t *testing.T) {
@@ -8425,13 +8273,7 @@ func TestHandleOneOffQuery_MultiColumnOrderByAmbiguousProjectionNameRejects(t *t
 		MessageID:   []byte{0xE3},
 		QueryString: "SELECT u32 AS i32 FROM t ORDER BY u32, i32",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "ORDER BY name \"i32\" is ambiguous"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "ORDER BY name \"i32\" is ambiguous")
 }
 
 // TestHandleOneOffQuery_ShunterDuplicateImplicitProjectionRejectText pins
@@ -8452,13 +8294,7 @@ func TestHandleOneOffQuery_ShunterDuplicateImplicitProjectionRejectText(t *testi
 		MessageID:   []byte{0xE1},
 		QueryString: "SELECT u32, u32 FROM t",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Duplicate name `u32`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Duplicate name `u32`")
 }
 
 // TestHandleOneOffQuery_ShunterDuplicateJoinAliasRejectText pins the
@@ -8491,13 +8327,7 @@ func TestHandleOneOffQuery_ShunterDuplicateJoinAliasRejectText(t *testing.T) {
 		MessageID:   []byte{0xE2},
 		QueryString: "SELECT dup.* FROM t AS dup JOIN s AS dup ON dup.u32 = dup.u32",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Duplicate name `dup`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Duplicate name `dup`")
 }
 
 // TestHandleOneOffQuery_ShunterDuplicateSelfJoinRejectText pins the same
@@ -8525,13 +8355,7 @@ func TestHandleOneOffQuery_ShunterDuplicateSelfJoinRejectText(t *testing.T) {
 		MessageID:   []byte{0xE3},
 		QueryString: "SELECT t.* FROM t JOIN t",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Duplicate name `t`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Duplicate name `t`")
 }
 
 // TestHandleOneOffQuery_ShunterJoinColumnKindMismatchRejectText pins
@@ -8559,13 +8383,7 @@ func TestHandleOneOffQuery_ShunterJoinColumnKindMismatchRejectText(t *testing.T)
 		MessageID:   []byte{0xE4},
 		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = s.name",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Unexpected type: (expected) String != U32 (inferred)"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Unexpected type: (expected) String != U32 (inferred)")
 }
 
 // TestHandleOneOffQuery_ShunterJoinArrayColumnInvalidOpRejectText pins
@@ -8588,13 +8406,7 @@ func TestHandleOneOffQuery_ShunterJoinArrayColumnInvalidOpRejectText(t *testing.
 		MessageID:   []byte{0xE5},
 		QueryString: "SELECT t.* FROM t JOIN s ON t.arr = s.arr",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Invalid binary operator `=` for type `Array<String>`"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Invalid binary operator `=` for type `Array<String>`")
 }
 
 // TestHandleOneOffQuery_ShunterUnresolvedVarUnqualifiedWhereRejectText pins
@@ -8615,13 +8427,7 @@ func TestHandleOneOffQuery_ShunterUnresolvedVarUnqualifiedWhereRejectText(t *tes
 		MessageID:   []byte{0xE6},
 		QueryString: "SELECT * FROM t WHERE missing = 1",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "`missing` is not in scope"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`missing` is not in scope")
 }
 
 // TestHandleOneOffQuery_ShunterUnresolvedVarProjectionColumnRejectText pins
@@ -8642,13 +8448,7 @@ func TestHandleOneOffQuery_ShunterUnresolvedVarProjectionColumnRejectText(t *tes
 		MessageID:   []byte{0xE7},
 		QueryString: "SELECT missing FROM t",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "`missing` is not in scope"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`missing` is not in scope")
 }
 
 // TestHandleOneOffQuery_ShunterUnresolvedVarJoinOnMissingRejectText pins
@@ -8680,13 +8480,7 @@ func TestHandleOneOffQuery_ShunterUnresolvedVarJoinOnMissingRejectText(t *testin
 		MessageID:   []byte{0xE8},
 		QueryString: "SELECT t.* FROM t JOIN s ON t.missing = s.id",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "`missing` is not in scope"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`missing` is not in scope")
 }
 
 // TestHandleOneOffQuery_ShunterUnresolvedVarJoinWhereQualifiedMissingRejectText
@@ -8722,13 +8516,7 @@ func TestHandleOneOffQuery_ShunterUnresolvedVarJoinWhereQualifiedMissingRejectTe
 		MessageID:   []byte{0xE9},
 		QueryString: "SELECT t.* FROM t JOIN s ON t.id = s.t_id WHERE s.missing = 1",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "`missing` is not in scope"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`missing` is not in scope")
 }
 
 // TestHandleOneOffQuery_ShunterUnresolvedVarBaseTableAfterAliasRejectText pins
@@ -8751,13 +8539,7 @@ func TestHandleOneOffQuery_ShunterUnresolvedVarBaseTableAfterAliasRejectText(t *
 		MessageID:   []byte{0xEA},
 		QueryString: "SELECT * FROM t AS r WHERE t.u32 = 5",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "`t` is not in scope"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`t` is not in scope")
 }
 
 // TestHandleOneOffQuery_ShunterUnresolvedVarBareJoinWildcardOnMissingRejectText
@@ -8790,13 +8572,7 @@ func TestHandleOneOffQuery_ShunterUnresolvedVarBareJoinWildcardOnMissingRejectTe
 		MessageID:   []byte{0xEC},
 		QueryString: "SELECT * FROM t JOIN s ON t.missing = s.id",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "`missing` is not in scope"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (JOIN ON resolution must precede bare-wildcard rejection)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`missing` is not in scope")
 }
 
 // TestHandleOneOffQuery_ShunterUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText
@@ -8829,13 +8605,7 @@ func TestHandleOneOffQuery_ShunterUnresolvedVarJoinOnMissingNotHiddenByWhereFals
 		MessageID:   []byte{0xED},
 		QueryString: "SELECT t.* FROM t JOIN s ON t.missing = s.id WHERE FALSE",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "`missing` is not in scope"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (FALSE-WHERE pruning must not bypass ON-column resolution)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`missing` is not in scope")
 }
 
 // TestHandleOneOffQuery_ShunterUnresolvedVarWherePrecedesProjectionRejectText
@@ -8857,13 +8627,7 @@ func TestHandleOneOffQuery_ShunterUnresolvedVarWherePrecedesProjectionRejectText
 		MessageID:   []byte{0xEB},
 		QueryString: "SELECT missing FROM t WHERE other_missing = 1",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "`other_missing` is not in scope"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (WHERE column-resolution must precede projection-column resolution)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`other_missing` is not in scope")
 }
 
 // TestHandleOneOffQuery_ShunterBooleanConstantWhereDoesNotMaskBranchErrors
@@ -8924,13 +8688,7 @@ func TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedProjectionQualifierRejec
 		MessageID:   []byte{0xEF},
 		QueryString: "SELECT x.u32 FROM t",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "`x` is not in scope"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (qualified column qualifier mismatch must emit Unresolved::Var)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`x` is not in scope")
 }
 
 // TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText
@@ -8951,13 +8709,7 @@ func TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedWildcardQualifierRejectT
 		MessageID:   []byte{0xF0},
 		QueryString: "SELECT x.* FROM t",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "`x` is not in scope"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (qualified wildcard qualifier mismatch must emit Unresolved::Var)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`x` is not in scope")
 }
 
 // TestHandleOneOffQuery_ShunterMissingLeftTablePrecedesDuplicateJoinAliasRejectText
@@ -8985,13 +8737,7 @@ func TestHandleOneOffQuery_ShunterMissingLeftTablePrecedesDuplicateJoinAliasReje
 		MessageID:   []byte{0xF1},
 		QueryString: "SELECT dup.* FROM missing AS dup JOIN s AS dup ON dup.id = dup.id",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "no such table: `missing`. If the table exists, it may be marked private."
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (left-table schema lookup must precede duplicate-alias rejection)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "no such table: `missing`. If the table exists, it may be marked private.")
 }
 
 // TestHandleOneOffQuery_ShunterUnqualifiedNamesProjectionRejectText pins
@@ -9024,13 +8770,7 @@ func TestHandleOneOffQuery_ShunterUnqualifiedNamesProjectionRejectText(t *testin
 		MessageID:   []byte{0xF2},
 		QueryString: "SELECT id FROM t JOIN s ON t.id = s.id",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Names must be qualified when using joins"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (unqualified projection column in join must emit UnqualifiedNames)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Names must be qualified when using joins")
 }
 
 // TestHandleOneOffQuery_ShunterUnqualifiedNamesWhereRejectText pins the
@@ -9062,13 +8802,7 @@ func TestHandleOneOffQuery_ShunterUnqualifiedNamesWhereRejectText(t *testing.T) 
 		MessageID:   []byte{0xF3},
 		QueryString: "SELECT t.* FROM t JOIN s ON t.id = s.id WHERE id = 7",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Names must be qualified when using joins"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (unqualified WHERE column in join must emit UnqualifiedNames)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Names must be qualified when using joins")
 }
 
 // TestHandleOneOffQuery_ShunterUnqualifiedNamesJoinOnRejectText pins the
@@ -9101,13 +8835,7 @@ func TestHandleOneOffQuery_ShunterUnqualifiedNamesJoinOnRejectText(t *testing.T)
 		MessageID:   []byte{0xF4},
 		QueryString: "SELECT t.* FROM t JOIN s ON id = s.id",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Names must be qualified when using joins"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (unqualified JOIN ON operand must emit UnqualifiedNames)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Names must be qualified when using joins")
 }
 
 // TestHandleOneOffQuery_ShunterSenderParameterCaseSensitiveRejectText pins
@@ -9127,13 +8855,7 @@ func TestHandleOneOffQuery_ShunterSenderParameterCaseSensitiveRejectText(t *test
 		MessageID:   []byte{0xF5},
 		QueryString: "SELECT * FROM s WHERE id = :SENDER",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	want := "Unsupported expression: :SENDER"
-	if *result.Error != want {
-		t.Fatalf("Error = %q, want %q (case-mismatched :sender placeholder must emit SqlUnsupported::Expr)", *result.Error, want)
-	}
+	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Unsupported expression: :SENDER")
 }
 
 func TestCompileSQLQueryString_AppParameterPlaceholderRejectedOutsideTemplate(t *testing.T) {
