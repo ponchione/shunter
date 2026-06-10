@@ -141,8 +141,10 @@ rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --lan
 The default `@shunter/client` import target is stable for generated bindings,
 but the runtime package is still private in this repository. Current app
 installs should resolve that name through a workspace, `file:` dependency, or
-locally packed tarball until npm scope ownership and release policy are
-documented.
+locally packed tarball under the private/local package policy. Public npm
+publishing requires a separate promotion slice that records package ownership,
+release authority, access policy, package metadata, publish commands, and the
+final artifact policy.
 
 Generated TypeScript includes protocol and contract metadata, including the
 normalized `generationProfile` and `runtimeImport` values in

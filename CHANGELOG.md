@@ -4,6 +4,16 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added standard static hosted-app layout guidance and a deployment checklist
+  for app-owned server, contract export, maintenance, frontend, and operations
+  workflows.
+- Added browser/SSR lifecycle guidance for generated TypeScript clients,
+  including browser-only WebSocket creation, token-provider behavior,
+  reconnect cache boundaries, and regenerate/rebuild ordering.
+- Documented the current private/local `@shunter/client` package release
+  workflow, including smoke-gated version synchronization, checked-in `dist`
+  artifact expectations, release-gate commands, and explicit public npm
+  promotion blockers.
 - Documented current aggregate semantics for `COUNT` and `SUM`, including
   empty/null behavior, live replacement deltas, supported `SUM` result domains,
   and rejected live aggregate shapes; clarified the unsupported `SUM` source
@@ -11,10 +21,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Strict JWT extra-claim preservation now rejects excessive configured claim
   counts and non-JSON or overly deep JSON claim values before exposing caller
   context to reducers and procedures.
-- Documented that `@shunter/client` npm ownership and release policy remain
-  unsettled, so the TypeScript runtime package stays private and current app
-  consumption remains workspace, `file:`, or locally packed tarball based.
-- Added a deferred `@shunter/client` npm publishing policy proposal while
+- Recorded that public `@shunter/client` npm publishing remains blocked, so
+  the TypeScript runtime package stays private and current app consumption
+  remains workspace, `file:`, or locally packed tarball based.
+- Added a deferred public `@shunter/client` npm promotion follow-up while
   keeping npm publishing and package metadata behavior unchanged.
 - Generated TypeScript `shunterContract` metadata now records the normalized
   generation profile and runtime import target for release traceability.

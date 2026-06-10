@@ -22,7 +22,13 @@ const expectedPackFiles = [
 ];
 
 const defaultRuntimePackageName = "@shunter/client";
-const defaultRuntimePackageVersion = "1.1.1-dev";
+const sourceVersion = readFileSync(join(repoRoot, "VERSION"), "utf8").trim();
+assert.match(
+  sourceVersion,
+  /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/,
+  "Shunter VERSION must be v-prefixed SemVer",
+);
+const defaultRuntimePackageVersion = sourceVersion.slice(1);
 const defaultGeneratedFixture = join(repoRoot, "codegen", "testdata", "v1_module_contract.ts");
 const appScopedRuntimePackageName = "@app/shunter-runtime";
 const appScopedGeneratedFixture = join(

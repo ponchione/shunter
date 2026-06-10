@@ -84,9 +84,11 @@ Keep current work tied to real hosted-app pressure:
 
 - product-app validation through Kickbrass, without adding artificial product
   features only to exercise Shunter.
-- public `@shunter/client` release workflow and install docs.
-- standard hosted app template, deployment/runbook guidance, Nuxt/browser
-  guidance, and SSR lifecycle guidance.
+- private/local `@shunter/client` package workflow in release gates, followed
+  by a separate public npm promotion slice once package ownership, publish
+  authority, access policy, package metadata, and artifact policy are settled.
+- scaffolded hosted app template tooling if the documented hosted-chat
+  template shape and browser/SSR lifecycle guidance are not enough.
 - workload-derived performance and operability evidence from real apps and
   external canaries.
 - targeted hardening for hosted surfaces already implemented: procedures,

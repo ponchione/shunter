@@ -49,12 +49,12 @@ changes.
 Keep hosted-app productization work here until it becomes a concrete release
 slice:
 
-- publish-ready `@shunter/client` workflow, including package ownership,
-  public install docs, release instructions, provenance decisions, npm publish
-  command policy, version synchronization, `dist/` artifact policy, and public
-  package metadata
-- standard static hosted-app template and deployment/runbook guidance
-- Nuxt/browser integration guide and SSR lifecycle guidance
+- public `@shunter/client` npm promotion, including package ownership, public
+  install docs, release authority, npm access and 2FA policy, publish command
+  policy, package metadata including licensing, version synchronization,
+  provenance decisions, and the final `dist/` artifact policy
+- scaffolded static hosted-app template tooling if real app work proves docs
+  and the hosted-chat template shape are not enough
 - dev workflow automation, such as rebuild/restart and TypeScript regeneration
   watchers, if real app work proves the manual flow too expensive
 

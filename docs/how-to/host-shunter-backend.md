@@ -92,6 +92,57 @@ Shunter permission checks. Explicit JWKS remains the preferred Supabase
 asymmetric-signing-key configuration path; discovery is generic IdP support, not
 a Supabase session or provider SDK integration.
 
+## Standard App Layout
+
+Use the hosted-chat example as the maintained template shape. A new app should
+keep the Shunter module declaration in a normal Go package and expose small
+app-owned binaries for serving, contract export, and offline maintenance:
+
+```text
+cmd/myapp/                  # starts the hosted backend
+cmd/export-contract/        # exports shunter.contract.json from app.Module()
+cmd/maintain/               # offline preflight and migration commands
+internal/app/module.go      # app.Module(), tables, reducers, procedures, reads
+frontend/                   # app-owned browser client, if present
+```
+
+The server binary should be small and explicit:
+
+```go
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	cfg := shunter.ConfigFromEnv()
+	cfg.EnableProtocol = true
+	cfg.Observability.Diagnostics.MountHTTP = true
+	if cfg.DataDir == "" {
+		cfg.DataDir = "./data/myapp"
+	}
+
+	if err := shunter.Run(ctx, app.Module(), cfg); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+Keep contract export in an app-owned binary because the generic Shunter CLI does
+not dynamically load modules. Build the runtime against a temporary `DataDir`,
+export the contract, and close the runtime before handing the artifact to
+review or codegen.
+
+Keep offline preflight and migration commands in an app-owned maintenance binary
+for the same reason. Use `CheckDataDirCompatibilityReport` before changing a
+persisted directory, and use `RunModuleDataDirMigrations` when registered module
+migration hooks need to run outside normal serving.
+
+For frontend apps, keep the generated binding file and the runtime package
+versioned with the reviewed contract. Until public npm publishing is promoted,
+resolve `@shunter/client` through a workspace dependency, `file:` dependency, or
+locally packed tarball. SSR-capable frontends should create Shunter WebSocket
+clients only from browser-owned lifecycle code; keep server-render paths limited
+to generated metadata, types, and normal app data flow.
+
 ## Example Workflow
 
 Run the canonical example:
@@ -239,6 +290,29 @@ The generated client imports `@shunter/client`, connects to the Shunter
 WebSocket endpoint, wraps the runtime client with `createModuleClient`, calls
 reducers and procedures through generated typed facade methods, and subscribes
 to declared views and event-table insert streams with generated row decoders.
+
+## Deployment Checklist
+
+Before deploying a static hosted app binary:
+
+1. Build the app server with linker-stamped Shunter build metadata.
+2. Export the module contract from the app-owned export binary.
+3. Review the contract with `describe`, `contract validate`, `contract assert`,
+   and, when upgrading, `contract diff`, `contract policy`, and `contract plan`.
+4. Regenerate TypeScript bindings from the reviewed contract, keep WebSocket
+   client creation in browser-only lifecycle code, and run the frontend
+   typecheck or app-specific browser gate.
+5. Run the app-owned maintenance preflight against the target offline `DataDir`.
+6. Take an offline backup before any blocking, data-rewrite, or hook-driven
+   migration.
+7. Start the new binary, then verify live `health --url`, `describe --url`, one
+   reducer or procedure call, and one declared read through the running-app CLI.
+8. Archive the app binary version, Shunter build metadata, module contract,
+   generated binding version, backup metadata, and command evidence together.
+
+Keep dev anonymous auth limited to local development. Public protocol serving
+should use strict auth with explicit issuer and audience policy plus local key
+material, configured JWKS issuers, or configured OIDC discovery issuers.
 
 ## Release Gate
 

@@ -5,19 +5,29 @@ Status: checked-in SDK runtime foundation.
 `typescript/client` is the TypeScript SDK runtime foundation for Shunter apps.
 It is named `@shunter/client` so generated bindings have a stable runtime
 import target. The long-term product target is a real npm package consumed by
-frontend apps and other projects. Today the package remains `"private": true`
-while the release workflow, package metadata, and packed-install gates are
-hardened.
+frontend apps and other projects. Today the package remains `"private": true`;
+the supported distribution path is a workspace dependency, `file:` dependency,
+or locally packed tarball that still resolves as `@shunter/client`.
 
-Npm publishing is not enabled for this package yet. The repository does not
-currently document `@shunter` scope ownership, release authority, a publish
-command policy, or the final version/`dist/` artifact rule, so keep this
-package private until those decisions are made.
+Current release policy:
 
-Build output is emitted to `dist/` as ESM JavaScript plus `.d.ts` files and
-source maps. Until public publishing is enabled, downstream apps should consume
-it through a workspace dependency, `file:` dependency, or locally packed tarball
-that still resolves as `@shunter/client`.
+- Shunter source versions live in the repository `VERSION` file with a leading
+  `v`.
+- This package mirrors that version without the leading `v`; for example
+  `v1.1.1-dev` maps to npm package version `1.1.1-dev`.
+- Build output is emitted to checked-in `dist/` ESM JavaScript, `.d.ts` files,
+  and source maps. `dist/` must be regenerated and included when the runtime
+  package changes.
+- `npm pack --dry-run` and `npm run smoke:package` are release gates for the
+  private/local package workflow. The smoke gate verifies the package version
+  mirror of root `VERSION`, packed file list, tarball install, `file:` install,
+  workspace install, and app-scoped runtime rename path used by generated
+  bindings.
+
+Public npm publishing is not enabled for this package yet. Keep `"private":
+true` until a promotion slice records `@shunter` package ownership, release
+authority, npm access and 2FA policy, publish command policy, package metadata
+including licensing, and the final `dist/` artifact rule.
 
 ## Local installs
 
@@ -73,6 +83,14 @@ Supported hosts are browsers and Electron renderers with standard Web APIs.
 Non-browser hosts must provide a compatible `webSocketFactory` when global
 `WebSocket` is absent. Server-side SDK APIs, React/framework adapters, and a
 broad Node/Deno/Bun/Workers compatibility matrix are v1 non-goals.
+
+In SSR-capable apps, treat this package as a browser runtime. Generated
+metadata and types can be imported by server-render code, but
+`createShunterClient()`, `connect()`, reducer/procedure calls, and
+subscriptions should run from browser-owned lifecycle code such as a Nuxt
+`.client.ts` plugin or component mount hook. Do not keep runtime clients in
+SSR globals or request-shared framework caches; each connected client belongs
+to one browser session.
 
 Reconnect is opt-in. A disconnected interval is a cache boundary: callers that
 need an authoritative view after reconnect should re-read or use the replayed

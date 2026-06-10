@@ -13,19 +13,30 @@ contract they were generated from.
 
 ## Install The Runtime Package
 
-Current v1 development still uses a local package path, workspace package, or
-packed tarball. The intended distribution model is for frontend apps and other
-projects to install `@shunter/client` from a versioned package, then generate
-app-specific bindings from a reviewed Shunter contract.
+Current v1 development supports a local package path, workspace package, or
+packed tarball. The package remains `"private": true`; do not treat
+`npm install @shunter/client` as a supported path until a public npm promotion
+slice explicitly removes that guardrail.
 
-The package is not published to npm yet and remains `"private": true`.
-Repository docs do not yet settle `@shunter` scope ownership, publish
-authority, publish commands, version synchronization, or the final `dist/`
-artifact policy. Until those are documented, do not treat
-`npm install @shunter/client` as a supported path.
+The supported package identity is still `@shunter/client`. Generated bindings
+import that name by default, and current local installs should resolve that
+same name through the app's package manager unless the app intentionally
+vendors or renames the runtime and generates bindings with the matching
+`--runtime-import` value.
 
-Until the npm release workflow is promoted, keep local installs resolving to
-the same package name the generated bindings import: `@shunter/client`.
+Current release policy:
+
+- Shunter source versions use `VERSION` with a leading `v`.
+- The TypeScript runtime package version mirrors that Shunter version without
+  the leading `v`; for example `v1.1.1-dev` maps to `1.1.1-dev`.
+- `dist/` is a checked-in package artifact and must match `src/` before a
+  release candidate is qualified.
+- `npm pack --dry-run` plus the package smoke gate are the package-shape
+  release checks for the private/local workflow. The smoke gate enforces the
+  package version mirror of root `VERSION`.
+- Public npm publishing is blocked until the project records package ownership,
+  release authority, npm access policy, publish command policy, package
+  metadata including licensing, and the final `dist/` artifact rule.
 
 App `package.json` with a `file:` dependency:
 
@@ -33,6 +44,25 @@ App `package.json` with a `file:` dependency:
 {
   "dependencies": {
     "@shunter/client": "file:../shunter/typescript/client"
+  }
+}
+```
+
+Workspace root:
+
+```json
+{
+  "private": true,
+  "workspaces": ["vendor/shunter-client", "app"]
+}
+```
+
+Workspace app:
+
+```json
+{
+  "dependencies": {
+    "@shunter/client": "1.1.1-dev"
   }
 }
 ```
@@ -55,6 +85,7 @@ Build the runtime package before consuming it through a local path or tarball:
 ```bash
 rtk npm --prefix typescript/client run build
 rtk npm --prefix typescript/client run pack:dry-run
+rtk npm --prefix typescript/client run smoke:package
 ```
 
 `pack:dry-run` and the package smoke gate validate local package contents and
@@ -175,6 +206,91 @@ Generated protocol metadata defaults to `v2.bsatn.shunter` while still listing
 `v1.bsatn.shunter` as supported. Parameterized declared reads require a
 negotiated v2 connection; no-parameter declared reads remain compatible with
 v1.
+
+## Browser And SSR Lifecycles
+
+Generated TypeScript clients are browser and Electron-renderer clients. In
+SSR-capable frameworks such as Nuxt, Next, SvelteKit, or Remix, import
+generated metadata and types wherever the framework needs them, but create the
+runtime WebSocket client only in browser code. Do not call
+`createShunterClient`, `connect`, or generated subscription helpers during
+server render, server data loading, or request-scoped middleware.
+
+Use a browser-only plugin, route-level client hook, or component mount callback
+as the lifecycle owner. The same rule applies to Nuxt: keep Shunter connection
+setup in a `.client.ts` plugin or another browser-only entrypoint, not in a
+universal plugin or server route. A runtime client is session state for one
+browser context; do not store it in SSR globals or framework caches shared
+across users.
+
+```ts
+import { createShunterClient } from "@shunter/client";
+import {
+  createModuleClient,
+  shunterContract,
+  shunterProtocol,
+} from "./shunter.gen";
+
+export async function connectBrowserShunter() {
+  if (typeof window === "undefined") {
+    throw new Error("Shunter WebSocket clients must be created in the browser");
+  }
+
+  const hasToken = (window.localStorage.getItem("my-app-token") ?? "") !== "";
+  const client = createShunterClient({
+    url: "wss://api.example.com/subscribe",
+    protocol: shunterProtocol,
+    contract: shunterContract,
+    ...(hasToken
+      ? {
+          token: () => {
+            const token = window.localStorage.getItem("my-app-token");
+            if (!token) {
+              throw new Error("my-app-token is not configured");
+            }
+            return token;
+          },
+        }
+      : {}),
+    reconnect: {
+      enabled: true,
+      maxAttempts: 3,
+      initialDelayMs: 250,
+      maxDelayMs: 5000,
+    },
+  });
+
+  await client.connect();
+  return { client, app: createModuleClient(client) };
+}
+```
+
+Token providers should read browser session state at connection-attempt time
+instead of closing over the token value seen during app startup. They are called
+before the first WebSocket is created and before each reconnect attempt. If a
+strict-auth browser session loses its token, throw from the provider and let the
+app's auth flow decide whether to reauthenticate, clear local state, or retry
+later. For dev-auth sessions that intentionally run anonymously, omit the token
+provider instead of returning an empty string.
+
+Reconnect replays active subscriptions after a fresh identity handshake, but a
+disconnected interval is still a cache boundary. Treat route caches, component
+state, and managed subscription row sets as potentially stale after reconnect;
+re-read declared queries or accept the replayed initial subscription snapshot
+when the UI needs an authoritative view. Close route-scoped clients and
+subscriptions when their owner is disposed.
+
+Regenerate and rebuild in this order when the Go module contract or local
+runtime package changes:
+
+1. Build and smoke-check the local `@shunter/client` package if
+   `typescript/client` changed.
+2. Export and review the app `shunter.contract.json`.
+3. Run `shunter contract codegen --language typescript` from that reviewed
+   contract.
+4. Reinstall or refresh the workspace, `file:`, or packed-tarball dependency
+   if the runtime package version or package contents changed.
+5. Run the app frontend typecheck or browser gate.
 
 ## Call Reducers
 

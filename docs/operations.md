@@ -266,8 +266,15 @@ rtk go tool staticcheck ./...
 ```bash
 rtk npm --prefix typescript/client run test
 rtk npm --prefix typescript/client run build
+rtk npm --prefix typescript/client run pack:dry-run
 rtk npm --prefix typescript/client run smoke:package
 ```
+
+These TypeScript commands qualify the private/local package workflow. They do
+not authorize public npm publishing. Public publishing requires a separate
+promotion record that settles package ownership, release authority, npm access
+policy, publish commands, package metadata including licensing, version
+synchronization, and the `dist/` artifact rule.
 
 7. Run the hosted example gate:
 

@@ -5,8 +5,9 @@ Shunter integration path.
 
 Recommended order for a new app integration:
 
-1. [Host Shunter as a backend](host-shunter-backend.md) - run the standard
-   static Go backend server and follow the hosted-chat example workflow.
+1. [Host Shunter as a backend](host-shunter-backend.md) - use the standard
+   static Go backend layout, deployment checklist, and hosted-chat example
+   workflow.
 2. [Module anatomy](module-anatomy.md) - declare modules, tables, reducers,
    procedures, reads, metadata, lifecycle hooks, migrations, and visibility
    filters.
@@ -24,7 +25,8 @@ Recommended order for a new app integration:
    contracts, review compatibility, and generate TypeScript bindings.
 9. [Use generated TypeScript clients](typescript-client.md) - install the local
    SDK runtime package, connect clients, call reducers and procedures, read
-   declared queries, subscribe to views/tables, and opt into reconnect.
+   declared queries, subscribe to views/tables, and keep browser/SSR lifecycles
+   clear.
 10. [Testing Shunter modules](testing-shunter-modules.md) - test modules through
    the root runtime API.
 

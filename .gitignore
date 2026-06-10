@@ -5,3 +5,11 @@
 node_modules/
 examples/hosted-chat/.contract-data/
 examples/hosted-chat/data/
+
+# Local teaching workspace
+/MISSION.md
+/RESOURCES.md
+/NOTES.md
+/lessons/
+/learning-reference/
+/learning-records/

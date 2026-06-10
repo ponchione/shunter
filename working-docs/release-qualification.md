@@ -35,9 +35,16 @@ rtk bash scripts/static-hosted-binary-gate.sh
 ```
 
 The TypeScript package commands qualify local package shape, dry-run pack
-contents, and packed-install smoke behavior. They do not authorize public npm
-publishing and do not settle `@shunter` scope ownership, publish command
-policy, version synchronization, or `dist/` artifact policy.
+contents, and packed-install smoke behavior for the current private/local
+package workflow. The package smoke gate enforces that the package version
+mirrors the Shunter source version without the leading `v`, and checked-in
+`dist/` artifacts must match `src/` for the release candidate under test.
+
+These commands do not authorize public npm publishing. Public publishing
+requires a separate promotion record that settles `@shunter` package ownership,
+release authority, npm access and 2FA policy, publish command policy, package
+metadata including licensing, version synchronization, and the final `dist/`
+artifact rule.
 
 The static hosted-binary gate wraps the maintained hosted-chat gate and focused
 binary-level Go gauntlets. It is the release evidence for the current static
