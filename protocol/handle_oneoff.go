@@ -949,23 +949,23 @@ type orderedOneOffPair struct {
 	rightRow types.ProductValue
 }
 
-type orderedOneOffPairSource uint8
+type oneOffPairSource uint8
 
 const (
-	orderedOneOffPairSourceInvalid orderedOneOffPairSource = iota
-	orderedOneOffPairSourceLeft
-	orderedOneOffPairSourceRight
+	oneOffPairSourceInvalid oneOffPairSource = iota
+	oneOffPairSourceLeft
+	oneOffPairSourceRight
 )
 
 type orderedOneOffPairTerm struct {
-	source     orderedOneOffPairSource
+	source     oneOffPairSource
 	index      int
 	desc       bool
 	columnName string
 }
 
 func (term orderedOneOffPairTerm) value(pair orderedOneOffPair) types.Value {
-	if term.source == orderedOneOffPairSourceLeft {
+	if term.source == oneOffPairSourceLeft {
 		return pair.leftRow[term.index]
 	}
 	return pair.rightRow[term.index]
@@ -1023,23 +1023,34 @@ func projectOneOffJoinPair(leftRow, rightRow types.ProductValue, leftID schema.T
 }
 
 func projectedJoinColumnSource(col compiledSQLProjectionColumn, leftID schema.TableID, leftAlias uint8, leftRow types.ProductValue, rightID schema.TableID, rightAlias uint8, rightRow types.ProductValue) (types.ProductValue, bool) {
+	switch classifyOneOffPairColumnSource(col, leftID, leftAlias, rightID, rightAlias) {
+	case oneOffPairSourceLeft:
+		return leftRow, true
+	case oneOffPairSourceRight:
+		return rightRow, true
+	default:
+		return nil, false
+	}
+}
+
+func classifyOneOffPairColumnSource(col compiledSQLProjectionColumn, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8) oneOffPairSource {
 	if leftID == rightID {
 		switch {
 		case col.Table == leftID && col.Alias == leftAlias:
-			return leftRow, true
+			return oneOffPairSourceLeft
 		case col.Table == rightID && col.Alias == rightAlias:
-			return rightRow, true
+			return oneOffPairSourceRight
 		default:
-			return nil, false
+			return oneOffPairSourceInvalid
 		}
 	}
 	switch col.Table {
 	case leftID:
-		return leftRow, true
+		return oneOffPairSourceLeft
 	case rightID:
-		return rightRow, true
+		return oneOffPairSourceRight
 	default:
-		return nil, false
+		return oneOffPairSourceInvalid
 	}
 }
 
@@ -1058,25 +1069,9 @@ func oneOffAggregateJoinColumnValue(leftRow, rightRow types.ProductValue, leftID
 func compileOrderedOneOffPairTerms(leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, orderBy []compiledSQLOrderBy) []orderedOneOffPairTerm {
 	terms := make([]orderedOneOffPairTerm, len(orderBy))
 	for i, orderTerm := range orderBy {
-		source := orderedOneOffPairSourceInvalid
 		column := orderTerm.Column
-		if leftID == rightID {
-			switch {
-			case column.Table == leftID && column.Alias == leftAlias:
-				source = orderedOneOffPairSourceLeft
-			case column.Table == rightID && column.Alias == rightAlias:
-				source = orderedOneOffPairSourceRight
-			}
-		} else {
-			switch column.Table {
-			case leftID:
-				source = orderedOneOffPairSourceLeft
-			case rightID:
-				source = orderedOneOffPairSourceRight
-			}
-		}
 		terms[i] = orderedOneOffPairTerm{
-			source:     source,
+			source:     classifyOneOffPairColumnSource(column, leftID, leftAlias, rightID, rightAlias),
 			index:      column.Schema.Index,
 			desc:       orderTerm.Desc,
 			columnName: column.Schema.Name,
@@ -1089,9 +1084,9 @@ func validateOrderedOneOffPairTerms(pair orderedOneOffPair, terms []orderedOneOf
 	for _, term := range terms {
 		var row types.ProductValue
 		switch term.source {
-		case orderedOneOffPairSourceLeft:
+		case oneOffPairSourceLeft:
 			row = pair.leftRow
-		case orderedOneOffPairSourceRight:
+		case oneOffPairSourceRight:
 			row = pair.rightRow
 		default:
 			return fmt.Errorf("ORDER BY column %q is not from the projected table", term.columnName)

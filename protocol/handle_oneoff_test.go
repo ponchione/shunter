@@ -4005,6 +4005,68 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoinProjectsRight(t *testing.T) {
 	}
 }
 
+func TestHandleOneOffQuery_AliasedSelfEquiJoinOrdersBySelectedAlias(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "join_key", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	tableID, tTS, ok := eng.Registry().TableByName("t")
+	if !ok {
+		t.Fatal("t table missing from registry")
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		tableID: {
+			{types.NewUint32(1), types.NewUint32(5)},
+			{types.NewUint32(2), types.NewUint32(5)},
+			{types.NewUint32(3), types.NewUint32(5)},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	tests := []struct {
+		name    string
+		query   string
+		wantIDs []uint32
+	}{
+		{
+			name:    "right projection ordered by right alias",
+			query:   "SELECT b.* FROM t AS a JOIN t AS b ON a.join_key = b.join_key ORDER BY b.id DESC LIMIT 4 OFFSET 1",
+			wantIDs: []uint32{3, 3, 2, 2},
+		},
+		{
+			name:    "left projection ordered by left alias",
+			query:   "SELECT a.* FROM t AS a JOIN t AS b ON a.join_key = b.join_key ORDER BY a.id ASC LIMIT 4 OFFSET 1",
+			wantIDs: []uint32{1, 1, 2, 2},
+		},
+	}
+	for i, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			rows := requireOneOffRows(t, conn, stateAccess, sl, &OneOffQueryMsg{
+				MessageID:   []byte{0x2a, byte(i + 1)},
+				QueryString: test.query,
+			}, tTS)
+			if len(rows) != len(test.wantIDs) {
+				t.Fatalf("got %d rows, want %d", len(rows), len(test.wantIDs))
+			}
+			for i, wantID := range test.wantIDs {
+				if got := rows[i][0]; !got.Equal(types.NewUint32(wantID)) {
+					t.Fatalf("row %d id = %v, want %d; decoded rows = %v", i, got, wantID, rows)
+				}
+			}
+		})
+	}
+}
+
 func TestHandleOneOffQuery_AliasedSelfCrossJoinProjection(t *testing.T) {
 	conn := testConnDirect(nil)
 	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}}}
