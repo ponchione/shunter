@@ -1,0 +1,21 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor
+                                                                                          │ working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/perf-v1.1.1-dev-ordered-current-focused.txt │
+                                                                                          │                                                       sec/op                                                        │
+InitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24                                                                                                           119.7µ ± 1%
+OrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24                                                                                                                     884.6µ ± 0%
+geomean                                                                                                                                                                                             325.4µ
+
+                                                                                          │ working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/perf-v1.1.1-dev-ordered-current-focused.txt │
+                                                                                          │                                                        B/op                                                         │
+InitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24                                                                                                          20.75Ki ± 0%
+OrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24                                                                                                                    224.1Ki ± 0%
+geomean                                                                                                                                                                                            68.18Ki
+
+                                                                                          │ working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/perf-v1.1.1-dev-ordered-current-focused.txt │
+                                                                                          │                                                      allocs/op                                                      │
+InitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24                                                                                                            13.00 ± 0%
+OrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24                                                                                                                      5.000 ± 0%
+geomean                                                                                                                                                                                              8.062

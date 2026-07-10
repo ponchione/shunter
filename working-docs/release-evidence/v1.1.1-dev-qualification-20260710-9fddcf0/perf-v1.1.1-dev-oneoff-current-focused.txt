@@ -1,0 +1,25 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/protocol
+cpu: AMD Ryzen 9 9900X 12-Core Processor
+BenchmarkExecuteCompiledSQLQueryCommonPaths/projection_order_limit-24         	    5235	    219773 ns/op	   80034 B/op	      58 allocs/op
+BenchmarkExecuteCompiledSQLQueryCommonPaths/projection_order_limit-24         	    5628	    219288 ns/op	   80033 B/op	      58 allocs/op
+BenchmarkExecuteCompiledSQLQueryCommonPaths/projection_order_limit-24         	    5428	    220289 ns/op	   80032 B/op	      58 allocs/op
+BenchmarkExecuteCompiledSQLQueryCommonPaths/projection_order_limit-24         	    5360	    219877 ns/op	   80032 B/op	      58 allocs/op
+BenchmarkExecuteCompiledSQLQueryCommonPaths/projection_order_limit-24         	    5523	    220203 ns/op	   80032 B/op	      58 allocs/op
+BenchmarkExecuteCompiledSQLQueryCommonPaths/projection_order_limit-24         	    5499	    220637 ns/op	   80032 B/op	      58 allocs/op
+BenchmarkExecuteCompiledSQLQueryCommonPaths/projection_order_limit-24         	    5559	    218864 ns/op	   80032 B/op	      58 allocs/op
+BenchmarkExecuteCompiledSQLQueryCommonPaths/projection_order_limit-24         	    5523	    220064 ns/op	   80032 B/op	      58 allocs/op
+BenchmarkExecuteCompiledSQLQueryCommonPaths/projection_order_limit-24         	    5500	    221335 ns/op	   80032 B/op	      58 allocs/op
+BenchmarkExecuteCompiledSQLQueryCommonPaths/projection_order_limit-24         	    5356	    218832 ns/op	   80032 B/op	      58 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     177	   6698889 ns/op	  276090 B/op	    3161 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     178	   6758071 ns/op	  276090 B/op	    3161 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     178	   6742476 ns/op	  276091 B/op	    3161 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     177	   6725683 ns/op	  276090 B/op	    3161 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     177	   6727956 ns/op	  276089 B/op	    3161 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     177	   6689562 ns/op	  276090 B/op	    3161 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     178	   6680890 ns/op	  276089 B/op	    3161 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     178	   6716005 ns/op	  276089 B/op	    3161 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     178	   6715106 ns/op	  276089 B/op	    3161 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     177	   6691701 ns/op	  276091 B/op	    3161 allocs/op
+

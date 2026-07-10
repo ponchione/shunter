@@ -1,0 +1,13 @@
+# Gate result
+
+- Working directory: `/home/gernsback/source/shunter`
+- Command: `rtk npm --prefix typescript/client run build`
+- Started: 2026-07-10T10:57:29.807Z
+- Finished: 2026-07-10T10:57:30.235Z
+- Exit code: 0
+- Result: pass
+
+~~~text
+> npm exec --yes --package typescript -- tsc -p tsconfig.build.json
+~~~
+

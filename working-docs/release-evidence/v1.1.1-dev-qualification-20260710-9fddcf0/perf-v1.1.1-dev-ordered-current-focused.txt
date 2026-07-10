@@ -1,0 +1,25 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor
+BenchmarkInitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24         	    9968	    119051 ns/op	   21248 B/op	      13 allocs/op
+BenchmarkInitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24         	   10000	    118905 ns/op	   21248 B/op	      13 allocs/op
+BenchmarkInitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24         	   10000	    119561 ns/op	   21248 B/op	      13 allocs/op
+BenchmarkInitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24         	    9850	    119409 ns/op	   21248 B/op	      13 allocs/op
+BenchmarkInitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24         	    9670	    121496 ns/op	   21248 B/op	      13 allocs/op
+BenchmarkInitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24         	    9844	    119976 ns/op	   21248 B/op	      13 allocs/op
+BenchmarkInitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24         	   10000	    119421 ns/op	   21248 B/op	      13 allocs/op
+BenchmarkInitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24         	   10000	    120240 ns/op	   21248 B/op	      13 allocs/op
+BenchmarkInitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24         	    9976	    119953 ns/op	   21248 B/op	      13 allocs/op
+BenchmarkInitialRowsForTableOrderedWindow/table_scan/rows_1024/limit_100/offset_0/shuffled/1col-24         	   10000	    119859 ns/op	   21248 B/op	      13 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1290	    880547 ns/op	  229427 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1368	    882327 ns/op	  229428 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1354	    877127 ns/op	  229428 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1364	    881739 ns/op	  229428 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1374	    886783 ns/op	  229427 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1345	    881902 ns/op	  229428 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1332	    887750 ns/op	  229427 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1344	    893718 ns/op	  229428 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1348	    887475 ns/op	  229431 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1311	    887185 ns/op	  229427 B/op	       5 allocs/op
+

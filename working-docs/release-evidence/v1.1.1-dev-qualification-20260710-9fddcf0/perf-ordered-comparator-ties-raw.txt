@@ -1,0 +1,16 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/subscription
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1290	    880547 ns/op	  229427 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1368	    882327 ns/op	  229428 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1354	    877127 ns/op	  229428 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1364	    881739 ns/op	  229428 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1374	    886783 ns/op	  229427 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1345	    881902 ns/op	  229428 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1332	    887750 ns/op	  229427 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1344	    893718 ns/op	  229428 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1348	    887475 ns/op	  229431 B/op	       5 allocs/op
+BenchmarkOrderedInitialRowsComparatorShapes/bounded/rows_4096/shuffled/1col/desc/ties-24         	    1311	    887185 ns/op	  229427 B/op	       5 allocs/op
+PASS
+ok  	github.com/ponchione/shunter/subscription	12.805s

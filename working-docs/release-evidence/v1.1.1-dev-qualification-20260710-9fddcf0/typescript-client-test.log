@@ -1,0 +1,14 @@
+# Gate result
+
+- Working directory: `/home/gernsback/source/shunter`
+- Command: `rtk npm --prefix typescript/client test`
+- Started: 2026-07-10T10:57:19.902Z
+- Finished: 2026-07-10T10:57:21.176Z
+- Exit code: 0
+- Result: pass
+
+~~~text
+> npm run typecheck && npm exec --yes --package typescript -- tsc -p tsconfig.runtime-test.json && node test/runtime-behavior.test.mjs && node .tmp_runtime_test/test/generated-type-index-decoding.test.js && node test/hosted-type-index-canary.test.mjs
+> npm exec --yes --package typescript -- tsc -p tsconfig.json --noEmit
+~~~
+

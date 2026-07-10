@@ -1,0 +1,39 @@
+# Gate result
+
+- Working directory: `/home/gernsback/source/opsboard-canary`
+- Command: `SHUNTER_CHECKOUT=/home/gernsback/source/shunter rtk make canary-full`
+- Started: 2026-07-10T11:01:36.002Z
+- Finished: 2026-07-10T11:01:43.374Z
+- Exit code: 2
+- Result: fail
+
+~~~text
+make: *** [Makefile:38: canary-full] Error 1
+./scripts/shunter-canary full
+
+==> revision context
+opsboard-canary: e69bce73cb49
+shunter: 9fddcf0b842f dirty
+
+==> full canary
++ go test ./... -count=1
+?   	github.com/ponchione/opsboard-canary/cmd/codegen	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/export-contract	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/migrate-data	[no test files]
+ok  	github.com/ponchione/opsboard-canary/cmd/server	0.002s
+ok  	github.com/ponchione/opsboard-canary/cmd/workflow	0.243s
+--- FAIL: TestCommittedContractMatchesCurrentExport (0.06s)
+    codegen_test.go:29: committed contract is stale; run `make contract`
+--- FAIL: TestCommittedTypeScriptCodegenMatchesContract (0.00s)
+    codegen_test.go:48: committed TypeScript bindings are stale; run `make codegen`
+FAIL
+FAIL	github.com/ponchione/opsboard-canary/internal/app	0.724s
+ok  	github.com/ponchione/opsboard-canary/internal/client	0.124s
+?   	github.com/ponchione/opsboard-canary/internal/model	[no test files]
+--- FAIL: TestStrictAuthHandshakeRejectsInvalidTokensAndRecovers (0.12s)
+    auth_handshake_test.go:17: missing token dial succeeded, want auth failure
+FAIL
+FAIL	github.com/ponchione/opsboard-canary/internal/workflows	7.067s
+FAIL
+~~~
+

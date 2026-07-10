@@ -95,6 +95,73 @@ Decision:
 
 ## Records
 
+### v1.1.1-dev qualification attempt - 2026-07-10
+
+- Status: failed
+- Operator: gernsback
+- Date/time: 2026-07-10T10:54:15Z through 2026-07-10T11:07:00Z
+- Environment: Linux gernsback 6.17.0-35-generic, linux/amd64,
+  Go go1.26.3, AMD Ryzen 9 9900X 12-Core Processor
+- Source version: `v1.1.1-dev`
+- Shunter ref: `9fddcf0b842f72d5e24e399d558042394b337fbd`
+- Shunter worktree state: dirty before qualification with the user-owned
+  documentation slice in `working-docs/README.md`,
+  `working-docs/deferred-functionality-backlog.md`,
+  `working-docs/hosted-backend-roadmap.md`,
+  `working-docs/nesl-operational-use-thought-experiment.md`, and
+  `working-docs/recommendations/`; qualification-created generated drift was
+  restored, leaving those paths plus this ledger/evidence
+- `opsboard-canary` ref:
+  `e69bce73cb49fbd2334dd8b99eb664b07fc6e132`
+- `opsboard-canary` worktree state: clean before and after, local branch
+  `master`
+
+Commands:
+
+| Scope | Working directory | Command | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| Preflight | `/home/gernsback/source/shunter` | required Git, version-file, package-version, CLI-version, operator, UTC, Go, and platform checks | pass; dirty source state recorded | `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/preflight.md` |
+| Shunter | `/home/gernsback/source/shunter` | `rtk go test ./...` | pass | `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/shunter-go-test.log` |
+| Shunter | `/home/gernsback/source/shunter` | `rtk go vet ./...` | pass | `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/shunter-go-vet.log` |
+| Shunter | `/home/gernsback/source/shunter` | `rtk go tool staticcheck ./...` | pass | `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/shunter-staticcheck.log` |
+| TypeScript | `/home/gernsback/source/shunter` | `rtk npm --prefix typescript/client test` | pass | `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/typescript-client-test.log` |
+| TypeScript | `/home/gernsback/source/shunter` | `rtk npm --prefix typescript/client run build` | pass; source-map drift restored | `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/typescript-client-build.log` |
+| TypeScript | `/home/gernsback/source/shunter` | `rtk npm --prefix typescript/client run pack:dry-run` | pass | `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/typescript-client-pack-dry-run.log` |
+| TypeScript | `/home/gernsback/source/shunter` | `rtk npm --prefix typescript/client run smoke:package` | pass | `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/typescript-client-smoke-package.log` |
+| Hosted binary | `/home/gernsback/source/shunter` | `rtk bash scripts/static-hosted-binary-gate.sh` | pass; generated trailing blank line restored | `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/static-hosted-binary-gate.log` |
+| Canary | `/home/gernsback/source/opsboard-canary` | `SHUNTER_CHECKOUT=/home/gernsback/source/shunter rtk make canary-quick` | fail: stale contract/codegen and obsolete auth-handshake expectation | `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/canary-quick.log` |
+| Canary | `/home/gernsback/source/opsboard-canary` | `SHUNTER_CHECKOUT=/home/gernsback/source/shunter rtk make canary-full` | fail at initial tests; later full stages not run | `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/canary-full.log` |
+
+Failures and supporting evidence:
+
+- The canary mismatch and unchanged canary worktree are documented in
+  `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/external-canary-diagnosis.md`.
+- TypeScript source-map and hosted-chat trailing-newline drift are documented
+  in
+  `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/generated-artifact-drift.md`.
+- Representative performance evidence supports the unreleased allocation
+  claims but records a 66.04% slower two-table ordered-join row; see
+  `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/performance-summary.md`.
+- No attempt was superseded and no product, gate, canary, changelog, or
+  version fix was made.
+
+Residual risks:
+
+- The intended source revision is not immutable because pre-existing
+  release-facing documentation remains uncommitted.
+- External quick/full canary gates fail, and the full gate does not reach SDK
+  smoke, seeded, race, reproducibility, or protocol-smoke stages.
+- The TypeScript build resolves an unpinned compiler and does not reproduce
+  checked-in source maps cleanly.
+- Focused performance rows are advisory local evidence, not production-scale
+  claims; the ordered-join latency regression remains unresolved.
+
+Decision:
+
+- Qualification deferred. This is a failed qualification attempt, not a
+  passed clean-ref release record. Full details are in
+  `working-docs/release-evidence/v1.1.1-dev-qualification-20260710-9fddcf0/qualification.md`.
+
 ### v1.1.1-dev canary qualification - 2026-05-25
 
 - Status: passed
