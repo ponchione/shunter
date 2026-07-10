@@ -95,10 +95,44 @@ Keep current work tied to real hosted-app pressure:
   event tables, maintained live windows, auth/JWKS, migration reports, and
   generated TypeScript clients.
 
+## Recommended Next Sequence
+
+Use this order to turn the current implementation into a better-qualified
+self-hosted product without expanding into reference-runtime parity work.
+Promote a step into active work only when the preceding evidence or a real app
+need makes it concrete.
+
+1. Qualify the current development line formally. Run the in-repo release
+   command set and external canary, refresh the release ledger and performance
+   snapshot, record residual risks, and decide whether to cut the next release.
+2. Establish product-derived operating targets through Kickbrass or another
+   real Shunter app. Record transaction rate, fanout distribution, recovery
+   time, memory, and backup/restore expectations instead of inventing proxy
+   features solely for coverage.
+3. Operationalize durability maintenance. Define an app-facing or documented
+   snapshot/compaction policy, make backup coordination explicit, and use the
+   resulting workload to reduce tail-replay allocation and recovery latency.
+4. Set live-query admission policy from evidence. Choose defensible defaults
+   or an explicit unbounded opt-in for multi-way relation/cardinality limits,
+   then pursue incremental evaluation only for product-relevant hot paths.
+5. Finish the TypeScript distribution decision. Either promote
+   `@shunter/client` through a governed public-package process or make the
+   private/vendored workflow an explicit supported product choice; add
+   framework helpers only when real lifecycle friction justifies them.
+6. Prefer type-system depth over broad SQL expansion. When product needs
+   justify it, prioritize nested products, sums/enums, general arrays, and
+   typed identity fields because they improve schema, reducers, contracts,
+   protocol values, and generated clients together.
+7. Reconcile planning documents as work lands. Retire completed deferred items,
+   keep release evidence tied to the commit it qualifies, and maintain a small
+   current roadmap rather than carrying implemented work as future backlog.
+
 ## Remaining Work Trackers
 
 Use focused trackers instead of growing this direction note:
 
+- `recommendations/` owns proposed continued-development slices until a real
+  product need or release decision promotes one into active work.
 - `deferred-functionality-backlog.md` owns explicitly deferred product/runtime
   scope such as dynamic serving, broad SQL, online backup orchestration,
   cross-table visibility, richer schema types, and codegen breadth.

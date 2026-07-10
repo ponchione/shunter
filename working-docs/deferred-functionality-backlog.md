@@ -220,7 +220,7 @@ Review later:
 
 ## Deferred Auth Expansion
 
-12. [ ] OIDC discovery documents and background remote auth refresh.
+12. [ ] Background remote auth refresh.
 
 Owner: `auth`, `protocol`, root runtime config
 
@@ -230,10 +230,12 @@ Deferred decision:
 - Strict-mode JWKS verification now supports configured issuer/JWKS URL pairs
   with on-demand fetch, cache reuse, HTTPS-by-default URL validation, and keyed
   unknown-`kid` refresh.
-- Defer OIDC discovery-document lookup and background remote refresh.
+- Generic OIDC discovery issuers now resolve discovery documents into JWKS
+  verification sources on demand with the same validation and cache behavior.
+- Defer proactive/background remote refresh and provider-specific refresh
+  policy.
 
 Review later:
-- OIDC discovery-document lookup.
 - Background cache refresh.
 - Provider-specific cache lifetime policy.
 - Protocol 401 mapping.
@@ -374,23 +376,6 @@ Review later:
 - Remote/deployed schema fetch.
 - Source-module schema extraction without building a runtime.
 
-22. [ ] Public codegen visibility profile.
-
-Owner: `codegen`, contracts, root runtime
-
-Deferred decision:
-- Current TypeScript generation emits table row types, decoders, metadata, and
-  table helpers for every table in the exported contract, including private
-  system tables and private app tables.
-- Defer a filtered public-SDK/profile model. Do not treat the current generated
-  surface as a public visibility boundary.
-
-Review later:
-- Profile selection for public, internal, and private generated surfaces.
-- Filtering private system tables and private app tables from public facades.
-- Contract metadata needed to distinguish metadata-only exports from callable
-  SDK APIs.
-
 23. [ ] Contract workflow provenance and release automation hardening.
 
 Owner: `contractworkflow`, `contractdiff`, `cmd/shunter`
@@ -522,18 +507,22 @@ Review later:
 - Explicit barriers for fanout absence and close behavior.
 - CI flake reduction.
 
-31. [ ] End-to-end type/index matrix.
+31. [ ] Broader end-to-end type/index matrix.
 
 Owner: `internal/gauntlettests`, root runtime, protocol, codegen
 
 Deferred decision:
-- Keep package-level type/index coverage unless hosted runtime behavior needs
-  broader end-to-end proof.
+- The current flat type system has a hosted Go canary covering reducer writes,
+  local and declared reads, protocol rows and live deltas, primary/unique and
+  secondary index paths, restart recovery, and offline backup/restore.
+- Generated TypeScript flat-kind decoding and a hosted TypeScript client run
+  provide deterministic client-side gates for the same supported value
+  families.
+- Keep that matrix stable and expand it when new value kinds, index semantics,
+  or a product-visible regression creates a concrete need.
 
 Review later:
-- Primitive widths.
 - Identity/connection IDs if added as value kinds.
-- Timestamps/durations.
-- Vectors or richer arrays if added.
-- Unique indexes.
-- Table-cache/codegen behavior.
+- Nested products, sums, vectors, or richer arrays if added.
+- New compound/range index semantics if added.
+- Broader table-cache/codegen behavior required by real client workloads.
