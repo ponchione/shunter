@@ -1,0 +1,13 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/protocol
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     297	   4084588 ns/op	  852894 B/op	    4729 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     303	   4107617 ns/op	  852892 B/op	    4729 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     290	   4040252 ns/op	  852893 B/op	    4729 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     302	   4041564 ns/op	  852894 B/op	    4729 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     292	   4061831 ns/op	  852894 B/op	    4729 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     301	   4022381 ns/op	  852893 B/op	    4729 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     292	   4075749 ns/op	  852894 B/op	    4729 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     295	   4043256 ns/op	  852896 B/op	    4729 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     291	   4045713 ns/op	  852894 B/op	    4729 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     296	   3925760 ns/op	  852896 B/op	    4729 allocs/op

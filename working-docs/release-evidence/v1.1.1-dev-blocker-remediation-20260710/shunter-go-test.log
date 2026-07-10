@@ -1,0 +1,5 @@
+Command: rtk go test ./...
+Result: pass (exit 0)
+
+Go test: 6416 passed in 30 packages
+

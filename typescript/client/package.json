@@ -19,13 +19,13 @@
     "README.md"
   ],
   "scripts": {
-    "build": "npm exec --yes --package typescript -- tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json",
     "pack:dry-run": "npm pack --dry-run",
     "smoke:package": "node test/package-smoke.mjs",
-    "test": "npm run typecheck && npm exec --yes --package typescript -- tsc -p tsconfig.runtime-test.json && node test/runtime-behavior.test.mjs && node .tmp_runtime_test/test/generated-type-index-decoding.test.js && node test/hosted-type-index-canary.test.mjs",
-    "typecheck": "npm exec --yes --package typescript -- tsc -p tsconfig.json --noEmit"
+    "test": "npm run typecheck && tsc -p tsconfig.runtime-test.json && node test/runtime-behavior.test.mjs && node .tmp_runtime_test/test/generated-type-index-decoding.test.js && node test/hosted-type-index-canary.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "typescript": "^5.9.0"
+    "typescript": "5.9.3"
   }
 }

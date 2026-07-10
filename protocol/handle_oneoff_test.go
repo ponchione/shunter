@@ -8734,3 +8734,37 @@ func TestCompileSQLQueryString_AppParameterPlaceholderRejectedOutsideTemplate(t 
 		t.Fatalf("CompileSQLQueryString error = %q, want %q", err.Error(), want)
 	}
 }
+
+func TestCompileOrderedOneOffPairTermsPreservesSelfJoinAliases(t *testing.T) {
+	const tableID schema.TableID = 7
+	terms := compileOrderedOneOffPairTerms(tableID, 1, tableID, 2, []compiledSQLOrderBy{
+		{
+			Column: compiledSQLProjectionColumn{
+				Table:  tableID,
+				Alias:  2,
+				Schema: schema.ColumnSchema{Index: 0, Name: "right_id", Type: schema.KindUint32},
+			},
+			Desc: true,
+		},
+		{
+			Column: compiledSQLProjectionColumn{
+				Table:  tableID,
+				Alias:  1,
+				Schema: schema.ColumnSchema{Index: 1, Name: "left_score", Type: schema.KindUint32},
+			},
+		},
+	})
+	pair := orderedOneOffPair{
+		leftRow:  types.ProductValue{types.NewUint32(10), types.NewUint32(11)},
+		rightRow: types.ProductValue{types.NewUint32(20), types.NewUint32(21)},
+	}
+	if err := validateOrderedOneOffPairTerms(pair, terms); err != nil {
+		t.Fatalf("validateOrderedOneOffPairTerms returned error: %v", err)
+	}
+	if got := terms[0].value(pair); !got.Equal(types.NewUint32(20)) {
+		t.Fatalf("right alias ORDER BY value = %v, want 20", got)
+	}
+	if got := terms[1].value(pair); !got.Equal(types.NewUint32(11)) {
+		t.Fatalf("left alias ORDER BY value = %v, want 11", got)
+	}
+}

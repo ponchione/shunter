@@ -1,0 +1,4 @@
+Command: rtk go tool staticcheck ./...
+Result: pass (exit 0)
+
+

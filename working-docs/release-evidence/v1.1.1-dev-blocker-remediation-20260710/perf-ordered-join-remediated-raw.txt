@@ -1,0 +1,17 @@
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/protocol
+cpu: AMD Ryzen 9 9900X 12-Core Processor            
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     246	   4774319 ns/op	  276169 B/op	    3162 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     250	   4827321 ns/op	  276124 B/op	    3162 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     250	   4783134 ns/op	  276121 B/op	    3162 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     250	   4782904 ns/op	  276121 B/op	    3162 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     248	   4805682 ns/op	  276121 B/op	    3162 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     250	   4795904 ns/op	  276122 B/op	    3162 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     246	   4789485 ns/op	  276121 B/op	    3162 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     246	   4790997 ns/op	  276122 B/op	    3162 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     249	   4763337 ns/op	  276122 B/op	    3162 allocs/op
+BenchmarkExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24         	     252	   4775287 ns/op	  276121 B/op	    3162 allocs/op
+PASS
+ok  	github.com/ponchione/shunter/protocol	16.798s
+

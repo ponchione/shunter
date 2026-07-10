@@ -1,0 +1,188 @@
+contracts/shunter.contract.json           | 30 +++++++++++++++
+ generated/typescript/index.ts             |  2 +
+ internal/workflows/auth_handshake_test.go | 61 +++++++++++++++++++++++++++----
+ package-lock.json                         |  2 +-
+ 4 files changed, 86 insertions(+), 9 deletions(-)
+
+Changes:
+
+contracts/shunter.contract.json
+  @@ -90,6 +90,9 @@
+  +        },
+  +        "sdk": {
+  +          "visibility": "public"
+           }
+         },
+         {
+  @@ -162,6 +165,9 @@
+  +        },
+  +        "sdk": {
+  +          "visibility": "public"
+           }
+         },
+         {
+  @@ -240,6 +246,9 @@
+  +        },
+  +        "sdk": {
+  +          "visibility": "public"
+           }
+         },
+         {
+  @@ -374,6 +383,9 @@
+  +        },
+  +        "sdk": {
+  +          "visibility": "public"
+           }
+         },
+         {
+  @@ -464,6 +476,9 @@
+  +        },
+  +        "sdk": {
+  +          "visibility": "public"
+           }
+         },
+         {
+  @@ -542,6 +557,9 @@
+  +        },
+  +        "sdk": {
+  +          "visibility": "public"
+           }
+         },
+         {
+  @@ -636,6 +654,9 @@
+  +        },
+  +        "sdk": {
+  +          "visibility": "public"
+           }
+         },
+         {
+  @@ -720,6 +741,9 @@
+  +        },
+  +        "sdk": {
+  +          "visibility": "public"
+           }
+         },
+         {
+  @@ -762,6 +786,9 @@
+  +        },
+  +        "sdk": {
+  +          "visibility": "system"
+           }
+         },
+         {
+  @@ -816,6 +843,9 @@
+  +        },
+  +        "sdk": {
+  +          "visibility": "system"
+           }
+         }
+       ],
+  +30 -0
+
+generated/typescript/index.ts
+  @@ -52,6 +52,8 @@ export const shunterContract = {
+  +  generationProfile: "internal",
+  +  runtimeImport: "@shunter/client",
+     protocol: shunterProtocol,
+   } as const satisfies ShunterGeneratedContractMetadata<typeof shunterProtocol>;
+   
+  +2 -0
+
+internal/workflows/auth_handshake_test.go
+  @@ -2,23 +2,29 @@ package workflows
+  +	"errors"
+  +	"net/http"
+  +	"strings"
+   	"testing"
+   	"time"
+   
+  +	"github.com/coder/websocket"
+   	"github.com/golang-jwt/jwt/v5"
+   
+   	"github.com/ponchione/opsboard-canary/internal/app"
+   	canaryclient "github.com/ponchione/opsboard-canary/internal/client"
+  +	"github.com/ponchione/shunter/protocol"
+   )
+   
+   func TestStrictAuthHandshakeRejectsInvalidTokensAndRecovers(t *testing.T) {
+   	h := newWorkflowHarness(t)
+   
+  -	requireDialFails(t, h.server.URL, "", "missing token")
+  -	requireDialFails(t, h.server.URL, "not-a-jwt", "malformed token")
+  -	requireDialFails(t, h.server.URL, signedAuthProbeToken(t, "wrong-issuer", "not-"+app.StrictAuthIssuer, app.StrictAuthAudience, time.Now().Add(time.Hour)), "wrong issuer token")
+  -	requireDialFails(t, h.server.URL, signedAuthProbeToken(t, "wrong-audience", app.StrictAuthIssuer, "not-"+app.StrictAuthAudience, time.Now().Add(time.Hour)), "wrong audience token")
+  -	requireDialFails(t, h.server.URL, signedAuthProbeToken(t, "expired", app.StrictAuthIssuer, app.StrictAuthAudience, time.Now().Add(-time.Hour)), "expired token")
+  +	requireMalformedAuthorizationRejectedBeforeUpgrade(t, h.server.URL)
+  +	requireAuthRejectedClose(t, h.server.URL, "", "missing token")
+  +	requireAuthRejectedClose(t, h.server.URL, "not-a-jwt", "malformed token")
+  +	requireAuthRejectedClose(t, h.server.URL, signedAuthProbeToken(t, "wrong-issuer", "not-"+app.StrictAuthIssuer, app.StrictAuthAudience, time.Now().Add(time.Hour)), "wrong issuer token")
+  +	requireAuthRejectedClose(t, h.server.URL, signedAuthProbeToken(t, "wrong-audience", app.StrictAuthIssuer, "not-"+app.StrictAuthAudience, time.Now().Add(time.Hour)), "wrong audience token")
+  +	requireAuthRejectedClose(t, h.server.URL, signedAuthProbeToken(t, "expired", app.StrictAuthIssuer, app.StrictAuthAudience, time.Now().Add(-time.Hour)), "expired token")
+   
+   	h.addCallerAs(t, "alice-after-auth-failures", "alice", app.PermProjectWrite, app.PermTicketWrite, app.PermCommentWrite)
+   	alice := h.callers["alice-after-auth-failures"].identity.Hex()
+  @@ -27,14 +33,53 @@ func TestStrictAuthHandshakeRejectsInvalidTokensAndRecovers(t *testing.T) {
+  -func requireDialFails(t *testing.T, runtimeURL, token, label string) {
+  +func requireAuthRejectedClose(t *testing.T, runtimeURL, token, label string) {
+   	t.Helper()
+   	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+   	defer cancel()
+   	c, err := canaryclient.Dial(ctx, runtimeURL, token)
+  +	if err != nil {
+  +		t.Fatalf("%s dial should complete WebSocket upgrade: %v", label, err)
+  +	}
+  +	defer c.CloseNow()
+  +	_, _, err = c.Read(ctx)
+   	if err == nil {
+  -		_ = c.CloseNow()
+  -		t.Fatalf("%s dial succeeded, want auth failure", label)
+  +		t.Fatalf("%s read succeeded, want strict-auth close", label)
+  +	}
+  +	if got := websocket.CloseStatus(err); got != websocket.StatusPolicyViolation {
+  +		t.Fatalf("%s close code = %d, want %d", label, got, websocket.StatusPolicyViolation)
+  +	}
+  +	var closeErr websocket.CloseError
+  +	if !errors.As(err, &closeErr) {
+  +		t.Fatalf("%s read error = %T %[2]v, want websocket.CloseError", label, err)
+  +	}
+  +	if closeErr.Reason != protocol.CloseReasonAuthRejected {
+  +		t.Fatalf("%s close reason = %q, want %q", label, closeErr.Reason, protocol.CloseReasonAuthRejected)
+  +	}
+  +}
+  +
+  +func requireMalformedAuthorizationRejectedBeforeUpgrade(t *testing.T, runtimeURL string) {
+  +	t.Helper()
+  +	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+  +	defer cancel()
+  +	header := http.Header{}
+  +	header.Set("Authorization", "Basic credentials")
+  +	conn, resp, err := websocket.Dial(ctx, strings.Replace(runtimeURL, "http://", "ws://", 1)+"/subscribe", &websocket.DialOptions{
+  +		HTTPHeader:   header,
+  +		Subprotocols: []string{protocol.SubprotocolV1},
+  +	})
+  +	if conn != nil {
+  +		_ = conn.CloseNow()
+  +	}
+  +	if err == nil {
+  +		t.Fatal("malformed Authorization header dial succeeded, want pre-upgrade rejection")
+  +	}
+  +	if resp == nil {
+  +		t.Fatalf("malformed Authorization header dial failed without HTTP response: %v", err)
+  +	}
+  +	defer resp.Body.Close()
+  +	if resp.StatusCode != http.StatusUnauthorized {
+  +		t.Fatalf("malformed Authorization header status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+   	}
+   }
+   
+  +53 -8
+
+package-lock.json
+  @@ -17,7 +17,7 @@
+  -        "typescript": "^5.9.0"
+  +        "typescript": "5.9.3"
+         }
+       },
+       "node_modules/@shunter/client": {
+  +1 -1
+

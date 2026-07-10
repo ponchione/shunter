@@ -1,0 +1,7 @@
+Command: rtk npm --prefix typescript/client test
+Result: pass (exit 0)
+Compiler: Version 5.9.3
+
+> npm run typecheck && tsc -p tsconfig.runtime-test.json && node test/runtime-behavior.test.mjs && node .tmp_runtime_test/test/generated-type-index-decoding.test.js && node test/hosted-type-index-canary.test.mjs
+> tsc -p tsconfig.json --noEmit
+

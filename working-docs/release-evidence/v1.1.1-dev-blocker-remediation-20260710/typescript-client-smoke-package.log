@@ -1,0 +1,10 @@
+Command: rtk npm --prefix typescript/client run smoke:package
+Result: pass (exit 0)
+
+> node test/package-smoke.mjs
+> tsc -p tsconfig.build.json
+added 2 packages in 430ms
+added 2 packages in 208ms
+added 2 packages in 209ms
+added 3 packages in 214ms
+

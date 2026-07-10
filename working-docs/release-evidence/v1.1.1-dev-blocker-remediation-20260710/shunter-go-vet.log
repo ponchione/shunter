@@ -1,0 +1,5 @@
+Command: rtk go vet ./...
+Result: pass (exit 0)
+
+
+

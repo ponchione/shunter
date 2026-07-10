@@ -1,0 +1,183 @@
+Command: rtk bash scripts/static-hosted-binary-gate.sh (two consecutive runs)
+Result: pass; idempotent
+
+Hashes before:
+3407936fb59f651c01349578d2448779a25c292cb409eaf0cadf898fdee10ebc  examples/hosted-chat/shunter.contract.json
+0ec667f2f31326ec2b24a188efc588f96d8103aa7be1b2e7587dad8bef41d586  examples/hosted-chat/frontend/src/generated/hosted_chat.ts
+b30f122bcb986752f4c37264a196ad9abc3f37736dfb64ca88ba32b6f0f5dfd4  examples/hosted-chat/frontend/package-lock.json
+
+Run 1: exit 0
+Go test: 4 passed in 1 packages
+Go test: 9 passed in 4 packages
+
+Module: hosted_chat v0.1.0
+Contract version: 1
+Schema version: 1
+Tables (4):
+  - messages: 3 columns, 1 indexes, read private
+  - message_events: 2 columns, 0 indexes, read private
+  - sys_clients: 3 columns, 1 indexes, read private
+  - sys_scheduled: 5 columns, 1 indexes, read private
+Reducers (1):
+  - send_message, args 2
+Procedures (1):
+  - send_system_message, args 1
+Queries (1):
+  - recent_messages executable, table messages, row columns 3
+Views (1):
+  - live_messages executable, table messages, row columns 3
+Visibility filters (0):
+2:  "status": "passed",
+51:      "name": "tables",
+8:  "section": "reducers",
+22:      "name": "send_message",
+2:  "status": "valid",
+3:  "scope": "contract",
+2:  "status": "ok",
+3:  "scope": "contract",
+4:  "running_server_checked": false,
+3:  "status": "fresh",
+2:  "compatible": true,
+8:    "compatible": true,
+5:  "requires_backup": false,
+6:  "requires_offline_hook": false,
+2:  "status": "ok",
+8:    "status": "ok",
+3:  "scope": "running_app",
+6:  "running_server_checked": true,
+2:  "status": "ok",
+3:  "scope": "running_app",
+9:      "Name": "hosted_chat",
+2:  "status": "ok",
+4:  "command": "call",
+7:  "surface": "send_message",
+2:  "status": "ok",
+4:  "command": "procedure",
+7:  "surface": "send_system_message",
+2:  "status": "ok",
+4:  "command": "query",
+7:  "surface": "recent_messages",
+21:        "body": "hello from hosted-chat gate",
+16:        "body": "hello from hosted-chat procedure",
+2:  "status": "ok",
+4:  "command": "query",
+7:  "surface": "SELECT * FROM messages ORDER BY id DESC LIMIT 10",
+21:        "body": "hello from hosted-chat gate",
+16:        "body": "hello from hosted-chat procedure",
+3:  "status": "compatible",
+9:    "status": "compatible",
+2:  "compatible": true,
+8:    "compatible": true,
+5:  "requires_backup": false,
+6:  "requires_offline_hook": false,
+2:  "DataDir": "/tmp/tmp.r8YgmhaHNy",
+3:  "RecoveredTxID": 0,
+4:  "DurableTxID": 0,
+5:  "Hooks": null
+backed up /tmp/tmp.r8YgmhaHNy to /tmp/tmp.ledta16TqI
+restored /tmp/tmp.ledta16TqI to /tmp/tmp.ODuKPnqB7A
+2:  "status": "ok",
+21:        "body": "hello from hosted-chat gate",
+16:        "body": "hello from hosted-chat procedure",
+wrote examples/hosted-chat/frontend/src/generated/hosted_chat.ts
+up to date, audited 4 packages in 258ms
+found 0 vulnerabilities
+> typecheck
+> npm exec --yes --package typescript -- tsc -p tsconfig.json --noEmit
+
+Hashes:
+3407936fb59f651c01349578d2448779a25c292cb409eaf0cadf898fdee10ebc  examples/hosted-chat/shunter.contract.json
+0ec667f2f31326ec2b24a188efc588f96d8103aa7be1b2e7587dad8bef41d586  examples/hosted-chat/frontend/src/generated/hosted_chat.ts
+b30f122bcb986752f4c37264a196ad9abc3f37736dfb64ca88ba32b6f0f5dfd4  examples/hosted-chat/frontend/package-lock.json
+
+Status:
+ M examples/hosted-chat/frontend/package-lock.json
+ M examples/hosted-chat/frontend/src/generated/hosted_chat.ts
+Run 2: exit 0
+Go test: 4 passed in 1 packages
+Go test: 9 passed in 4 packages
+
+Module: hosted_chat v0.1.0
+Contract version: 1
+Schema version: 1
+Tables (4):
+  - messages: 3 columns, 1 indexes, read private
+  - message_events: 2 columns, 0 indexes, read private
+  - sys_clients: 3 columns, 1 indexes, read private
+  - sys_scheduled: 5 columns, 1 indexes, read private
+Reducers (1):
+  - send_message, args 2
+Procedures (1):
+  - send_system_message, args 1
+Queries (1):
+  - recent_messages executable, table messages, row columns 3
+Views (1):
+  - live_messages executable, table messages, row columns 3
+Visibility filters (0):
+2:  "status": "passed",
+51:      "name": "tables",
+8:  "section": "reducers",
+22:      "name": "send_message",
+2:  "status": "valid",
+3:  "scope": "contract",
+2:  "status": "ok",
+3:  "scope": "contract",
+4:  "running_server_checked": false,
+3:  "status": "fresh",
+2:  "compatible": true,
+8:    "compatible": true,
+5:  "requires_backup": false,
+6:  "requires_offline_hook": false,
+2:  "status": "ok",
+8:    "status": "ok",
+3:  "scope": "running_app",
+6:  "running_server_checked": true,
+2:  "status": "ok",
+3:  "scope": "running_app",
+9:      "Name": "hosted_chat",
+2:  "status": "ok",
+4:  "command": "call",
+7:  "surface": "send_message",
+2:  "status": "ok",
+4:  "command": "procedure",
+7:  "surface": "send_system_message",
+2:  "status": "ok",
+4:  "command": "query",
+7:  "surface": "recent_messages",
+21:        "body": "hello from hosted-chat gate",
+16:        "body": "hello from hosted-chat procedure",
+2:  "status": "ok",
+4:  "command": "query",
+7:  "surface": "SELECT * FROM messages ORDER BY id DESC LIMIT 10",
+21:        "body": "hello from hosted-chat gate",
+16:        "body": "hello from hosted-chat procedure",
+3:  "status": "compatible",
+9:    "status": "compatible",
+2:  "compatible": true,
+8:    "compatible": true,
+5:  "requires_backup": false,
+6:  "requires_offline_hook": false,
+2:  "DataDir": "/tmp/tmp.8sx0JmaIWr",
+3:  "RecoveredTxID": 0,
+4:  "DurableTxID": 0,
+5:  "Hooks": null
+backed up /tmp/tmp.8sx0JmaIWr to /tmp/tmp.xELNau1WZc
+restored /tmp/tmp.xELNau1WZc to /tmp/tmp.wGJk6GMW0i
+2:  "status": "ok",
+21:        "body": "hello from hosted-chat gate",
+16:        "body": "hello from hosted-chat procedure",
+wrote examples/hosted-chat/frontend/src/generated/hosted_chat.ts
+up to date, audited 4 packages in 924ms
+found 0 vulnerabilities
+> typecheck
+> npm exec --yes --package typescript -- tsc -p tsconfig.json --noEmit
+
+Hashes:
+3407936fb59f651c01349578d2448779a25c292cb409eaf0cadf898fdee10ebc  examples/hosted-chat/shunter.contract.json
+0ec667f2f31326ec2b24a188efc588f96d8103aa7be1b2e7587dad8bef41d586  examples/hosted-chat/frontend/src/generated/hosted_chat.ts
+b30f122bcb986752f4c37264a196ad9abc3f37736dfb64ca88ba32b6f0f5dfd4  examples/hosted-chat/frontend/package-lock.json
+
+Status:
+ M examples/hosted-chat/frontend/package-lock.json
+ M examples/hosted-chat/frontend/src/generated/hosted_chat.ts
+

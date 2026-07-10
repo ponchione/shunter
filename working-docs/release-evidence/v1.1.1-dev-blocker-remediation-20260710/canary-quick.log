@@ -1,0 +1,45 @@
+Working directory: /home/gernsback/source/opsboard-canary
+Command: SHUNTER_CHECKOUT=/home/gernsback/source/shunter rtk make canary-quick
+Result: pass (exit 0)
+
+Shunter module resolution:
+{
+	"Path": "github.com/ponchione/shunter",
+	"Version": "v0.0.0-00010101000000-000000000000",
+	"Replace": {
+		"Path": "../shunter",
+		"Dir": "/home/gernsback/source/shunter",
+		"GoMod": "/home/gernsback/source/shunter/go.mod",
+		"GoVersion": "1.25.5"
+	},
+	"Dir": "/home/gernsback/source/shunter",
+	"GoMod": "/home/gernsback/source/shunter/go.mod",
+	"GoVersion": "1.25.5"
+}
+
+
+./scripts/shunter-canary quick
+==> revision context
+opsboard-canary: e69bce73cb49 dirty
+shunter: 9fddcf0b842f dirty
+==> quick canary
++ go test ./... -count=1
+?   	github.com/ponchione/opsboard-canary/cmd/codegen	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/export-contract	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/migrate-data	[no test files]
+ok  	github.com/ponchione/opsboard-canary/cmd/server	0.002s
+ok  	github.com/ponchione/opsboard-canary/cmd/workflow	0.274s
+ok  	github.com/ponchione/opsboard-canary/internal/app	0.897s
+ok  	github.com/ponchione/opsboard-canary/internal/client	0.134s
+?   	github.com/ponchione/opsboard-canary/internal/model	[no test files]
+ok  	github.com/ponchione/opsboard-canary/internal/workflows	7.082s
++ make sdk-smoke
+npm install
+up to date, audited 6 packages in 336ms
+found 0 vulnerabilities
+npm run sdk-smoke
+> sdk-smoke
+> npm run sdk-typecheck && node tests/typescript/sdk-smoke.ts
+> sdk-typecheck
+> tsc -p tsconfig.sdk-smoke.json --noEmit
+

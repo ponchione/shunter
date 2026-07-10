@@ -949,15 +949,39 @@ type orderedOneOffPair struct {
 	rightRow types.ProductValue
 }
 
+type orderedOneOffPairSource uint8
+
+const (
+	orderedOneOffPairSourceInvalid orderedOneOffPairSource = iota
+	orderedOneOffPairSourceLeft
+	orderedOneOffPairSourceRight
+)
+
+type orderedOneOffPairTerm struct {
+	source     orderedOneOffPairSource
+	index      int
+	desc       bool
+	columnName string
+}
+
+func (term orderedOneOffPairTerm) value(pair orderedOneOffPair) types.Value {
+	if term.source == orderedOneOffPairSourceLeft {
+		return pair.leftRow[term.index]
+	}
+	return pair.rightRow[term.index]
+}
+
 func collectOrderedOneOffPairProjections(visitPairs func(func(types.ProductValue, types.ProductValue) bool) error, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy, offset int, limit int) ([]types.ProductValue, error) {
 	var pairs []orderedOneOffPair
 	var orderErr error
+	orderTerms := compileOrderedOneOffPairTerms(leftID, leftAlias, rightID, rightAlias, orderBy)
 	err := visitPairs(func(leftRow, rightRow types.ProductValue) bool {
-		if err := validateOrderKeysFromJoinPair(leftRow, rightRow, leftID, leftAlias, rightID, rightAlias, orderBy); err != nil {
+		pair := orderedOneOffPair{leftRow: leftRow, rightRow: rightRow}
+		if err := validateOrderedOneOffPairTerms(pair, orderTerms); err != nil {
 			orderErr = err
 			return false
 		}
-		pairs = append(pairs, orderedOneOffPair{leftRow: leftRow, rightRow: rightRow})
+		pairs = append(pairs, pair)
 		return true
 	})
 	if err != nil {
@@ -967,14 +991,12 @@ func collectOrderedOneOffPairProjections(visitPairs func(func(types.ProductValue
 		return nil, orderErr
 	}
 	slices.SortStableFunc(pairs, func(a, b orderedOneOffPair) int {
-		for _, term := range orderBy {
-			leftValue, _ := orderValueFromJoinPair(a.leftRow, a.rightRow, leftID, leftAlias, rightID, rightAlias, term)
-			rightValue, _ := orderValueFromJoinPair(b.leftRow, b.rightRow, leftID, leftAlias, rightID, rightAlias, term)
-			cmp := leftValue.Compare(rightValue)
+		for _, term := range orderTerms {
+			cmp := term.value(a).Compare(term.value(b))
 			if cmp == 0 {
 				continue
 			}
-			if term.Desc {
+			if term.desc {
 				return -cmp
 			}
 			return cmp
@@ -1033,22 +1055,49 @@ func oneOffAggregateJoinColumnValue(leftRow, rightRow types.ProductValue, leftID
 	return source[idx], true
 }
 
-func orderValueFromJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, term compiledSQLOrderBy) (types.Value, error) {
-	source, ok := projectedJoinColumnSource(term.Column, leftID, leftAlias, leftRow, rightID, rightAlias, rightRow)
-	if !ok {
-		return types.Value{}, fmt.Errorf("ORDER BY column %q is not from the projected table", term.Column.Schema.Name)
+func compileOrderedOneOffPairTerms(leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, orderBy []compiledSQLOrderBy) []orderedOneOffPairTerm {
+	terms := make([]orderedOneOffPairTerm, len(orderBy))
+	for i, orderTerm := range orderBy {
+		source := orderedOneOffPairSourceInvalid
+		column := orderTerm.Column
+		if leftID == rightID {
+			switch {
+			case column.Table == leftID && column.Alias == leftAlias:
+				source = orderedOneOffPairSourceLeft
+			case column.Table == rightID && column.Alias == rightAlias:
+				source = orderedOneOffPairSourceRight
+			}
+		} else {
+			switch column.Table {
+			case leftID:
+				source = orderedOneOffPairSourceLeft
+			case rightID:
+				source = orderedOneOffPairSourceRight
+			}
+		}
+		terms[i] = orderedOneOffPairTerm{
+			source:     source,
+			index:      column.Schema.Index,
+			desc:       orderTerm.Desc,
+			columnName: column.Schema.Name,
+		}
 	}
-	idx := term.Column.Schema.Index
-	if idx < 0 || idx >= len(source) {
-		return types.Value{}, fmt.Errorf("ORDER BY column %q is missing from row", term.Column.Schema.Name)
-	}
-	return source[idx], nil
+	return terms
 }
 
-func validateOrderKeysFromJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, orderBy []compiledSQLOrderBy) error {
-	for _, term := range orderBy {
-		if _, err := orderValueFromJoinPair(leftRow, rightRow, leftID, leftAlias, rightID, rightAlias, term); err != nil {
-			return err
+func validateOrderedOneOffPairTerms(pair orderedOneOffPair, terms []orderedOneOffPairTerm) error {
+	for _, term := range terms {
+		var row types.ProductValue
+		switch term.source {
+		case orderedOneOffPairSourceLeft:
+			row = pair.leftRow
+		case orderedOneOffPairSourceRight:
+			row = pair.rightRow
+		default:
+			return fmt.Errorf("ORDER BY column %q is not from the projected table", term.columnName)
+		}
+		if term.index < 0 || term.index >= len(row) {
+			return fmt.Errorf("ORDER BY column %q is missing from row", term.columnName)
 		}
 	}
 	return nil

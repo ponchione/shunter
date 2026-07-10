@@ -38,7 +38,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   options and `shunter contract codegen --profile`.
 - Protocol one-off SQL ordered reads now avoid per-row ORDER BY key slices on
   single-table sorts and defer ordered join projection until after windowing,
-  reducing allocation traffic on hot query paths.
+  reducing allocation traffic on hot query paths; ordered joins also resolve
+  sort-column row sources once per query instead of during every comparison.
 - Strict protocol auth failures now complete the WebSocket upgrade when a
   supported Shunter subprotocol is offered, then close with 1008 and
   `auth-token rejected by admission` so browser clients can classify token
