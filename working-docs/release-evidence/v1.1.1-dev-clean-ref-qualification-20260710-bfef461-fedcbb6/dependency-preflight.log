@@ -1,0 +1,127 @@
+===== COMMAND =====
+working_directory: /home/gernsback/source/shunter
+command: rtk npm --prefix typescript/client ci
+start_utc: 2026-07-10T14:08:59Z
+end_utc: 2026-07-10T14:09:00Z
+exit_code: 0
+----- output -----
+added 1 package, and audited 2 packages in 492ms
+found 0 vulnerabilities
+===== END COMMAND =====
+
+===== COMMAND =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git status --short -- typescript/client/package.json typescript/client/package-lock.json typescript/client/dist
+start_utc: 2026-07-10T14:09:00Z
+end_utc: 2026-07-10T14:09:00Z
+exit_code: 0
+----- output -----
+
+===== END COMMAND =====
+
+===== COMMAND =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --exit-code -- typescript/client/package.json typescript/client/package-lock.json typescript/client/dist
+start_utc: 2026-07-10T14:09:00Z
+end_utc: 2026-07-10T14:09:01Z
+exit_code: 0
+----- output -----
+
+===== END COMMAND =====
+
+===== COMMAND =====
+working_directory: /home/gernsback/source/shunter
+command: rtk typescript/client/node_modules/.bin/tsc --version
+start_utc: 2026-07-10T14:09:01Z
+end_utc: 2026-07-10T14:09:01Z
+exit_code: 0
+----- output -----
+Version 5.9.3
+===== END COMMAND =====
+
+===== COMMAND =====
+working_directory: /home/gernsback/source/shunter
+command: rtk sha256sum typescript/client/dist/index.js typescript/client/dist/index.js.map typescript/client/dist/index.d.ts typescript/client/dist/index.d.ts.map
+start_utc: 2026-07-10T14:09:01Z
+end_utc: 2026-07-10T14:09:01Z
+exit_code: 0
+----- output -----
+60e049047c1921c2e893436287481c3d79593f1ef7f2b5603f308ed41478f204  typescript/client/dist/index.js
+b42a6ecd99e8802f0b2f8e013d88521d8da4fe5430e4ad27591ea29805d67437  typescript/client/dist/index.js.map
+8509522421d29e5153b978597b0458ab2cb84201559c039d23a2b1bd0f308a24  typescript/client/dist/index.d.ts
+a6d7800c1e85e45f1b11d958968128b927ea8587a884d0cc2e89c9862688b6fb  typescript/client/dist/index.d.ts.map
+===== END COMMAND =====
+
+===== COMMAND =====
+working_directory: /home/gernsback/source/shunter
+command: rtk sha256sum examples/hosted-chat/shunter.contract.json examples/hosted-chat/frontend/src/generated/hosted_chat.ts examples/hosted-chat/frontend/package-lock.json
+start_utc: 2026-07-10T14:09:01Z
+end_utc: 2026-07-10T14:09:01Z
+exit_code: 0
+----- output -----
+3407936fb59f651c01349578d2448779a25c292cb409eaf0cadf898fdee10ebc  examples/hosted-chat/shunter.contract.json
+0ec667f2f31326ec2b24a188efc588f96d8103aa7be1b2e7587dad8bef41d586  examples/hosted-chat/frontend/src/generated/hosted_chat.ts
+b30f122bcb986752f4c37264a196ad9abc3f37736dfb64ca88ba32b6f0f5dfd4  examples/hosted-chat/frontend/package-lock.json
+===== END COMMAND =====
+
+===== COMMAND =====
+working_directory: /home/gernsback/source/shunter
+command: rtk node -e "const b=require('fs').readFileSync('examples/hosted-chat/frontend/src/generated/hosted_chat.ts'); console.log(JSON.stringify({size:b.length,lastBytes:[...b.subarray(-4)],canonicalTwoNewlineFooter:b.length>=2&&b[b.length-1]===10&&b[b.length-2]===10&&(b.length<3||b[b.length-3]!==10)},null,2))"
+start_utc: 2026-07-10T14:09:01Z
+end_utc: 2026-07-10T14:09:02Z
+exit_code: 0
+----- output -----
+{
+  "size": 21664,
+  "lastBytes": [
+    10,
+    125,
+    10,
+    10
+  ],
+  "canonicalTwoNewlineFooter": true
+}
+===== END COMMAND =====
+
+===== COMMAND =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git status --short --branch
+start_utc: 2026-07-10T14:09:02Z
+end_utc: 2026-07-10T14:09:02Z
+exit_code: 0
+----- output -----
+* main...origin/main [ahead 3]
+?? working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/
+===== END COMMAND =====
+
+===== COMMAND =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --stat
+start_utc: 2026-07-10T14:09:02Z
+end_utc: 2026-07-10T14:09:02Z
+exit_code: 0
+----- output -----
+
+===== END COMMAND =====
+
+===== COMMAND =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --cached
+start_utc: 2026-07-10T14:09:02Z
+end_utc: 2026-07-10T14:09:02Z
+exit_code: 0
+----- output -----
+
+===== END COMMAND =====
+
+===== COMMAND =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git ls-files --others --exclude-standard
+start_utc: 2026-07-10T14:09:02Z
+end_utc: 2026-07-10T14:09:03Z
+exit_code: 0
+----- output -----
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/preflight.md
+===== END COMMAND =====
+
+

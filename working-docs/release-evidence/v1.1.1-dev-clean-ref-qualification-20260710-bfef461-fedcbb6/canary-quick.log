@@ -1,0 +1,110 @@
+working_directory: /home/gernsback/source/opsboard-canary
+command: SHUNTER_CHECKOUT=/home/gernsback/source/shunter rtk make canary-quick
+start_utc: 2026-07-10T14:13:40Z
+end_utc: 2026-07-10T14:14:08Z
+exit_code: 0
+----- raw relevant output -----
+./scripts/shunter-canary quick
+==> revision context
+opsboard-canary: fedcbb6de9ea
+shunter: bfef461409e9 dirty
+==> quick canary
++ go test ./... -count=1
+?   	github.com/ponchione/opsboard-canary/cmd/codegen	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/export-contract	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/migrate-data	[no test files]
+ok  	github.com/ponchione/opsboard-canary/cmd/server	0.002s
+ok  	github.com/ponchione/opsboard-canary/cmd/workflow	0.207s
+ok  	github.com/ponchione/opsboard-canary/internal/app	0.586s
+ok  	github.com/ponchione/opsboard-canary/internal/client	0.104s
+?   	github.com/ponchione/opsboard-canary/internal/model	[no test files]
+ok  	github.com/ponchione/opsboard-canary/internal/workflows	6.817s
++ make sdk-smoke
+npm install
+up to date, audited 6 packages in 297ms
+found 0 vulnerabilities
+npm run sdk-smoke
+> sdk-smoke
+> npm run sdk-typecheck && node tests/typescript/sdk-smoke.ts
+> sdk-typecheck
+> tsc -p tsconfig.sdk-smoke.json --noEmit
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/opsboard-canary
+command: rtk git status --short --branch
+exit_code: 0
+----- output -----
+## master
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/opsboard-canary
+command: rtk git diff --stat
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/opsboard-canary
+command: rtk git diff
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/opsboard-canary
+command: rtk git diff --cached
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/opsboard-canary
+command: rtk git ls-files --others --exclude-standard
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git status --short --branch
+exit_code: 0
+----- output -----
+* main...origin/main [ahead 3]
+?? working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --stat
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --cached
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git ls-files --others --exclude-standard
+exit_code: 0
+----- output -----
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/canary-module-resolution.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/dependency-preflight.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/preflight.md
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-test.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-vet.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-staticcheck.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/static-hosted-binary-gate.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-build.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-pack-dry-run.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-smoke-package.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-test.log
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk find . -name '*.test'
+exit_code: 0
+----- output -----
+
+

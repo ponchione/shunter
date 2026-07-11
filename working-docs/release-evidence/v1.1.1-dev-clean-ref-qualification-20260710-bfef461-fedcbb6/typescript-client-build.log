@@ -1,0 +1,89 @@
+working_directory: /home/gernsback/source/shunter
+command: rtk npm --prefix typescript/client run build
+start_utc: 2026-07-10T14:11:54Z
+end_utc: 2026-07-10T14:11:55Z
+exit_code: 0
+pre_build_hashes:
+60e049047c1921c2e893436287481c3d79593f1ef7f2b5603f308ed41478f204  typescript/client/dist/index.js
+b42a6ecd99e8802f0b2f8e013d88521d8da4fe5430e4ad27591ea29805d67437  typescript/client/dist/index.js.map
+8509522421d29e5153b978597b0458ab2cb84201559c039d23a2b1bd0f308a24  typescript/client/dist/index.d.ts
+a6d7800c1e85e45f1b11d958968128b927ea8587a884d0cc2e89c9862688b6fb  typescript/client/dist/index.d.ts.map
+post_build_hashes:
+60e049047c1921c2e893436287481c3d79593f1ef7f2b5603f308ed41478f204  typescript/client/dist/index.js
+b42a6ecd99e8802f0b2f8e013d88521d8da4fe5430e4ad27591ea29805d67437  typescript/client/dist/index.js.map
+8509522421d29e5153b978597b0458ab2cb84201559c039d23a2b1bd0f308a24  typescript/client/dist/index.d.ts
+a6d7800c1e85e45f1b11d958968128b927ea8587a884d0cc2e89c9862688b6fb  typescript/client/dist/index.d.ts.map
+hashes_match: true
+----- raw relevant output -----
+> tsc -p tsconfig.build.json
+
+===== POST-BUILD CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk sha256sum typescript/client/dist/index.js typescript/client/dist/index.js.map typescript/client/dist/index.d.ts typescript/client/dist/index.d.ts.map
+exit_code: 0
+----- output -----
+60e049047c1921c2e893436287481c3d79593f1ef7f2b5603f308ed41478f204  typescript/client/dist/index.js
+b42a6ecd99e8802f0b2f8e013d88521d8da4fe5430e4ad27591ea29805d67437  typescript/client/dist/index.js.map
+8509522421d29e5153b978597b0458ab2cb84201559c039d23a2b1bd0f308a24  typescript/client/dist/index.d.ts
+a6d7800c1e85e45f1b11d958968128b927ea8587a884d0cc2e89c9862688b6fb  typescript/client/dist/index.d.ts.map
+===== POST-BUILD CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git status --short -- typescript/client/dist
+exit_code: 0
+----- output -----
+
+===== POST-BUILD CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --exit-code -- typescript/client/dist
+exit_code: 0
+----- output -----
+
+===== POST-BUILD CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk typescript/client/node_modules/.bin/tsc --version
+exit_code: 0
+----- output -----
+Version 5.9.3
+===== POST-BUILD CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git status --short --branch
+exit_code: 0
+----- output -----
+* main...origin/main [ahead 3]
+?? working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/
+===== POST-BUILD CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --stat
+exit_code: 0
+----- output -----
+
+===== POST-BUILD CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff
+exit_code: 0
+----- output -----
+
+===== POST-BUILD CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --cached
+exit_code: 0
+----- output -----
+
+===== POST-BUILD CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git ls-files --others --exclude-standard
+exit_code: 0
+----- output -----
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/dependency-preflight.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/preflight.md
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-test.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-vet.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-staticcheck.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-test.log
+===== POST-BUILD CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk find . -name '*.test'
+exit_code: 0
+----- output -----
+
+

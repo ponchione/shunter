@@ -1,12 +1,14 @@
 # Hosted Backend Direction
 
-Status: current product direction
-Scope: Shunter as a Go-first self-hosted backend/database runtime.
+Status: current active-development direction
+Scope: Shunter as an experimental Go-first self-hosted backend/database
+runtime.
 
-Shunter's current product direction is a static Go app server that application
-frontends talk to over the Shunter protocol. App state, reducers, declared
-reads, live views, subscriptions, procedures, durability, recovery, health, and
-diagnostics are Shunter-owned backend responsibilities.
+Shunter is an actively developed experimental backend/runtime. Its current
+architectural direction is a static Go app server that application frontends
+talk to over the Shunter protocol. App state, reducers, declared reads, live
+views, subscriptions, procedures, durability, recovery, health, and diagnostics
+are Shunter-owned backend responsibilities.
 
 ```text
 Frontend / TypeScript client
@@ -63,7 +65,7 @@ Implemented hosted-app surfaces:
 - private package-shaped `@shunter/client` runtime and generated module-client
   helpers for reducers, procedures, declared reads/views, table subscriptions,
   and event-table streams.
-- hosted-chat release gate covering the common static hosted-app workflow.
+- hosted-chat integration gate covering the common static hosted-app workflow.
 
 ## Non-Goals
 
@@ -75,67 +77,47 @@ Current non-goals:
 - multi-language client SDK parity beyond TypeScript.
 - reference-runtime protocol, storage, client, or source compatibility.
 - PostgreSQL compatibility, PGWire, SQL DML, or broad SQL database behavior.
+- distributed transactions or multi-region operation.
 - app-facing blob/object storage; keep large bytes in object storage and keep
   transactional metadata in Shunter tables.
 
-## Near-Term Focus
+## Active Development Priorities
 
-Keep current work tied to real hosted-app pressure:
+Select work from concrete evidence or an explicit goal, not from a release or
+productization sequence. Current priorities are:
 
-- product-app validation through Kickbrass, without adding artificial product
-  features only to exercise Shunter.
-- private/local `@shunter/client` package workflow in release gates, followed
-  by a separate public npm promotion slice once package ownership, publish
-  authority, access policy, package metadata, and artifact policy are settled.
-- scaffolded hosted app template tooling if the documented hosted-chat
-  template shape and browser/SSR lifecycle guidance are not enough.
-- workload-derived performance and operability evidence from real apps and
-  external canaries.
-- targeted hardening for hosted surfaces already implemented: procedures,
-  event tables, maintained live windows, auth/JWKS, migration reports, and
-  generated TypeScript clients.
+- explicit feature requests tied to an application or user goal
+- correctness bugs and reproducible failures
+- simplification and maintainability of the existing implementation
+- focused hardening of behavior touched by an active change
+- targeted performance work supported by profiles or benchmarks
 
-## Recommended Next Sequence
+Validate each change proportionally: start with the touched packages and
+expand only when risk, dependencies, or the affected external canary surface
+justify it. No specific feature is selected as the next implementation task by
+this direction note.
 
-Use this order to turn the current implementation into a better-qualified
-self-hosted product without expanding into reference-runtime parity work.
-Promote a step into active work only when the preceding evidence or a real app
-need makes it concrete.
+## Dormant Until Triggered
 
-1. Qualify the current development line formally. Run the in-repo release
-   command set and external canary, refresh the release ledger and performance
-   snapshot, record residual risks, and decide whether to cut the next release.
-2. Establish product-derived operating targets through Kickbrass or another
-   real Shunter app. Record transaction rate, fanout distribution, recovery
-   time, memory, and backup/restore expectations instead of inventing proxy
-   features solely for coverage.
-3. Operationalize durability maintenance. Define an app-facing or documented
-   snapshot/compaction policy, make backup coordination explicit, and use the
-   resulting workload to reduce tail-replay allocation and recovery latency.
-4. Set live-query admission policy from evidence. Choose defensible defaults
-   or an explicit unbounded opt-in for multi-way relation/cardinality limits,
-   then pursue incremental evaluation only for product-relevant hot paths.
-5. Finish the TypeScript distribution decision. Either promote
-   `@shunter/client` through a governed public-package process or make the
-   private/vendored workflow an explicit supported product choice; add
-   framework helpers only when real lifecycle friction justifies them.
-6. Prefer type-system depth over broad SQL expansion. When product needs
-   justify it, prioritize nested products, sums/enums, general arrays, and
-   typed identity fields because they improve schema, reducers, contracts,
-   protocol values, and generated clients together.
-7. Reconcile planning documents as work lands. Retire completed deferred items,
-   keep release evidence tied to the commit it qualifies, and maintain a small
-   current roadmap rather than carrying implemented work as future backlog.
+Keep production operating envelopes, public npm distribution, extensive
+release qualification, canary-wide release gates, and release preparation
+dormant until a concrete product, integration, distribution, or explicitly
+authorized release decision requires them. Their presence in supporting
+trackers is not a promise of production readiness or an instruction to begin
+productization.
 
 ## Remaining Work Trackers
 
 Use focused trackers instead of growing this direction note:
 
-- `recommendations/` owns proposed continued-development slices until a real
-  product need or release decision promotes one into active work.
+- `recommendations/` owns optional, trigger-driven proposals until a concrete
+  user goal, failure, code evidence, integration pressure, or authorized
+  distribution/release decision promotes one into active work.
 - `deferred-functionality-backlog.md` owns explicitly deferred product/runtime
   scope such as dynamic serving, broad SQL, online backup orchestration,
   cross-table visibility, richer schema types, and codegen breadth.
 - `tech-debt.md` owns non-blocking productization, canary, performance, and
   hardening follow-up.
-- `release-qualification.md` owns release gate command sets and evidence.
+- `release-qualification.md` preserves historical records and owns on-demand
+  release gate command sets and evidence for explicitly authorized release
+  work.

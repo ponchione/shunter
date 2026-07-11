@@ -1,0 +1,51 @@
+working_directory: /home/gernsback/source/shunter
+command: rtk npm --prefix typescript/client test
+start_utc: 2026-07-10T14:11:33Z
+end_utc: 2026-07-10T14:11:34Z
+exit_code: 0
+----- raw relevant output -----
+> npm run typecheck && tsc -p tsconfig.runtime-test.json && node test/runtime-behavior.test.mjs && node .tmp_runtime_test/test/generated-type-index-decoding.test.js && node test/hosted-type-index-canary.test.mjs
+> tsc -p tsconfig.json --noEmit
+
+===== POST-COMMAND STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git status --short --branch
+exit_code: 0
+----- output -----
+* main...origin/main [ahead 3]
+?? working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/
+===== POST-COMMAND STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --stat
+exit_code: 0
+----- output -----
+
+===== POST-COMMAND STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff
+exit_code: 0
+----- output -----
+
+===== POST-COMMAND STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --cached
+exit_code: 0
+----- output -----
+
+===== POST-COMMAND STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git ls-files --others --exclude-standard
+exit_code: 0
+----- output -----
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/dependency-preflight.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/preflight.md
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-test.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-vet.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-staticcheck.log
+===== POST-COMMAND STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk find . -name '*.test'
+exit_code: 0
+----- output -----
+
+

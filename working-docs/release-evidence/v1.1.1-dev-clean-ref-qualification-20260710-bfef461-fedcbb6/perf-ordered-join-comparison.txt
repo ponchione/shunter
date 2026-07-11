@@ -1,0 +1,62 @@
+working_directory: /home/gernsback/source/shunter
+command: rtk go run golang.org/x/perf/cmd/benchstat@v0.0.0-20260709024250-82a0b07e230d -ignore cpu working-docs/release-evidence/v1.1.1-dev-blocker-remediation-20260710/perf-ordered-join-v1.1.0-baseline.txt working-docs/release-evidence/v1.1.1-dev-blocker-remediation-20260710/perf-ordered-join-remediated-raw.txt working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/perf-ordered-join-clean-ref-samples.txt
+benchstat_version: v0.0.0-20260709024250-82a0b07e230d
+start_utc: 2026-07-10T14:17:05Z
+end_utc: 2026-07-10T14:17:05Z
+exit_code: 0
+----- comparison output -----
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/protocol
+                                                                               │ working-docs/release-evidence/v1.1.1-dev-blocker-remediation-20260710/perf-ordered-join-v1.1.0-baseline.txt │ working-docs/release-evidence/v1.1.1-dev-blocker-remediation-20260710/perf-ordered-join-remediated-raw.txt │ working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/perf-ordered-join-clean-ref-samples.txt │
+                                                                               │                                                   sec/op                                                    │                                       sec/op                                        vs base                │                                                  sec/op                                                    vs base                │
+ExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24                                                                                                   4.044m ± 1%                                                                          4.786m ± 0%  +18.34% (p=0.000 n=10)                                                                                                 4.910m ± 5%  +21.39% (p=0.000 n=10)
+
+                                                                               │ working-docs/release-evidence/v1.1.1-dev-blocker-remediation-20260710/perf-ordered-join-v1.1.0-baseline.txt │ working-docs/release-evidence/v1.1.1-dev-blocker-remediation-20260710/perf-ordered-join-remediated-raw.txt │ working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/perf-ordered-join-clean-ref-samples.txt │
+                                                                               │                                                    B/op                                                     │                                        B/op                                         vs base                │                                                   B/op                                                     vs base                │
+ExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24                                                                                                  832.9Ki ± 0%                                                                         269.6Ki ± 0%  -67.63% (p=0.000 n=10)                                                                                                269.7Ki ± 0%  -67.63% (p=0.000 n=10)
+
+                                                                               │ working-docs/release-evidence/v1.1.1-dev-blocker-remediation-20260710/perf-ordered-join-v1.1.0-baseline.txt │ working-docs/release-evidence/v1.1.1-dev-blocker-remediation-20260710/perf-ordered-join-remediated-raw.txt │ working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/perf-ordered-join-clean-ref-samples.txt │
+                                                                               │                                                  allocs/op                                                  │                                     allocs/op                                       vs base                │                                                 allocs/op                                                  vs base                │
+ExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24                                                                                                   4.729k ± 0%                                                                          3.162k ± 0%  -33.14% (p=0.000 n=10)                                                                                                 3.162k ± 0%  -33.14% (p=0.000 n=10)
+
+===== POST-COMPARISON STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --stat
+exit_code: 0
+----- output -----
+
+===== POST-COMPARISON STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff
+exit_code: 0
+----- output -----
+
+===== POST-COMPARISON STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --cached
+exit_code: 0
+----- output -----
+
+===== POST-COMPARISON STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git ls-files --others --exclude-standard
+exit_code: 0
+----- output -----
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/canary-full.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/canary-module-resolution.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/canary-quick.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/dependency-preflight.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/perf-ordered-join-clean-ref-benchstat.txt
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/perf-ordered-join-clean-ref-raw.txt
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/perf-ordered-join-clean-ref-samples.txt
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/preflight.md
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-test.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-vet.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-staticcheck.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/static-hosted-binary-gate.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-build.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-pack-dry-run.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-smoke-package.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-test.log
+

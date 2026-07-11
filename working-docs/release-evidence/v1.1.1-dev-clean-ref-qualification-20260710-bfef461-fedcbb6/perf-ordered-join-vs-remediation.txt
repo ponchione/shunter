@@ -1,0 +1,23 @@
+working_directory: /home/gernsback/source/shunter
+command: rtk go run golang.org/x/perf/cmd/benchstat@v0.0.0-20260709024250-82a0b07e230d -ignore cpu working-docs/release-evidence/v1.1.1-dev-blocker-remediation-20260710/perf-ordered-join-remediated-raw.txt working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/perf-ordered-join-clean-ref-samples.txt
+benchstat_version: v0.0.0-20260709024250-82a0b07e230d
+start_utc: 2026-07-10T14:17:19Z
+end_utc: 2026-07-10T14:17:20Z
+exit_code: 0
+----- comparison output -----
+goos: linux
+goarch: amd64
+pkg: github.com/ponchione/shunter/protocol
+                                                                               │ working-docs/release-evidence/v1.1.1-dev-blocker-remediation-20260710/perf-ordered-join-remediated-raw.txt │ working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/perf-ordered-join-clean-ref-samples.txt │
+                                                                               │                                                   sec/op                                                   │                                                   sec/op                                                    vs base               │
+ExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24                                                                                                  4.786m ± 0%                                                                                                  4.910m ± 5%  +2.58% (p=0.000 n=10)
+
+                                                                               │ working-docs/release-evidence/v1.1.1-dev-blocker-remediation-20260710/perf-ordered-join-remediated-raw.txt │ working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/perf-ordered-join-clean-ref-samples.txt │
+                                                                               │                                                    B/op                                                    │                                                      B/op                                                        vs base          │
+ExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24                                                                                                 269.6Ki ± 0%                                                                                                      269.7Ki ± 0%  ~ (p=0.053 n=10)
+
+                                                                               │ working-docs/release-evidence/v1.1.1-dev-blocker-remediation-20260710/perf-ordered-join-remediated-raw.txt │ working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/perf-ordered-join-clean-ref-samples.txt │
+                                                                               │                                                 allocs/op                                                  │                                                   allocs/op                                                    vs base            │
+ExecuteCompiledSQLQueryJoinReadShapes/two_table_join_projection_order_limit-24                                                                                                  3.162k ± 0%                                                                                                     3.162k ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal
+

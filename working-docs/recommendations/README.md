@@ -1,37 +1,59 @@
 # Continued-Development Recommendations
 
-Status: proposed slices awaiting explicit promotion
+Status: optional proposals plus completed historical records
 
 These recommendations consolidate the codebase assessment, reference-runtime
-comparison, hosted-product direction, and operational-use discussion completed
-in July 2026. They are not an active roadmap and do not authorize speculative
-implementation.
+comparison, hosted-backend direction, and operational-use discussion completed
+in July 2026. They are optional, trigger-driven ideas, not a sequential roadmap,
+and do not authorize speculative implementation.
 
-Promote one file at a time into `../actionable/` or a task-specific plan when a
-release decision, product workload, reproducible failure, or approved
-integration supplies its promotion trigger. Live code and tests remain more
-authoritative than these notes.
+A recommendation becomes active only when supported by at least one concrete
+trigger:
 
-## Suggested Order
+- an explicit user goal
+- a reproducible bug or limitation
+- code or test evidence
+- concrete integration pressure
+- a specifically authorized release or distribution decision
 
-| Order | Recommendation | Primary outcome |
-| ---: | --- | --- |
-| 1 | [Qualify the current development line](01-current-release-qualification.md) | A release decision tied to current evidence |
-| 2 | [Establish a product operating envelope](02-product-operating-envelope.md) | Measured capacity and recovery expectations |
-| 3 | [Operationalize durability maintenance](03-durability-maintenance-policy.md) | A repeatable snapshot, compaction, and backup policy |
-| 4 | [Reduce recovery cost](04-recovery-efficiency-refactor.md) | Lower replay memory and latency without format drift |
-| 5 | [Define reliable integration patterns](05-enterprise-integration-reliability.md) | Safe coordination with systems of record |
-| 6 | [Harden operational authorization](06-operational-authorization-model.md) | Enterprise identity-to-permission and scope behavior |
-| 7 | [Make reconnect state explicit](07-client-connectivity-resilience.md) | Honest operator UX through network interruption |
-| 8 | [Set live-query admission policy](08-live-query-admission-policy.md) | Evidence-backed protection from expensive views |
-| 9 | [Add an operational audit pattern](09-operational-audit-trail.md) | App-facing action history without exposing commitlog internals |
-| 10 | [Settle TypeScript distribution](10-typescript-client-distribution.md) | A governed public or intentionally private SDK workflow |
-| 11 | [Deepen the type system](11-type-system-depth.md) | Richer domain contracts before broad SQL work |
+Promote a triggered proposal into `../actionable/` or another owned plan only
+when its concrete implementation goal is authorized. File numbers are stable
+references, not priority. In particular, completing qualification does not make
+the product operating envelope or any other item the automatic next task.
+Release, production-operability, synthetic benchmark, and productization work
+must not become the default merely because it appears first. Live code and tests
+remain more authoritative than these notes.
 
-Items 1 through 4 are qualification and operability work for capabilities that
-already exist. Items 5 through 9 arise from using Shunter as a live operational
-coordination backend. Items 10 and 11 are productization and developer-
-experience investments that should follow real adoption pressure.
+## Completed And Historical
+
+- [Qualify the current development line](01-current-release-qualification.md) -
+  completed on 2026-07-10; qualification and release-owner review are preserved,
+  no release was cut, and release preparation is dormant pending explicit
+  authorization.
+
+## Optional Proposals
+
+- [Establish a product operating envelope](02-product-operating-envelope.md) -
+  measured capacity and recovery expectations when real workload pressure
+  requires them.
+- [Operationalize durability maintenance](03-durability-maintenance-policy.md) -
+  a repeatable snapshot, compaction, and backup policy.
+- [Reduce recovery cost](04-recovery-efficiency-refactor.md) - lower replay
+  memory and latency without format drift.
+- [Define reliable integration patterns](05-enterprise-integration-reliability.md) -
+  safe coordination with systems of record.
+- [Harden operational authorization](06-operational-authorization-model.md) -
+  enterprise identity-to-permission and scope behavior.
+- [Make reconnect state explicit](07-client-connectivity-resilience.md) - honest
+  operator UX through network interruption.
+- [Set live-query admission policy](08-live-query-admission-policy.md) -
+  evidence-backed protection from expensive views.
+- [Add an operational audit pattern](09-operational-audit-trail.md) - app-facing
+  action history without exposing commitlog internals.
+- [Settle TypeScript distribution](10-typescript-client-distribution.md) - a
+  governed public or intentionally private SDK workflow.
+- [Deepen the type system](11-type-system-depth.md) - richer domain contracts
+  before broad SQL work.
 
 ## Standing Non-Goals
 

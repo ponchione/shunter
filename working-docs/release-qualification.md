@@ -1,12 +1,20 @@
 # Release Qualification Ledger
 
-Status: current release evidence ledger
-Scope: durable Shunter release qualification inputs and outcomes.
+Status: historical and on-demand release evidence ledger
+Scope: durable Shunter release qualification inputs and outcomes for explicitly
+authorized release work.
 
-Use this file for every release candidate or final release decision. Add the
-record before tagging whenever release notes claim qualification passed. Keep
-failed or superseded candidate records instead of replacing them; a final
-record can reference earlier failed records.
+Use this ledger only for an explicitly authorized release candidate, release
+qualification, or release decision. Normal work on a `-dev` line does not
+require a ledger entry or a release-evidence directory. Add a record before
+tagging whenever release notes claim qualification passed, and keep failed or
+superseded candidate records instead of replacing them.
+
+The completed `v1.1.1-dev` qualification and release-owner approval remain
+preserved historical evidence. Approval to advance does not make release
+preparation the active next action: `v1.1.1-dev` remains in active development
+until the user separately authorizes release preparation. No release
+preparation is currently authorized.
 
 ## Required Evidence
 
@@ -94,6 +102,104 @@ Decision:
 ```
 
 ## Records
+
+### v1.1.1-dev release-owner review - 2026-07-10
+
+- Status: approved for release preparation
+- Reviewer: gernsback
+- Date/time: 2026-07-10T14:29:21Z through 2026-07-10T14:30:04Z
+- Environment: Linux gernsback 6.17.0-35-generic, linux/amd64,
+  Go go1.26.3, Node v24.4.1, npm 11.17.0,
+  AMD Ryzen 9 9900X 12-Core Processor
+- Source version: `v1.1.1-dev`
+- Shunter ref: `bfef461409e9158b53ad4dc96dc956ca1598fe6a`
+- `opsboard-canary` ref:
+  `fedcbb6de9eabb539e561e814e9687f27ddb4fe6`
+- Review evidence:
+  `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/release-owner-review.md`
+
+Review dispositions:
+
+| Requirement | Result |
+| --- | --- |
+| Candidate identity and initial state | pass; exact clean candidate revisions proved |
+| Command completeness | pass; every required command exited zero |
+| TypeScript reproducibility | pass; TypeScript 5.9.3 and all four `dist` hashes reproduced without drift |
+| Hosted generation reproducibility | pass; all three hashes and canonical two-newline footer reproduced without normalization or restoration |
+| External canary coverage | pass; quick and every required full stage passed; canary remained clean and resolved the exact local Shunter checkout |
+| Performance evidence | complete as advisory evidence; 4.910 ms/op, 269.7 KiB/op, 3.162k allocations/op |
+| Memory and machine-failure evidence | accepted as bounded carried-forward evidence; no Shunter leak signal, no production soak, prior failure cause unknown |
+| Changelog and decision consistency | pass; allocation/source-resolution claims are accurate and both risks are retained |
+
+Residual risks:
+
+- Accepted for this release-owner candidate decision: the representative
+  ordered-join latency is 21.39% slower than v1.1.0 and 2.58% slower than the
+  dirty remediation run. The evidence is advisory and no new threshold is
+  inferred.
+- Accepted for this release-owner candidate decision: no Shunter memory-growth
+  or leak signal was found, but no production soak was performed and the prior
+  abrupt machine-failure cause remains unknown.
+
+Decision:
+
+- The two residual risks are accepted for the release-owner candidate decision.
+  Both exact candidates are approved to advance only to a separately authorized
+  release-preparation slice. This is not authorization to tag, publish, create
+  a release, or open a pull request. No tag, publication, release, or pull
+  request was created.
+
+### v1.1.1-dev clean-ref candidate qualification - 2026-07-10
+
+- Status: passed
+- Operator: gernsback
+- Date/time: 2026-07-10T14:08:23Z through 2026-07-10T14:17:53Z
+- Environment: Linux gernsback 6.17.0-35-generic, linux/amd64,
+  Go go1.26.3, Node v24.4.1, npm 11.17.0,
+  AMD Ryzen 9 9900X 12-Core Processor
+- Source version: `v1.1.1-dev`
+- Shunter ref: `bfef461409e9158b53ad4dc96dc956ca1598fe6a`
+- Shunter worktree state: clean before qualification; afterward limited to
+  this ledger entry and
+  `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/`
+- `opsboard-canary` ref:
+  `fedcbb6de9eabb539e561e814e9687f27ddb4fe6`
+- `opsboard-canary` worktree state: clean before and after; local branch
+  `master`
+
+Commands:
+
+| Scope | Working directory | Command | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| Preflight | `/home/gernsback/source/shunter` and `/home/gernsback/source/opsboard-canary` | required clean-ref Git, version, package, lockfile, artifact, environment, and footer checks | pass | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/preflight.md` |
+| Dependency | `/home/gernsback/source/shunter` | `rtk npm --prefix typescript/client ci` | pass; package-local TypeScript 5.9.3 | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/dependency-preflight.log` |
+| Shunter | `/home/gernsback/source/shunter` | `rtk go test ./...` | pass | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-test.log` |
+| Shunter | `/home/gernsback/source/shunter` | `rtk go vet ./...` | pass | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-vet.log` |
+| Shunter | `/home/gernsback/source/shunter` | `rtk go tool staticcheck ./...` | pass | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-staticcheck.log` |
+| TypeScript | `/home/gernsback/source/shunter` | `rtk npm --prefix typescript/client test` | pass | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-test.log` |
+| TypeScript | `/home/gernsback/source/shunter` | `rtk npm --prefix typescript/client run build` | pass; byte-identical `dist` | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-build.log` |
+| TypeScript | `/home/gernsback/source/shunter` | `rtk npm --prefix typescript/client run pack:dry-run` | pass | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-pack-dry-run.log` |
+| TypeScript | `/home/gernsback/source/shunter` | `rtk npm --prefix typescript/client run smoke:package` | pass | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-smoke-package.log` |
+| Hosted binary | `/home/gernsback/source/shunter` | `rtk bash scripts/static-hosted-binary-gate.sh` | pass; generated hashes and canonical footer reproduced | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/static-hosted-binary-gate.log` |
+| Canary resolution | `/home/gernsback/source/opsboard-canary` | `rtk go list -m -json github.com/ponchione/shunter` | pass; resolved to the candidate checkout | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/canary-module-resolution.log` |
+| Canary | `/home/gernsback/source/opsboard-canary` | `SHUNTER_CHECKOUT=/home/gernsback/source/shunter rtk make canary-quick` | pass; Go tests and SDK smoke/typecheck | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/canary-quick.log` |
+| Canary | `/home/gernsback/source/opsboard-canary` | `SHUNTER_CHECKOUT=/home/gernsback/source/shunter rtk make canary-full` | pass; all required stages | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/canary-full.log` |
+| Performance | `/home/gernsback/source/shunter` | `go test -run '^$' -bench '^BenchmarkExecuteCompiledSQLQueryJoinReadShapes$/^two_table_join_projection_order_limit$' -benchmem -count=10 ./protocol` | pass; advisory, 10 samples | `working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/performance-summary.md` |
+
+Residual risks:
+
+- The clean candidate's representative ordered-join row measured 4.910 ms/op,
+  21.39% slower than the v1.1.0 baseline and 2.58% slower than the dirty
+  remediation result. This local row is advisory and not production-scale.
+- The prior bounded investigation found no Shunter memory-growth or leak
+  signal, but the earlier hard machine-failure cause remains unknown.
+
+Decision:
+
+- Passed as v1.1.1-dev candidate qualification for both exact clean revisions.
+  No tag or release was created. Release-owner review and an explicit candidate
+  release decision are the next action.
+
 
 ### v1.1.1-dev qualification attempt - 2026-07-10
 

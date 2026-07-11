@@ -1,49 +1,27 @@
 # Qualify The Current Development Line
 
-Status: recommended first step
-
-Promotion trigger: immediate release-owner decision to qualify or cut the
-current `v1.1.1-dev` line.
+Status: completed 2026-07-10
 
 Owners: root runtime, CLI, TypeScript client, release process
 
-## Why
+## Result
 
-The latest formal canary record predates substantial hosted-app,
-authentication, subscription, codegen, and performance work. Current local
-commands pass, but the durable release ledger must bind qualification to the
-exact commit and external canary state being released.
+- Qualification completed for Shunter revision
+  `bfef461409e9158b53ad4dc96dc956ca1598fe6a` and `opsboard-canary` revision
+  `fedcbb6de9eabb539e561e814e9687f27ddb4fe6`.
+- The release-owner review completed and approved those exact candidates to
+  advance only if a separate release-preparation slice is authorized. See the
+  [completed review](../release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/release-owner-review.md).
+- No release was cut. `v1.1.1-dev` remains the active development line, and
+  release preparation is deferred until the user explicitly requests it.
 
-## Outcome
+## Historical Rationale
 
-A recorded decision to release, defer, or reject the current development line,
-with current evidence and residual risks.
+Qualification was undertaken to bind substantial hosted-app, authentication,
+subscription, codegen, and performance work to exact Shunter and external
+canary revisions. The resulting ledger and review remain valid historical
+evidence; approval to advance does not create an active release obligation.
 
-## Work
-
-1. Run the minimum command set from `../release-qualification.md` at a clean,
-   recorded Shunter commit.
-2. Run the external `opsboard-canary` quick and full gates at a recorded clean
-   or explicitly documented commit.
-3. Refresh representative performance rows when current behavior differs from
-   the `v1.1.0` snapshot or when a claimed improvement needs evidence.
-4. Record environment, toolchain, commands, logs, and failures in a new release
-   qualification record.
-5. Review the unreleased changelog as a user-facing release boundary rather
-   than treating every merged change as equally notable.
-6. Decide whether to tag the release or keep the source line on `-dev` with an
-   explicit blocker.
-
-## Non-Goals
-
-- changing runtime behavior merely to make qualification pass
-- public npm publication without the separate package-governance decision
-- claiming production scale from local qualification
-
-## Completion Evidence
-
-- clean worktree and exact Shunter commit recorded
-- all required in-repo commands pass
-- external canary commands pass or have an accepted, explicit residual risk
-- release ledger contains the new record and evidence paths
-- release/tag decision is explicit
+Do not rerun the qualification gates or add release evidence during normal
+development. Use proportional validation for the code being changed unless a
+new release effort is explicitly authorized.

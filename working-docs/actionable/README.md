@@ -1,15 +1,18 @@
 # Actionable Backlog Slices
 
-Status: current implementation-facing planning docs
+Status: explicitly authorized implementation-facing planning docs only
 
-These files promote narrow parts of
-`working-docs/deferred-functionality-backlog.md` into actionable slices while
-keeping the larger deferred product decisions parked. Point implementation
-tasks at one file at a time.
+This directory is for narrow implementation slices explicitly promoted for a
+concrete goal while larger deferred product decisions remain parked. A file's
+presence does not authorize continued work or select the next feature.
 
-- `subscription-evidence-matrix.md` - subscription benchmark evidence,
-  multi-way join limit review, aggregate evidence, and end-to-end type/index
-  matrix.
+- `subscription-evidence-matrix.md` - closed subscription evidence campaign,
+  retained for historical context. It is not an instruction to keep adding
+  synthetic benchmark stages.
+
+A new actionable slice requires explicit promotion for a concrete
+implementation goal. Do not create a slice or choose a feature merely to keep
+this directory populated; no next implementation task is selected here.
 
 These docs are not numbered specs. Prefer live code and tests when they
 disagree with planning text.

@@ -1,0 +1,53 @@
+working_directory: /home/gernsback/source/shunter
+command: rtk npm --prefix typescript/client run pack:dry-run
+start_utc: 2026-07-10T14:12:15Z
+end_utc: 2026-07-10T14:12:16Z
+exit_code: 0
+----- raw relevant output -----
+> npm pack --dry-run
+shunter-client-1.1.1-dev.tgz
+
+===== POST-COMMAND STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git status --short --branch
+exit_code: 0
+----- output -----
+* main...origin/main [ahead 3]
+?? working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/
+===== POST-COMMAND STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --stat
+exit_code: 0
+----- output -----
+
+===== POST-COMMAND STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff
+exit_code: 0
+----- output -----
+
+===== POST-COMMAND STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --cached
+exit_code: 0
+----- output -----
+
+===== POST-COMMAND STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git ls-files --others --exclude-standard
+exit_code: 0
+----- output -----
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/dependency-preflight.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/preflight.md
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-test.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-vet.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-staticcheck.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-build.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-test.log
+===== POST-COMMAND STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk find . -name '*.test'
+exit_code: 0
+----- output -----
+
+

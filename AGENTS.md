@@ -50,6 +50,21 @@ when you are editing that document.
 - Update `CHANGELOG.md` when changing release-facing behavior or preparing a
   release.
 
+## Active Development Policy
+
+- A `-dev` `VERSION` is the normal state during active development. Do not infer
+  release preparation from passed qualification, an unreleased changelog, or
+  existing release evidence.
+- Formal qualification, release preparation, tagging, publication, and release
+  creation require explicit user authorization. Staging, committing, pushing,
+  or opening a pull request also require explicit authorization.
+- For ordinary implementation work, run targeted tests for touched packages
+  first. Expand validation when risk or dependency surface justifies it, and
+  use canary gates only when a change affects the external canary surface or
+  the user specifically requests them.
+- Do not create release-evidence directories or append qualification records
+  for routine development changes.
+
 ## Go Workflow
 
 - When working in Go code, prefer Go-native tooling over generic text search.

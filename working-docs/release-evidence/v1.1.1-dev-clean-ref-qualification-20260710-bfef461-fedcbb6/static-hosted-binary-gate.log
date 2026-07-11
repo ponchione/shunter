@@ -1,0 +1,174 @@
+working_directory: /home/gernsback/source/shunter
+command: rtk bash scripts/static-hosted-binary-gate.sh
+start_utc: 2026-07-10T14:12:44Z
+end_utc: 2026-07-10T14:13:10Z
+exit_code: 0
+pre_gate_hashes:
+3407936fb59f651c01349578d2448779a25c292cb409eaf0cadf898fdee10ebc  examples/hosted-chat/shunter.contract.json
+0ec667f2f31326ec2b24a188efc588f96d8103aa7be1b2e7587dad8bef41d586  examples/hosted-chat/frontend/src/generated/hosted_chat.ts
+b30f122bcb986752f4c37264a196ad9abc3f37736dfb64ca88ba32b6f0f5dfd4  examples/hosted-chat/frontend/package-lock.json
+post_gate_hashes:
+3407936fb59f651c01349578d2448779a25c292cb409eaf0cadf898fdee10ebc  examples/hosted-chat/shunter.contract.json
+0ec667f2f31326ec2b24a188efc588f96d8103aa7be1b2e7587dad8bef41d586  examples/hosted-chat/frontend/src/generated/hosted_chat.ts
+b30f122bcb986752f4c37264a196ad9abc3f37736dfb64ca88ba32b6f0f5dfd4  examples/hosted-chat/frontend/package-lock.json
+hashes_match: true
+----- raw relevant output -----
+Go test: 4 passed in 1 packages
+Go test: 9 passed in 4 packages
+
+Module: hosted_chat v0.1.0
+Contract version: 1
+Schema version: 1
+Tables (4):
+  - messages: 3 columns, 1 indexes, read private
+  - message_events: 2 columns, 0 indexes, read private
+  - sys_clients: 3 columns, 1 indexes, read private
+  - sys_scheduled: 5 columns, 1 indexes, read private
+Reducers (1):
+  - send_message, args 2
+Procedures (1):
+  - send_system_message, args 1
+Queries (1):
+  - recent_messages executable, table messages, row columns 3
+Views (1):
+  - live_messages executable, table messages, row columns 3
+Visibility filters (0):
+2:  "status": "passed",
+51:      "name": "tables",
+8:  "section": "reducers",
+22:      "name": "send_message",
+2:  "status": "valid",
+3:  "scope": "contract",
+2:  "status": "ok",
+3:  "scope": "contract",
+4:  "running_server_checked": false,
+3:  "status": "fresh",
+2:  "compatible": true,
+8:    "compatible": true,
+5:  "requires_backup": false,
+6:  "requires_offline_hook": false,
+2:  "status": "ok",
+8:    "status": "ok",
+3:  "scope": "running_app",
+6:  "running_server_checked": true,
+2:  "status": "ok",
+3:  "scope": "running_app",
+9:      "Name": "hosted_chat",
+2:  "status": "ok",
+4:  "command": "call",
+7:  "surface": "send_message",
+2:  "status": "ok",
+4:  "command": "procedure",
+7:  "surface": "send_system_message",
+2:  "status": "ok",
+4:  "command": "query",
+7:  "surface": "recent_messages",
+21:        "body": "hello from hosted-chat gate",
+16:        "body": "hello from hosted-chat procedure",
+2:  "status": "ok",
+4:  "command": "query",
+7:  "surface": "SELECT * FROM messages ORDER BY id DESC LIMIT 10",
+21:        "body": "hello from hosted-chat gate",
+16:        "body": "hello from hosted-chat procedure",
+3:  "status": "compatible",
+9:    "status": "compatible",
+2:  "compatible": true,
+8:    "compatible": true,
+5:  "requires_backup": false,
+6:  "requires_offline_hook": false,
+2:  "DataDir": "/tmp/tmp.o7UxaDgvm3",
+3:  "RecoveredTxID": 0,
+4:  "DurableTxID": 0,
+5:  "Hooks": null
+backed up /tmp/tmp.o7UxaDgvm3 to /tmp/tmp.afgkG35kDL
+restored /tmp/tmp.afgkG35kDL to /tmp/tmp.AYF8o8khNr
+2:  "status": "ok",
+21:        "body": "hello from hosted-chat gate",
+16:        "body": "hello from hosted-chat procedure",
+wrote examples/hosted-chat/frontend/src/generated/hosted_chat.ts
+up to date, audited 4 packages in 279ms
+found 0 vulnerabilities
+> typecheck
+> npm exec --yes --package typescript -- tsc -p tsconfig.json --noEmit
+
+===== POST-GATE CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk sha256sum examples/hosted-chat/shunter.contract.json examples/hosted-chat/frontend/src/generated/hosted_chat.ts examples/hosted-chat/frontend/package-lock.json
+exit_code: 0
+----- output -----
+3407936fb59f651c01349578d2448779a25c292cb409eaf0cadf898fdee10ebc  examples/hosted-chat/shunter.contract.json
+0ec667f2f31326ec2b24a188efc588f96d8103aa7be1b2e7587dad8bef41d586  examples/hosted-chat/frontend/src/generated/hosted_chat.ts
+b30f122bcb986752f4c37264a196ad9abc3f37736dfb64ca88ba32b6f0f5dfd4  examples/hosted-chat/frontend/package-lock.json
+===== POST-GATE CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk node -e "const b=require('fs').readFileSync('examples/hosted-chat/frontend/src/generated/hosted_chat.ts'); console.log(JSON.stringify({size:b.length,lastBytes:[...b.subarray(-4)],canonicalTwoNewlineFooter:b.length>=2&&b[b.length-1]===10&&b[b.length-2]===10&&(b.length<3||b[b.length-3]!==10)},null,2))"
+exit_code: 0
+----- output -----
+{
+  "size": 21664,
+  "lastBytes": [
+    10,
+    125,
+    10,
+    10
+  ],
+  "canonicalTwoNewlineFooter": true
+}
+===== POST-GATE CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git status --short -- examples/hosted-chat/shunter.contract.json examples/hosted-chat/frontend/src/generated/hosted_chat.ts examples/hosted-chat/frontend/package-lock.json
+exit_code: 0
+----- output -----
+
+===== POST-GATE CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --exit-code -- examples/hosted-chat/shunter.contract.json examples/hosted-chat/frontend/src/generated/hosted_chat.ts examples/hosted-chat/frontend/package-lock.json
+exit_code: 0
+----- output -----
+
+===== POST-GATE CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git status --short --branch
+exit_code: 0
+----- output -----
+* main...origin/main [ahead 3]
+?? working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/
+===== POST-GATE CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --stat
+exit_code: 0
+----- output -----
+
+===== POST-GATE CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff
+exit_code: 0
+----- output -----
+
+===== POST-GATE CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --cached
+exit_code: 0
+----- output -----
+
+===== POST-GATE CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git ls-files --others --exclude-standard
+exit_code: 0
+----- output -----
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/dependency-preflight.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/preflight.md
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-test.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-vet.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-staticcheck.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-build.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-pack-dry-run.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-smoke-package.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-test.log
+===== POST-GATE CHECK =====
+working_directory: /home/gernsback/source/shunter
+command: rtk find . -name '*.test'
+exit_code: 0
+----- output -----
+
+

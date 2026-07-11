@@ -1,0 +1,129 @@
+working_directory: /home/gernsback/source/opsboard-canary
+command: SHUNTER_CHECKOUT=/home/gernsback/source/shunter rtk make canary-full
+start_utc: 2026-07-10T14:14:17Z
+end_utc: 2026-07-10T14:15:02Z
+exit_code: 0
+stages_reached_and_passed: {"go_tests":true,"sdk_smoke_typecheck":true,"seeded_workflow":true,"race_testing":true,"contract_reproducibility":true,"codegen_reproducibility":true,"in_process_protocol_smoke":true,"served_protocol_smoke":true}
+----- raw relevant output -----
+./scripts/shunter-canary full
+==> revision context
+opsboard-canary: fedcbb6de9ea
+shunter: bfef461409e9 dirty
+==> full canary
++ go test ./... -count=1
+?   	github.com/ponchione/opsboard-canary/cmd/codegen	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/export-contract	[no test files]
+?   	github.com/ponchione/opsboard-canary/cmd/migrate-data	[no test files]
+ok  	github.com/ponchione/opsboard-canary/cmd/server	0.002s
+ok  	github.com/ponchione/opsboard-canary/cmd/workflow	0.206s
+ok  	github.com/ponchione/opsboard-canary/internal/app	0.611s
+ok  	github.com/ponchione/opsboard-canary/internal/client	0.109s
+?   	github.com/ponchione/opsboard-canary/internal/model	[no test files]
+ok  	github.com/ponchione/opsboard-canary/internal/workflows	6.729s
++ make sdk-smoke
+npm install
+up to date, audited 6 packages in 274ms
+found 0 vulnerabilities
+npm run sdk-smoke
+> sdk-smoke
+> npm run sdk-typecheck && node tests/typescript/sdk-smoke.ts
+> sdk-typecheck
+> tsc -p tsconfig.sdk-smoke.json --noEmit
++ go test ./internal/workflows -run TestSeededWorkflow -count=1
+ok  	github.com/ponchione/opsboard-canary/internal/workflows	0.765s
++ go test -race ./internal/workflows -count=1
+ok  	github.com/ponchione/opsboard-canary/internal/workflows	8.360s
+==> contract/codegen reproducibility
++ make contract
+go run ./cmd/export-contract > contracts/shunter.contract.json
++ make codegen
+go run ./cmd/codegen
++ diff -ru /tmp/opsboard-canary-codegen.IhvVPM/contracts contracts
++ diff -ru /tmp/opsboard-canary-codegen.IhvVPM/generated generated
+==> in-process protocol smoke
++ go run ./cmd/workflow --in-process --data-dir /home/gernsback/source/opsboard-canary/artifacts/canary/workflow-in-process-20260710T141435Z --trace-out /home/gernsback/source/opsboard-canary/artifacts/canary/workflow-in-process-trace.json
+protocol workflow smoke passed
+==> served protocol smoke on 127.0.0.1:13000
++ go run ./cmd/workflow --addr 127.0.0.1:13000 --trace-out /home/gernsback/source/opsboard-canary/artifacts/canary/server-smoke-trace-20260710T141435Z.json
+protocol workflow smoke passed
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/opsboard-canary
+command: rtk git status --short --branch
+exit_code: 0
+----- output -----
+## master
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/opsboard-canary
+command: rtk git diff --stat
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/opsboard-canary
+command: rtk git diff
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/opsboard-canary
+command: rtk git diff --cached
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/opsboard-canary
+command: rtk git ls-files --others --exclude-standard
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git status --short --branch
+exit_code: 0
+----- output -----
+* main...origin/main [ahead 3]
+?? working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --stat
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git diff --cached
+exit_code: 0
+----- output -----
+
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk git ls-files --others --exclude-standard
+exit_code: 0
+----- output -----
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/canary-module-resolution.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/canary-quick.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/dependency-preflight.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/preflight.md
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-test.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-go-vet.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/shunter-staticcheck.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/static-hosted-binary-gate.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-build.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-pack-dry-run.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-smoke-package.log
+working-docs/release-evidence/v1.1.1-dev-clean-ref-qualification-20260710-bfef461-fedcbb6/typescript-client-test.log
+===== POST-GATE STATE =====
+working_directory: /home/gernsback/source/shunter
+command: rtk find . -name '*.test'
+exit_code: 0
+----- output -----
+
+
