@@ -892,15 +892,15 @@ func visitOneOffJoinPairs(ctx context.Context, view store.CommittedReadView, joi
 }
 
 func oneOffJoinPairMatches(join subscription.Join, leftRow, rightRow types.ProductValue) bool {
-	leftValue, ok := oneOffRowValue(leftRow, join.LeftCol)
-	if !ok {
+	leftIndex := int(join.LeftCol)
+	if leftIndex < 0 || leftIndex >= len(leftRow) {
 		return false
 	}
-	rightValue, ok := oneOffRowValue(rightRow, join.RightCol)
-	if !ok {
+	rightIndex := int(join.RightCol)
+	if rightIndex < 0 || rightIndex >= len(rightRow) {
 		return false
 	}
-	if !leftValue.Equal(rightValue) {
+	if !types.EqualValues(&leftRow[leftIndex], &rightRow[rightIndex]) {
 		return false
 	}
 	if join.Filter != nil && !subscription.MatchJoinPair(join.Filter, join.Left, join.LeftAlias, leftRow, join.Right, join.RightAlias, rightRow) {

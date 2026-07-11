@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added `types.EqualValues` for allocation-free pointer equality and used it
+  to remove full-value copies from one-off join matching.
 - Added standard static hosted-app layout guidance and a deployment checklist
   for app-owned server, contract export, maintenance, frontend, and operations
   workflows.

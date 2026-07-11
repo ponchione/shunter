@@ -1079,6 +1079,164 @@ func TestEqualFloat(t *testing.T) {
 	}
 }
 
+func TestEqualValuesMatchesValueEqualAllKinds(t *testing.T) {
+	float32Equal := mustFloat32(t, 3.25)
+	float32Unequal := mustFloat32(t, -7.5)
+	float64Equal := mustFloat64(t, 6.5)
+	float64Unequal := mustFloat64(t, -11.25)
+	jsonEqual := mustJSON(t, `{"b":2,"a":1}`)
+	jsonCanonicalEqual := mustJSON(t, `{"a":1,"b":2}`)
+	jsonUnequal := mustJSON(t, `{"a":1,"b":3}`)
+	uuidEqual := [16]byte{0: 1, 15: 2}
+	uuidUnequal := [16]byte{0: 1, 15: 3}
+
+	cases := []struct {
+		name              string
+		equal, unequal    Value
+		canonicalEqualAlt *Value
+	}{
+		{name: "Bool", equal: NewBool(true), unequal: NewBool(false)},
+		{name: "Int8", equal: NewInt8(-8), unequal: NewInt8(8)},
+		{name: "Int16", equal: NewInt16(-16), unequal: NewInt16(16)},
+		{name: "Int32", equal: NewInt32(-32), unequal: NewInt32(32)},
+		{name: "Int64", equal: NewInt64(-64), unequal: NewInt64(64)},
+		{name: "Uint8", equal: NewUint8(8), unequal: NewUint8(9)},
+		{name: "Uint16", equal: NewUint16(16), unequal: NewUint16(17)},
+		{name: "Uint32", equal: NewUint32(32), unequal: NewUint32(33)},
+		{name: "Uint64", equal: NewUint64(64), unequal: NewUint64(65)},
+		{name: "Float32", equal: float32Equal, unequal: float32Unequal},
+		{name: "Float64", equal: float64Equal, unequal: float64Unequal},
+		{name: "String", equal: NewString("equal"), unequal: NewString("unequal")},
+		{name: "Bytes", equal: NewBytes([]byte{1, 2, 3}), unequal: NewBytes([]byte{1, 2, 4})},
+		{name: "Int128", equal: NewInt128(-1, 2), unequal: NewInt128(-1, 3)},
+		{name: "Uint128", equal: NewUint128(1, 2), unequal: NewUint128(1, 3)},
+		{name: "Int256", equal: NewInt256(-1, 2, 3, 4), unequal: NewInt256(-1, 2, 3, 5)},
+		{name: "Uint256", equal: NewUint256(1, 2, 3, 4), unequal: NewUint256(1, 2, 3, 5)},
+		{name: "Timestamp", equal: NewTimestamp(-123), unequal: NewTimestamp(123)},
+		{name: "ArrayString", equal: NewArrayString([]string{"a", "b"}), unequal: NewArrayString([]string{"a", "c"})},
+		{name: "UUID", equal: NewUUID(uuidEqual), unequal: NewUUID(uuidUnequal)},
+		{name: "Duration", equal: NewDuration(-456), unequal: NewDuration(456)},
+		{name: "JSON", equal: jsonEqual, unequal: jsonUnequal, canonicalEqualAlt: &jsonCanonicalEqual},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			equalRight := tc.equal
+			if tc.canonicalEqualAlt != nil {
+				equalRight = *tc.canonicalEqualAlt
+			}
+			for _, pair := range []struct {
+				name        string
+				left, right Value
+				want        bool
+			}{
+				{name: "equal", left: tc.equal, right: equalRight, want: true},
+				{name: "unequal", left: tc.equal, right: tc.unequal, want: false},
+				{name: "null_null", left: NewNull(tc.equal.Kind()), right: NewNull(tc.equal.Kind()), want: true},
+				{name: "null_value", left: NewNull(tc.equal.Kind()), right: tc.equal, want: false},
+				{name: "value_null", left: tc.equal, right: NewNull(tc.equal.Kind()), want: false},
+			} {
+				t.Run(pair.name, func(t *testing.T) {
+					methodGot := pair.left.Equal(pair.right)
+					if methodGot != pair.want {
+						t.Fatalf("Value.Equal = %v, want %v", methodGot, pair.want)
+					}
+					if pointerGot := EqualValues(&pair.left, &pair.right); pointerGot != methodGot {
+						t.Fatalf("EqualValues = %v, Value.Equal = %v", pointerGot, methodGot)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestEqualValuesEdgeCasesMatchValueEqual(t *testing.T) {
+	float32PositiveZero := mustFloat32(t, 0)
+	float32NegativeZero := mustFloat32(t, float32(math.Copysign(0, -1)))
+	float64PositiveZero := mustFloat64(t, 0)
+	float64NegativeZero := mustFloat64(t, math.Copysign(0, -1))
+
+	for _, tc := range []struct {
+		name        string
+		left, right Value
+		want        bool
+	}{
+		{name: "cross_kind_signed_unsigned", left: NewInt64(1), right: NewUint64(1), want: false},
+		{name: "cross_kind_timestamp_duration", left: NewTimestamp(1), right: NewDuration(1), want: false},
+		{name: "cross_kind_bytes_json", left: NewBytes([]byte(`1`)), right: mustJSON(t, `1`), want: false},
+		{name: "float32_positive_negative_zero", left: float32PositiveZero, right: float32NegativeZero, want: true},
+		{name: "float64_positive_negative_zero", left: float64PositiveZero, right: float64NegativeZero, want: true},
+		{name: "bytes_equal_empty", left: NewBytes(nil), right: NewBytes([]byte{}), want: true},
+		{name: "array_string_unequal_length", left: NewArrayString([]string{"a"}), right: NewArrayString([]string{"a", "b"}), want: false},
+		{name: "json_canonical_equivalent", left: mustJSON(t, `{"b":2,"a":1}`), right: mustJSON(t, `{"a":1,"b":2}`), want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			methodGot := tc.left.Equal(tc.right)
+			if methodGot != tc.want {
+				t.Fatalf("Value.Equal = %v, want %v", methodGot, tc.want)
+			}
+			if pointerGot := EqualValues(&tc.left, &tc.right); pointerGot != methodGot {
+				t.Fatalf("EqualValues = %v, Value.Equal = %v", pointerGot, methodGot)
+			}
+		})
+	}
+}
+
+func TestEqualValuesNilOperandsPanic(t *testing.T) {
+	value := NewUint64(1)
+	for _, tc := range []struct {
+		name string
+		call func()
+	}{
+		{name: "left", call: func() { EqualValues(nil, &value) }},
+		{name: "right", call: func() { EqualValues(&value, nil) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("EqualValues did not panic")
+				}
+			}()
+			tc.call()
+		})
+	}
+}
+
+func TestEqualValuesInvalidKindMatchesValueEqual(t *testing.T) {
+	left := Value{kind: ValueKind(999)}
+	right := Value{kind: ValueKind(999)}
+	panicString := func(t *testing.T, call func()) (message string) {
+		t.Helper()
+		defer func() {
+			got := recover()
+			var ok bool
+			message, ok = got.(string)
+			if !ok {
+				t.Fatalf("panic = %#v, want string", got)
+			}
+		}()
+		call()
+		t.Fatal("call did not panic")
+		return ""
+	}
+
+	methodPanic := panicString(t, func() { left.Equal(right) })
+	pointerPanic := panicString(t, func() { EqualValues(&left, &right) })
+	if pointerPanic != methodPanic {
+		t.Fatalf("EqualValues panic = %q, Value.Equal panic = %q", pointerPanic, methodPanic)
+	}
+
+	otherKind := Value{kind: ValueKind(1000)}
+	if methodGot, pointerGot := left.Equal(otherKind), EqualValues(&left, &otherKind); pointerGot != methodGot || methodGot {
+		t.Fatalf("invalid cross-kind: EqualValues = %v, Value.Equal = %v, want false", pointerGot, methodGot)
+	}
+	leftNull := Value{kind: ValueKind(999), isNull: true}
+	rightNull := Value{kind: ValueKind(999), isNull: true}
+	if methodGot, pointerGot := leftNull.Equal(rightNull), EqualValues(&leftNull, &rightNull); pointerGot != methodGot || !methodGot {
+		t.Fatalf("invalid null kind: EqualValues = %v, Value.Equal = %v, want true", pointerGot, methodGot)
+	}
+}
+
 // =============================================================
 // Story 1.3: Value.Compare
 // =============================================================

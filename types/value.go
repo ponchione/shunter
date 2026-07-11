@@ -553,6 +553,45 @@ func (v Value) Equal(other Value) bool {
 	}
 }
 
+// EqualValues returns true if left and right have the same kind and value.
+// No cross-kind coercion. It panics if either operand is nil.
+func EqualValues(left, right *Value) bool {
+	if left.kind != right.kind {
+		return false
+	}
+	if left.isNull || right.isNull {
+		return left.isNull && right.isNull
+	}
+	switch left.kind {
+	case KindBool:
+		return left.b == right.b
+	case KindInt8, KindInt16, KindInt32, KindInt64:
+		return left.i64 == right.i64
+	case KindUint8, KindUint16, KindUint32, KindUint64:
+		return left.u64 == right.u64
+	case KindFloat32:
+		return left.f32 == right.f32
+	case KindFloat64:
+		return left.f64 == right.f64
+	case KindString:
+		return left.str == right.str
+	case KindBytes, KindJSON:
+		return bytes.Equal(left.buf, right.buf)
+	case KindInt128, KindUint128:
+		return left.hi128 == right.hi128 && left.lo128 == right.lo128
+	case KindInt256, KindUint256:
+		return left.w256 == right.w256
+	case KindTimestamp, KindDuration:
+		return left.i64 == right.i64
+	case KindArrayString:
+		return slices.Equal(left.strArr, right.strArr)
+	case KindUUID:
+		return left.uuid == right.uuid
+	default:
+		panic(fmt.Sprintf("shunter: unhandled ValueKind %d", int(left.kind)))
+	}
+}
+
 // --- Ordering (Story 1.3) ---
 
 // Compare returns -1, 0, or +1. Panics on cross-kind comparison.
