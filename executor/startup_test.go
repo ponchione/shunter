@@ -510,7 +510,7 @@ func TestStartup_SweepDoesNotInvokeOnDisconnectReducer(t *testing.T) {
 // command may interleave ahead of the sweep."
 func TestStartup_ExternalRejectedWhileSweepInProgress(t *testing.T) {
 	block := make(chan struct{})
-	enteredEval := make(chan struct{})
+	checkedEval := make(chan struct{})
 	var sawReady atomic.Bool
 	var gateRejectsObserved atomic.Int32
 
@@ -518,7 +518,6 @@ func TestStartup_ExternalRejectedWhileSweepInProgress(t *testing.T) {
 		clients: []sysClientsSeed{{conn: types.ConnectionID{1}}},
 	})
 	h.subs.onEval = func(store.CommittedReadView) {
-		close(enteredEval)
 		// Inside the sweep's post-commit pipeline the gate must still
 		// be closed; concurrent external admission must be rejected.
 		if h.exec.externalReady.Load() {
@@ -531,6 +530,7 @@ func TestStartup_ExternalRejectedWhileSweepInProgress(t *testing.T) {
 		if errors.Is(err, ErrExecutorNotStarted) {
 			gateRejectsObserved.Add(1)
 		}
+		close(checkedEval)
 		<-block
 	}
 
@@ -538,9 +538,9 @@ func TestStartup_ExternalRejectedWhileSweepInProgress(t *testing.T) {
 	go func() { done <- h.exec.Startup(context.Background(), nil) }()
 
 	select {
-	case <-enteredEval:
+	case <-checkedEval:
 	case <-time.After(2 * time.Second):
-		t.Fatal("Startup did not reach postCommit eval")
+		t.Fatal("Startup did not check external admission during postCommit eval")
 	}
 	if sawReady.Load() {
 		t.Error("externalReady flipped true while sweep was still running")
