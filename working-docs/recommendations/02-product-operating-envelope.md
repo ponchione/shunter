@@ -1,8 +1,8 @@
 # Establish A Product Operating Envelope
 
-Status: recommended after current-line qualification
+Status: dormant until a real product workload exists
 
-Promotion trigger: Kickbrass or another real product has a stable workflow that
+Promotion trigger: an owner-selected real product has a stable workflow that
 can be measured without artificial product features.
 
 Owners: product app, root runtime, subscription, protocol, commitlog,

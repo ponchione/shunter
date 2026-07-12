@@ -1,11 +1,32 @@
 # Reduce Recovery Memory And Latency
 
-Status: recommended evidence-driven refactor
+Status: completed 2026-07-12
 
 Promotion trigger: current product-derived recovery measurements reproduce
 material allocation or latency cost in commit-log tail replay.
 
 Owners: commitlog, store, root recovery wiring, observability
+
+## Result
+
+The recovery refactor landed in `0b877f2`. Tail replay now stages changes by
+touched table and publishes only after complete replay, snapshot byte slices
+use the narrower decode path, and snapshot writes avoid per-row schema lookup.
+
+A 10-sample comparison against qualified revision `bfef461` measured the large
+snapshot-plus-tail fixture at 1,882.213 ms and 1,887.96 MiB/op before versus
+9.245 ms and 10.34 MiB/op after. Segmented recovery improved from 293.554 ms
+and 431.469 MiB/op to 3.413 ms and 2.698 MiB/op. Snapshot-only recovery also
+improved, and snapshot creation allocations fell 37.21% with no statistically
+significant latency change in the filesystem-heavy fixture.
+
+Transient before/after CPU and allocation profiles confirm that per-record
+whole-table cloning was removed. Recovery, fault, property, and repository
+tests remain the correctness authority. Reproducible commands and full focused
+results are in `../../docs/performance-envelopes.md`.
+
+No further generic optimization is active. Application-scale recovery targets
+remain dependent on a selected product workload.
 
 ## Why
 
@@ -47,8 +68,9 @@ Implement only candidates supported by profiles:
 
 ## Completion Evidence
 
-- before/after CPU and memory profiles
-- benchstat results for snapshot-only, segmented replay, and snapshot-plus-tail
-  recovery
-- no regression in recovery fault, fuzz, property, and gauntlet tests
-- documented peak memory and time improvement on the promoted fixture
+- [x] before/after CPU and memory profiles
+- [x] benchstat results for snapshot-only, segmented replay, and
+  snapshot-plus-tail recovery
+- [x] no regression in recovery fault, property, and repository-local gate
+  coverage
+- [x] documented memory and time improvement on the promoted fixture

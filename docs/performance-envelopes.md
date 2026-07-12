@@ -5,6 +5,81 @@ exists. The rows are advisory unless a release process defines hard thresholds
 for a specific workload. The snapshot below uses the preferred repo toolchain
 from `go.mod`.
 
+## 2026-07-12 Optimization Closeout
+
+This focused comparison measures the recovery, snapshot, maintained-window,
+and ordered-join changes after the qualified `bfef461` revision. The baseline
+was a detached worktree at `bfef461409e9158b53ad4dc96dc956ca1598fe6a`; the
+candidate was `0b877f23dc91a6f0fd216759fa36803acb834d38`. Candidate-side
+uncommitted changes were outside the measured Go packages. Raw output and
+profiles were kept under `/tmp`, and the temporary worktree was removed.
+
+- Host: `Linux gernsback 6.17.0-35-generic`, linux/amd64
+- Go: `go1.26.3`
+- CPU: `AMD Ryzen 9 9900X 12-Core Processor`, 12 cores, 24 logical CPUs
+- Samples: 10 per benchmark row
+- Comparison tool:
+  `golang.org/x/perf/cmd/benchstat@v0.0.0-20260709024250-82a0b07e230d`
+  with `-ignore cpu`
+
+Commands, run once in each worktree:
+
+```bash
+go test -run '^$' -bench 'Benchmark(OpenAndRecoverSnapshotOnly|OpenAndRecoverSnapshotWithTailReplay|CreateSnapshotLarge)$' -benchmem -count=10 ./commitlog
+go test -run '^$' -bench '^BenchmarkOpenAndRecoverSegmentedLog$' -benchmem -count=10 ./commitlog
+go test -run '^$' -bench '^BenchmarkEvalOrderedLimitedWindowDelta$' -benchmem -count=10 ./subscription
+go test -run '^$' -bench '^BenchmarkExecuteCompiledSQLQueryJoinReadShapes$/^two_table_join_projection_order_limit$' -benchmem -count=10 ./protocol
+```
+
+Representative recovery and snapshot rows:
+
+| Benchmark | Baseline sec/op | Candidate sec/op | Delta | Baseline B/op | Candidate B/op | Delta | Baseline allocs/op | Candidate allocs/op | Delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `OpenAndRecoverSegmentedLog-24` | 293.554 ms | 3.413 ms | -98.84% | 431.469 MiB | 2.698 MiB | -99.37% | 1,685.66k | 38.37k | -97.72% |
+| `OpenAndRecoverSnapshotOnly/large-24` | 7.513 ms | 4.629 ms | -38.38% | 22.147 MiB | 5.771 MiB | -73.94% | 58.43k | 50.24k | -14.02% |
+| `OpenAndRecoverSnapshotWithTailReplay/large-24` | 1,882.213 ms | 9.245 ms | -99.51% | 1,887.96 MiB | 10.34 MiB | -99.45% | 6,984.63k | 78.89k | -98.87% |
+| `CreateSnapshotLarge-24` | 25.34 ms | 38.50 ms | no significant change (`p=0.123`) | 2.929 MiB | 1.839 MiB | -37.21% | 25.236k | 8.971k | -64.45% |
+
+Snapshot-only latency improved 32.45%, 37.48%, and 38.38% across the small,
+medium, and large fixtures. Snapshot-plus-tail latency improved 77.64%,
+97.81%, and 99.51%. `CreateSnapshotLarge` includes filesystem and temporary
+directory work in its timed loop; its latency sample was noisy, while its
+allocation reductions were statistically significant.
+
+Maintained ordered/windowed subscription deltas:
+
+| Fixture | Baseline sec/op | Candidate sec/op | Delta | B/op delta | allocs/op delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| rows 128, limit 10, ascending, insert head | 25.07 us | 19.54 us | -22.05% | -4.56% | -22.86% |
+| rows 1,024, limit 100, descending, delete head | 452.3 us | 392.9 us | -13.13% | -5.91% | -23.53% |
+| rows 1,024, limit 100, shuffled two-column, insert outside | 623.7 us | 557.9 us | -10.55% | -3.39% | -30.00% |
+| rows 4,096, limit 100, descending two-column, insert head | 2.414 ms | 2.088 ms | -13.50% | -6.39% | -21.43% |
+| rows 4,096, limit 1,000, shuffled, delete head | 2.105 ms | 1.838 ms | -12.69% | -6.38% | -23.60% |
+
+The focused ordered two-table join improved from 4.989 ms/op to 2.501 ms/op
+(-49.88%, `p=0.000`) with unchanged 269.7 KiB/op and 3.162k allocs/op. This
+closes the qualified revision's explicit ordered-join latency residual without
+changing the query fixture or introducing a threshold.
+
+The large snapshot-plus-tail allocation profile fell from 1,857.77 MiB total
+sampled allocation space to 22.18 MiB in the one-operation profile (the latter
+includes fixture and profiler setup). At the baseline, `ApplyChangeset` and
+per-record `cloneReplayTable` accounted for 97.52% of cumulative allocation
+space; the candidate profile instead shows bounded recovery-batch application,
+snapshot decode, row copy, and index-key construction. CPU profiles show the
+same removal of per-record whole-table cloning. Profile commands:
+
+```bash
+go test -run '^$' -bench '^BenchmarkOpenAndRecoverSnapshotWithTailReplay$/^large$' -benchmem -benchtime=1x -cpuprofile /tmp/shunter-recovery-<state>-cpu.pprof -memprofile /tmp/shunter-recovery-<state>-mem.pprof ./commitlog
+rtk go tool pprof -top -alloc_space /tmp/shunter-recovery-<state>-mem.pprof
+rtk go tool pprof -top /tmp/shunter-recovery-<state>-cpu.pprof
+```
+
+The candidate CPU profile used a 2-second benchmark duration because one
+candidate operation was too short to yield samples. The results do not justify
+another optimization slice; application-scale recovery and backup/restore
+targets remain product-triggered evidence.
+
 ## Snapshot
 
 - Date: 2026-05-13

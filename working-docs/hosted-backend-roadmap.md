@@ -4,6 +4,9 @@ Status: current active-development direction
 Scope: Shunter as an experimental Go-first self-hosted backend/database
 runtime.
 
+No real application is currently selected. The canonical hosted-chat example
+is the repository-local integration fixture, not a product choice.
+
 Shunter is an actively developed experimental backend/runtime. Its current
 architectural direction is a static Go app server that application frontends
 talk to over the Shunter protocol. App state, reducers, declared reads, live
@@ -66,6 +69,12 @@ Implemented hosted-app surfaces:
   helpers for reducers, procedures, declared reads/views, table subscriptions,
   and event-table streams.
 - hosted-chat integration gate covering the common static hosted-app workflow.
+- app-owned offline maintenance preparation and a deterministic hosted-chat
+  snapshot, covered-compaction, backup, restore, preflight, and recovered-state
+  drill.
+- bounded TypeScript reconnect with explicit connection epochs, subscription
+  replay completion, non-authoritative resynchronizing handles, and
+  unknown-outcome errors for interrupted reducer/procedure calls.
 
 ## Non-Goals
 

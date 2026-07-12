@@ -30,22 +30,28 @@ remain more authoritative than these notes.
   completed on 2026-07-10; qualification and release-owner review are preserved,
   no release was cut, and release preparation is dormant pending explicit
   authorization.
+- [Reduce recovery cost](04-recovery-efficiency-refactor.md) - completed on
+  2026-07-12 with profiles and before/after benchmark evidence; further targets
+  require a real workload.
+
+## Partially Satisfied And Dormant
+
+- [Operationalize durability maintenance](03-durability-maintenance-policy.md) -
+  the generic offline sequence, app-owned command, recovery drill, gate, and
+  runbook are complete; cadence, retention, and RPO/RTO require a real app.
+- [Make reconnect state explicit](07-client-connectivity-resilience.md) - the
+  generic epoch, replay-completion, handle-authority, and interrupted-call
+  semantics are complete; application presentation remains product-owned.
 
 ## Optional Proposals
 
 - [Establish a product operating envelope](02-product-operating-envelope.md) -
   measured capacity and recovery expectations when real workload pressure
   requires them.
-- [Operationalize durability maintenance](03-durability-maintenance-policy.md) -
-  a repeatable snapshot, compaction, and backup policy.
-- [Reduce recovery cost](04-recovery-efficiency-refactor.md) - lower replay
-  memory and latency without format drift.
 - [Define reliable integration patterns](05-enterprise-integration-reliability.md) -
   safe coordination with systems of record.
 - [Harden operational authorization](06-operational-authorization-model.md) -
   enterprise identity-to-permission and scope behavior.
-- [Make reconnect state explicit](07-client-connectivity-resilience.md) - honest
-  operator UX through network interruption.
 - [Set live-query admission policy](08-live-query-admission-policy.md) -
   evidence-backed protection from expensive views.
 - [Add an operational audit pattern](09-operational-audit-trail.md) - app-facing

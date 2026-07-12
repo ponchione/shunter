@@ -11,8 +11,10 @@ Current product decision:
   standalone system. App modules are still authored in Go and linked into the
   server binary while the protocol, SDK, auth, operations, and deployment
   surfaces mature.
-- Make the TypeScript client runtime publishable as an npm package consumed by
-  frontend apps and generated bindings.
+- Keep the TypeScript client runtime private/local until the owner makes an npm
+  distribution, package-governance, and release decision. Frontend apps and
+  generated bindings currently consume workspace, `file:`, or locally packed
+  package shapes.
 - Harden the existing runtime, durability, protocol, schema, contract, and docs
   surfaces first.
 - Do not start generic daemon control-plane, managed service, dynamic module

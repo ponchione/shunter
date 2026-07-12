@@ -25,12 +25,12 @@ limited to the missing evidence.
 
 ## Product And External Canary Maintenance
 
-Kickbrass may serve as the primary product adoption canary while it is being
-implemented on Shunter. Use it to validate real app pressure: API ergonomics,
-generated TypeScript shape, auth, procedures/service adapters, persistence,
-deployment, backup/restore, and operational workflows.
+No real product application is currently selected. When the owner selects one,
+use its natural workload to validate API ergonomics, generated TypeScript
+shape, auth, procedures/service adapters, persistence, deployment,
+backup/restore, and operational workflows.
 
-Do not add artificial Kickbrass features only to improve Shunter coverage. If a
+Do not add artificial product features only to improve Shunter coverage. If a
 Shunter edge case is not natural product behavior, cover it in package tests,
 hosted-chat, or a synthetic/external canary.
 

@@ -4,6 +4,24 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- The pinned Go toolchain advances within the supported 1.26 line to 1.26.5,
+  incorporating standard-library fixes for GO-2026-5037, GO-2026-5039, and
+  GO-2026-5856 found reachable by the repository vulnerability scan. The
+  indirect `golang.org/x/sys` dependency advances to v0.44.0, removing the
+  remaining module-level GO-2026-5024 advisory from the dependency graph.
+- TypeScript connections now expose synchronization epochs and subscription
+  replay progress, managed handles explicitly enter `resynchronizing` across
+  connection loss, and callers can await replay completion with
+  `whenSynchronized()`.
+- TypeScript reducer and procedure calls that lose their authoritative response
+  now reject with `ShunterCallInterruptedError` and an unknown outcome instead
+  of appearing equivalent to a confirmed server failure.
+- The hosted-chat maintenance binary now prepares an offline backup point with
+  a completed snapshot and snapshot-covered compaction; its deterministic drill
+  and hosted gate prove backup, fresh restore, compatibility preflight,
+  restart, and recovered application-visible state. Preparation rejects missing
+  DataDirs and invalid output formats before mutation and does not start normal
+  runtime services, schedulers, or startup migration hooks.
 - Snapshot row decoding now bypasses the generic buffered-reader path for
   byte-slice inputs, and snapshot writes resolve each non-empty table schema
   once instead of once per row.
