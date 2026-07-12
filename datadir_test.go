@@ -448,6 +448,37 @@ func TestBackupDataDirSyncsNestedDirectoriesBeforeDurablePublication(t *testing.
 	}
 }
 
+func TestBackupDataDirFailureDurablySyncsStagingRemoval(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "data")
+	if err := os.Mkdir(source, 0o755); err != nil {
+		t.Fatalf("create source data dir: %v", err)
+	}
+	writeDataDirTestBytes(t, source, "segment", []byte("complete"))
+	output := filepath.Join(dir, "backup")
+	failure := errors.New("injected staging permission failure")
+	previousChmod := chmodOfflineCopyPath
+	chmodOfflineCopyPath = func(string, os.FileMode) error { return failure }
+	t.Cleanup(func() { chmodOfflineCopyPath = previousChmod })
+	previousSync := syncOfflineCopyDir
+	var synced []string
+	syncOfflineCopyDir = func(path string) error {
+		synced = append(synced, path)
+		return previousSync(path)
+	}
+	t.Cleanup(func() { syncOfflineCopyDir = previousSync })
+
+	err := BackupDataDir(source, output)
+	if !errors.Is(err, failure) {
+		t.Fatalf("BackupDataDir error = %v, want injected failure", err)
+	}
+	assertPathMissing(t, output)
+	assertNoOfflineCopyStagingEntries(t, dir, "backup")
+	if len(synced) != 1 || synced[0] != dir {
+		t.Fatalf("synced directories after cleanup = %#v, want publication parent %s", synced, dir)
+	}
+}
+
 func TestRestoreDataDirRejectsNonEmptyDestinationWithoutMutation(t *testing.T) {
 	dir := t.TempDir()
 	backupDir := filepath.Join(dir, "backup")

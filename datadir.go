@@ -105,6 +105,8 @@ func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestinat
 		if removeStaging {
 			if err := removeOfflineCopyTree(staging); err != nil {
 				retErr = errors.Join(retErr, fmt.Errorf("remove staging data dir %s: %w", staging, err))
+			} else if err := syncOfflineCopyDir(parent); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("sync removal of staging data dir %s: %w", staging, err))
 			}
 		}
 	}()
@@ -150,7 +152,11 @@ func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestinat
 		if rollbackErr == nil {
 			rollbackErr = syncOfflineCopyDir(parent)
 		} else {
-			rollbackErr = errors.Join(rollbackErr, removeOfflineCopyTree(dst))
+			removeErr := removeOfflineCopyTree(dst)
+			if removeErr == nil {
+				removeErr = syncOfflineCopyDir(parent)
+			}
+			rollbackErr = errors.Join(rollbackErr, removeErr)
 			removeStaging = false
 		}
 		if destinationWasEmpty {
