@@ -368,6 +368,49 @@ func TestDecodeProductValueReaderShapeMismatchPreservesSentinel(t *testing.T) {
 	}
 }
 
+func TestDecodeProductValueFromBytesMatchesReader(t *testing.T) {
+	ts := &schema.TableSchema{
+		Name: "players",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: types.KindUint64},
+			{Index: 1, Name: "nickname", Type: types.KindString, Nullable: true},
+			{Index: 2, Name: "payload", Type: types.KindBytes},
+		},
+	}
+	row := types.ProductValue{
+		types.NewUint64(7),
+		types.NewNull(types.KindString),
+		types.NewBytes([]byte{0xde, 0xad, 0xbe, 0xef}),
+	}
+	encoded, err := AppendProductValueForSchema(nil, row, ts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fromReader, err := DecodeProductValue(bytes.NewReader(encoded), ts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromBytes, err := DecodeProductValueFromBytes(encoded, ts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fromReader.Equal(fromBytes) {
+		t.Fatalf("byte-slice decode = %+v, reader decode = %+v", fromBytes, fromReader)
+	}
+
+	trailing := append(append([]byte(nil), encoded...), 0xff)
+	_, readerErr := DecodeProductValue(bytes.NewReader(trailing), ts)
+	_, bytesErr := DecodeProductValueFromBytes(trailing, ts)
+	if !errors.Is(readerErr, ErrRowLengthMismatch) || !errors.Is(bytesErr, ErrRowLengthMismatch) {
+		t.Fatalf("trailing errors = (%v, %v), want ErrRowLengthMismatch", readerErr, bytesErr)
+	}
+	var readerShape, bytesShape *RowShapeMismatchError
+	if !errors.As(readerErr, &readerShape) || !errors.As(bytesErr, &bytesShape) || *readerShape != *bytesShape {
+		t.Fatalf("trailing shape errors = (%+v, %+v), want equal", readerShape, bytesShape)
+	}
+}
+
 func TestDecodeProductValueFromBytesDetachesBytesColumnFromInput(t *testing.T) {
 	ts := &schema.TableSchema{
 		Name: "files",

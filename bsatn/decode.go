@@ -298,20 +298,9 @@ func DecodeProductValue(r io.Reader, ts *schema.TableSchema) (types.ProductValue
 	if !ok {
 		br = bufio.NewReader(r)
 	}
-
-	pv := make(types.ProductValue, len(ts.Columns))
-	for i, col := range ts.Columns {
-		v, err := decodeColumnValue(br, col)
-		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				return nil, errors.Join(
-					ErrRowLengthMismatch,
-					&RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: i},
-				)
-			}
-			return nil, err
-		}
-		pv[i] = v
+	pv, err := decodeProductValueColumns(br, ts)
+	if err != nil {
+		return nil, err
 	}
 
 	if _, err := br.Peek(1); err == nil {
@@ -326,9 +315,41 @@ func DecodeProductValue(r io.Reader, ts *schema.TableSchema) (types.ProductValue
 	return pv, nil
 }
 
+func decodeProductValueColumns(r io.Reader, ts *schema.TableSchema) (types.ProductValue, error) {
+	pv := make(types.ProductValue, len(ts.Columns))
+	for i, col := range ts.Columns {
+		v, err := decodeColumnValue(r, col)
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return nil, errors.Join(
+					ErrRowLengthMismatch,
+					&RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: i},
+				)
+			}
+			return nil, err
+		}
+		pv[i] = v
+	}
+	return pv, nil
+}
+
 // DecodeProductValueFromBytes decodes and rejects trailing bytes.
 func DecodeProductValueFromBytes(data []byte, ts *schema.TableSchema) (types.ProductValue, error) {
-	return DecodeProductValue(bytes.NewReader(data), ts)
+	if ts == nil {
+		return nil, errors.New("bsatn: table schema is required")
+	}
+	reader := bytes.NewReader(data)
+	pv, err := decodeProductValueColumns(reader, ts)
+	if err != nil {
+		return nil, err
+	}
+	if reader.Len() != 0 {
+		return nil, errors.Join(
+			ErrRowLengthMismatch,
+			&RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: len(ts.Columns) + 1},
+		)
+	}
+	return pv, nil
 }
 
 func decodeBoolByte(b byte) (types.Value, error) {

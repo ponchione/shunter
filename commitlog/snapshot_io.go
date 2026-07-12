@@ -660,13 +660,16 @@ func writeSnapshotBodyCapture(dst io.Writer, reg schema.SchemaRegistry, txID typ
 		if err := writeUint32Full(dst, uint32(len(table.rows))); err != nil {
 			return err
 		}
+		if len(table.rows) == 0 {
+			continue
+		}
+		ts, ok := reg.Table(table.tableID)
+		if !ok {
+			return fmt.Errorf("%w: snapshot table section references unknown table %d", ErrSnapshot, table.tableID)
+		}
 		for _, row := range table.rows {
 			rowBuf = rowBuf[:0]
 			var err error
-			ts, ok := reg.Table(table.tableID)
-			if !ok {
-				return fmt.Errorf("%w: snapshot table section references unknown table %d", ErrSnapshot, table.tableID)
-			}
 			rowBuf, err = bsatn.AppendProductValueForSchema(rowBuf, row, ts)
 			if err != nil {
 				return err

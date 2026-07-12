@@ -741,9 +741,12 @@ func TestReplayLogApplyErrorIncludesTxAndSegmentContext(t *testing.T) {
 	)
 	segments := []SegmentInfo{{Path: segmentPath, StartTx: 1, LastTx: 2, Valid: true}}
 
-	_, err := ReplayLog(committed, segments, 0, reg)
+	maxTxID, err := ReplayLog(committed, segments, 0, reg)
 	if err == nil {
 		t.Fatal("expected apply error")
+	}
+	if maxTxID != 1 {
+		t.Fatalf("max applied tx after later apply error = %d, want 1", maxTxID)
 	}
 	var pkErr *store.PrimaryKeyViolationError
 	if !errors.As(err, &pkErr) {
@@ -755,6 +758,27 @@ func TestReplayLogApplyErrorIncludesTxAndSegmentContext(t *testing.T) {
 	if !strings.Contains(err.Error(), segmentPath) {
 		t.Fatalf("apply error %q missing segment path", err)
 	}
+	assertReplayPlayerRows(t, committed, map[uint64]string{1: "alice"})
+}
+
+func TestReplayLogWithRecoveryBatchLeavesStateUnchangedOnLaterDecodeError(t *testing.T) {
+	root := t.TempDir()
+	committed, reg := buildReplayCommittedState(t)
+	segmentPath := writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, rawPayload: []byte{0xff}},
+	)
+	segments := []SegmentInfo{{Path: segmentPath, StartTx: 1, LastTx: 2, Valid: true}}
+	batch := store.NewRecoveryBatch(committed)
+	maxTxID, err := replayLogWithApply(segments, 0, reg, batch.Apply)
+	if err == nil {
+		t.Fatal("expected decode error")
+	}
+	if maxTxID != 1 {
+		t.Fatalf("max applied tx before decode error = %d, want 1", maxTxID)
+	}
+	batch.Discard()
+	assertReplayPlayerRows(t, committed, map[uint64]string{})
 }
 
 type replayRecord struct {

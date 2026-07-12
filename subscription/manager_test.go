@@ -171,6 +171,9 @@ func TestEvalOrderedLimitedViewMaintainsTopNOnInsert(t *testing.T) {
 	requireProductRowsEqual(t, update.Deletes, []types.ProductValue{
 		{types.NewUint64(2), types.NewString("two")},
 	})
+	if got := after.scanCalls[1]; got != 1 {
+		t.Fatalf("post-commit table scans = %d, want 1", got)
+	}
 }
 
 func TestEvalOrderedLimitedViewMaintainsTopNOnDelete(t *testing.T) {

@@ -47,6 +47,12 @@ func seekReplayReaderToHorizon(reader *SegmentReader, segmentPath string, startT
 }
 
 func ReplayLog(committed *store.CommittedState, segments []SegmentInfo, fromTxID types.TxID, reg schema.SchemaRegistry) (types.TxID, error) {
+	return replayLogWithApply(segments, fromTxID, reg, func(changeset *store.Changeset) error {
+		return store.ApplyChangeset(committed, changeset)
+	})
+}
+
+func replayLogWithApply(segments []SegmentInfo, fromTxID types.TxID, reg schema.SchemaRegistry, apply func(*store.Changeset) error) (types.TxID, error) {
 	maxAppliedTxID := fromTxID
 
 	for _, segment := range segments {
@@ -97,7 +103,7 @@ func ReplayLog(committed *store.CommittedState, segments []SegmentInfo, fromTxID
 				}
 				return maxAppliedTxID, fmt.Errorf("commitlog: replay decode tx %d from segment %s: %w", record.TxID, segment.Path, err)
 			}
-			if err := store.ApplyChangeset(committed, changeset); err != nil {
+			if err := apply(changeset); err != nil {
 				closeErr := reader.Close()
 				if closeErr != nil {
 					return maxAppliedTxID, fmt.Errorf("commitlog: replay apply tx %d from segment %s: %w (close error: %v)", record.TxID, segment.Path, err, closeErr)

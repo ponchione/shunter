@@ -16,6 +16,8 @@ import (
 // unordered.
 type mockCommitted struct {
 	rows map[TableID]map[types.RowID]types.ProductValue
+	// scanCalls records full table scans for tests that pin evaluation work.
+	scanCalls map[TableID]int
 	// idxCol maps (tableID, indexID) → column index for single-column
 	// equality index lookups used by join delta tests.
 	idxCol map[indexRef]int
@@ -28,8 +30,9 @@ type indexRef struct {
 
 func newMockCommitted() *mockCommitted {
 	return &mockCommitted{
-		rows:   make(map[TableID]map[types.RowID]types.ProductValue),
-		idxCol: make(map[indexRef]int),
+		rows:      make(map[TableID]map[types.RowID]types.ProductValue),
+		scanCalls: make(map[TableID]int),
+		idxCol:    make(map[indexRef]int),
 	}
 }
 
@@ -47,6 +50,7 @@ func (m *mockCommitted) setIndex(table TableID, index IndexID, col int) {
 }
 
 func (m *mockCommitted) TableScan(id TableID) iter.Seq2[types.RowID, types.ProductValue] {
+	m.scanCalls[id]++
 	return func(yield func(types.RowID, types.ProductValue) bool) {
 		rids := sortedRowIDs(m.rows[id])
 		for _, rid := range rids {

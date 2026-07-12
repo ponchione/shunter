@@ -4,6 +4,14 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Snapshot row decoding now bypasses the generic buffered-reader path for
+  byte-slice inputs, and snapshot writes resolve each non-empty table schema
+  once instead of once per row.
+- Maintained single-table window updates now reconstruct their before/after
+  row bags in one committed-state scan.
+- Startup recovery now stages commit-log tail changes per touched table and
+  publishes them only after complete replay, avoiding per-record whole-table
+  clones while preserving public `ReplayLog` partial-progress behavior.
 - Added `types.EqualValues` for allocation-free pointer equality and used it
   to remove full-value copies from one-off join matching.
 - Added standard static hosted-app layout guidance and a deployment checklist

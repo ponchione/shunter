@@ -134,11 +134,18 @@ func OpenAndRecoverWithRegistryReport(dir string, reg schema.SchemaRegistry) (*s
 	}
 
 	replayStart := time.Now()
-	maxAppliedTxID, err := ReplayLog(committed, segments, replayFrom, recoveryRegistry)
-	report.ReplayDuration = time.Since(replayStart)
+	recoveryBatch := store.NewRecoveryBatch(committed)
+	maxAppliedTxID, err := replayLogWithApply(segments, replayFrom, recoveryRegistry, recoveryBatch.Apply)
 	if err != nil {
+		report.ReplayDuration = time.Since(replayStart)
+		recoveryBatch.Discard()
 		return nil, 0, RecoveryResumePlan{}, report, recoveryRegistry, err
 	}
+	if err := recoveryBatch.Commit(); err != nil {
+		report.ReplayDuration = time.Since(replayStart)
+		return nil, 0, RecoveryResumePlan{}, report, recoveryRegistry, fmt.Errorf("commitlog: publish recovered changesets: %w", err)
+	}
+	report.ReplayDuration = time.Since(replayStart)
 	if maxAppliedTxID > replayFrom {
 		report.ReplayedTxRange = RecoveryTxIDRange{Start: replayFrom + 1, End: maxAppliedTxID}
 	}

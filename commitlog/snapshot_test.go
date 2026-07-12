@@ -2674,6 +2674,46 @@ func TestReadSnapshotLargeRoundTrip(t *testing.T) {
 	}
 }
 
+type countingSnapshotRegistry struct {
+	schema.SchemaRegistry
+	tableCalls map[schema.TableID]int
+}
+
+func (r *countingSnapshotRegistry) Table(id schema.TableID) (*schema.TableSchema, bool) {
+	r.tableCalls[id]++
+	return r.SchemaRegistry.Table(id)
+}
+
+func TestWriteSnapshotBodyCaptureLooksUpSchemaOncePerNonEmptyTable(t *testing.T) {
+	_, base := testSchema()
+	row := types.ProductValue{types.NewUint64(1), types.NewString("alice")}
+
+	t.Run("non_empty", func(t *testing.T) {
+		reg := &countingSnapshotRegistry{SchemaRegistry: base, tableCalls: make(map[schema.TableID]int)}
+		body := snapshotBodyCapture{tables: []snapshotTableCapture{{
+			tableID: 0,
+			rows:    []types.ProductValue{row, row},
+		}}}
+		if err := writeSnapshotBodyCapture(io.Discard, reg, 1, body); err != nil {
+			t.Fatal(err)
+		}
+		if got := reg.tableCalls[0]; got != 1 {
+			t.Fatalf("schema lookups = %d, want 1", got)
+		}
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		reg := &countingSnapshotRegistry{SchemaRegistry: base, tableCalls: make(map[schema.TableID]int)}
+		body := snapshotBodyCapture{tables: []snapshotTableCapture{{tableID: 0}}}
+		if err := writeSnapshotBodyCapture(io.Discard, reg, 1, body); err != nil {
+			t.Fatal(err)
+		}
+		if got := reg.tableCalls[0]; got != 0 {
+			t.Fatalf("empty-table schema lookups = %d, want 0", got)
+		}
+	})
+}
+
 func BenchmarkCreateSnapshotLarge(b *testing.B) {
 	cs, reg := buildLargeSnapshotCommittedState(b, 4096)
 	for i := 0; i < b.N; i++ {

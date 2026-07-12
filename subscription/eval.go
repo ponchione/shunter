@@ -527,11 +527,31 @@ func (m *Manager) maintainsWindowedSingleTableDelta(qs *queryState, dv *DeltaVie
 }
 
 func (m *Manager) evalWindowedSingleTableDelta(ctx context.Context, qs *queryState, dv *DeltaView, table TableID) (SubscriptionUpdate, bool, error) {
-	before, err := m.windowedRowsBefore(ctx, qs, dv, table)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	before, after, err := collectWindowRowsBeforeAfter(
+		ctx,
+		dv.CommittedView(),
+		qs.predicate,
+		table,
+		dv.InsertedRows(table),
+		dv.DeletedRows(table),
+	)
 	if err != nil {
 		return SubscriptionUpdate{}, false, err
 	}
-	after, err := m.windowedRowsAfter(ctx, qs, dv, table)
+	if err := ctx.Err(); err != nil {
+		return SubscriptionUpdate{}, false, err
+	}
+	before, err = applyLiveWindow(before, qs)
+	if err != nil {
+		return SubscriptionUpdate{}, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return SubscriptionUpdate{}, false, err
+	}
+	after, err = applyLiveWindow(after, qs)
 	if err != nil {
 		return SubscriptionUpdate{}, false, err
 	}
@@ -541,61 +561,55 @@ func (m *Manager) evalWindowedSingleTableDelta(ctx context.Context, qs *querySta
 	return update, ok, nil
 }
 
-func (m *Manager) windowedRowsAfter(ctx context.Context, qs *queryState, dv *DeltaView, table TableID) ([]types.ProductValue, error) {
-	rows, err := collectWindowRows(ctx, dv.CommittedView(), qs.predicate, table, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	return applyLiveWindow(rows, qs)
-}
-
-func (m *Manager) windowedRowsBefore(ctx context.Context, qs *queryState, dv *DeltaView, table TableID) ([]types.ProductValue, error) {
-	var insertCounts map[uint64]countedRowBucket
-	insertedRows := dv.InsertedRows(table)
-	if len(insertedRows) > 0 {
-		insertCounts = countRows(insertedRows)
-	}
-	rows, err := collectWindowRows(ctx, dv.CommittedView(), qs.predicate, table, insertCounts, dv.DeletedRows(table))
-	if err != nil {
-		return nil, err
-	}
-	return applyLiveWindow(rows, qs)
-}
-
-func collectWindowRows(ctx context.Context, view store.CommittedReadView, pred Predicate, table TableID, skipCounts map[uint64]countedRowBucket, appendDeleted []types.ProductValue) ([]types.ProductValue, error) {
+func collectWindowRowsBeforeAfter(
+	ctx context.Context,
+	view store.CommittedReadView,
+	pred Predicate,
+	table TableID,
+	insertedRows []types.ProductValue,
+	deletedRows []types.ProductValue,
+) (before, after []types.ProductValue, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var rows []types.ProductValue
-	rowCap := len(appendDeleted)
-	if view != nil {
-		rowCap += view.RowCount(table)
+	var insertCounts map[uint64]countedRowBucket
+	if len(insertedRows) > 0 {
+		insertCounts = countRows(insertedRows)
 	}
-	if rowCap > 0 {
-		rows = make([]types.ProductValue, 0, rowCap)
+	beforeCap := len(deletedRows)
+	afterCap := 0
+	if view != nil {
+		afterCap = view.RowCount(table)
+		beforeCap += afterCap
+	}
+	if totalCap := beforeCap + afterCap; totalCap > 0 {
+		rows := make([]types.ProductValue, totalCap)
+		before = rows[:0:beforeCap]
+		after = rows[beforeCap:beforeCap:totalCap]
 	}
 	if view != nil {
 		for _, row := range view.TableScan(table) {
 			if err := ctx.Err(); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			if skipCounts != nil && decrementRowCount(skipCounts, row) {
-				continue
-			}
+			inserted := insertCounts != nil && decrementRowCount(insertCounts, row)
 			if MatchRow(pred, table, row) {
-				rows = append(rows, row)
+				after = append(after, row)
+				if !inserted {
+					before = append(before, row)
+				}
 			}
 		}
 	}
-	for _, row := range appendDeleted {
+	for _, row := range deletedRows {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if MatchRow(pred, table, row) {
-			rows = append(rows, row)
+			before = append(before, row)
 		}
 	}
-	return rows, nil
+	return before, after, nil
 }
 
 func applyLiveWindow(rows []types.ProductValue, qs *queryState) ([]types.ProductValue, error) {

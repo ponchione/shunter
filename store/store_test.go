@@ -1416,3 +1416,162 @@ func TestApplyChangesetErrorLeavesAutoIncrementSequenceUnchanged(t *testing.T) {
 		t.Fatalf("NextID after failed replay = %d, want %d", tbl.NextID(), beforeNextID)
 	}
 }
+
+func TestRecoveryBatchPublishesMultipleChangesetsAtOnce(t *testing.T) {
+	cs, _ := buildTestState()
+	table, _ := cs.Table(0)
+	batch := NewRecoveryBatch(cs)
+	for i, name := range []string{"alice", "bob"} {
+		if err := batch.Apply(&Changeset{Tables: map[schema.TableID]*TableChangeset{
+			0: {Inserts: []types.ProductValue{mkRow(uint64(i+1), name)}},
+		}}); err != nil {
+			t.Fatalf("Apply changeset %d: %v", i+1, err)
+		}
+	}
+	if table.RowCount() != 0 {
+		t.Fatalf("committed rows before batch commit = %d, want 0", table.RowCount())
+	}
+	if err := batch.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := cs.Table(0)
+	if current != table {
+		t.Fatal("RecoveryBatch.Commit replaced the committed table pointer")
+	}
+	if table.RowCount() != 2 {
+		t.Fatalf("committed rows after batch commit = %d, want 2", table.RowCount())
+	}
+	if table.NextID() != 3 {
+		t.Fatalf("next row ID after batch commit = %d, want 3", table.NextID())
+	}
+	if err := batch.Apply(nil); !errors.Is(err, errRecoveryBatchClosed) {
+		t.Fatalf("Apply after commit error = %v, want closed batch", err)
+	}
+}
+
+func TestRecoveryBatchPublishesMultipleTables(t *testing.T) {
+	cs := NewCommittedState()
+	players := NewTable(pkSchema())
+	logs := NewTable(noPKSchema())
+	cs.RegisterTable(0, players)
+	cs.RegisterTable(1, logs)
+	batch := NewRecoveryBatch(cs)
+	if err := batch.Apply(&Changeset{Tables: map[schema.TableID]*TableChangeset{
+		0: {Inserts: []types.ProductValue{mkRow(1, "alice")}},
+		1: {Inserts: []types.ProductValue{{types.NewString("started")}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if players.RowCount() != 0 || logs.RowCount() != 0 {
+		t.Fatalf("rows before publish = (%d, %d), want (0, 0)", players.RowCount(), logs.RowCount())
+	}
+	if err := batch.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if players.RowCount() != 1 || logs.RowCount() != 1 {
+		t.Fatalf("rows after publish = (%d, %d), want (1, 1)", players.RowCount(), logs.RowCount())
+	}
+}
+
+func TestRecoveryBatchFailurePublishesNothing(t *testing.T) {
+	cs, _ := buildTestState()
+	table, _ := cs.Table(0)
+	batch := NewRecoveryBatch(cs)
+	if err := batch.Apply(&Changeset{Tables: map[schema.TableID]*TableChangeset{
+		0: {Inserts: []types.ProductValue{mkRow(1, "alice")}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	wantErr := batch.Apply(&Changeset{Tables: map[schema.TableID]*TableChangeset{
+		0: {Inserts: []types.ProductValue{mkRow(1, "duplicate")}},
+	}})
+	if !errors.Is(wantErr, ErrPrimaryKeyViolation) {
+		t.Fatalf("second Apply error = %v, want ErrPrimaryKeyViolation", wantErr)
+	}
+	if table.RowCount() != 0 || table.NextID() != 1 {
+		t.Fatalf("committed state after failed batch = rows %d next %d, want rows 0 next 1", table.RowCount(), table.NextID())
+	}
+	if err := batch.Commit(); !errors.Is(err, ErrPrimaryKeyViolation) || err != wantErr {
+		t.Fatalf("Commit error = %v, want original Apply error %v", err, wantErr)
+	}
+	batch.Discard()
+	if table.RowCount() != 0 || table.NextID() != 1 {
+		t.Fatalf("committed state after discard = rows %d next %d, want rows 0 next 1", table.RowCount(), table.NextID())
+	}
+}
+
+func TestRecoveryBatchSkipsEventTableRows(t *testing.T) {
+	cs := NewCommittedState()
+	const tid schema.TableID = 0
+	cs.RegisterTable(tid, NewTable(eventPKSchema()))
+	batch := NewRecoveryBatch(cs)
+	if err := batch.Apply(&Changeset{Tables: map[schema.TableID]*TableChangeset{
+		tid: {Inserts: []types.ProductValue{mkRow(1, "event")}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := batch.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	table, _ := cs.Table(tid)
+	if table.RowCount() != 0 || table.NextID() != 1 {
+		t.Fatalf("event state after recovery batch = rows %d next %d, want rows 0 next 1", table.RowCount(), table.NextID())
+	}
+}
+
+func TestRecoveryBatchPreservesAutoIncrementSequence(t *testing.T) {
+	cs, _ := buildAutoIncrementState(t)
+	batch := NewRecoveryBatch(cs)
+	if err := batch.Apply(&Changeset{Tables: map[schema.TableID]*TableChangeset{
+		0: {Inserts: []types.ProductValue{{types.NewUint64(7), types.NewString("seven")}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := batch.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	table, _ := cs.Table(0)
+	if sequence, ok := table.SequenceValue(); !ok || sequence != 8 {
+		t.Fatalf("sequence after recovery batch = (%d, %v), want (8, true)", sequence, ok)
+	}
+	if table.NextID() != 2 {
+		t.Fatalf("next row ID after recovery batch = %d, want 2", table.NextID())
+	}
+}
+
+func TestRecoveryBatchCompositeUniqueFailurePublishesNothing(t *testing.T) {
+	cs := NewCommittedState()
+	table := NewTable(compositeIndexedSchema(true))
+	cs.RegisterTable(0, table)
+	batch := NewRecoveryBatch(cs)
+	if err := batch.Apply(&Changeset{Tables: map[schema.TableID]*TableChangeset{
+		0: {Inserts: []types.ProductValue{compositeRow(1, "red", 10, "first")}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	err := batch.Apply(&Changeset{Tables: map[schema.TableID]*TableChangeset{
+		0: {Inserts: []types.ProductValue{compositeRow(2, "red", 10, "second")}},
+	}})
+	if !errors.Is(err, ErrUniqueConstraintViolation) {
+		t.Fatalf("composite duplicate error = %v, want ErrUniqueConstraintViolation", err)
+	}
+	if table.RowCount() != 0 || table.NextID() != 1 {
+		t.Fatalf("committed state after composite failure = rows %d next %d, want rows 0 next 1", table.RowCount(), table.NextID())
+	}
+}
+
+func TestRecoveryBatchRowIDExhaustionPublishesNothing(t *testing.T) {
+	cs, _ := buildTestState()
+	table, _ := cs.Table(0)
+	table.SetNextID(^types.RowID(0))
+	batch := NewRecoveryBatch(cs)
+	err := batch.Apply(&Changeset{Tables: map[schema.TableID]*TableChangeset{
+		0: {Inserts: []types.ProductValue{mkRow(1, "alice")}},
+	}})
+	if !errors.Is(err, ErrRowIDOverflow) {
+		t.Fatalf("exhausted row ID error = %v, want ErrRowIDOverflow", err)
+	}
+	if table.RowCount() != 0 || table.NextID() != ^types.RowID(0) {
+		t.Fatalf("committed state after row ID exhaustion = rows %d next %d", table.RowCount(), table.NextID())
+	}
+}
