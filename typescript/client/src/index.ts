@@ -663,6 +663,10 @@ interface PendingSubscription {
   readonly handle?: ManagedSubscriptionHandle<unknown>;
   readonly eventTable?: boolean;
   readonly replayEpoch?: number;
+  readonly replayWaiters?: Set<{
+    resolve(): void;
+    reject(error: ShunterError): void;
+  }>;
   readonly cleanup?: () => void;
   resolve(value: SubscriptionUnsubscribe | SubscriptionHandle<unknown>): void;
   reject(error: ShunterError): void;
@@ -751,7 +755,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   const pendingUnsubscribesByQuery = new Map<QueryID, PendingUnsubscribe>();
   const activeSubscriptionsByQuery = new Map<QueryID, ActiveSubscription>();
   const activeSubscriptionAliasesByRootQuery = new Map<QueryID, Set<QueryID>>();
-  const pendingReplaySubscriptions = new Map<QueryID, number>();
+  const pendingReplaySubscriptionsByEpoch = new Map<number, Set<QueryID>>();
   const synchronizationWaiters = new Set<{
     resolve(synchronization: ConnectionSynchronization): void;
     reject(error: ShunterError): void;
@@ -793,12 +797,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   };
 
   const connectionSynchronization = (): ConnectionSynchronization => {
-    let pendingSubscriptions = 0;
-    for (const replayEpoch of pendingReplaySubscriptions.values()) {
-      if (replayEpoch === connectionEpoch) {
-        pendingSubscriptions += 1;
-      }
-    }
+    const pendingSubscriptions = pendingReplaySubscriptionsByEpoch.get(connectionEpoch)?.size ?? 0;
     return {
       epoch: connectionEpoch,
       synchronized: pendingSubscriptions === 0,
@@ -826,13 +825,55 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   };
 
   const finishReplaySubscription = (pending: PendingSubscription): void => {
-    if (pending.replayEpoch === undefined || !pendingReplaySubscriptions.delete(pending.queryId)) {
+    if (pending.replayEpoch === undefined) {
       return;
+    }
+    const replaySubscriptions = pendingReplaySubscriptionsByEpoch.get(pending.replayEpoch);
+    if (replaySubscriptions === undefined || !replaySubscriptions.delete(pending.queryId)) {
+      return;
+    }
+    if (replaySubscriptions.size === 0) {
+      pendingReplaySubscriptionsByEpoch.delete(pending.replayEpoch);
     }
     if (pending.replayEpoch === connectionEpoch) {
       publishSynchronization();
     }
   };
+
+  const trackReplaySubscription = (pending: PendingSubscription): void => {
+    if (pending.replayEpoch === undefined) {
+      return;
+    }
+    let replaySubscriptions = pendingReplaySubscriptionsByEpoch.get(pending.replayEpoch);
+    if (replaySubscriptions === undefined) {
+      replaySubscriptions = new Set<QueryID>();
+      pendingReplaySubscriptionsByEpoch.set(pending.replayEpoch, replaySubscriptions);
+    }
+    replaySubscriptions.add(pending.queryId);
+  };
+
+  const settleReplayWaiters = (pending: PendingSubscription, error?: ShunterError): void => {
+    if (pending.replayWaiters === undefined) {
+      return;
+    }
+    for (const waiter of pending.replayWaiters) {
+      if (error === undefined) {
+        waiter.resolve();
+      } else {
+        waiter.reject(error);
+      }
+    }
+    pending.replayWaiters.clear();
+  };
+
+  const waitForReplaySubscription = (pending: PendingSubscription): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      if (pending.replayWaiters === undefined) {
+        resolve();
+        return;
+      }
+      pending.replayWaiters.add({ resolve, reject });
+    });
 
   const rejectPendingReducerCalls = (error: ShunterError, interrupted: boolean): void => {
     for (const [requestId, pending] of pendingReducerCalls) {
@@ -882,6 +923,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   const rejectPendingSubscriptions = (error: ShunterError, preserveReplay: boolean): void => {
     for (const pending of [...pendingSubscriptionsByRequest.values()]) {
       cleanupPendingSubscription(pending);
+      settleReplayWaiters(pending, error);
       if (preserveReplay && pending.replayEpoch !== undefined) {
         continue;
       }
@@ -920,7 +962,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
     activeSubscriptionsByQuery.clear();
     activeSubscriptionAliasesByRootQuery.clear();
-    pendingReplaySubscriptions.clear();
+    pendingReplaySubscriptionsByEpoch.clear();
   };
 
   const markActiveSubscriptionsResynchronizing = (): void => {
@@ -1555,11 +1597,17 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         return unsubscribePromise;
       }
       unsubscribePromise = (async () => {
-        const activeSocket = socket;
         if (state.status === "reconnecting" || state.status === "connecting") {
           removeActiveSubscription(queryId);
           return;
         }
+        const pendingReplay = pendingSubscriptionsByQuery.get(queryId);
+        if (pendingReplay?.replayEpoch !== undefined) {
+          removeActiveSubscription(queryId);
+          await waitForReplaySubscription(pendingReplay);
+          removeActiveSubscription(queryId);
+        }
+        const activeSocket = socket;
         if (state.status !== "connected" || activeSocket === undefined) {
           throw new ShunterClosedClientError(closedMessage);
         }
@@ -1685,6 +1733,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         handle: active.handle,
         eventTable: active.eventTable,
         replayEpoch: connectionEpoch,
+        replayWaiters: new Set(),
         resolve: () => {},
         reject: (error) => {
           removeActiveSubscription(active.queryId);
@@ -1693,7 +1742,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       };
       pendingSubscriptionsByRequest.set(request.requestId, pending);
       pendingSubscriptionsByQuery.set(request.queryId, pending);
-      pendingReplaySubscriptions.set(request.queryId, connectionEpoch);
+      trackReplaySubscription(pending);
       try {
         activeSocket.send(request.frame);
       } catch (error) {
@@ -1785,6 +1834,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       }
     }
     cleanupPendingSubscription(pending);
+    settleReplayWaiters(pending);
     pending.resolve(pending.handle ?? (
       pending.kind === "declared_view"
         ? declaredViewUnsubscribe(response.queryId)
@@ -1838,6 +1888,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return;
     }
     cleanupPendingSubscription(pending);
+    settleReplayWaiters(pending);
     pending.resolve(pending.handle ?? declaredViewUnsubscribe(response.queryId));
   };
 
@@ -1855,6 +1906,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       code: "subscription_failed",
       details: { kind: pending.kind, target: pending.target, response },
     });
+    settleReplayWaiters(pending, error);
     pending.handle?.close(error);
     pending.reject(error);
   };

@@ -3931,6 +3931,70 @@ assert.deepEqual(reconnectStates, [
 ]);
 await reconnectClient.close();
 
+const replayUnsubscribeSockets = [];
+const replayUnsubscribeClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    replayUnsubscribeSockets.push(socket);
+    return socket;
+  },
+});
+const replayUnsubscribeConnecting = replayUnsubscribeClient.connect();
+await nextTurn();
+replayUnsubscribeSockets[0].open();
+replayUnsubscribeSockets[0].message(identityTokenFrame().buffer);
+await replayUnsubscribeConnecting;
+const replayUnsubscribeSubscription = replayUnsubscribeClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+replayUnsubscribeSockets[0].message(subscribeSingleAppliedFrame);
+const replayUnsubscribeHandle = await replayUnsubscribeSubscription;
+replayUnsubscribeSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+await nextTurn();
+replayUnsubscribeSockets[1].open();
+replayUnsubscribeSockets[1].message(identityTokenFrame().buffer);
+assert.deepEqual(replayUnsubscribeClient.state.synchronization, {
+  epoch: 2,
+  synchronized: false,
+  pendingSubscriptions: 1,
+});
+const replayUnsubscribe = replayUnsubscribeHandle.unsubscribe();
+assert.deepEqual(replayUnsubscribeHandle.state, {
+  status: "unsubscribing",
+  rows: ["1-2", "3"],
+});
+await nextTurn();
+assert.equal(replayUnsubscribeSockets[1].sent.length, 1);
+replayUnsubscribeSockets[1].message(reconnectSubscribeSingleAppliedFrame);
+await nextTurn();
+assert.equal(replayUnsubscribeSockets[1].sent.length, 2);
+assert.deepEqual(
+  replayUnsubscribeSockets[1].sent[1],
+  encodeUnsubscribeSingleRequest(0x11121314, { requestId: 2 }).frame,
+);
+assert.equal(replayUnsubscribeHandle.epoch, 2);
+replayUnsubscribeSockets[1].message(bytesFromHex("030200000000000000000000001413121100"));
+await replayUnsubscribe;
+assert.deepEqual(await replayUnsubscribeHandle.closed, { reason: "unsubscribed" });
+assert.equal(replayUnsubscribeClient.state.status, "connected");
+assert.deepEqual(replayUnsubscribeClient.state.synchronization, {
+  epoch: 2,
+  synchronized: true,
+  pendingSubscriptions: 0,
+});
+await replayUnsubscribeClient.close();
+
 const replayCloseSockets = [];
 const replayCloseClient = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe",

@@ -382,7 +382,7 @@ export function createShunterClient(options) {
     const pendingUnsubscribesByQuery = new Map();
     const activeSubscriptionsByQuery = new Map();
     const activeSubscriptionAliasesByRootQuery = new Map();
-    const pendingReplaySubscriptions = new Map();
+    const pendingReplaySubscriptionsByEpoch = new Map();
     const synchronizationWaiters = new Set();
     const listeners = new Set();
     if (options.onStateChange !== undefined) {
@@ -409,12 +409,7 @@ export function createShunterClient(options) {
         synchronizationWaiters.clear();
     };
     const connectionSynchronization = () => {
-        let pendingSubscriptions = 0;
-        for (const replayEpoch of pendingReplaySubscriptions.values()) {
-            if (replayEpoch === connectionEpoch) {
-                pendingSubscriptions += 1;
-            }
-        }
+        const pendingSubscriptions = pendingReplaySubscriptionsByEpoch.get(connectionEpoch)?.size ?? 0;
         return {
             epoch: connectionEpoch,
             synchronized: pendingSubscriptions === 0,
@@ -439,13 +434,52 @@ export function createShunterClient(options) {
         resolveSynchronizationWaiters(synchronization);
     };
     const finishReplaySubscription = (pending) => {
-        if (pending.replayEpoch === undefined || !pendingReplaySubscriptions.delete(pending.queryId)) {
+        if (pending.replayEpoch === undefined) {
             return;
+        }
+        const replaySubscriptions = pendingReplaySubscriptionsByEpoch.get(pending.replayEpoch);
+        if (replaySubscriptions === undefined || !replaySubscriptions.delete(pending.queryId)) {
+            return;
+        }
+        if (replaySubscriptions.size === 0) {
+            pendingReplaySubscriptionsByEpoch.delete(pending.replayEpoch);
         }
         if (pending.replayEpoch === connectionEpoch) {
             publishSynchronization();
         }
     };
+    const trackReplaySubscription = (pending) => {
+        if (pending.replayEpoch === undefined) {
+            return;
+        }
+        let replaySubscriptions = pendingReplaySubscriptionsByEpoch.get(pending.replayEpoch);
+        if (replaySubscriptions === undefined) {
+            replaySubscriptions = new Set();
+            pendingReplaySubscriptionsByEpoch.set(pending.replayEpoch, replaySubscriptions);
+        }
+        replaySubscriptions.add(pending.queryId);
+    };
+    const settleReplayWaiters = (pending, error) => {
+        if (pending.replayWaiters === undefined) {
+            return;
+        }
+        for (const waiter of pending.replayWaiters) {
+            if (error === undefined) {
+                waiter.resolve();
+            }
+            else {
+                waiter.reject(error);
+            }
+        }
+        pending.replayWaiters.clear();
+    };
+    const waitForReplaySubscription = (pending) => new Promise((resolve, reject) => {
+        if (pending.replayWaiters === undefined) {
+            resolve();
+            return;
+        }
+        pending.replayWaiters.add({ resolve, reject });
+    });
     const rejectPendingReducerCalls = (error, interrupted) => {
         for (const [requestId, pending] of pendingReducerCalls) {
             pending.cleanup?.();
@@ -490,6 +524,7 @@ export function createShunterClient(options) {
     const rejectPendingSubscriptions = (error, preserveReplay) => {
         for (const pending of [...pendingSubscriptionsByRequest.values()]) {
             cleanupPendingSubscription(pending);
+            settleReplayWaiters(pending, error);
             if (preserveReplay && pending.replayEpoch !== undefined) {
                 continue;
             }
@@ -521,7 +556,7 @@ export function createShunterClient(options) {
         }
         activeSubscriptionsByQuery.clear();
         activeSubscriptionAliasesByRootQuery.clear();
-        pendingReplaySubscriptions.clear();
+        pendingReplaySubscriptionsByEpoch.clear();
     };
     const markActiveSubscriptionsResynchronizing = () => {
         for (const active of new Set(activeSubscriptionsByQuery.values())) {
@@ -1064,11 +1099,17 @@ export function createShunterClient(options) {
                 return unsubscribePromise;
             }
             unsubscribePromise = (async () => {
-                const activeSocket = socket;
                 if (state.status === "reconnecting" || state.status === "connecting") {
                     removeActiveSubscription(queryId);
                     return;
                 }
+                const pendingReplay = pendingSubscriptionsByQuery.get(queryId);
+                if (pendingReplay?.replayEpoch !== undefined) {
+                    removeActiveSubscription(queryId);
+                    await waitForReplaySubscription(pendingReplay);
+                    removeActiveSubscription(queryId);
+                }
+                const activeSocket = socket;
                 if (state.status !== "connected" || activeSocket === undefined) {
                     throw new ShunterClosedClientError(closedMessage);
                 }
@@ -1173,6 +1214,7 @@ export function createShunterClient(options) {
                 handle: active.handle,
                 eventTable: active.eventTable,
                 replayEpoch: connectionEpoch,
+                replayWaiters: new Set(),
                 resolve: () => { },
                 reject: (error) => {
                     removeActiveSubscription(active.queryId);
@@ -1181,7 +1223,7 @@ export function createShunterClient(options) {
             };
             pendingSubscriptionsByRequest.set(request.requestId, pending);
             pendingSubscriptionsByQuery.set(request.queryId, pending);
-            pendingReplaySubscriptions.set(request.queryId, connectionEpoch);
+            trackReplaySubscription(pending);
             try {
                 activeSocket.send(request.frame);
             }
@@ -1271,6 +1313,7 @@ export function createShunterClient(options) {
             }
         }
         cleanupPendingSubscription(pending);
+        settleReplayWaiters(pending);
         pending.resolve(pending.handle ?? (pending.kind === "declared_view"
             ? declaredViewUnsubscribe(response.queryId)
             : tableSubscriptionUnsubscribe(response.queryId)));
@@ -1318,6 +1361,7 @@ export function createShunterClient(options) {
             return;
         }
         cleanupPendingSubscription(pending);
+        settleReplayWaiters(pending);
         pending.resolve(pending.handle ?? declaredViewUnsubscribe(response.queryId));
     };
     const settleSubscriptionError = (response) => {
@@ -1330,6 +1374,7 @@ export function createShunterClient(options) {
             code: "subscription_failed",
             details: { kind: pending.kind, target: pending.target, response },
         });
+        settleReplayWaiters(pending, error);
         pending.handle?.close(error);
         pending.reject(error);
     };

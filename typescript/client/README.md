@@ -97,7 +97,9 @@ Connected state exposes a synchronization epoch and pending replay count;
 `whenSynchronized()` resolves after replay acknowledgements complete. Managed
 handles enter `resynchronizing` while their retained rows are non-authoritative
 and return to `active` with the new epoch only after the replayed initial
-snapshot is applied. If replay is disabled, handles close on loss.
+snapshot is applied. Unsubscribing during replay waits for that replay response
+before sending the server unsubscribe. If replay is disabled, handles close on
+loss.
 
 This package owns the shared TypeScript runtime surface that generated Shunter
 bindings import. The current slice includes constants, protocol compatibility

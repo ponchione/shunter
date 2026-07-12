@@ -476,6 +476,9 @@ Managed handles track `subscribing`, `active`, `resynchronizing`,
 that supplied the authoritative rows. `resynchronizing` retains the previous
 rows for display but explicitly marks them non-authoritative. Unsubscribe paths
 wait for the matching server acknowledgement or a matching subscription error.
+If disposal begins while replay is pending, the client first waits for that
+replay response and then sends the unsubscribe, so subscribe and unsubscribe
+operations for one query ID never overlap.
 
 ## Reconnect
 

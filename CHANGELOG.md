@@ -12,7 +12,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - TypeScript connections now expose synchronization epochs and subscription
   replay progress, managed handles explicitly enter `resynchronizing` across
   connection loss, and callers can await replay completion with
-  `whenSynchronized()`.
+  `whenSynchronized()`. Unsubscribing a resynchronizing handle now serializes
+  against its in-flight replay instead of overlapping subscribe/unsubscribe
+  operations for the same query ID.
 - TypeScript reducer and procedure calls that lose their authoritative response
   now reject with `ShunterCallInterruptedError` and an unknown outcome instead
   of appearing equivalent to a confirmed server failure.
