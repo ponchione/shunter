@@ -221,13 +221,69 @@ func newFlagSet(stderr io.Writer, name string) *flag.FlagSet {
 }
 
 func parseFlags(fs *flag.FlagSet, args []string) (int, bool) {
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(interspersedFlagArgs(fs, args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0, true
 		}
 		return 2, true
 	}
 	return 0, false
+}
+
+// interspersedFlagArgs preserves positional order while moving recognized
+// flags (and their values) ahead of positionals for the standard library flag
+// parser. A literal -- ends flag recognition and keeps every following token
+// positional.
+func interspersedFlagArgs(fs *flag.FlagSet, args []string) []string {
+	flags := make([]string, 0, len(args))
+	positionals := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			positionals = append(positionals, args[i+1:]...)
+			break
+		}
+		name, hasValue, isFlag := commandLineFlagName(arg)
+		if !isFlag {
+			positionals = append(positionals, arg)
+			continue
+		}
+		flags = append(flags, arg)
+		definition := fs.Lookup(name)
+		if definition == nil || hasValue || isBooleanFlag(definition) {
+			continue
+		}
+		if i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	out := make([]string, 0, len(flags)+1+len(positionals))
+	out = append(out, flags...)
+	if len(positionals) != 0 {
+		out = append(out, "--")
+		out = append(out, positionals...)
+	}
+	return out
+}
+
+func commandLineFlagName(arg string) (name string, hasValue, ok bool) {
+	if len(arg) < 2 || arg[0] != '-' || arg == "-" {
+		return "", false, false
+	}
+	trimmed := strings.TrimLeft(arg, "-")
+	if trimmed == "" {
+		return "", false, true
+	}
+	if before, _, found := strings.Cut(trimmed, "="); found {
+		return before, true, true
+	}
+	return trimmed, false, true
+}
+
+func isBooleanFlag(definition *flag.Flag) bool {
+	boolean, ok := definition.Value.(interface{ IsBoolFlag() bool })
+	return ok && boolean.IsBoolFlag()
 }
 
 func requireNoArgs(stderr io.Writer, fs *flag.FlagSet) int {

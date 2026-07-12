@@ -83,6 +83,79 @@ func TestDescribeHelpDocumentsAllSections(t *testing.T) {
 	assertContains(t, stderr.String(), "all, tables, reducers, procedures, queries, views, or visibility")
 }
 
+func TestRunningAppCommandsAcceptInterspersedFlags(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "flag before positional",
+			args: []string{"call", "--url", "http://127.0.0.1", "--contract", "missing.json", "--format", "yaml", "send_message", `{}`},
+		},
+		{
+			name: "flag between positionals",
+			args: []string{"procedure", "--url", "http://127.0.0.1", "--contract", "missing.json", "send_system_message", "--format", "yaml", `{}`},
+		},
+		{
+			name: "flag after positionals",
+			args: []string{"query", "--url", "http://127.0.0.1", "--contract", "missing.json", "recent_messages", `{}`, "--format", "yaml"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := run(&stdout, &stderr, tc.args); code != 2 {
+				t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+			}
+			assertContains(t, stderr.String(), "output format")
+			if strings.Contains(stderr.String(), "requires") {
+				t.Fatalf("stderr = %s, flag was treated as a positional", stderr.String())
+			}
+		})
+	}
+}
+
+func TestRunningAppInterspersedFlagsHonorDoubleDashAndMalformedValues(t *testing.T) {
+	t.Run("double dash", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(&stdout, &stderr, []string{
+			"call", "--url", "http://127.0.0.1", "--contract", "missing.json",
+			"--", "send_message", `{}`, "--format", "yaml",
+		})
+		if code != 2 {
+			t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+		}
+		assertContains(t, stderr.String(), "call requires reducer name")
+		if strings.Contains(stderr.String(), "output format") {
+			t.Fatalf("stderr = %s, flag after -- was parsed", stderr.String())
+		}
+	})
+
+	t.Run("malformed value after positional", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(&stdout, &stderr, []string{
+			"call", "--url", "http://127.0.0.1", "--contract", "missing.json",
+			"send_message", `{}`, "--timeout", "not-a-duration",
+		})
+		if code != 2 {
+			t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+		}
+		assertContains(t, stderr.String(), "invalid value")
+		assertContains(t, stderr.String(), "timeout")
+	})
+}
+
+func TestInterspersedArgumentSourceFlagsRemainExclusive(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"call", "--url", "http://127.0.0.1", "--contract", "missing.json",
+		"send_message", `{}`, "--args", `{}`,
+	})
+	if code != 2 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	assertContains(t, stderr.String(), "provide only one of positional JSON, --args, --args-file, or --args-hex")
+}
+
 func TestDescribeCommandReadsContractText(t *testing.T) {
 	dir := t.TempDir()
 	contract := cliContractFixture()

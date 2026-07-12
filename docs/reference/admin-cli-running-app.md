@@ -170,6 +170,12 @@ the contract's reducer, procedure, or query parameter schema.
 - Decode rows through contract row schemas when present.
 - Emit text by default and JSON with `--format json`.
 
+Flags may appear before, between, or after reducer, procedure, query, and JSON
+positionals, so the ordering shown by root help is executable. A literal `--`
+ends flag parsing; every following token is positional. Argument input remains
+exclusive across positional JSON, `--args`, `--args-file`, and `--args-hex`
+regardless of where those flags appear.
+
 The CLI does not infer reducer or procedure argument formats when the contract
 does not declare them. In that case, operators must use raw bytes mode or the
 app should export product schemas.

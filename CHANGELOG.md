@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- CLI commands now support interspersed flags, including the root-help forms
+  that place `--format` after reducer, procedure, or query positionals. Literal
+  `--` still terminates flag parsing, malformed values remain usage errors, and
+  positional/flag argument sources remain mutually exclusive.
 - JWKS and OIDC discovery fetches now use a dedicated bounded HTTP client that
   revalidates every redirect target, caps chains at five hops, preserves valid
   cross-host redirects, and rejects non-loopback HTTP targets and every

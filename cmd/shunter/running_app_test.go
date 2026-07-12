@@ -52,9 +52,9 @@ func TestCallCommandInvokesRunningAppReducerJSON(t *testing.T) {
 		"--url", srv.httpURL(),
 		"--contract", contractPath,
 		"--token", "operator-token",
-		"--format", "json",
 		"send_message",
 		`{"author":"Ada","body":"hello"}`,
+		"--format", "json",
 	})
 	if code != 0 {
 		t.Fatalf("call exit code = %d, stderr = %s", code, stderr.String())
