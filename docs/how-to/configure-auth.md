@@ -123,6 +123,11 @@ URLs must use HTTPS except for loopback HTTP in local development and tests.
 `AuthIssuers` and `AuthAudiences` remain the issuer and audience policy;
 discovery entries are not added to those allowlists.
 
+JWKS and discovery redirects are limited to five hops and every target is
+validated again. Valid cross-host HTTPS redirects are supported; HTTPS-to-HTTP
+downgrades are rejected. A loopback HTTP redirect is allowed only from an
+already-HTTP loopback chain.
+
 ### Supabase
 
 Treat Supabase as delegated auth. Your frontend or app code obtains and

@@ -273,7 +273,7 @@ func fetchJWKS(source JWKSConfig) ([]resolvedJWTVerificationKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetch jwks: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := remoteAuthHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch jwks: %w", err)
 	}

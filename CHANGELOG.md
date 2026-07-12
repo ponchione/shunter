@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- JWKS and OIDC discovery fetches now use a dedicated bounded HTTP client that
+  revalidates every redirect target, caps chains at five hops, preserves valid
+  cross-host redirects, and rejects non-loopback HTTP targets and every
+  HTTPS-to-HTTP downgrade without mutating `http.DefaultClient`.
 - Protocol-client close handshakes now use the caller context, so `Close` and
   every `DialAnd*` helper remain bounded by the same end-to-end deadline even
   when a peer never acknowledges close or the context expires immediately after

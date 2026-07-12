@@ -208,6 +208,11 @@ Discovery uses `<issuer>/.well-known/openid-configuration` when
 an explicit discovery URL. Discovery and JWKS URLs must use HTTPS except for
 loopback HTTP used in local development and tests.
 
+Both fetch paths use a dedicated client that revalidates every redirect target,
+allows at most five redirects, and permits cross-host redirects only when the
+target still satisfies that HTTPS-or-loopback rule. An HTTPS request is never
+allowed to downgrade to HTTP, including loopback HTTP.
+
 Local `AuthVerificationKeys` remain useful when deployments want key material
 fully controlled by app configuration. `AuthSigningKey` remains the legacy
 HS256 path and should not be used for third-party OIDC providers.

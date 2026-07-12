@@ -147,7 +147,7 @@ func fetchOIDCDiscovery(source OIDCDiscoveryConfig) (JWKSConfig, error) {
 	if err != nil {
 		return JWKSConfig{}, fmt.Errorf("fetch oidc discovery: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := remoteAuthHTTPClient.Do(req)
 	if err != nil {
 		return JWKSConfig{}, fmt.Errorf("fetch oidc discovery: %w", err)
 	}
