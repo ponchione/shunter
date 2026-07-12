@@ -50,7 +50,10 @@ jobs:
       - name: Staticcheck
         run: go tool staticcheck ./...
       - name: Check whitespace
-        run: git diff --check
+        shell: bash
+        run: |
+          empty_tree="$(git hash-object -t tree /dev/null)"
+          git diff --check "$empty_tree" HEAD --
 
   go-test:
     name: Go tests
