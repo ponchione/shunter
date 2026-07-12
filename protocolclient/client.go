@@ -168,7 +168,7 @@ func (c *Client) Close(ctx context.Context) error {
 	if !c.closeDone.CompareAndSwap(false, true) {
 		return nil
 	}
-	err := c.conn.Close(websocket.StatusNormalClosure, "")
+	err := c.conn.CloseWithContext(ctx, websocket.StatusNormalClosure, "")
 	if err != nil {
 		return classifyContextError(ctx, err)
 	}

@@ -41,6 +41,7 @@ func DialAndCallReducer(ctx context.Context, opts Options, request ReducerCallRe
 	}
 
 	update, callErr := client.CallReducer(ctx, request.Name, request.Arguments)
+	runDialAndBeforeCloseHook()
 	closeErr := client.Close(ctx)
 	if callErr != nil {
 		return identity, update, callErr
@@ -59,6 +60,7 @@ func DialAndExecuteDeclaredQuery(ctx context.Context, opts Options, request Decl
 	}
 
 	response, execErr := client.ExecuteDeclaredQuery(ctx, request)
+	runDialAndBeforeCloseHook()
 	closeErr := client.Close(ctx)
 	if execErr != nil {
 		return identity, response, execErr
@@ -77,6 +79,7 @@ func DialAndExecuteSQLQuery(ctx context.Context, opts Options, request SQLQueryR
 	}
 
 	response, execErr := client.SQLQuery(ctx, request.QueryString)
+	runDialAndBeforeCloseHook()
 	closeErr := client.Close(ctx)
 	if execErr != nil {
 		return identity, response, execErr
@@ -95,6 +98,7 @@ func DialAndCallProcedure(ctx context.Context, opts Options, request ProcedureCa
 	}
 
 	response, callErr := client.CallProcedure(ctx, request.Name, request.Arguments)
+	runDialAndBeforeCloseHook()
 	closeErr := client.Close(ctx)
 	if callErr != nil {
 		return identity, response, callErr
@@ -103,6 +107,16 @@ func DialAndCallProcedure(ctx context.Context, opts Options, request ProcedureCa
 		return identity, response, closeErr
 	}
 	return identity, response, nil
+}
+
+// dialAndBeforeCloseHook is test-only instrumentation for contexts that expire
+// after a one-off operation succeeds but before connection cleanup begins.
+var dialAndBeforeCloseHook func()
+
+func runDialAndBeforeCloseHook() {
+	if dialAndBeforeCloseHook != nil {
+		dialAndBeforeCloseHook()
+	}
 }
 
 // CallReducer sends a full-update reducer call and waits for its matching result.

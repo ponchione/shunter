@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Protocol-client close handshakes now use the caller context, so `Close` and
+  every `DialAnd*` helper remain bounded by the same end-to-end deadline even
+  when a peer never acknowledges close or the context expires immediately after
+  a successful response.
 - Local `Runtime.SubscribeView` results now own their maintained subscription
   through idempotent, concurrency-safe `Close` and `Unsubscribe(ctx)` methods.
   Cleanup removes manager registries, pruning state, active accounting, and

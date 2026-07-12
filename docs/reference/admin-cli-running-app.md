@@ -124,6 +124,9 @@ dial, write, and read waits.
 - The command derives a context with deadline before dialing.
 - The same deadline applies to WebSocket dial, token handshake, request write,
   response wait, and close.
+- Close uses the caller-controlled WebSocket handshake API and forcibly tears
+  down a non-cooperating peer when that same context expires; it does not add a
+  library-owned close wait after the command deadline.
 - Timeout returns a non-zero exit status and includes the target URL, command
   kind, and reducer, procedure, or query name in the error.
 - Reducer calls are not retried automatically. If a query retry is added later,

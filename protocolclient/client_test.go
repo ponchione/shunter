@@ -69,6 +69,125 @@ func TestClientNextRequestIDSkipsZeroAfterWrap(t *testing.T) {
 	}
 }
 
+func TestClientCloseDeadlineBoundsNonCooperatingPeer(t *testing.T) {
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+		<-r.Context().Done()
+	})
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelDial()
+	client, _, err := Dial(dialCtx, Options{URL: srv.wsURL(), Token: "operator-token"})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	closeCtx, cancelClose := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancelClose()
+	started := time.Now()
+	err = client.Close(closeCtx)
+	elapsed := time.Since(started)
+	if !errors.Is(err, ErrTimeout) {
+		t.Fatalf("Close error = %v, want ErrTimeout", err)
+	}
+	if elapsed > 750*time.Millisecond {
+		t.Fatalf("Close elapsed = %v, want caller deadline bound", elapsed)
+	}
+}
+
+func TestDialAndHelpersBoundNonCooperatingCloseByCallerContext(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(context.Context, Options) error
+	}{
+		{
+			name: "reducer",
+			run: func(ctx context.Context, opts Options) error {
+				_, _, err := DialAndCallReducer(ctx, opts, ReducerCallRequest{Name: "send_message"})
+				return err
+			},
+		},
+		{
+			name: "declared query",
+			run: func(ctx context.Context, opts Options) error {
+				_, _, err := DialAndExecuteDeclaredQuery(ctx, opts, DeclaredQueryRequest{Name: "recent_messages"})
+				return err
+			},
+		},
+		{
+			name: "sql query",
+			run: func(ctx context.Context, opts Options) error {
+				_, _, err := DialAndExecuteSQLQuery(ctx, opts, SQLQueryRequest{QueryString: "SELECT * FROM messages"})
+				return err
+			},
+		},
+		{
+			name: "procedure",
+			run: func(ctx context.Context, opts Options) error {
+				_, _, err := DialAndCallProcedure(ctx, opts, ProcedureCallRequest{Name: "send_system_message"})
+				return err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, mode := range []struct {
+				name              string
+				timeout           time.Duration
+				cancelBeforeClose bool
+				wantErr           error
+			}{
+				{name: "deadline", timeout: 100 * time.Millisecond, wantErr: ErrTimeout},
+				{name: "already canceled after operation", timeout: 2 * time.Second, cancelBeforeClose: true, wantErr: context.Canceled},
+			} {
+				t.Run(mode.name, func(t *testing.T) {
+					srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+						ws := acceptProtocolClientTestConn(t, w, r)
+						defer ws.CloseNow()
+						writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+						msg, ok := readProtocolClientMessage(t, r, ws)
+						if !ok {
+							return
+						}
+						switch request := msg.(type) {
+						case protocol.CallReducerMsg:
+							writeProtocolClientServerMessage(t, ws, protocol.TransactionUpdate{
+								Status:      protocol.StatusCommitted{},
+								ReducerCall: protocol.ReducerCallInfo{ReducerName: request.ReducerName, RequestID: request.RequestID},
+							})
+						case protocol.DeclaredQueryMsg:
+							writeProtocolClientServerMessage(t, ws, protocol.OneOffQueryResponse{MessageID: request.MessageID})
+						case protocol.OneOffQueryMsg:
+							writeProtocolClientServerMessage(t, ws, protocol.OneOffQueryResponse{MessageID: request.MessageID})
+						case protocol.CallProcedureMsg:
+							writeProtocolClientServerMessage(t, ws, protocol.ProcedureResponse{MessageID: request.MessageID})
+						default:
+							t.Errorf("client message = %T, want one-off request", msg)
+							return
+						}
+						<-r.Context().Done()
+					})
+					ctx, cancel := context.WithTimeout(context.Background(), mode.timeout)
+					defer cancel()
+					if mode.cancelBeforeClose {
+						previous := dialAndBeforeCloseHook
+						dialAndBeforeCloseHook = cancel
+						t.Cleanup(func() { dialAndBeforeCloseHook = previous })
+					}
+					started := time.Now()
+					err := tc.run(ctx, Options{URL: srv.wsURL(), Token: "operator-token"})
+					elapsed := time.Since(started)
+					if !errors.Is(err, mode.wantErr) {
+						t.Fatalf("DialAnd helper error = %v, want %v", err, mode.wantErr)
+					}
+					if elapsed > 750*time.Millisecond {
+						t.Fatalf("DialAnd helper elapsed = %v, want caller-context close bound", elapsed)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestDialRequiresExplicitTokenBeforeNetwork(t *testing.T) {
 	called := make(chan struct{}, 1)
 	srv := protocolClientTestServer(t, func(http.ResponseWriter, *http.Request) {
