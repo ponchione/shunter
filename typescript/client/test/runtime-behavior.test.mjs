@@ -25,6 +25,7 @@ import {
   SHUNTER_SUBPROTOCOL_V1,
   SHUNTER_SUBPROTOCOL_V2,
   ShunterAuthError,
+  ShunterCallInterruptedError,
   ShunterClosedClientError,
   ShunterContractMismatchError,
   ShunterProtocolError,
@@ -1712,8 +1713,14 @@ assert.deepEqual(
   encodeReducerCallRequest("send", new Uint8Array([0x02]), { requestId: 2 }).frame,
 );
 const autoReducerIdClosing = autoReducerIdClient.close();
-await assert.rejects(explicitLowReducerRequest, ShunterClosedClientError);
-await assert.rejects(autoAllocatedReducerRequest, ShunterClosedClientError);
+await assert.rejects(
+  explicitLowReducerRequest,
+  assertInterruptedCall(undefined, "reducer", "send", { requestId: 1 }),
+);
+await assert.rejects(
+  autoAllocatedReducerRequest,
+  assertInterruptedCall(undefined, "reducer", "send", { requestId: 2 }),
+);
 await autoReducerIdClosing;
 
 const reducerFailure = client.callReducer("send", new Uint8Array(), {
@@ -2992,6 +2999,9 @@ await pendingCloseConnecting;
 const pendingReducerClose = pendingCloseClient.callReducer("send", new Uint8Array([0xaa]), {
   requestId: 0x21222324,
 });
+const pendingProcedureClose = pendingCloseClient.callProcedure("refresh", new Uint8Array([0xbb]), {
+  messageId: new Uint8Array([0x03, 0x04]),
+});
 const pendingQueryClose = pendingCloseClient.runDeclaredQuery("recent_users", {
   messageId: new Uint8Array([0x01, 0x02]),
 });
@@ -2999,9 +3009,16 @@ const pendingTableClose = pendingCloseClient.subscribeTable("users", undefined, 
   requestId: 0x01020304,
   queryId: 0x11121314,
 });
-assert.equal(pendingCloseSockets[0].sent.length, 3);
+assert.equal(pendingCloseSockets[0].sent.length, 4);
 const pendingClientClose = pendingCloseClient.close();
-await assert.rejects(pendingReducerClose, ShunterClosedClientError);
+await assert.rejects(
+  pendingReducerClose,
+  assertInterruptedCall(undefined, "reducer", "send", { requestId: 0x21222324 }),
+);
+await assert.rejects(
+  pendingProcedureClose,
+  assertInterruptedCall(undefined, "procedure", "refresh", { messageId: new Uint8Array([0x03, 0x04]) }),
+);
 await assert.rejects(pendingQueryClose, ShunterClosedClientError);
 await assert.rejects(pendingTableClose, ShunterClosedClientError);
 await pendingClientClose;
@@ -3146,19 +3163,52 @@ const unexpectedCloseReducer = unexpectedCloseClient.callReducer("send", new Uin
 const unexpectedCloseQuery = unexpectedCloseClient.runDeclaredQuery("recent_users", {
   messageId: new Uint8Array([0x09, 0x08]),
 });
-assert.equal(unexpectedCloseSockets[0].sent.length, 3);
+const unexpectedCloseProcedure = unexpectedCloseClient.callProcedure("refresh", new Uint8Array([0xbb]), {
+  messageId: new Uint8Array([0x07, 0x06]),
+});
+assert.equal(unexpectedCloseSockets[0].sent.length, 4);
 unexpectedCloseSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
 assert.equal(unexpectedCloseClient.state.status, "closed");
 const unexpectedCloseError = unexpectedCloseClient.state.error;
 assert(unexpectedCloseError instanceof ShunterClosedClientError);
 assert.equal(unexpectedCloseError.code, "1006");
 assert.deepEqual(unexpectedCloseError.details, { reason: "lost", wasClean: false });
-const assertUnexpectedCloseError = (error) => {
+function assertInterruptedCall(cause, operation, name, expectedIds) {
+  return (error) => {
+    assert(error instanceof ShunterCallInterruptedError);
+    assert.equal(error.kind, "interrupted");
+    assert.equal(error.code, "call_outcome_unknown");
+    assert.equal(error.outcome, "unknown");
+    assert.equal(error.operation, operation);
+    assert.equal(error.operationName, name);
+    if (cause !== undefined) {
+      assert.strictEqual(error.cause, cause);
+    } else {
+      assert(error.cause instanceof ShunterClosedClientError);
+    }
+    if (expectedIds.requestId !== undefined) {
+      assert.equal(error.requestId, expectedIds.requestId);
+    }
+    if (expectedIds.messageId !== undefined) {
+      assert.deepEqual(error.messageId, expectedIds.messageId);
+    }
+    return true;
+  };
+}
+await assert.rejects(
+  unexpectedCloseReducer,
+  assertInterruptedCall(unexpectedCloseError, "reducer", "send", { requestId: 0x21222324 }),
+);
+await assert.rejects(
+  unexpectedCloseProcedure,
+  assertInterruptedCall(unexpectedCloseError, "procedure", "refresh", {
+    messageId: new Uint8Array([0x07, 0x06]),
+  }),
+);
+await assert.rejects(unexpectedCloseQuery, (error) => {
   assert.strictEqual(error, unexpectedCloseError);
   return true;
-};
-await assert.rejects(unexpectedCloseReducer, assertUnexpectedCloseError);
-await assert.rejects(unexpectedCloseQuery, assertUnexpectedCloseError);
+});
 const unexpectedClosed = await unexpectedCloseHandle.closed;
 assert.equal(unexpectedClosed.reason, "error");
 assert.strictEqual(unexpectedClosed.error, unexpectedCloseError);
@@ -3211,12 +3261,14 @@ assert.deepEqual(transportErrorSockets[0].closeCalls[0], {
   code: 1000,
   reason: "transport failure",
 });
-const assertTransportError = (error) => {
+await assert.rejects(
+  transportErrorReducer,
+  assertInterruptedCall(transportError, "reducer", "send", { requestId: 0x21222324 }),
+);
+await assert.rejects(transportErrorQuery, (error) => {
   assert.strictEqual(error, transportError);
   return true;
-};
-await assert.rejects(transportErrorReducer, assertTransportError);
-await assert.rejects(transportErrorQuery, assertTransportError);
+});
 const transportErrorClosed = await transportErrorHandle.closed;
 assert.equal(transportErrorClosed.reason, "error");
 assert.strictEqual(transportErrorClosed.error, transportError);
@@ -3270,7 +3322,10 @@ const assertUnknownFrameError = (error) => {
   assert.strictEqual(error, unknownFrameError);
   return true;
 };
-await assert.rejects(unknownFrameReducer, assertUnknownFrameError);
+await assert.rejects(
+  unknownFrameReducer,
+  assertInterruptedCall(unknownFrameError, "reducer", "send", { requestId: 0x21222324 }),
+);
 await assert.rejects(unknownFrameQuery, assertUnknownFrameError);
 const unknownFrameClosed = await unknownFrameHandle.closed;
 assert.equal(unknownFrameClosed.reason, "error");
@@ -3327,7 +3382,10 @@ const assertSubscriptionEvaluationFailure = (error) => {
   assert.strictEqual(error, subscriptionEvaluationFailure);
   return true;
 };
-await assert.rejects(subscriptionEvaluationReducer, assertSubscriptionEvaluationFailure);
+await assert.rejects(
+  subscriptionEvaluationReducer,
+  assertInterruptedCall(subscriptionEvaluationFailure, "reducer", "send", { requestId: 0x21222324 }),
+);
 await assert.rejects(subscriptionEvaluationQuery, assertSubscriptionEvaluationFailure);
 const subscriptionEvaluationClosed = await subscriptionEvaluationHandle.closed;
 assert.equal(subscriptionEvaluationClosed.reason, "error");
@@ -3376,10 +3434,10 @@ assert.equal(activeSubscriptionFailure.code, "subscription_failed");
 assert.match(activeSubscriptionFailure.message, /subscription eval denied/);
 assert.equal(activeSubscriptionFailure.details.response.queryId, 0x11121314);
 assert.deepEqual(activeSubscriptionErrorSockets[0].closeCalls, [{ code: 1000, reason: "protocol failure" }]);
-await assert.rejects(activeSubscriptionErrorReducer, (error) => {
-  assert.strictEqual(error, activeSubscriptionFailure);
-  return true;
-});
+await assert.rejects(
+  activeSubscriptionErrorReducer,
+  assertInterruptedCall(activeSubscriptionFailure, "reducer", "send", { requestId: 0x21222324 }),
+);
 const activeSubscriptionErrorClosed = await activeSubscriptionErrorHandle.closed;
 assert.equal(activeSubscriptionErrorClosed.reason, "error");
 assert.strictEqual(activeSubscriptionErrorClosed.error, activeSubscriptionFailure);
@@ -3432,7 +3490,14 @@ const abortedReducer = abortClient.callReducer("send", new Uint8Array([0xaa]), {
   signal: reducerAbort.signal,
 });
 reducerAbort.abort();
-await assert.rejects(abortedReducer, ShunterClosedClientError);
+await assert.rejects(abortedReducer, (error) => {
+  assert(error instanceof ShunterCallInterruptedError);
+  assert.equal(error.operation, "reducer");
+  assert.equal(error.operationName, "send");
+  assert.equal(error.requestId, 0x21222324);
+  assert(error.cause instanceof ShunterClosedClientError);
+  return true;
+});
 abortSockets[0].message(committedUpdateFrame);
 assert.equal(abortClient.state.status, "connected");
 const reusedReducerRequest = abortClient.callReducer("send", new Uint8Array([0xaa]), {
@@ -3440,6 +3505,28 @@ const reusedReducerRequest = abortClient.callReducer("send", new Uint8Array([0xa
 });
 abortSockets[0].message(committedUpdateFrame);
 assert.deepEqual(await reusedReducerRequest, committedUpdateFrame);
+
+const procedureAbort = new AbortController();
+const abortedProcedure = abortClient.callProcedure("refresh", new Uint8Array([0xbb]), {
+  messageId: new Uint8Array([0x03, 0x04]),
+  signal: procedureAbort.signal,
+});
+procedureAbort.abort();
+await assert.rejects(abortedProcedure, (error) => {
+  assert(error instanceof ShunterCallInterruptedError);
+  assert.equal(error.operation, "procedure");
+  assert.equal(error.operationName, "refresh");
+  assert.deepEqual(error.messageId, new Uint8Array([0x03, 0x04]));
+  assert(error.cause instanceof ShunterClosedClientError);
+  return true;
+});
+abortSockets[0].message(procedureSuccessFrame);
+assert.equal(abortClient.state.status, "connected");
+const reusedProcedureRequest = abortClient.callProcedure("refresh", new Uint8Array([0xbb]), {
+  messageId: new Uint8Array([0x03, 0x04]),
+});
+abortSockets[0].message(procedureSuccessFrame);
+assert.deepEqual(await reusedProcedureRequest, new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
 
 const queryAbort = new AbortController();
 const abortedQuery = abortClient.runDeclaredQuery("recent_users", {
@@ -3745,6 +3832,11 @@ reconnectSockets[0].message(identityTokenFrame({ token: "initial-token" }).buffe
 await reconnecting;
 assert.equal(reconnectTokenCalls, 1);
 assert.equal(reconnectSockets[0].url, "ws://127.0.0.1:3000/subscribe?token=token-1");
+assert.deepEqual(reconnectClient.state.synchronization, {
+  epoch: 1,
+  synchronized: true,
+  pendingSubscriptions: 0,
+});
 const reconnectHandleSubscription = reconnectClient.subscribeTable("users", undefined, {
   requestId: 0x01020304,
   queryId: 0x11121314,
@@ -3756,12 +3848,30 @@ const reconnectHandle = await reconnectHandleSubscription;
 assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["1-2", "3"] });
 reconnectSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
 assert.equal(reconnectClient.state.status, "reconnecting");
+assert.deepEqual(reconnectHandle.state, {
+  status: "resynchronizing",
+  rows: ["1-2", "3"],
+  previousEpoch: 1,
+  targetEpoch: 2,
+});
 await nextTurn();
 assert.equal(reconnectSockets.length, 2);
 assert.equal(reconnectSockets[1].url, "ws://127.0.0.1:3000/subscribe?token=token-2");
 reconnectSockets[1].open();
 reconnectSockets[1].message(identityTokenFrame({ token: "reconnected-token" }).buffer);
 assert.equal(reconnectClient.state.status, "connected");
+assert.deepEqual(reconnectClient.state.synchronization, {
+  epoch: 2,
+  synchronized: false,
+  pendingSubscriptions: 1,
+});
+let firstReplayCompleted = false;
+const firstReplaySynchronization = reconnectClient.whenSynchronized().then((synchronization) => {
+  firstReplayCompleted = true;
+  return synchronization;
+});
+await nextTurn();
+assert.equal(firstReplayCompleted, false);
 assert.deepEqual(
   reconnectSockets[1].sent[0],
   encodeTableSubscriptionRequest("users", {
@@ -3771,14 +3881,27 @@ assert.deepEqual(
 );
 reconnectSockets[1].message(reconnectSubscribeSingleAppliedFrame);
 assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["4-5"] });
+assert.equal(reconnectHandle.epoch, 2);
+assert.deepEqual(await firstReplaySynchronization, {
+  epoch: 2,
+  synchronized: true,
+  pendingSubscriptions: 0,
+});
 await nextTurn();
 reconnectSockets[1].dispatch("close", { code: 1006, reason: "lost again", wasClean: false });
 assert.equal(reconnectClient.state.status, "reconnecting");
+assert.deepEqual(reconnectHandle.state, {
+  status: "resynchronizing",
+  rows: ["4-5"],
+  previousEpoch: 2,
+  targetEpoch: 3,
+});
 await nextTurn();
 assert.equal(reconnectSockets.length, 3);
 reconnectSockets[2].open();
 reconnectSockets[2].message(identityTokenFrame({ token: "second-reconnected-token" }).buffer);
 assert.equal(reconnectClient.state.status, "connected");
+const secondReplaySynchronization = reconnectClient.whenSynchronized();
 assert.deepEqual(
   reconnectSockets[2].sent[0],
   encodeTableSubscriptionRequest("users", {
@@ -3788,17 +3911,76 @@ assert.deepEqual(
 );
 reconnectSockets[2].message(secondReconnectSubscribeSingleAppliedFrame);
 assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["4-5"] });
+assert.equal(reconnectHandle.epoch, 3);
+assert.deepEqual(await secondReplaySynchronization, {
+  epoch: 3,
+  synchronized: true,
+  pendingSubscriptions: 0,
+});
 assert.deepEqual(reconnectStates, [
   "connecting",
   "connected",
   "reconnecting",
   "connecting",
   "connected",
+  "connected",
   "reconnecting",
   "connecting",
   "connected",
+  "connected",
 ]);
 await reconnectClient.close();
+
+const replayCloseSockets = [];
+const replayCloseClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    replayCloseSockets.push(socket);
+    return socket;
+  },
+});
+const replayCloseConnecting = replayCloseClient.connect();
+await nextTurn();
+replayCloseSockets[0].open();
+replayCloseSockets[0].message(identityTokenFrame().buffer);
+await replayCloseConnecting;
+const replayCloseSubscription = replayCloseClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+replayCloseSockets[0].message(subscribeSingleAppliedFrame);
+const replayCloseHandle = await replayCloseSubscription;
+replayCloseSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+await nextTurn();
+assert.equal(replayCloseSockets.length, 2);
+replayCloseSockets[1].open();
+replayCloseSockets[1].message(identityTokenFrame().buffer);
+assert.deepEqual(replayCloseClient.state.synchronization, {
+  epoch: 2,
+  synchronized: false,
+  pendingSubscriptions: 1,
+});
+const replayCloseSynchronization = replayCloseClient.whenSynchronized();
+const replayCloseClosing = replayCloseClient.close();
+await assert.rejects(replayCloseSynchronization, (error) => {
+  assert(error instanceof ShunterClosedClientError);
+  assert.match(error.message, /connection is closing/);
+  return true;
+});
+await replayCloseClosing;
+const replayCloseClosed = await replayCloseHandle.closed;
+assert.equal(replayCloseClosed.reason, "error");
+assert(replayCloseClosed.error instanceof ShunterClosedClientError);
 
 const reconnectEstablishedAuthCloseSockets = [];
 const reconnectEstablishedAuthCloseStates = [];
@@ -3896,18 +4078,21 @@ const reconnectNoReplayHandle = await reconnectNoReplayHandleSubscription;
 assert.deepEqual(reconnectNoReplayHandle.state, { status: "active", rows: ["1-2", "3"] });
 reconnectNoReplaySockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
 assert.equal(reconnectNoReplayClient.state.status, "reconnecting");
+const reconnectNoReplayClosed = await reconnectNoReplayHandle.closed;
+assert.equal(reconnectNoReplayClosed.reason, "error");
+assert.strictEqual(reconnectNoReplayClosed.error, reconnectNoReplayClient.state.error);
+assert.deepEqual(reconnectNoReplayHandle.state, {
+  status: "closed",
+  error: reconnectNoReplayClient.state.error,
+});
 await nextTurn();
 assert.equal(reconnectNoReplaySockets.length, 2);
 reconnectNoReplaySockets[1].open();
 reconnectNoReplaySockets[1].message(identityTokenFrame().buffer);
 assert.equal(reconnectNoReplayClient.state.status, "connected");
 assert.equal(reconnectNoReplaySockets[1].sent.length, 0);
-assert.deepEqual(reconnectNoReplayHandle.state, { status: "active", rows: ["1-2", "3"] });
 assert.deepEqual(reconnectNoReplayStates, ["connecting", "connected", "reconnecting", "connecting", "connected"]);
 await reconnectNoReplayClient.close();
-const reconnectNoReplayClosed = await reconnectNoReplayHandle.closed;
-assert.equal(reconnectNoReplayClosed.reason, "error");
-assert(reconnectNoReplayClosed.error instanceof ShunterClosedClientError);
 
 const reconnectZeroSockets = [];
 const reconnectZeroStates = [];
@@ -3960,12 +4145,14 @@ assert(reconnectZeroError instanceof ShunterClosedClientError);
 assert.equal(reconnectZeroError.code, "1006");
 assert.equal(reconnectZeroTokenCalls, 1);
 assert.equal(reconnectZeroSockets.length, 1);
-const assertReconnectZeroError = (error) => {
+await assert.rejects(
+  reconnectZeroReducer,
+  assertInterruptedCall(reconnectZeroError, "reducer", "send", { requestId: 0x21222324 }),
+);
+await assert.rejects(reconnectZeroQuery, (error) => {
   assert.strictEqual(error, reconnectZeroError);
   return true;
-};
-await assert.rejects(reconnectZeroReducer, assertReconnectZeroError);
-await assert.rejects(reconnectZeroQuery, assertReconnectZeroError);
+});
 const reconnectZeroClosed = await reconnectZeroHandle.closed;
 assert.equal(reconnectZeroClosed.reason, "error");
 assert.strictEqual(reconnectZeroClosed.error, reconnectZeroError);
@@ -4761,6 +4948,7 @@ const exhaustionQuery = exhaustionClient.runDeclaredQuery("recent_users", {
 assert.equal(exhaustionSockets[0].sent.length, 3);
 exhaustionSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
 assert.equal(exhaustionClient.state.status, "reconnecting");
+const initialDisconnect = exhaustionClient.state.error;
 const assertInitialDisconnect = (error) => {
   assert(error instanceof ShunterClosedClientError);
   assert.equal(error.kind, "closed");
@@ -4768,9 +4956,17 @@ const assertInitialDisconnect = (error) => {
   assert.deepEqual(error.details, { reason: "lost", wasClean: false });
   return true;
 };
-await assert.rejects(exhaustionReducer, assertInitialDisconnect);
+await assert.rejects(
+  exhaustionReducer,
+  assertInterruptedCall(initialDisconnect, "reducer", "send", { requestId: 0x21222324 }),
+);
 await assert.rejects(exhaustionQuery, assertInitialDisconnect);
-assert.deepEqual(exhaustionHandle.state, { status: "active", rows: ["1-2", "3"] });
+assert.deepEqual(exhaustionHandle.state, {
+  status: "resynchronizing",
+  rows: ["1-2", "3"],
+  previousEpoch: 1,
+  targetEpoch: 2,
+});
 await nextTurn();
 assert.equal(exhaustionTokenCalls, 2);
 assert.equal(exhaustionSockets.length, 2);
@@ -4989,7 +5185,6 @@ assert.deepEqual(reconnectReplayFailureStates, [
   "connected",
   "reconnecting",
   "connecting",
-  "connected",
   "failed",
   "closed",
 ]);
@@ -5058,8 +5253,73 @@ assert.deepEqual(reconnectReplayErrorStates, [
   "reconnecting",
   "connecting",
   "connected",
+  "connected",
 ]);
 await reconnectReplayErrorClient.close();
+
+const reconnectReplayCallbackSockets = [];
+const reconnectReplayCallbackStates = [];
+let reconnectReplayRowCallbacks = 0;
+const reconnectReplayCallbackClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  reconnect: {
+    enabled: true,
+    maxAttempts: 1,
+    initialDelayMs: 0,
+    maxDelayMs: 0,
+  },
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    reconnectReplayCallbackSockets.push(socket);
+    return socket;
+  },
+  onStateChange: ({ current }) => reconnectReplayCallbackStates.push(current.status),
+});
+const reconnectReplayCallbackConnecting = reconnectReplayCallbackClient.connect();
+await nextTurn();
+reconnectReplayCallbackSockets[0].open();
+reconnectReplayCallbackSockets[0].message(identityTokenFrame().buffer);
+await reconnectReplayCallbackConnecting;
+const reconnectReplayCallbackHandleSubscription = reconnectReplayCallbackClient.subscribeTable("users", () => {
+  reconnectReplayRowCallbacks += 1;
+  if (reconnectReplayRowCallbacks > 1) {
+    throw new Error("replay row callback failed");
+  }
+}, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+reconnectReplayCallbackSockets[0].message(subscribeSingleAppliedFrame);
+const reconnectReplayCallbackHandle = await reconnectReplayCallbackHandleSubscription;
+reconnectReplayCallbackSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+await nextTurn();
+const observedReplayCallbackReconnect = reconnectReplayCallbackClient.connect();
+reconnectReplayCallbackSockets[1].open();
+reconnectReplayCallbackSockets[1].message(identityTokenFrame().buffer);
+await observedReplayCallbackReconnect;
+const replayCallbackSynchronization = reconnectReplayCallbackClient.whenSynchronized();
+reconnectReplayCallbackSockets[1].message(reconnectSubscribeSingleAppliedFrame);
+const reconnectReplayCallbackError = await rejectByNextTurn(replayCallbackSynchronization, (error) => {
+  assert.equal(error.kind, "validation");
+  assert.match(error.message, /row callback failed/);
+});
+assert.equal(reconnectReplayCallbackClient.state.status, "failed");
+assert.strictEqual(reconnectReplayCallbackClient.state.error, reconnectReplayCallbackError);
+const reconnectReplayCallbackClosed = await reconnectReplayCallbackHandle.closed;
+assert.equal(reconnectReplayCallbackClosed.reason, "error");
+assert.strictEqual(reconnectReplayCallbackClosed.error, reconnectReplayCallbackError);
+assert.deepEqual(reconnectReplayCallbackStates, [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "connecting",
+  "connected",
+  "failed",
+]);
+await reconnectReplayCallbackClient.close();
 
 const reconnectAuthSockets = [];
 const reconnectAuthStates = [];

@@ -92,9 +92,12 @@ subscriptions should run from browser-owned lifecycle code such as a Nuxt
 SSR globals or request-shared framework caches; each connected client belongs
 to one browser session.
 
-Reconnect is opt-in. A disconnected interval is a cache boundary: callers that
-need an authoritative view after reconnect should re-read or use the replayed
-initial snapshot rather than assuming continuous delta delivery across the gap.
+Reconnect is opt-in. A disconnected interval is an authority boundary.
+Connected state exposes a synchronization epoch and pending replay count;
+`whenSynchronized()` resolves after replay acknowledgements complete. Managed
+handles enter `resynchronizing` while their retained rows are non-authoritative
+and return to `active` with the new epoch only after the replayed initial
+snapshot is applied. If replay is disabled, handles close on loss.
 
 This package owns the shared TypeScript runtime surface that generated Shunter
 bindings import. The current slice includes constants, protocol compatibility
@@ -161,6 +164,11 @@ host-specific transports.
 `connect()` resolves after the first server frame is decoded as an
 `IdentityToken`. Passing `reconnect: { enabled: true }` reconnects unexpected
 transport failures with configurable bounded backoff.
+`connect()` does not imply that replay is complete: inspect
+`client.state.synchronization` or await `client.whenSynchronized()` when cached
+subscription authority matters. Terminal connection failure or explicit close
+rejects pending synchronization waiters; aborted replay never reports a
+successful synchronized state.
 Token providers must resolve to strings; invalid results fail before a
 WebSocket is created.
 Apps can pass generated `shunterContract` metadata into `createShunterClient()`;
@@ -192,6 +200,13 @@ converted into failed result envelopes on that path. Typed reducer callers can u
 their own argument encoder; generated bindings provide schema-derived argument
 encoders and standalone reducer result product decoders when the contract
 exports those schemas.
+Reducer and procedure calls that were sent but lose the authoritative server
+response—including through explicit close or post-send cancellation—reject
+with `ShunterCallInterruptedError` (`kind: "interrupted"`,
+`outcome: "unknown"`). The operation may have executed; callers must not treat
+that error as a confirmed failure or retry automatically unless the
+application has designed an idempotency policy. Shunter does not provide an
+offline mutation queue.
 `runDeclaredQuery()` currently resolves with the raw `OneOffQueryResponse`
 frame on success and rejects on response errors. Consumers that want a typed raw
 envelope can pass that frame to `decodeRawDeclaredQueryResult()`.

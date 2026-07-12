@@ -274,10 +274,12 @@ later. For dev-auth sessions that intentionally run anonymously, omit the token
 provider instead of returning an empty string.
 
 Reconnect replays active subscriptions after a fresh identity handshake, but a
-disconnected interval is still a cache boundary. Treat route caches, component
-state, and managed subscription row sets as potentially stale after reconnect;
-re-read declared queries or accept the replayed initial subscription snapshot
-when the UI needs an authoritative view. Close route-scoped clients and
+disconnected interval is still an authority boundary. Managed handles report
+`resynchronizing` while retained rows are non-authoritative. After the new
+identity handshake, inspect `client.state.synchronization` or await
+`client.whenSynchronized()`; the latter resolves only after every replayed
+subscription receives an applied/error response. Active handle state carries
+the epoch that made its rows authoritative. Close route-scoped clients and
 subscriptions when their owner is disposed.
 
 Regenerate and rebuild in this order when the Go module contract or local
@@ -323,6 +325,14 @@ if (result.status === "failed") {
   throw result.error;
 }
 ```
+
+If a reducer or procedure request was sent but connection loss, explicit client
+close, or post-send cancellation prevents an authoritative response, the
+promise rejects with
+`ShunterCallInterruptedError`. Its outcome is `unknown`: the operation may
+have executed, so this is distinct from a server-confirmed validation failure.
+Do not retry automatically unless the application has an explicit idempotency
+policy. Shunter does not queue mutations offline.
 
 If a reducer does not export product schemas, keep the app's byte encoding
 documented near the reducer and pass encoded `Uint8Array` values through the
@@ -461,9 +471,11 @@ const unsubscribeFacadeEvents = await app.events.notifications.onInsert(({ row }
 await unsubscribeFacadeEvents();
 ```
 
-Managed handles track `subscribing`, `active`, `unsubscribing`, and `closed`
-states. Unsubscribe paths wait for the matching server acknowledgement or a
-matching subscription error.
+Managed handles track `subscribing`, `active`, `resynchronizing`,
+`unsubscribing`, and `closed` states. `handle.epoch` names the connection epoch
+that supplied the authoritative rows. `resynchronizing` retains the previous
+rows for display but explicitly marks them non-authoritative. Unsubscribe paths
+wait for the matching server acknowledgement or a matching subscription error.
 
 ## Reconnect
 
@@ -486,8 +498,22 @@ const client = createShunterClient({
 
 When reconnect is enabled, token providers are called for each connection
 attempt. Resubscription is enabled by default after a fresh identity handshake.
-A disconnected interval is still a cache boundary: re-read or use the replayed
-initial snapshot after reconnect when the client needs an authoritative view.
+A disconnected interval is an authority boundary. `connect()` resolves at the
+identity handshake; replay may still be pending. Await synchronization when the
+caller needs authoritative managed rows:
+
+```ts
+await client.connect();
+const synchronization = await client.whenSynchronized();
+console.log(synchronization.epoch);
+```
+
+If `resubscribe: false`, existing managed handles close on connection loss
+instead of silently retaining authoritative-looking rows. Auth/token rejection
+does not consume the bounded transport retry loop, and retry exhaustion closes
+all remaining handles and rejects synchronization waiters. Explicit close or
+any other terminal failure also rejects replay waiters; aborted replay never
+reports a synchronized state.
 
 ## Verify SDK Changes
 

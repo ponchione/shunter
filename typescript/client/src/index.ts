@@ -66,6 +66,7 @@ export type ProtocolCompatibilityResult =
 export type ShunterErrorKind =
   | "auth"
   | "contract_mismatch"
+  | "interrupted"
   | "validation"
   | "protocol"
   | "protocol_mismatch"
@@ -148,6 +149,46 @@ export class ShunterTimeoutError extends ShunterError {
 export class ShunterClosedClientError extends ShunterError {
   constructor(message: string, options: ShunterErrorOptions = {}) {
     super("closed", message, options);
+  }
+}
+
+export type ShunterCallOperation = "reducer" | "procedure";
+
+export interface ShunterCallInterruptedErrorOptions extends ShunterErrorOptions {
+  readonly operation: ShunterCallOperation;
+  readonly name: string;
+  readonly requestId?: RequestID;
+  readonly messageId?: Uint8Array;
+}
+
+export class ShunterCallInterruptedError extends ShunterError {
+  readonly operation: ShunterCallOperation;
+  readonly operationName: string;
+  readonly requestId?: RequestID;
+  readonly messageId?: Uint8Array;
+  readonly outcome = "unknown" as const;
+
+  constructor(options: ShunterCallInterruptedErrorOptions) {
+    const details = {
+      operation: options.operation,
+      name: options.name,
+      outcome: "unknown",
+      ...(options.requestId === undefined ? {} : { requestId: options.requestId }),
+      ...(options.messageId === undefined ? {} : { messageId: new Uint8Array(options.messageId) }),
+    };
+    super(
+      "interrupted",
+      `${options.operation === "reducer" ? "Reducer" : "Procedure"} call lost its authoritative response; its outcome is unknown.`,
+      {
+        ...options,
+        code: options.code ?? "call_outcome_unknown",
+        details,
+      },
+    );
+    this.operation = options.operation;
+    this.operationName = options.name;
+    this.requestId = options.requestId;
+    this.messageId = options.messageId === undefined ? undefined : new Uint8Array(options.messageId);
   }
 }
 
@@ -480,6 +521,12 @@ export interface ConnectionMetadata<Protocol extends ProtocolMetadata = Protocol
   readonly contract?: GeneratedContractMetadata;
 }
 
+export interface ConnectionSynchronization {
+  readonly epoch: number;
+  readonly synchronized: boolean;
+  readonly pendingSubscriptions: number;
+}
+
 export interface IdentityTokenMessage {
   readonly identity: Uint8Array;
   readonly token: string;
@@ -489,7 +536,11 @@ export interface IdentityTokenMessage {
 export type ConnectionState<Protocol extends ProtocolMetadata = ProtocolMetadata> =
   | { readonly status: "idle" }
   | { readonly status: "connecting"; readonly attempt: number }
-  | { readonly status: "connected"; readonly metadata: ConnectionMetadata<Protocol> }
+  | {
+      readonly status: "connected";
+      readonly metadata: ConnectionMetadata<Protocol>;
+      readonly synchronization: ConnectionSynchronization;
+    }
   | { readonly status: "reconnecting"; readonly attempt: number; readonly error?: ShunterError }
   | { readonly status: "closing" }
   | { readonly status: "closed"; readonly error?: ShunterError }
@@ -588,6 +639,7 @@ interface PendingDeclaredQuery {
 
 interface PendingProcedureCall {
   readonly name: string;
+  readonly messageId: Uint8Array;
   readonly cleanup?: () => void;
   resolve(value: Uint8Array): void;
   reject(error: ShunterError): void;
@@ -610,6 +662,7 @@ interface PendingSubscription {
   readonly decodeRow?: RowDecoder<unknown>;
   readonly handle?: ManagedSubscriptionHandle<unknown>;
   readonly eventTable?: boolean;
+  readonly replayEpoch?: number;
   readonly cleanup?: () => void;
   resolve(value: SubscriptionUnsubscribe | SubscriptionHandle<unknown>): void;
   reject(error: ShunterError): void;
@@ -646,6 +699,7 @@ interface PendingUnsubscribe {
 export interface ShunterClient<Protocol extends ProtocolMetadata = ProtocolMetadata> {
   readonly state: ConnectionState<Protocol>;
   connect(): Promise<ConnectionMetadata<Protocol>>;
+  whenSynchronized(): Promise<ConnectionSynchronization>;
   callReducer: ReducerCaller<string, Uint8Array, Uint8Array>;
   callProcedure: ProcedureCaller<string, Uint8Array, Uint8Array>;
   runDeclaredQuery: DeclaredQueryRunner<string, Uint8Array>;
@@ -680,6 +734,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   let suppressSocketCloseTransition = false;
   let hasConnected = false;
   let connectGeneration = 0;
+  let connectionEpoch = 0;
   let reconnectAttempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let resolveClose: (() => void) | undefined;
@@ -696,6 +751,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   const pendingUnsubscribesByQuery = new Map<QueryID, PendingUnsubscribe>();
   const activeSubscriptionsByQuery = new Map<QueryID, ActiveSubscription>();
   const activeSubscriptionAliasesByRootQuery = new Map<QueryID, Set<QueryID>>();
+  const pendingReplaySubscriptions = new Map<QueryID, number>();
+  const synchronizationWaiters = new Set<{
+    resolve(synchronization: ConnectionSynchronization): void;
+    reject(error: ShunterError): void;
+  }>();
   const listeners = new Set<ConnectionStateListener<Protocol>>();
   if (options.onStateChange !== undefined) {
     listeners.add(options.onStateChange);
@@ -725,11 +785,67 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     ws.removeEventListener("error", handlers.error);
   };
 
-  const rejectPendingReducerCalls = (error: ShunterError): void => {
+  const rejectSynchronizationWaiters = (error: ShunterError): void => {
+    for (const waiter of synchronizationWaiters) {
+      waiter.reject(error);
+    }
+    synchronizationWaiters.clear();
+  };
+
+  const connectionSynchronization = (): ConnectionSynchronization => {
+    let pendingSubscriptions = 0;
+    for (const replayEpoch of pendingReplaySubscriptions.values()) {
+      if (replayEpoch === connectionEpoch) {
+        pendingSubscriptions += 1;
+      }
+    }
+    return {
+      epoch: connectionEpoch,
+      synchronized: pendingSubscriptions === 0,
+      pendingSubscriptions,
+    };
+  };
+
+  const resolveSynchronizationWaiters = (synchronization: ConnectionSynchronization): void => {
+    if (!synchronization.synchronized) {
+      return;
+    }
+    for (const waiter of synchronizationWaiters) {
+      waiter.resolve(synchronization);
+    }
+    synchronizationWaiters.clear();
+  };
+
+  const publishSynchronization = (): void => {
+    if (state.status !== "connected") {
+      return;
+    }
+    const synchronization = connectionSynchronization();
+    setState({ status: "connected", metadata: state.metadata, synchronization });
+    resolveSynchronizationWaiters(synchronization);
+  };
+
+  const finishReplaySubscription = (pending: PendingSubscription): void => {
+    if (pending.replayEpoch === undefined || !pendingReplaySubscriptions.delete(pending.queryId)) {
+      return;
+    }
+    if (pending.replayEpoch === connectionEpoch) {
+      publishSynchronization();
+    }
+  };
+
+  const rejectPendingReducerCalls = (error: ShunterError, interrupted: boolean): void => {
     for (const [requestId, pending] of pendingReducerCalls) {
       pending.cleanup?.();
       pendingReducerCalls.delete(requestId);
-      pending.reject(error);
+      pending.reject(interrupted
+        ? new ShunterCallInterruptedError({
+          operation: "reducer",
+          name: pending.name,
+          requestId,
+          cause: error,
+        })
+        : error);
     }
   };
 
@@ -741,11 +857,18 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
   };
 
-  const rejectPendingProcedureCalls = (error: ShunterError): void => {
+  const rejectPendingProcedureCalls = (error: ShunterError, interrupted: boolean): void => {
     for (const [messageKey, pending] of pendingProcedureCalls) {
       pending.cleanup?.();
       pendingProcedureCalls.delete(messageKey);
-      pending.reject(error);
+      pending.reject(interrupted
+        ? new ShunterCallInterruptedError({
+          operation: "procedure",
+          name: pending.name,
+          messageId: pending.messageId,
+          cause: error,
+        })
+        : error);
     }
   };
 
@@ -753,11 +876,15 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     pending.cleanup?.();
     pendingSubscriptionsByRequest.delete(pending.requestId);
     pendingSubscriptionsByQuery.delete(pending.queryId);
+    finishReplaySubscription(pending);
   };
 
-  const rejectPendingSubscriptions = (error: ShunterError): void => {
+  const rejectPendingSubscriptions = (error: ShunterError, preserveReplay: boolean): void => {
     for (const pending of [...pendingSubscriptionsByRequest.values()]) {
       cleanupPendingSubscription(pending);
+      if (preserveReplay && pending.replayEpoch !== undefined) {
+        continue;
+      }
       pending.handle?.close(error);
       pending.reject(error);
     }
@@ -776,11 +903,14 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
   };
 
-  const rejectInFlightOperations = (error: ShunterError): void => {
-    rejectPendingReducerCalls(error);
-    rejectPendingProcedureCalls(error);
+  const rejectInFlightOperations = (
+    error: ShunterError,
+    options: { readonly interruptedCalls?: boolean; readonly preserveReplay?: boolean } = {},
+  ): void => {
+    rejectPendingReducerCalls(error, options.interruptedCalls === true);
+    rejectPendingProcedureCalls(error, options.interruptedCalls === true);
     rejectPendingDeclaredQueries(error);
-    rejectPendingSubscriptions(error);
+    rejectPendingSubscriptions(error, options.preserveReplay === true);
     rejectPendingUnsubscribes(error);
   };
 
@@ -790,10 +920,18 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
     activeSubscriptionsByQuery.clear();
     activeSubscriptionAliasesByRootQuery.clear();
+    pendingReplaySubscriptions.clear();
   };
 
-  const rejectPendingOperations = (error: ShunterError): void => {
-    rejectInFlightOperations(error);
+  const markActiveSubscriptionsResynchronizing = (): void => {
+    for (const active of new Set(activeSubscriptionsByQuery.values())) {
+      active.handle?.markResynchronizing(connectionEpoch + 1);
+    }
+  };
+
+  const rejectPendingOperations = (error: ShunterError, interruptedCalls = false): void => {
+    rejectSynchronizationWaiters(error);
+    rejectInFlightOperations(error, { interruptedCalls });
     closeActiveSubscriptions(error);
   };
 
@@ -819,7 +957,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return;
     }
     rejectConnect?.(error);
-    rejectPendingOperations(error);
+    rejectPendingOperations(error, true);
     setState({ status: "closed", error });
     finishClose();
   };
@@ -827,6 +965,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   const failConnecting = (error: ShunterError): void => {
     suppressSocketCloseTransition = true;
     rejectConnect?.(error);
+    rejectSynchronizationWaiters(error);
     setState({ status: "failed", error });
     try {
       socket?.close(closeNormalCode, "protocol failure");
@@ -838,8 +977,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
 
   const failConnected = (error: ShunterError): void => {
     suppressSocketCloseTransition = true;
-    rejectPendingOperations(error);
     setState({ status: "failed", error });
+    rejectPendingOperations(error, true);
     try {
       socket?.close(closeNormalCode, "protocol failure");
     } catch {
@@ -867,9 +1006,17 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
     reconnectAttempt += 1;
     rejectConnect?.(error);
-    rejectInFlightOperations(error);
-    finishClose();
     setState({ status: "reconnecting", attempt: reconnectAttempt, error });
+    if (reconnectOptions.resubscribe) {
+      markActiveSubscriptionsResynchronizing();
+    } else {
+      closeActiveSubscriptions(error);
+    }
+    rejectInFlightOperations(error, {
+      interruptedCalls: true,
+      preserveReplay: reconnectOptions.resubscribe,
+    });
+    finishClose();
     const delay = reconnectDelayMs(reconnectOptions, reconnectAttempt);
     clearReconnectTimer();
     reconnectTimer = setTimeout(() => {
@@ -902,7 +1049,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     const closedError = new ShunterClosedClientError("Shunter client connection is closing.");
     if (state.status === "failed") {
       rejectConnect?.(closedError);
-      rejectPendingOperations(closedError);
+      rejectPendingOperations(closedError, true);
       setState({ status: "closed" });
       finishClose();
       return Promise.resolve();
@@ -913,7 +1060,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return Promise.resolve();
     }
     rejectConnect?.(closedError);
-    rejectPendingOperations(closedError);
+    rejectPendingOperations(closedError, true);
     setState({ status: "closing" });
     const pendingClose = new Promise<void>((resolve) => {
       resolveClose = resolve;
@@ -1139,7 +1286,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     for (let i = 0; i < rowBytes.length; i += 1) {
       cacheRow(active.rowCache, rowBytes[i], rows[i]);
     }
-    active.handle?.replaceRows(cachedRows(active.rowCache));
+    active.handle?.replaceRows(cachedRows(active.rowCache), connectionEpoch);
   };
 
   const applyCachedUpdate = (
@@ -1152,7 +1299,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return;
     }
     if (active.eventTable) {
-      active.handle.replaceRows([]);
+      active.handle.replaceRows([], connectionEpoch);
       return;
     }
     if (update.insertRowBytes === undefined) {
@@ -1177,7 +1324,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         cacheRow(active.rowCache, update.insertRowBytes[i], decodedInserts[i]);
       }
     }
-    active.handle.replaceRows(cachedRows(active.rowCache));
+    active.handle.replaceRows(cachedRows(active.rowCache), connectionEpoch);
   };
 
   const registerActiveSubscription = (
@@ -1479,7 +1626,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       "Table unsubscribe request send failed",
     );
 
-  const resubscribeActiveSubscriptions = (activeSocket: WebSocketLike): ShunterError | undefined => {
+  const resubscribeActiveSubscriptions = (
+    activeSocket: WebSocketLike,
+    selectedSubprotocol: string,
+  ): ShunterError | undefined => {
     if (!reconnectOptions.resubscribe) {
       return undefined;
     }
@@ -1499,7 +1649,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         : undefined;
       if (requestParams !== undefined) {
         try {
-          assertDeclaredReadParametersSupported(state.status === "connected" ? state.metadata.subprotocol : undefined, options.protocol);
+          assertDeclaredReadParametersSupported(selectedSubprotocol, options.protocol);
         } catch (error) {
           return isShunterError(error) ? error : toShunterError(error, "protocol_mismatch", "Declared view resubscribe protocol check failed");
         }
@@ -1534,6 +1684,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         decodeRow: active.decodeRow,
         handle: active.handle,
         eventTable: active.eventTable,
+        replayEpoch: connectionEpoch,
         resolve: () => {},
         reject: (error) => {
           removeActiveSubscription(active.queryId);
@@ -1542,6 +1693,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       };
       pendingSubscriptionsByRequest.set(request.requestId, pending);
       pendingSubscriptionsByQuery.set(request.queryId, pending);
+      pendingReplaySubscriptions.set(request.queryId, connectionEpoch);
       try {
         activeSocket.send(request.frame);
       } catch (error) {
@@ -1605,10 +1757,6 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         });
       } catch (error) {
         const callbackError = toShunterError(error, "validation", "SubscribeSingleApplied raw rows callback failed");
-        removeActiveSubscription(response.queryId);
-        cleanupPendingSubscription(pending);
-        pending.handle?.close(callbackError);
-        pending.reject(callbackError);
         failConnected(callbackError);
         return;
       }
@@ -1621,10 +1769,6 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         pending.onInitialRows?.(rows);
       } catch (error) {
         const callbackError = toShunterError(error, "validation", "SubscribeSingleApplied row callback failed");
-        removeActiveSubscription(response.queryId);
-        cleanupPendingSubscription(pending);
-        pending.handle?.close(callbackError);
-        pending.reject(callbackError);
         failConnected(callbackError);
         return;
       }
@@ -1636,10 +1780,6 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         pending.onInitialRows?.(cloneRowBytes(rows));
       } catch (error) {
         const callbackError = toShunterError(error, "validation", "SubscribeSingleApplied raw row callback failed");
-        removeActiveSubscription(response.queryId);
-        cleanupPendingSubscription(pending);
-        pending.handle?.close(callbackError);
-        pending.reject(callbackError);
         failConnected(callbackError);
         return;
       }
@@ -1682,26 +1822,18 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       rowCache: pending.handle === undefined ? undefined : new Map(),
       eventTable: pending.eventTable,
     }, response.updates.map((update) => update.queryId));
-    pending.handle?.replaceRows([]);
+    pending.handle?.replaceRows([], connectionEpoch);
     if (pending.onInitialRows !== undefined && pending.decodeRow !== undefined) {
       try {
         pending.onInitialRows(decodeSubscriptionInitialRows(response.updates, pending.decodeRow, "SubscribeMultiApplied"));
       } catch (error) {
         const callbackError = toShunterError(error, "validation", "SubscribeMultiApplied initial row callback failed");
-        removeActiveSubscription(response.queryId);
-        cleanupPendingSubscription(pending);
-        pending.handle?.close(callbackError);
-        pending.reject(callbackError);
         failConnected(callbackError);
         return;
       }
     }
     const updateError = dispatchRawSubscriptionUpdates(response.updates, "SubscribeMultiApplied");
     if (updateError !== undefined) {
-      removeActiveSubscription(response.queryId);
-      cleanupPendingSubscription(pending);
-      pending.handle?.close(updateError);
-      pending.reject(updateError);
       failConnected(updateError);
       return;
     }
@@ -1900,6 +2032,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
               ? error
               : new ShunterAuthError("Token provider failed.", { cause: error });
           setState({ status: "failed", error: shunterError });
+          rejectSynchronizationWaiters(shunterError);
           finishClose();
           reject(shunterError);
           return;
@@ -1911,6 +2044,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         } catch (error) {
           const shunterError = toShunterError(error, "transport", "Create WebSocket failed");
           setState({ status: "failed", error: shunterError });
+          rejectSynchronizationWaiters(shunterError);
           finishClose();
           reject(shunterError);
           return;
@@ -1965,13 +2099,17 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
               };
               cleanupOpeningAbort();
               hasConnected = true;
-              setState({ status: "connected", metadata });
-              const resubscribeError = resubscribeActiveSubscriptions(ws);
+              connectionEpoch += 1;
+              const resubscribeError = resubscribeActiveSubscriptions(ws, metadata.subprotocol);
               if (resubscribeError !== undefined) {
-                failConnected(resubscribeError);
+                rejectPendingOperations(resubscribeError);
+                failConnecting(resubscribeError);
                 reject(resubscribeError);
                 return;
               }
+              const synchronization = connectionSynchronization();
+              setState({ status: "connected", metadata, synchronization });
+              resolveSynchronizationWaiters(synchronization);
               resolve(metadata);
             } catch (error) {
               cleanupOpeningAbort();
@@ -2017,7 +2155,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
                 details: { reason: event.reason, wasClean: event.wasClean },
               });
               if (!scheduleReconnect(error)) {
-                rejectPendingOperations(error);
+                rejectPendingOperations(error, true);
                 setState({ status: "closed", error });
                 finishClose();
               }
@@ -2034,6 +2172,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
               });
               if (!scheduleReconnect(error)) {
                 setState({ status: "failed", error });
+                rejectSynchronizationWaiters(error);
                 reject(error);
                 finishClose();
               }
@@ -2049,7 +2188,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
               });
               suppressSocketCloseTransition = true;
               if (!scheduleReconnect(error)) {
-                rejectPendingOperations(error);
+                rejectPendingOperations(error, true);
                 setState({ status: "failed", error });
                 finishClose();
               }
@@ -2070,6 +2209,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           cleanupSocketListeners(ws, handlers);
           suppressSocketCloseTransition = true;
           setState({ status: "failed", error });
+          rejectSynchronizationWaiters(error);
           reject(error);
           try {
             ws.close(closeNormalCode, "connection aborted");
@@ -2102,6 +2242,19 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return state;
     },
     connect: connectClient,
+    whenSynchronized(): Promise<ConnectionSynchronization> {
+      if (state.status === "connected" && state.synchronization.synchronized) {
+        return Promise.resolve(state.synchronization);
+      }
+      if (state.status !== "connecting" && state.status !== "reconnecting" && state.status !== "connected") {
+        return Promise.reject(new ShunterClosedClientError(
+          "Cannot wait for synchronization while the Shunter client is disconnected.",
+        ));
+      }
+      return new Promise<ConnectionSynchronization>((resolve, reject) => {
+        synchronizationWaiters.add({ resolve, reject });
+      });
+    },
     async callReducer(name: string, args: Uint8Array, options: ReducerCallOptions = {}): Promise<Uint8Array> {
       if (disposed) {
         throw new ShunterClosedClientError("Cannot call a reducer on a disposed Shunter client.");
@@ -2137,7 +2290,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           const abort = (): void => {
             pendingReducerCalls.delete(request.requestId);
             cleanup?.();
-            reject(new ShunterClosedClientError("Reducer call aborted before a response was received."));
+            reject(new ShunterCallInterruptedError({
+              operation: "reducer",
+              name,
+              requestId: request.requestId,
+              cause: new ShunterClosedClientError("Reducer call aborted before a response was received."),
+            }));
           };
           options.signal.addEventListener("abort", abort, { once: true });
           cleanup = () => {
@@ -2190,14 +2348,25 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           const abort = (): void => {
             pendingProcedureCalls.delete(messageKey);
             cleanup?.();
-            reject(new ShunterClosedClientError("Procedure call aborted before a response was received."));
+            reject(new ShunterCallInterruptedError({
+              operation: "procedure",
+              name,
+              messageId: request.messageId,
+              cause: new ShunterClosedClientError("Procedure call aborted before a response was received."),
+            }));
           };
           options.signal.addEventListener("abort", abort, { once: true });
           cleanup = () => {
             options.signal?.removeEventListener("abort", abort);
           };
         }
-        pendingProcedureCalls.set(messageKey, { name, cleanup, resolve, reject });
+        pendingProcedureCalls.set(messageKey, {
+          name,
+          messageId: new Uint8Array(request.messageId),
+          cleanup,
+          resolve,
+          reject,
+        });
         try {
           activeSocket.send(request.frame);
         } catch (error) {
@@ -2290,6 +2459,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       const handle = options.returnHandle === true
         ? createSubscriptionHandle<unknown>({
           queryId: request.queryId,
+          epoch: connectionEpoch,
           unsubscribe: declaredViewUnsubscribe(request.queryId),
         })
         : undefined;
@@ -2366,6 +2536,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       const handle = options.returnHandle === true
         ? createSubscriptionHandle<unknown>({
           queryId: request.queryId,
+          epoch: connectionEpoch,
           unsubscribe: tableSubscriptionUnsubscribe(request.queryId),
         })
         : undefined;
@@ -4333,6 +4504,12 @@ export interface SubscriptionClosed {
 export type SubscriptionState<Row = unknown> =
   | { readonly status: "subscribing" }
   | { readonly status: "active"; readonly rows: readonly Row[] }
+  | {
+      readonly status: "resynchronizing";
+      readonly rows: readonly Row[];
+      readonly previousEpoch: number;
+      readonly targetEpoch: number;
+    }
   | { readonly status: "unsubscribing"; readonly rows: readonly Row[] }
   | { readonly status: "closed"; readonly error?: ShunterError };
 
@@ -4358,18 +4535,21 @@ export type TableRowDecoders<RowsByName extends object = Record<string, unknown>
 
 export interface SubscriptionHandle<Row = unknown> {
   readonly queryId?: QueryID;
+  readonly epoch: number;
   readonly state: SubscriptionState<Row>;
   readonly closed: Promise<SubscriptionClosed>;
   unsubscribe(): void | Promise<void>;
 }
 
 export interface ManagedSubscriptionHandle<Row = unknown> extends SubscriptionHandle<Row> {
-  replaceRows(rows: readonly Row[]): void;
+  replaceRows(rows: readonly Row[], epoch?: number): void;
+  markResynchronizing(targetEpoch: number): void;
   close(error?: ShunterError): void;
 }
 
 export interface SubscriptionHandleOptions<Row = unknown> {
   readonly queryId?: QueryID;
+  readonly epoch?: number;
   readonly initialRows?: readonly Row[];
   readonly unsubscribe?: () => void | Promise<void>;
   readonly onStateChange?: (state: SubscriptionState<Row>) => void;
@@ -4384,6 +4564,7 @@ export interface SubscriptionHandleReturnOptions {
 export function createSubscriptionHandle<Row = unknown>(
   options: SubscriptionHandleOptions<Row> = {},
 ): ManagedSubscriptionHandle<Row> {
+  let epoch = options.epoch ?? 0;
   let state: SubscriptionState<Row> =
     options.initialRows === undefined
       ? { status: "subscribing" }
@@ -4418,14 +4599,33 @@ export function createSubscriptionHandle<Row = unknown>(
     get state() {
       return state;
     },
+    get epoch() {
+      return epoch;
+    },
     closed,
-    replaceRows(rows: readonly Row[]): void {
+    replaceRows(rows: readonly Row[], nextEpoch = epoch): void {
       if (state.status === "closed") {
         throw new ShunterClosedClientError("Cannot replace rows on a closed subscription.");
       }
+      epoch = nextEpoch;
       setState({
         status: state.status === "unsubscribing" ? "unsubscribing" : "active",
         rows: [...rows],
+      });
+    },
+    markResynchronizing(targetEpoch: number): void {
+      if (state.status === "closed" || state.status === "unsubscribing") {
+        return;
+      }
+      const rows = state.status === "active" || state.status === "resynchronizing"
+        ? state.rows
+        : [];
+      const previousEpoch = state.status === "resynchronizing" ? state.previousEpoch : epoch;
+      setState({
+        status: "resynchronizing",
+        rows,
+        previousEpoch,
+        targetEpoch,
       });
     },
     close(error?: ShunterError): void {
@@ -4439,7 +4639,9 @@ export function createSubscriptionHandle<Row = unknown>(
         if (state.status === "closed") {
           return;
         }
-        const rows = state.status === "active" || state.status === "unsubscribing" ? state.rows : [];
+        const rows = state.status === "active" || state.status === "resynchronizing" || state.status === "unsubscribing"
+          ? state.rows
+          : [];
         setState({ status: "unsubscribing", rows });
         try {
           await options.unsubscribe?.();

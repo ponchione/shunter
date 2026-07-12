@@ -57,7 +57,7 @@ export type ProtocolCompatibilityResult = {
     readonly ok: false;
     readonly issue: ProtocolCompatibilityIssue;
 };
-export type ShunterErrorKind = "auth" | "contract_mismatch" | "validation" | "protocol" | "protocol_mismatch" | "transport" | "timeout" | "closed";
+export type ShunterErrorKind = "auth" | "contract_mismatch" | "interrupted" | "validation" | "protocol" | "protocol_mismatch" | "transport" | "timeout" | "closed";
 export interface ShunterErrorOptions {
     readonly code?: string;
     readonly details?: unknown;
@@ -98,6 +98,21 @@ export declare class ShunterTimeoutError extends ShunterError {
 }
 export declare class ShunterClosedClientError extends ShunterError {
     constructor(message: string, options?: ShunterErrorOptions);
+}
+export type ShunterCallOperation = "reducer" | "procedure";
+export interface ShunterCallInterruptedErrorOptions extends ShunterErrorOptions {
+    readonly operation: ShunterCallOperation;
+    readonly name: string;
+    readonly requestId?: RequestID;
+    readonly messageId?: Uint8Array;
+}
+export declare class ShunterCallInterruptedError extends ShunterError {
+    readonly operation: ShunterCallOperation;
+    readonly operationName: string;
+    readonly requestId?: RequestID;
+    readonly messageId?: Uint8Array;
+    readonly outcome: "unknown";
+    constructor(options: ShunterCallInterruptedErrorOptions);
 }
 export declare function isShunterError(error: unknown): error is ShunterError;
 export declare function toShunterError(error: unknown, kind?: ShunterErrorKind, message?: string): ShunterError;
@@ -156,6 +171,11 @@ export interface ConnectionMetadata<Protocol extends ProtocolMetadata = Protocol
     readonly connectionId?: Uint8Array;
     readonly contract?: GeneratedContractMetadata;
 }
+export interface ConnectionSynchronization {
+    readonly epoch: number;
+    readonly synchronized: boolean;
+    readonly pendingSubscriptions: number;
+}
 export interface IdentityTokenMessage {
     readonly identity: Uint8Array;
     readonly token: string;
@@ -169,6 +189,7 @@ export type ConnectionState<Protocol extends ProtocolMetadata = ProtocolMetadata
 } | {
     readonly status: "connected";
     readonly metadata: ConnectionMetadata<Protocol>;
+    readonly synchronization: ConnectionSynchronization;
 } | {
     readonly status: "reconnecting";
     readonly attempt: number;
@@ -226,6 +247,7 @@ export type WebSocketFactory = (url: string, protocols: readonly ShunterSubproto
 export interface ShunterClient<Protocol extends ProtocolMetadata = ProtocolMetadata> {
     readonly state: ConnectionState<Protocol>;
     connect(): Promise<ConnectionMetadata<Protocol>>;
+    whenSynchronized(): Promise<ConnectionSynchronization>;
     callReducer: ReducerCaller<string, Uint8Array, Uint8Array>;
     callProcedure: ProcedureCaller<string, Uint8Array, Uint8Array>;
     runDeclaredQuery: DeclaredQueryRunner<string, Uint8Array>;
@@ -478,6 +500,11 @@ export type SubscriptionState<Row = unknown> = {
     readonly status: "active";
     readonly rows: readonly Row[];
 } | {
+    readonly status: "resynchronizing";
+    readonly rows: readonly Row[];
+    readonly previousEpoch: number;
+    readonly targetEpoch: number;
+} | {
     readonly status: "unsubscribing";
     readonly rows: readonly Row[];
 } | {
@@ -503,16 +530,19 @@ export type TableRowDecoders<RowsByName extends object = Record<string, unknown>
 };
 export interface SubscriptionHandle<Row = unknown> {
     readonly queryId?: QueryID;
+    readonly epoch: number;
     readonly state: SubscriptionState<Row>;
     readonly closed: Promise<SubscriptionClosed>;
     unsubscribe(): void | Promise<void>;
 }
 export interface ManagedSubscriptionHandle<Row = unknown> extends SubscriptionHandle<Row> {
-    replaceRows(rows: readonly Row[]): void;
+    replaceRows(rows: readonly Row[], epoch?: number): void;
+    markResynchronizing(targetEpoch: number): void;
     close(error?: ShunterError): void;
 }
 export interface SubscriptionHandleOptions<Row = unknown> {
     readonly queryId?: QueryID;
+    readonly epoch?: number;
     readonly initialRows?: readonly Row[];
     readonly unsubscribe?: () => void | Promise<void>;
     readonly onStateChange?: (state: SubscriptionState<Row>) => void;

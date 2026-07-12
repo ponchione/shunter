@@ -93,6 +93,31 @@ export class ShunterClosedClientError extends ShunterError {
         super("closed", message, options);
     }
 }
+export class ShunterCallInterruptedError extends ShunterError {
+    operation;
+    operationName;
+    requestId;
+    messageId;
+    outcome = "unknown";
+    constructor(options) {
+        const details = {
+            operation: options.operation,
+            name: options.name,
+            outcome: "unknown",
+            ...(options.requestId === undefined ? {} : { requestId: options.requestId }),
+            ...(options.messageId === undefined ? {} : { messageId: new Uint8Array(options.messageId) }),
+        };
+        super("interrupted", `${options.operation === "reducer" ? "Reducer" : "Procedure"} call lost its authoritative response; its outcome is unknown.`, {
+            ...options,
+            code: options.code ?? "call_outcome_unknown",
+            details,
+        });
+        this.operation = options.operation;
+        this.operationName = options.name;
+        this.requestId = options.requestId;
+        this.messageId = options.messageId === undefined ? undefined : new Uint8Array(options.messageId);
+    }
+}
 export function isShunterError(error) {
     return error instanceof ShunterError;
 }
@@ -340,6 +365,7 @@ export function createShunterClient(options) {
     let suppressSocketCloseTransition = false;
     let hasConnected = false;
     let connectGeneration = 0;
+    let connectionEpoch = 0;
     let reconnectAttempt = 0;
     let reconnectTimer;
     let resolveClose;
@@ -356,6 +382,8 @@ export function createShunterClient(options) {
     const pendingUnsubscribesByQuery = new Map();
     const activeSubscriptionsByQuery = new Map();
     const activeSubscriptionAliasesByRootQuery = new Map();
+    const pendingReplaySubscriptions = new Map();
+    const synchronizationWaiters = new Set();
     const listeners = new Set();
     if (options.onStateChange !== undefined) {
         listeners.add(options.onStateChange);
@@ -374,11 +402,62 @@ export function createShunterClient(options) {
         ws.removeEventListener("close", handlers.close);
         ws.removeEventListener("error", handlers.error);
     };
-    const rejectPendingReducerCalls = (error) => {
+    const rejectSynchronizationWaiters = (error) => {
+        for (const waiter of synchronizationWaiters) {
+            waiter.reject(error);
+        }
+        synchronizationWaiters.clear();
+    };
+    const connectionSynchronization = () => {
+        let pendingSubscriptions = 0;
+        for (const replayEpoch of pendingReplaySubscriptions.values()) {
+            if (replayEpoch === connectionEpoch) {
+                pendingSubscriptions += 1;
+            }
+        }
+        return {
+            epoch: connectionEpoch,
+            synchronized: pendingSubscriptions === 0,
+            pendingSubscriptions,
+        };
+    };
+    const resolveSynchronizationWaiters = (synchronization) => {
+        if (!synchronization.synchronized) {
+            return;
+        }
+        for (const waiter of synchronizationWaiters) {
+            waiter.resolve(synchronization);
+        }
+        synchronizationWaiters.clear();
+    };
+    const publishSynchronization = () => {
+        if (state.status !== "connected") {
+            return;
+        }
+        const synchronization = connectionSynchronization();
+        setState({ status: "connected", metadata: state.metadata, synchronization });
+        resolveSynchronizationWaiters(synchronization);
+    };
+    const finishReplaySubscription = (pending) => {
+        if (pending.replayEpoch === undefined || !pendingReplaySubscriptions.delete(pending.queryId)) {
+            return;
+        }
+        if (pending.replayEpoch === connectionEpoch) {
+            publishSynchronization();
+        }
+    };
+    const rejectPendingReducerCalls = (error, interrupted) => {
         for (const [requestId, pending] of pendingReducerCalls) {
             pending.cleanup?.();
             pendingReducerCalls.delete(requestId);
-            pending.reject(error);
+            pending.reject(interrupted
+                ? new ShunterCallInterruptedError({
+                    operation: "reducer",
+                    name: pending.name,
+                    requestId,
+                    cause: error,
+                })
+                : error);
         }
     };
     const rejectPendingDeclaredQueries = (error) => {
@@ -388,21 +467,32 @@ export function createShunterClient(options) {
             pending.reject(error);
         }
     };
-    const rejectPendingProcedureCalls = (error) => {
+    const rejectPendingProcedureCalls = (error, interrupted) => {
         for (const [messageKey, pending] of pendingProcedureCalls) {
             pending.cleanup?.();
             pendingProcedureCalls.delete(messageKey);
-            pending.reject(error);
+            pending.reject(interrupted
+                ? new ShunterCallInterruptedError({
+                    operation: "procedure",
+                    name: pending.name,
+                    messageId: pending.messageId,
+                    cause: error,
+                })
+                : error);
         }
     };
     const cleanupPendingSubscription = (pending) => {
         pending.cleanup?.();
         pendingSubscriptionsByRequest.delete(pending.requestId);
         pendingSubscriptionsByQuery.delete(pending.queryId);
+        finishReplaySubscription(pending);
     };
-    const rejectPendingSubscriptions = (error) => {
+    const rejectPendingSubscriptions = (error, preserveReplay) => {
         for (const pending of [...pendingSubscriptionsByRequest.values()]) {
             cleanupPendingSubscription(pending);
+            if (preserveReplay && pending.replayEpoch !== undefined) {
+                continue;
+            }
             pending.handle?.close(error);
             pending.reject(error);
         }
@@ -418,11 +508,11 @@ export function createShunterClient(options) {
             pending.reject(error);
         }
     };
-    const rejectInFlightOperations = (error) => {
-        rejectPendingReducerCalls(error);
-        rejectPendingProcedureCalls(error);
+    const rejectInFlightOperations = (error, options = {}) => {
+        rejectPendingReducerCalls(error, options.interruptedCalls === true);
+        rejectPendingProcedureCalls(error, options.interruptedCalls === true);
         rejectPendingDeclaredQueries(error);
-        rejectPendingSubscriptions(error);
+        rejectPendingSubscriptions(error, options.preserveReplay === true);
         rejectPendingUnsubscribes(error);
     };
     const closeActiveSubscriptions = (error) => {
@@ -431,9 +521,16 @@ export function createShunterClient(options) {
         }
         activeSubscriptionsByQuery.clear();
         activeSubscriptionAliasesByRootQuery.clear();
+        pendingReplaySubscriptions.clear();
     };
-    const rejectPendingOperations = (error) => {
-        rejectInFlightOperations(error);
+    const markActiveSubscriptionsResynchronizing = () => {
+        for (const active of new Set(activeSubscriptionsByQuery.values())) {
+            active.handle?.markResynchronizing(connectionEpoch + 1);
+        }
+    };
+    const rejectPendingOperations = (error, interruptedCalls = false) => {
+        rejectSynchronizationWaiters(error);
+        rejectInFlightOperations(error, { interruptedCalls });
         closeActiveSubscriptions(error);
     };
     const clearReconnectTimer = () => {
@@ -456,13 +553,14 @@ export function createShunterClient(options) {
             return;
         }
         rejectConnect?.(error);
-        rejectPendingOperations(error);
+        rejectPendingOperations(error, true);
         setState({ status: "closed", error });
         finishClose();
     };
     const failConnecting = (error) => {
         suppressSocketCloseTransition = true;
         rejectConnect?.(error);
+        rejectSynchronizationWaiters(error);
         setState({ status: "failed", error });
         try {
             socket?.close(closeNormalCode, "protocol failure");
@@ -474,8 +572,8 @@ export function createShunterClient(options) {
     };
     const failConnected = (error) => {
         suppressSocketCloseTransition = true;
-        rejectPendingOperations(error);
         setState({ status: "failed", error });
+        rejectPendingOperations(error, true);
         try {
             socket?.close(closeNormalCode, "protocol failure");
         }
@@ -501,9 +599,18 @@ export function createShunterClient(options) {
         }
         reconnectAttempt += 1;
         rejectConnect?.(error);
-        rejectInFlightOperations(error);
-        finishClose();
         setState({ status: "reconnecting", attempt: reconnectAttempt, error });
+        if (reconnectOptions.resubscribe) {
+            markActiveSubscriptionsResynchronizing();
+        }
+        else {
+            closeActiveSubscriptions(error);
+        }
+        rejectInFlightOperations(error, {
+            interruptedCalls: true,
+            preserveReplay: reconnectOptions.resubscribe,
+        });
+        finishClose();
         const delay = reconnectDelayMs(reconnectOptions, reconnectAttempt);
         clearReconnectTimer();
         reconnectTimer = setTimeout(() => {
@@ -535,7 +642,7 @@ export function createShunterClient(options) {
         const closedError = new ShunterClosedClientError("Shunter client connection is closing.");
         if (state.status === "failed") {
             rejectConnect?.(closedError);
-            rejectPendingOperations(closedError);
+            rejectPendingOperations(closedError, true);
             setState({ status: "closed" });
             finishClose();
             return Promise.resolve();
@@ -546,7 +653,7 @@ export function createShunterClient(options) {
             return Promise.resolve();
         }
         rejectConnect?.(closedError);
-        rejectPendingOperations(closedError);
+        rejectPendingOperations(closedError, true);
         setState({ status: "closing" });
         const pendingClose = new Promise((resolve) => {
             resolveClose = resolve;
@@ -742,14 +849,14 @@ export function createShunterClient(options) {
         for (let i = 0; i < rowBytes.length; i += 1) {
             cacheRow(active.rowCache, rowBytes[i], rows[i]);
         }
-        active.handle?.replaceRows(cachedRows(active.rowCache));
+        active.handle?.replaceRows(cachedRows(active.rowCache), connectionEpoch);
     };
     const applyCachedUpdate = (active, update, inserts, label) => {
         if (active.rowCache === undefined || active.handle === undefined) {
             return;
         }
         if (active.eventTable) {
-            active.handle.replaceRows([]);
+            active.handle.replaceRows([], connectionEpoch);
             return;
         }
         if (update.insertRowBytes === undefined) {
@@ -775,7 +882,7 @@ export function createShunterClient(options) {
                 cacheRow(active.rowCache, update.insertRowBytes[i], decodedInserts[i]);
             }
         }
-        active.handle.replaceRows(cachedRows(active.rowCache));
+        active.handle.replaceRows(cachedRows(active.rowCache), connectionEpoch);
     };
     const registerActiveSubscription = (active, aliases = [active.queryId]) => {
         const previousAliases = activeSubscriptionAliasesByRootQuery.get(active.queryId);
@@ -1011,7 +1118,7 @@ export function createShunterClient(options) {
         };
     };
     const tableSubscriptionUnsubscribe = (queryId) => unsubscribeOnce("table", queryId, encodeUnsubscribeSingleRequest, "Cannot unsubscribe a table subscription after the Shunter client is disconnected.", "Table unsubscribe request send failed");
-    const resubscribeActiveSubscriptions = (activeSocket) => {
+    const resubscribeActiveSubscriptions = (activeSocket, selectedSubprotocol) => {
         if (!reconnectOptions.resubscribe) {
             return undefined;
         }
@@ -1031,7 +1138,7 @@ export function createShunterClient(options) {
                 : undefined;
             if (requestParams !== undefined) {
                 try {
-                    assertDeclaredReadParametersSupported(state.status === "connected" ? state.metadata.subprotocol : undefined, options.protocol);
+                    assertDeclaredReadParametersSupported(selectedSubprotocol, options.protocol);
                 }
                 catch (error) {
                     return isShunterError(error) ? error : toShunterError(error, "protocol_mismatch", "Declared view resubscribe protocol check failed");
@@ -1065,6 +1172,7 @@ export function createShunterClient(options) {
                 decodeRow: active.decodeRow,
                 handle: active.handle,
                 eventTable: active.eventTable,
+                replayEpoch: connectionEpoch,
                 resolve: () => { },
                 reject: (error) => {
                     removeActiveSubscription(active.queryId);
@@ -1073,6 +1181,7 @@ export function createShunterClient(options) {
             };
             pendingSubscriptionsByRequest.set(request.requestId, pending);
             pendingSubscriptionsByQuery.set(request.queryId, pending);
+            pendingReplaySubscriptions.set(request.queryId, connectionEpoch);
             try {
                 activeSocket.send(request.frame);
             }
@@ -1131,10 +1240,6 @@ export function createShunterClient(options) {
             }
             catch (error) {
                 const callbackError = toShunterError(error, "validation", "SubscribeSingleApplied raw rows callback failed");
-                removeActiveSubscription(response.queryId);
-                cleanupPendingSubscription(pending);
-                pending.handle?.close(callbackError);
-                pending.reject(callbackError);
                 failConnected(callbackError);
                 return;
             }
@@ -1148,10 +1253,6 @@ export function createShunterClient(options) {
             }
             catch (error) {
                 const callbackError = toShunterError(error, "validation", "SubscribeSingleApplied row callback failed");
-                removeActiveSubscription(response.queryId);
-                cleanupPendingSubscription(pending);
-                pending.handle?.close(callbackError);
-                pending.reject(callbackError);
                 failConnected(callbackError);
                 return;
             }
@@ -1165,10 +1266,6 @@ export function createShunterClient(options) {
             }
             catch (error) {
                 const callbackError = toShunterError(error, "validation", "SubscribeSingleApplied raw row callback failed");
-                removeActiveSubscription(response.queryId);
-                cleanupPendingSubscription(pending);
-                pending.handle?.close(callbackError);
-                pending.reject(callbackError);
                 failConnected(callbackError);
                 return;
             }
@@ -1204,27 +1301,19 @@ export function createShunterClient(options) {
             rowCache: pending.handle === undefined ? undefined : new Map(),
             eventTable: pending.eventTable,
         }, response.updates.map((update) => update.queryId));
-        pending.handle?.replaceRows([]);
+        pending.handle?.replaceRows([], connectionEpoch);
         if (pending.onInitialRows !== undefined && pending.decodeRow !== undefined) {
             try {
                 pending.onInitialRows(decodeSubscriptionInitialRows(response.updates, pending.decodeRow, "SubscribeMultiApplied"));
             }
             catch (error) {
                 const callbackError = toShunterError(error, "validation", "SubscribeMultiApplied initial row callback failed");
-                removeActiveSubscription(response.queryId);
-                cleanupPendingSubscription(pending);
-                pending.handle?.close(callbackError);
-                pending.reject(callbackError);
                 failConnected(callbackError);
                 return;
             }
         }
         const updateError = dispatchRawSubscriptionUpdates(response.updates, "SubscribeMultiApplied");
         if (updateError !== undefined) {
-            removeActiveSubscription(response.queryId);
-            cleanupPendingSubscription(pending);
-            pending.handle?.close(updateError);
-            pending.reject(updateError);
             failConnected(updateError);
             return;
         }
@@ -1400,6 +1489,7 @@ export function createShunterClient(options) {
                     ? error
                     : new ShunterAuthError("Token provider failed.", { cause: error });
                 setState({ status: "failed", error: shunterError });
+                rejectSynchronizationWaiters(shunterError);
                 finishClose();
                 reject(shunterError);
                 return;
@@ -1411,6 +1501,7 @@ export function createShunterClient(options) {
             catch (error) {
                 const shunterError = toShunterError(error, "transport", "Create WebSocket failed");
                 setState({ status: "failed", error: shunterError });
+                rejectSynchronizationWaiters(shunterError);
                 finishClose();
                 reject(shunterError);
                 return;
@@ -1463,13 +1554,17 @@ export function createShunterClient(options) {
                         };
                         cleanupOpeningAbort();
                         hasConnected = true;
-                        setState({ status: "connected", metadata });
-                        const resubscribeError = resubscribeActiveSubscriptions(ws);
+                        connectionEpoch += 1;
+                        const resubscribeError = resubscribeActiveSubscriptions(ws, metadata.subprotocol);
                         if (resubscribeError !== undefined) {
-                            failConnected(resubscribeError);
+                            rejectPendingOperations(resubscribeError);
+                            failConnecting(resubscribeError);
                             reject(resubscribeError);
                             return;
                         }
+                        const synchronization = connectionSynchronization();
+                        setState({ status: "connected", metadata, synchronization });
+                        resolveSynchronizationWaiters(synchronization);
                         resolve(metadata);
                     }
                     catch (error) {
@@ -1510,7 +1605,7 @@ export function createShunterClient(options) {
                             details: { reason: event.reason, wasClean: event.wasClean },
                         });
                         if (!scheduleReconnect(error)) {
-                            rejectPendingOperations(error);
+                            rejectPendingOperations(error, true);
                             setState({ status: "closed", error });
                             finishClose();
                         }
@@ -1527,6 +1622,7 @@ export function createShunterClient(options) {
                         });
                         if (!scheduleReconnect(error)) {
                             setState({ status: "failed", error });
+                            rejectSynchronizationWaiters(error);
                             reject(error);
                             finishClose();
                         }
@@ -1544,7 +1640,7 @@ export function createShunterClient(options) {
                         });
                         suppressSocketCloseTransition = true;
                         if (!scheduleReconnect(error)) {
-                            rejectPendingOperations(error);
+                            rejectPendingOperations(error, true);
                             setState({ status: "failed", error });
                             finishClose();
                         }
@@ -1566,6 +1662,7 @@ export function createShunterClient(options) {
                 cleanupSocketListeners(ws, handlers);
                 suppressSocketCloseTransition = true;
                 setState({ status: "failed", error });
+                rejectSynchronizationWaiters(error);
                 reject(error);
                 try {
                     ws.close(closeNormalCode, "connection aborted");
@@ -1597,6 +1694,17 @@ export function createShunterClient(options) {
             return state;
         },
         connect: connectClient,
+        whenSynchronized() {
+            if (state.status === "connected" && state.synchronization.synchronized) {
+                return Promise.resolve(state.synchronization);
+            }
+            if (state.status !== "connecting" && state.status !== "reconnecting" && state.status !== "connected") {
+                return Promise.reject(new ShunterClosedClientError("Cannot wait for synchronization while the Shunter client is disconnected."));
+            }
+            return new Promise((resolve, reject) => {
+                synchronizationWaiters.add({ resolve, reject });
+            });
+        },
         async callReducer(name, args, options = {}) {
             if (disposed) {
                 throw new ShunterClosedClientError("Cannot call a reducer on a disposed Shunter client.");
@@ -1633,7 +1741,12 @@ export function createShunterClient(options) {
                     const abort = () => {
                         pendingReducerCalls.delete(request.requestId);
                         cleanup?.();
-                        reject(new ShunterClosedClientError("Reducer call aborted before a response was received."));
+                        reject(new ShunterCallInterruptedError({
+                            operation: "reducer",
+                            name,
+                            requestId: request.requestId,
+                            cause: new ShunterClosedClientError("Reducer call aborted before a response was received."),
+                        }));
                     };
                     options.signal.addEventListener("abort", abort, { once: true });
                     cleanup = () => {
@@ -1687,14 +1800,25 @@ export function createShunterClient(options) {
                     const abort = () => {
                         pendingProcedureCalls.delete(messageKey);
                         cleanup?.();
-                        reject(new ShunterClosedClientError("Procedure call aborted before a response was received."));
+                        reject(new ShunterCallInterruptedError({
+                            operation: "procedure",
+                            name,
+                            messageId: request.messageId,
+                            cause: new ShunterClosedClientError("Procedure call aborted before a response was received."),
+                        }));
                     };
                     options.signal.addEventListener("abort", abort, { once: true });
                     cleanup = () => {
                         options.signal?.removeEventListener("abort", abort);
                     };
                 }
-                pendingProcedureCalls.set(messageKey, { name, cleanup, resolve, reject });
+                pendingProcedureCalls.set(messageKey, {
+                    name,
+                    messageId: new Uint8Array(request.messageId),
+                    cleanup,
+                    resolve,
+                    reject,
+                });
                 try {
                     activeSocket.send(request.frame);
                 }
@@ -1786,6 +1910,7 @@ export function createShunterClient(options) {
             const handle = options.returnHandle === true
                 ? createSubscriptionHandle({
                     queryId: request.queryId,
+                    epoch: connectionEpoch,
                     unsubscribe: declaredViewUnsubscribe(request.queryId),
                 })
                 : undefined;
@@ -1859,6 +1984,7 @@ export function createShunterClient(options) {
             const handle = options.returnHandle === true
                 ? createSubscriptionHandle({
                     queryId: request.queryId,
+                    epoch: connectionEpoch,
                     unsubscribe: tableSubscriptionUnsubscribe(request.queryId),
                 })
                 : undefined;
@@ -3245,6 +3371,7 @@ function assertProcedureCallsSupported(selectedSubprotocol, expected) {
     });
 }
 export function createSubscriptionHandle(options = {}) {
+    let epoch = options.epoch ?? 0;
     let state = options.initialRows === undefined
         ? { status: "subscribing" }
         : { status: "active", rows: [...options.initialRows] };
@@ -3273,14 +3400,33 @@ export function createSubscriptionHandle(options = {}) {
         get state() {
             return state;
         },
+        get epoch() {
+            return epoch;
+        },
         closed,
-        replaceRows(rows) {
+        replaceRows(rows, nextEpoch = epoch) {
             if (state.status === "closed") {
                 throw new ShunterClosedClientError("Cannot replace rows on a closed subscription.");
             }
+            epoch = nextEpoch;
             setState({
                 status: state.status === "unsubscribing" ? "unsubscribing" : "active",
                 rows: [...rows],
+            });
+        },
+        markResynchronizing(targetEpoch) {
+            if (state.status === "closed" || state.status === "unsubscribing") {
+                return;
+            }
+            const rows = state.status === "active" || state.status === "resynchronizing"
+                ? state.rows
+                : [];
+            const previousEpoch = state.status === "resynchronizing" ? state.previousEpoch : epoch;
+            setState({
+                status: "resynchronizing",
+                rows,
+                previousEpoch,
+                targetEpoch,
             });
         },
         close(error) {
@@ -3294,7 +3440,9 @@ export function createSubscriptionHandle(options = {}) {
                 if (state.status === "closed") {
                     return;
                 }
-                const rows = state.status === "active" || state.status === "unsubscribing" ? state.rows : [];
+                const rows = state.status === "active" || state.status === "resynchronizing" || state.status === "unsubscribing"
+                    ? state.rows
+                    : [];
                 setState({ status: "unsubscribing", rows });
                 try {
                     await options.unsubscribe?.();

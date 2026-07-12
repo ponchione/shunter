@@ -185,6 +185,11 @@ const connectedState: ConnectionState<typeof generatedProtocol> = {
     protocol: generatedProtocol,
     subprotocol: selectedSubprotocol,
   },
+  synchronization: {
+    epoch: 1,
+    synchronized: true,
+    pendingSubscriptions: 0,
+  },
 };
 
 const authError = new ShunterAuthError("token rejected", { code: "auth_denied" });
@@ -196,6 +201,7 @@ const mismatch = new ShunterProtocolMismatchError("unsupported protocol", {
 
 const activeMessages: SubscriptionHandle<MessagesRow> = {
   queryId: 1,
+  epoch: 1,
   state: { status: "active", rows: [] },
   closed: Promise.resolve({ reason: "unsubscribed" }),
   unsubscribe() {},
