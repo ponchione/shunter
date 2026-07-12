@@ -7,10 +7,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+
+	"github.com/ponchione/shunter/internal/atomicfile"
 )
 
-// BackupDataDir copies a stopped runtime's complete DataDir into outputPath.
+// BackupDataDir transactionally copies a stopped runtime's complete DataDir
+// into outputPath. The output becomes visible only after the complete staged
+// copy is durable.
 // The source directory must exist and must not be a symlink. The output path
 // must not already exist, and it must not be nested inside the source DataDir.
 //
@@ -29,7 +34,9 @@ func BackupDataDir(dataDir, outputPath string) error {
 	return copyOfflineDataDir(src, dst, "source data dir", "copy", false)
 }
 
-// RestoreDataDir copies a complete offline DataDir backup into dataDir.
+// RestoreDataDir transactionally copies a complete offline DataDir backup into
+// dataDir. The restored contents become visible only after the complete staged
+// copy is durable.
 // The backup directory must exist and must not be a symlink. The destination
 // may be missing or empty, but RestoreDataDir refuses to merge backup contents
 // into a non-empty directory.
@@ -56,7 +63,7 @@ func cleanRequiredPath(label, path string) (string, error) {
 	return filepath.Clean(trimmed), nil
 }
 
-func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestination bool) error {
+func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestination bool) (retErr error) {
 	srcInfo, err := os.Lstat(src)
 	if err != nil {
 		return fmt.Errorf("read %s %s: %w", sourceLabel, src, err)
@@ -70,21 +77,107 @@ func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestinat
 	if err := rejectNestedCopy(src, dst); err != nil {
 		return err
 	}
+	destinationWasEmpty := false
+	var destinationMode fs.FileMode
 	if allowEmptyDestination {
-		if err := ensureMissingOrEmptyDir(dst); err != nil {
+		info, exists, err := inspectMissingOrEmptyDir(dst)
+		if err != nil {
 			return err
+		}
+		if exists {
+			destinationWasEmpty = true
+			destinationMode = info.Mode().Perm()
 		}
 	} else if err := requireMissingPath("backup output", dst); err != nil {
 		return err
 	}
 
-	if err := os.MkdirAll(dst, srcInfo.Mode().Perm()); err != nil {
-		return fmt.Errorf("create destination data dir %s: %w", dst, err)
+	parent := filepath.Dir(dst)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return fmt.Errorf("create destination parent directory %s: %w", parent, err)
 	}
-	if err := os.Chmod(dst, srcInfo.Mode().Perm()); err != nil {
-		return fmt.Errorf("chmod destination data dir %s: %w", dst, err)
+	staging, err := makeOfflineCopyStagingDir(parent, "."+filepath.Base(dst)+".staging-*")
+	if err != nil {
+		return fmt.Errorf("create staging data dir beside %s: %w", dst, err)
 	}
-	return copyDirectoryContents(src, dst)
+	removeStaging := true
+	defer func() {
+		if removeStaging {
+			if err := removeOfflineCopyTree(staging); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("remove staging data dir %s: %w", staging, err))
+			}
+		}
+	}()
+	if err := chmodOfflineCopyPath(staging, srcInfo.Mode().Perm()); err != nil {
+		return fmt.Errorf("chmod staging data dir %s: %w", staging, err)
+	}
+	if err := copyDirectoryContents(src, staging); err != nil {
+		return err
+	}
+	if err := syncOfflineCopyTree(staging); err != nil {
+		return fmt.Errorf("sync staged data dir %s: %w", staging, err)
+	}
+
+	if destinationWasEmpty {
+		if err := removeOfflineCopyEmpty(dst); err != nil {
+			return fmt.Errorf("remove empty restore destination %s before publication: %w", dst, err)
+		}
+		if err := syncOfflineCopyDir(parent); err != nil {
+			rollbackErr := restoreEmptyOfflineCopyDestination(dst, destinationMode, parent)
+			return errors.Join(fmt.Errorf("sync removal of empty restore destination %s: %w", dst, err), rollbackErr)
+		}
+	} else {
+		label := "destination"
+		if !allowEmptyDestination {
+			label = "backup output"
+		}
+		if err := requireMissingPath(label, dst); err != nil {
+			return err
+		}
+	}
+
+	if err := renameOfflineCopy(staging, dst); err != nil {
+		var rollbackErr error
+		if destinationWasEmpty {
+			rollbackErr = restoreEmptyOfflineCopyDestination(dst, destinationMode, parent)
+		}
+		return errors.Join(fmt.Errorf("publish staged data dir %s: %w", dst, err), rollbackErr)
+	}
+	removeStaging = false
+	if err := syncOfflineCopyDir(parent); err != nil {
+		removeStaging = true
+		rollbackErr := renameOfflineCopy(dst, staging)
+		if rollbackErr == nil {
+			rollbackErr = syncOfflineCopyDir(parent)
+		} else {
+			rollbackErr = errors.Join(rollbackErr, removeOfflineCopyTree(dst))
+			removeStaging = false
+		}
+		if destinationWasEmpty {
+			rollbackErr = errors.Join(rollbackErr, restoreEmptyOfflineCopyDestination(dst, destinationMode, parent))
+		}
+		return errors.Join(fmt.Errorf("sync published data dir %s: %w", dst, err), rollbackErr)
+	}
+	return nil
+}
+
+var (
+	makeOfflineCopyStagingDir = os.MkdirTemp
+	chmodOfflineCopyPath      = os.Chmod
+	removeOfflineCopyEmpty    = os.Remove
+	removeOfflineCopyTree     = os.RemoveAll
+	renameOfflineCopy         = os.Rename
+	syncOfflineCopyDir        = atomicfile.SyncDir
+)
+
+func restoreEmptyOfflineCopyDestination(dst string, mode fs.FileMode, parent string) error {
+	if err := os.Mkdir(dst, mode); err != nil {
+		return fmt.Errorf("restore original empty destination %s: %w", dst, err)
+	}
+	if err := syncOfflineCopyDir(parent); err != nil {
+		return fmt.Errorf("sync restored empty destination %s: %w", dst, err)
+	}
+	return nil
 }
 
 func rejectNestedCopy(src, dst string) error {
@@ -149,32 +242,33 @@ func requireMissingPath(label, path string) error {
 	return nil
 }
 
-func ensureMissingOrEmptyDir(path string) error {
+func inspectMissingOrEmptyDir(path string) (fs.FileInfo, bool, error) {
 	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("inspect restore destination %s: %w", path, err)
+		return nil, false, fmt.Errorf("inspect restore destination %s: %w", path, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("restore destination %s is a symlink; refusing to restore", path)
+		return nil, false, fmt.Errorf("restore destination %s is a symlink; refusing to restore", path)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("restore destination %s is not a directory", path)
+		return nil, false, fmt.Errorf("restore destination %s is not a directory", path)
 	}
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return fmt.Errorf("read restore destination %s: %w", path, err)
+		return nil, false, fmt.Errorf("read restore destination %s: %w", path, err)
 	}
 	if len(entries) != 0 {
-		return fmt.Errorf("restore destination %s is not empty", path)
+		return nil, false, fmt.Errorf("restore destination %s is not empty", path)
 	}
-	return nil
+	return info, true, nil
 }
 
 func copyDirectoryContents(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, entry fs.DirEntry, walkErr error) error {
+	expected := make(map[string]fs.FileInfo)
+	if err := filepath.WalkDir(src, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -196,6 +290,7 @@ func copyDirectoryContents(src, dst string) error {
 			return fmt.Errorf("stat source entry %s: %w", path, err)
 		}
 		mode := info.Mode()
+		expected[rel] = info
 		switch {
 		case entry.IsDir():
 			if err := os.MkdirAll(target, mode.Perm()); err != nil {
@@ -210,7 +305,72 @@ func copyDirectoryContents(src, dst string) error {
 		default:
 			return fmt.Errorf("source entry %s has unsupported mode %s", path, mode)
 		}
+	}); err != nil {
+		return err
+	}
+	return verifyOfflineCopySource(src, expected)
+}
+
+func verifyOfflineCopySource(src string, expected map[string]fs.FileInfo) error {
+	seen := make(map[string]bool, len(expected))
+	err := filepath.WalkDir(src, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == src {
+			return nil
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		want, ok := expected[rel]
+		if !ok {
+			return fmt.Errorf("source entry %s appeared while copying; refusing to copy", path)
+		}
+		got, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("stat source entry %s after copy: %w", path, err)
+		}
+		if !sameFileSnapshot(want, got) {
+			return fmt.Errorf("source entry %s changed while copying; refusing to copy", path)
+		}
+		seen[rel] = true
+		return nil
 	})
+	if err != nil {
+		return err
+	}
+	for rel := range expected {
+		if !seen[rel] {
+			return fmt.Errorf("source entry %s disappeared while copying; refusing to copy", filepath.Join(src, rel))
+		}
+	}
+	return nil
+}
+
+func syncOfflineCopyTree(root string) error {
+	var dirs []string
+	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			dirs = append(dirs, path)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	sort.Slice(dirs, func(i, j int) bool {
+		return len(dirs[i]) > len(dirs[j])
+	})
+	for _, dir := range dirs {
+		if err := syncOfflineCopyDir(dir); err != nil {
+			return fmt.Errorf("sync directory %s: %w", dir, err)
+		}
+	}
+	return nil
 }
 
 // copyRegularFileAfterCopyHook is a test-only instrumentation point for

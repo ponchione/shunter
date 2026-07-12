@@ -120,7 +120,11 @@ if err := shunter.BackupDataDir("./data/chat", "./backups/chat-2026-05-04"); err
 rtk go run ./cmd/shunter backup --data-dir ./data/chat --out ./backups/chat-2026-05-04
 ```
 
-Backup refuses symlink sources, existing output paths, nested
+Backup stages and durably syncs the complete tree beside the requested output,
+then publishes it with a rename and parent-directory sync. Any failed attempt
+removes its staging tree and leaves the output path absent, so it cannot be
+consumed as a backup and the same command can be retried. Backup refuses
+symlink sources, existing output paths, nested
 destinations inside the source `DataDir`, symlink entries, unsupported special
 files, and source files that change while being copied.
 
@@ -140,6 +144,9 @@ if err := shunter.RestoreDataDir("./backups/chat-2026-05-04", "./data/chat"); er
 	return err
 }
 ```
+
+Restore uses the same staged publication. Failures leave a missing destination
+missing or an existing empty destination empty; no partial DataDir is exposed.
 
 ```bash
 rtk go run ./cmd/shunter restore --backup ./backups/chat-2026-05-04 --data-dir ./data/chat

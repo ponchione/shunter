@@ -145,9 +145,13 @@ CLI helper:
 rtk go run ./cmd/shunter backup --data-dir ./data/chat --out ./backups/chat-2026-05-04
 ```
 
-`BackupDataDir` refuses symlink sources, existing output paths, nested
-destinations inside the source data directory, symlink entries, unsupported
-special files, and source files that change while being copied.
+`BackupDataDir` copies into a same-parent staging directory, syncs every copied
+file and directory, and atomically publishes the requested output only after
+the staged tree is complete. A failed backup leaves no output path that can be
+mistaken for a usable backup and can be retried. It refuses symlink sources,
+existing output paths, nested destinations inside the source data directory,
+symlink entries, unsupported special files, and source trees that change while
+being copied.
 
 ## Restore
 
@@ -175,10 +179,13 @@ CLI helper:
 rtk go run ./cmd/shunter restore --backup ./backups/chat-2026-05-04 --data-dir ./data/chat
 ```
 
-`RestoreDataDir` refuses symlink backup sources, symlink or non-directory
-destinations, nested destinations inside the backup source, symlink entries,
-unsupported special files, and non-empty destinations. Restore into a fresh
-directory, then let `Build` validate compatibility.
+`RestoreDataDir` uses the same staged, directory-synced publication. A failed
+restore leaves an initially missing destination missing and preserves an
+initially empty destination as empty; partial restored state is never published.
+It refuses symlink backup sources, symlink or non-directory destinations,
+nested destinations inside the backup source, symlink entries, unsupported
+special files, and non-empty destinations. Restore into a fresh directory, then
+let `Build` validate compatibility.
 
 ## Contract Review And Upgrade
 

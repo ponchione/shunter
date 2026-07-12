@@ -268,10 +268,184 @@ func TestBackupDataDirRejectsSourceChangedDuringCopy(t *testing.T) {
 		t.Fatal("BackupDataDir returned nil, want source mutation error")
 	}
 	assertErrorContains(t, err, "changed while copying")
-	if _, statErr := os.Lstat(filepath.Join(backupDir, "00000000000000000001.log")); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("backup file stat after rejected source mutation = %v, want not exist", statErr)
+	if _, statErr := os.Lstat(backupDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("backup root stat after rejected source mutation = %v, want not exist", statErr)
 	}
 	assertDataDirFileBytes(t, sourcePath, []byte("mutated-segment"))
+}
+
+func TestBackupDataDirFailurePhasesNeverPublishConsumableArtifact(t *testing.T) {
+	failure := errors.New("injected offline-copy failure")
+	for _, tc := range []struct {
+		name    string
+		install func(t *testing.T)
+	}{
+		{
+			name: "create staging",
+			install: func(t *testing.T) {
+				previous := makeOfflineCopyStagingDir
+				makeOfflineCopyStagingDir = func(string, string) (string, error) { return "", failure }
+				t.Cleanup(func() { makeOfflineCopyStagingDir = previous })
+			},
+		},
+		{
+			name: "sync staged tree",
+			install: func(t *testing.T) {
+				installOfflineCopySyncFailure(t, 1, failure)
+			},
+		},
+		{
+			name: "prepare staging permissions",
+			install: func(t *testing.T) {
+				previous := chmodOfflineCopyPath
+				chmodOfflineCopyPath = func(string, os.FileMode) error { return failure }
+				t.Cleanup(func() { chmodOfflineCopyPath = previous })
+			},
+		},
+		{
+			name: "publish rename",
+			install: func(t *testing.T) {
+				previous := renameOfflineCopy
+				renameOfflineCopy = func(string, string) error { return failure }
+				t.Cleanup(func() { renameOfflineCopy = previous })
+			},
+		},
+		{
+			name: "sync publication",
+			install: func(t *testing.T) {
+				installOfflineCopySyncFailure(t, 2, failure)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			source := filepath.Join(dir, "data")
+			if err := os.Mkdir(source, 0o755); err != nil {
+				t.Fatalf("create source data dir: %v", err)
+			}
+			writeDataDirTestBytes(t, source, "segment", []byte("complete"))
+			output := filepath.Join(dir, "backup")
+			tc.install(t)
+
+			err := BackupDataDir(source, output)
+			if err == nil || !errors.Is(err, failure) {
+				t.Fatalf("BackupDataDir error = %v, want injected failure", err)
+			}
+			assertPathMissing(t, output)
+			assertNoOfflineCopyStagingEntries(t, dir, "backup")
+			if restoreErr := RestoreDataDir(output, filepath.Join(dir, "restore")); restoreErr == nil {
+				t.Fatal("RestoreDataDir accepted failed backup path")
+			}
+		})
+	}
+}
+
+func TestRestoreDataDirFailurePhasesPreserveInitiallyEmptyDestination(t *testing.T) {
+	failure := errors.New("injected restore failure")
+	for _, tc := range []struct {
+		name     string
+		syncCall int
+		rename   bool
+		remove   bool
+	}{
+		{name: "sync staged tree", syncCall: 1},
+		{name: "remove empty destination", remove: true},
+		{name: "sync empty removal", syncCall: 2},
+		{name: "publish rename", rename: true},
+		{name: "sync publication", syncCall: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			backup := filepath.Join(dir, "backup")
+			if err := os.Mkdir(backup, 0o755); err != nil {
+				t.Fatalf("create backup data dir: %v", err)
+			}
+			writeDataDirTestBytes(t, backup, "segment", []byte("complete"))
+			destination := filepath.Join(dir, "data")
+			if err := os.Mkdir(destination, 0o750); err != nil {
+				t.Fatalf("create empty restore destination: %v", err)
+			}
+			if tc.syncCall != 0 {
+				installOfflineCopySyncFailure(t, tc.syncCall, failure)
+			}
+			if tc.rename {
+				previous := renameOfflineCopy
+				renameOfflineCopy = func(string, string) error { return failure }
+				t.Cleanup(func() { renameOfflineCopy = previous })
+			}
+			if tc.remove {
+				previous := removeOfflineCopyEmpty
+				removeOfflineCopyEmpty = func(string) error { return failure }
+				t.Cleanup(func() { removeOfflineCopyEmpty = previous })
+			}
+
+			err := RestoreDataDir(backup, destination)
+			if err == nil || !errors.Is(err, failure) {
+				t.Fatalf("RestoreDataDir error = %v, want injected failure", err)
+			}
+			info, statErr := os.Stat(destination)
+			if statErr != nil {
+				t.Fatalf("stat restored empty destination: %v", statErr)
+			}
+			if !info.IsDir() || info.Mode().Perm() != 0o750 {
+				t.Fatalf("destination after failure mode = %v, want empty directory mode 0750", info.Mode())
+			}
+			entries, readErr := os.ReadDir(destination)
+			if readErr != nil || len(entries) != 0 {
+				t.Fatalf("destination entries after failure = %#v, err = %v, want empty", entries, readErr)
+			}
+			assertNoOfflineCopyStagingEntries(t, dir, "data")
+		})
+	}
+}
+
+func TestRestoreDataDirFailureLeavesInitiallyMissingDestinationMissing(t *testing.T) {
+	dir := t.TempDir()
+	backup := filepath.Join(dir, "backup")
+	if err := os.Mkdir(backup, 0o755); err != nil {
+		t.Fatalf("create backup data dir: %v", err)
+	}
+	writeDataDirTestBytes(t, backup, "segment", []byte("complete"))
+	destination := filepath.Join(dir, "data")
+	failure := errors.New("injected publication failure")
+	installOfflineCopySyncFailure(t, 2, failure)
+
+	err := RestoreDataDir(backup, destination)
+	if err == nil || !errors.Is(err, failure) {
+		t.Fatalf("RestoreDataDir error = %v, want injected failure", err)
+	}
+	assertPathMissing(t, destination)
+	assertNoOfflineCopyStagingEntries(t, dir, "data")
+}
+
+func TestBackupDataDirSyncsNestedDirectoriesBeforeDurablePublication(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "data")
+	if err := os.MkdirAll(filepath.Join(source, "nested"), 0o755); err != nil {
+		t.Fatalf("create nested source data dir: %v", err)
+	}
+	writeDataDirTestBytes(t, filepath.Join(source, "nested"), "segment", []byte("complete"))
+	output := filepath.Join(dir, "backup")
+	previous := syncOfflineCopyDir
+	var synced []string
+	syncOfflineCopyDir = func(path string) error {
+		synced = append(synced, path)
+		return nil
+	}
+	t.Cleanup(func() { syncOfflineCopyDir = previous })
+
+	if err := BackupDataDir(source, output); err != nil {
+		t.Fatalf("BackupDataDir: %v", err)
+	}
+	if len(synced) < 3 {
+		t.Fatalf("synced directories = %#v, want nested staging, staging root, and publication parent", synced)
+	}
+	if filepath.Base(synced[0]) != "nested" {
+		t.Fatalf("first synced directory = %s, want nested staging directory", synced[0])
+	}
+	if synced[len(synced)-1] != dir {
+		t.Fatalf("last synced directory = %s, want publication parent %s", synced[len(synced)-1], dir)
+	}
 }
 
 func TestRestoreDataDirRejectsNonEmptyDestinationWithoutMutation(t *testing.T) {
@@ -645,8 +819,38 @@ func TestRestoreDataDirRejectsSymlinkBackupSourcesAndEntries(t *testing.T) {
 	}
 	assertErrorContains(t, err, "entry-link")
 	assertErrorContains(t, err, "is a symlink; refusing to copy")
-	if _, statErr := os.Stat(restoreDir); statErr != nil {
-		t.Fatalf("restore destination should exist for failed partial copy investigation: %v", statErr)
+	assertPathMissing(t, restoreDir)
+}
+
+func installOfflineCopySyncFailure(t *testing.T, failCall int, failure error) {
+	t.Helper()
+	previous := syncOfflineCopyDir
+	call := 0
+	syncOfflineCopyDir = func(path string) error {
+		call++
+		if call == failCall {
+			return failure
+		}
+		return previous(path)
+	}
+	t.Cleanup(func() { syncOfflineCopyDir = previous })
+}
+
+func assertPathMissing(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("path %s stat = %v, want not exist", path, err)
+	}
+}
+
+func assertNoOfflineCopyStagingEntries(t *testing.T, parent, destinationBase string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(parent, "."+destinationBase+".staging-*"))
+	if err != nil {
+		t.Fatalf("glob staging paths: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("staging paths after failure = %#v, want none", matches)
 	}
 }
 
