@@ -57,13 +57,22 @@ rtk go run ./examples/hosted-chat/cmd/maintain preflight \
   --data-dir ./examples/hosted-chat/data \
   --format json
 
+rtk go run ./examples/hosted-chat/cmd/maintain prepare-backup \
+  --data-dir ./examples/hosted-chat/data \
+  --format json
+
 rtk go run ./examples/hosted-chat/cmd/maintain migrate \
   --data-dir ./examples/hosted-chat/data
 ```
 
 The generic `shunter` CLI can copy offline `DataDir` directories, but
-schema-aware preflight and migration commands must live in an app-owned binary
-so they can link `app.Module()` directly.
+schema-aware preflight, snapshot/compaction preparation, and migration commands
+must live in an app-owned binary so they can link `app.Module()` directly.
+Run `prepare-backup` only after the serving process has stopped: it opens the
+existing DataDir without starting normal runtime services, schedulers, startup
+migration hooks, or protocol serving; creates a snapshot; waits for that
+horizon; compacts the covered log prefix; and closes before reporting success.
+Missing DataDirs and invalid output formats fail before mutation.
 
 With the backend running, call the reducer and read the declared query through
 the running-app CLI:
@@ -107,8 +116,8 @@ Typecheck the frontend-shaped client:
 
 ```bash
 cd examples/hosted-chat/frontend
-npm install
-npm run typecheck
+rtk npm ci
+rtk npm run typecheck
 ```
 
 The TypeScript example asserts generated contract compatibility, connects to
@@ -136,6 +145,7 @@ contract-local health, runs app-owned fresh preflight, starts a real server on
 an ephemeral local port, checks live `health` and `describe`, runs one CLI
 reducer call, one CLI procedure call, one declared query, and one raw SQL read
 against it, stops the server, runs app-owned compatible preflight and no-op
-migration, runs offline backup and restore, restarts from the restored
-`DataDir`, verifies recovered query results, regenerates the TypeScript
-bindings, and runs the frontend typecheck.
+migration, creates a snapshot and compacts its covered log prefix, runs offline
+backup and restore, preflights the restored DataDir, restarts from it, verifies
+recovered query results, regenerates the TypeScript bindings, and runs the
+frontend typecheck.

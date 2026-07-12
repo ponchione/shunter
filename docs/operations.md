@@ -103,14 +103,33 @@ Current policy:
 
 Backup is offline-only for v1.
 
-Recommended flow:
+Supported maintenance/recovery sequence:
 
 1. Stop admitting new traffic.
-2. Optionally create a snapshot and compact covered log segments.
-3. Call `Runtime.Close` and wait for success.
-4. Copy the complete `DataDir` with `BackupDataDir` or `shunter backup`.
-5. Store the matching app contract, app module version, Shunter version, commit,
-   backup timestamp, and copied `shunter.datadir.json` next to the backup.
+2. Wait for the application-required durability boundary and stop the serving
+   runtime cleanly.
+3. Use an app-owned maintenance process to recover the existing DataDir without
+   starting normal runtime services, schedulers, startup migration hooks, or
+   protocol serving. It creates a snapshot, waits for the returned TX ID,
+   compacts only against that completed snapshot ID, and closes cleanly. Missing
+   DataDirs and invalid command formats must fail before mutation.
+4. Copy the complete `DataDir` offline with `BackupDataDir` or `shunter backup`.
+5. Restore into a fresh DataDir and run app-owned compatibility preflight.
+6. Start the compatible app and verify application-visible state before
+   admitting traffic.
+7. Store the matching app contract, app module version, Shunter version,
+   commit, backup timestamp, and copied `shunter.datadir.json` with the backup.
+
+Every step is fail-stop: do not continue after snapshot, compaction, close,
+copy, restore, or preflight failure. Preserve the complete source DataDir and
+diagnostics. The app/process supervisor owns traffic drain, scheduling,
+retention, RPO/RTO, backup storage, and restart admission; Shunter owns the
+runtime state operations and their safety checks.
+
+The canonical repository drill is `TestMaintenanceRecoveryDrill` in
+`examples/hosted-chat/cmd/maintain`; the hosted-chat gate runs the same
+app-owned preparation, backup, restore, preflight, restart, and declared-read
+verification sequence.
 
 Go helper:
 

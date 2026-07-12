@@ -16,6 +16,7 @@ sql_query_json="$(mktemp)"
 running_describe_json="$(mktemp)"
 running_health_json="$(mktemp)"
 preflight_json="$(mktemp)"
+prepare_backup_json="$(mktemp)"
 migrate_json="$(mktemp)"
 run_data="$(mktemp -d)"
 backup_data="$(mktemp -d)"
@@ -27,7 +28,7 @@ cleanup() {
     kill "$server_pid" >/dev/null 2>&1 || true
     wait "$server_pid" >/dev/null 2>&1 || true
   fi
-  rm -f "$build_bin" "$describe_json" "$health_json" "$validate_json" "$assert_json" "$call_json" "$procedure_json" "$query_json" "$sql_query_json" "$running_describe_json" "$running_health_json" "$preflight_json" "$migrate_json" "$server_log"
+  rm -f "$build_bin" "$describe_json" "$health_json" "$validate_json" "$assert_json" "$call_json" "$procedure_json" "$query_json" "$sql_query_json" "$running_describe_json" "$running_health_json" "$preflight_json" "$prepare_backup_json" "$migrate_json" "$server_log"
   rm -rf "$run_data" "$backup_data" "$restored_data"
 }
 trap cleanup EXIT
@@ -192,8 +193,19 @@ rtk grep '"DataDir": "' "$migrate_json"
 rtk grep '"RecoveredTxID": 0' "$migrate_json"
 rtk grep '"DurableTxID":' "$migrate_json"
 rtk grep '"Hooks": null' "$migrate_json"
+rtk go run ./examples/hosted-chat/cmd/maintain prepare-backup \
+  --data-dir "$run_data" \
+  --format json > "$prepare_backup_json"
+rtk grep '"status": "prepared"' "$prepare_backup_json"
+rtk grep '"recovered_tx_id":' "$prepare_backup_json"
+rtk python3 -c 'import json,sys; result=json.load(open(sys.argv[1])); assert result["snapshot_tx_id"] > 0; assert result["snapshot_tx_id"] == result["recovered_tx_id"]' "$prepare_backup_json"
 rtk go run ./cmd/shunter backup --data-dir "$run_data" --out "$backup_data"
 rtk go run ./cmd/shunter restore --backup "$backup_data" --data-dir "$restored_data"
+rtk go run ./examples/hosted-chat/cmd/maintain preflight \
+  --data-dir "$restored_data" \
+  --format json > "$preflight_json"
+rtk grep '"status": "compatible"' "$preflight_json"
+rtk grep '"compatible": true' "$preflight_json"
 
 listen_port="$(free_port)"
 server_url="http://127.0.0.1:${listen_port}"
@@ -209,5 +221,5 @@ rtk go run ./cmd/shunter contract codegen \
   --out examples/hosted-chat/frontend/src/generated/hosted_chat.ts
 
 cd examples/hosted-chat/frontend
-rtk npm install
+rtk npm ci
 rtk npm run typecheck

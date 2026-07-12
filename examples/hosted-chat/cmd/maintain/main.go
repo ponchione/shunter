@@ -31,6 +31,8 @@ func run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 	switch args[0] {
 	case "preflight":
 		return runPreflight(stdout, stderr, args[1:])
+	case "prepare-backup":
+		return runPrepareBackup(ctx, stdout, stderr, args[1:])
 	case "migrate":
 		return runMigrate(ctx, stdout, stderr, args[1:])
 	default:
@@ -38,6 +40,86 @@ func run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		printHelp(stderr)
 		return 2
 	}
+}
+
+type backupPreparationResult struct {
+	Status        string `json:"status"`
+	DataDir       string `json:"data_dir"`
+	RecoveredTxID uint64 `json:"recovered_tx_id"`
+	SnapshotTxID  uint64 `json:"snapshot_tx_id"`
+}
+
+func runPrepareBackup(ctx context.Context, stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("hosted-chat-maintain prepare-backup", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dataDir := fs.String("data-dir", "", "offline hosted-chat DataDir to snapshot and compact")
+	format := fs.String("format", formatText, "output format: text or json")
+	if code, stop := parseFlags(fs, args); stop {
+		return code
+	}
+	if code := requireNoArgs(stderr, fs); code != 0 {
+		return code
+	}
+	if err := validateOutputFormat(*format); err != nil {
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 2
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	result, err := prepareBackup(ctx, app.Module(), maintenanceConfig(*dataDir))
+	if err != nil {
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 1
+	}
+	if err := writeBackupPreparationResult(stdout, result, *format); err != nil {
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 2
+	}
+	return 0
+}
+
+func prepareBackup(ctx context.Context, mod *shunter.Module, cfg shunter.Config) (backupPreparationResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return backupPreparationResult{}, err
+	}
+	if err := requireExistingOfflineDataDir(cfg.DataDir); err != nil {
+		return backupPreparationResult{}, err
+	}
+	rt, err := shunter.Build(mod, cfg)
+	if err != nil {
+		return backupPreparationResult{}, fmt.Errorf("build maintenance runtime: %w", err)
+	}
+	closeWith := func(operationErr error) error {
+		return errors.Join(operationErr, rt.Close())
+	}
+	recoveredTxID := rt.Health().Recovery.RecoveredTxID
+	snapshotTxID, err := rt.CreateSnapshot()
+	if err != nil {
+		return backupPreparationResult{}, closeWith(fmt.Errorf("create maintenance snapshot: %w", err))
+	}
+	if err := ctx.Err(); err != nil {
+		return backupPreparationResult{}, closeWith(fmt.Errorf("prepare maintenance snapshot: %w", err))
+	}
+	if err := rt.WaitUntilDurable(ctx, snapshotTxID); err != nil {
+		return backupPreparationResult{}, closeWith(fmt.Errorf("wait for snapshot horizon durability: %w", err))
+	}
+	if err := rt.CompactCommitLog(snapshotTxID); err != nil {
+		return backupPreparationResult{}, closeWith(fmt.Errorf("compact snapshot-covered commit log: %w", err))
+	}
+	if err := rt.Close(); err != nil {
+		return backupPreparationResult{}, fmt.Errorf("close maintenance runtime: %w", err)
+	}
+	return backupPreparationResult{
+		Status:        "prepared",
+		DataDir:       cfg.DataDir,
+		RecoveredTxID: uint64(recoveredTxID),
+		SnapshotTxID:  uint64(snapshotTxID),
+	}, nil
 }
 
 func runPreflight(stdout, stderr io.Writer, args []string) int {
@@ -50,6 +132,10 @@ func runPreflight(stdout, stderr io.Writer, args []string) int {
 	}
 	if code := requireNoArgs(stderr, fs); code != 0 {
 		return code
+	}
+	if err := validateOutputFormat(*format); err != nil {
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 2
 	}
 	cfg := maintenanceConfig(*dataDir)
 	report, err := shunter.CheckDataDirCompatibilityReport(app.Module(), cfg)
@@ -78,6 +164,10 @@ func runMigrate(ctx context.Context, stdout, stderr io.Writer, args []string) in
 	if code := requireNoArgs(stderr, fs); code != 0 {
 		return code
 	}
+	if err := validateOutputFormat(*format); err != nil {
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 2
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -102,6 +192,36 @@ func maintenanceConfig(dataDir string) shunter.Config {
 		cfg.DataDir = "./data/hosted-chat"
 	}
 	return cfg
+}
+
+func requireExistingOfflineDataDir(dataDir string) error {
+	dataDir = strings.TrimSpace(dataDir)
+	if dataDir == "" {
+		return fmt.Errorf("offline data dir path is required")
+	}
+	info, err := os.Lstat(dataDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("offline data dir %s does not exist", dataDir)
+	}
+	if err != nil {
+		return fmt.Errorf("inspect offline data dir %s: %w", dataDir, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("offline data dir %s is a symlink", dataDir)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("offline data dir %s is not a directory", dataDir)
+	}
+	return nil
+}
+
+func validateOutputFormat(format string) error {
+	switch strings.TrimSpace(format) {
+	case "", formatText, formatJSON:
+		return nil
+	default:
+		return fmt.Errorf("format must be text or json")
+	}
 }
 
 func writePreflightReport(w io.Writer, report shunter.DataDirCompatibilityReport, format string) error {
@@ -149,6 +269,26 @@ func writeMigrationResult(w io.Writer, result shunter.MigrationRunResult, format
 	}
 }
 
+func writeBackupPreparationResult(w io.Writer, result backupPreparationResult, format string) error {
+	switch strings.TrimSpace(format) {
+	case "", formatText:
+		fmt.Fprintf(w, "status: %s\n", result.Status)
+		fmt.Fprintf(w, "data_dir: %s\n", result.DataDir)
+		fmt.Fprintf(w, "recovered_tx_id: %d\n", result.RecoveredTxID)
+		fmt.Fprintf(w, "snapshot_tx_id: %d\n", result.SnapshotTxID)
+		return nil
+	case formatJSON:
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(w, "%s\n", data)
+		return err
+	default:
+		return fmt.Errorf("format must be text or json")
+	}
+}
+
 func parseFlags(fs *flag.FlagSet, args []string) (int, bool) {
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -176,10 +316,13 @@ func printHelp(w io.Writer) {
 
 Usage:
   hosted-chat-maintain preflight [--data-dir ./data/hosted-chat] [--format text|json]
+  hosted-chat-maintain prepare-backup [--data-dir ./data/hosted-chat] [--format text|json]
   hosted-chat-maintain migrate [--data-dir ./data/hosted-chat] [--format text|json]
 
 These commands are app-owned: they link the hosted-chat module directly so
 DataDir compatibility checks and migration hooks use the same declarations as
-the hosted server.
+the hosted server. prepare-backup requires an existing offline DataDir, recovers
+it without starting runtime services or startup hooks, creates a snapshot,
+compacts only the covered log prefix, and closes before reporting success.
 `)
 }

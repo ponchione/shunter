@@ -86,13 +86,29 @@ completed snapshot TX ID.
 
 Current v1 backup is offline-only.
 
-Recommended flow:
+Supported maintenance/recovery flow:
 
 1. Stop accepting traffic.
-2. Optionally create a snapshot and compact covered log segments.
-3. Close the runtime.
-4. Copy the entire `DataDir`.
-5. Store the matching module contract and build metadata next to the backup.
+2. Wait for required transactions to become durable, then stop the serving
+   runtime cleanly.
+3. In an app-owned maintenance process, recover the existing DataDir without
+   starting normal runtime services, schedulers, startup migration hooks, or
+   protocol serving. Create a snapshot, wait for its returned TX ID to be
+   durable, and compact only with that completed snapshot TX ID.
+4. Close the recovered maintenance state and require success before continuing.
+5. Copy the entire `DataDir` offline.
+6. Restore into a fresh DataDir, run module-linked compatibility preflight,
+   start the compatible app, and verify application-visible reads before
+   admitting traffic.
+7. Retain the complete DataDir copy, matching module contract and module
+   version, Shunter version/commit, backup timestamp, and build metadata.
+
+The hosted-chat `prepare-backup` command and `TestMaintenanceRecoveryDrill`
+provide the repository-local example. Preparation requires an existing
+DataDir; a missing path or invalid output format fails before mutation.
+Snapshot, compaction, close, backup, restore, or preflight errors stop the
+sequence; preserve the source DataDir and the error for investigation rather
+than deleting individual artifacts.
 
 ```go
 if err := shunter.BackupDataDir("./data/chat", "./backups/chat-2026-05-04"); err != nil {
