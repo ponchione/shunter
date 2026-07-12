@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Local `Runtime.SubscribeView` results now own their maintained subscription
+  through idempotent, concurrency-safe `Close` and `Unsubscribe(ctx)` methods.
+  Cleanup removes manager registries, pruning state, active accounting, and
+  commit-time work; cancellation and registration-response races now either
+  return an owned subscription or leave none installed.
 - Offline `BackupDataDir` and `RestoreDataDir` now copy into a private adjacent
   staging tree, verify the source remained stable, sync all file and directory
   entries, and publish with a parent-synced rename. Failures remove staging and

@@ -222,8 +222,12 @@ sub, err := rt.SubscribeView(ctx, "live_messages", 1)
 if err != nil {
 	return err
 }
+defer sub.Close()
 _ = sub.InitialRows
 ```
+
+The returned value owns the maintained local subscription. Always call
+`Close`, or call `Unsubscribe(ctx)` when cleanup needs its own deadline.
 
 ## Serve Protocol Traffic
 

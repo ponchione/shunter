@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/ponchione/shunter/bsatn"
@@ -49,8 +50,9 @@ type DeclaredQueryResult struct {
 	Rows      []types.ProductValue
 }
 
-// DeclaredViewSubscription is the local admission result returned by
-// SubscribeView.
+// DeclaredViewSubscription is the owned local admission result returned by
+// SubscribeView. Call Close or Unsubscribe when the maintained subscription is
+// no longer needed. Copies share the same idempotent cleanup state.
 type DeclaredViewSubscription struct {
 	Name        string
 	QueryID     uint32
@@ -58,6 +60,89 @@ type DeclaredViewSubscription struct {
 	TableName   string
 	Columns     []schema.ColumnSchema
 	InitialRows []types.ProductValue
+
+	cleanup *declaredViewSubscriptionCleanup
+}
+
+// Close releases the maintained subscription with no caller deadline. It is
+// safe to call repeatedly and concurrently. Call Unsubscribe when cleanup must
+// use a caller-controlled context.
+func (s DeclaredViewSubscription) Close() error {
+	return s.Unsubscribe(context.Background())
+}
+
+// Unsubscribe releases the maintained subscription. It is safe to call
+// repeatedly and concurrently. If cleanup is not admitted before ctx is
+// canceled, ownership remains live and a later call may retry. If cleanup
+// removes the subscription but reports a final-evaluation error, repeated calls
+// return that same terminal error.
+func (s DeclaredViewSubscription) Unsubscribe(ctx context.Context) error {
+	if s.cleanup == nil {
+		return nil
+	}
+	return s.cleanup.unsubscribe(ctx)
+}
+
+type declaredViewSubscriptionCleanup struct {
+	mu            sync.Mutex
+	runtime       *Runtime
+	connID        types.ConnectionID
+	queryID       uint32
+	done          bool
+	terminalErr   error
+	inFlight      chan struct{}
+	unsubscribeFn func(context.Context) (bool, error)
+}
+
+func (c *declaredViewSubscriptionCleanup) unsubscribe(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		c.mu.Lock()
+		if c.done {
+			err := c.terminalErr
+			c.mu.Unlock()
+			return err
+		}
+		if wait := c.inFlight; wait != nil {
+			c.mu.Unlock()
+			select {
+			case <-wait:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			c.mu.Unlock()
+			return err
+		}
+		wait := make(chan struct{})
+		c.inFlight = wait
+		unsubscribe := c.unsubscribeFn
+		if unsubscribe == nil {
+			runtime := c.runtime
+			connID := c.connID
+			queryID := c.queryID
+			unsubscribe = func(callCtx context.Context) (bool, error) {
+				return runtime.unsubscribeDeclaredView(callCtx, connID, queryID)
+			}
+		}
+		c.mu.Unlock()
+
+		released, err := unsubscribe(ctx)
+		c.mu.Lock()
+		if released {
+			c.done = true
+			c.terminalErr = err
+			c.runtime = nil
+		}
+		c.inFlight = nil
+		close(wait)
+		c.mu.Unlock()
+		return err
+	}
 }
 
 // DeclaredReadOption configures local named query/view calls.
@@ -196,33 +281,84 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 	cmd := executor.RegisterSubscriptionSetCmd{
 		Request: plan.subscriptionSetRegisterRequest(ctx, callOpts.caller.ConnectionID, queryID, callOpts.requestID),
 		Reply: func(result subscription.SubscriptionSetRegisterResult, err error) {
+			if declaredViewRegisterReplyHook != nil {
+				declaredViewRegisterReplyHook()
+			}
 			responseCh <- declaredViewRegisterResponse{result: result, err: err}
 		},
 	}
 	if err := exec.SubmitWithContext(ctx, cmd); err != nil {
 		return DeclaredViewSubscription{}, err
 	}
-	select {
-	case response := <-responseCh:
-		if response.err != nil {
-			return DeclaredViewSubscription{}, response.err
-		}
-		return DeclaredViewSubscription{
-			Name:        entry.Name,
-			QueryID:     queryID,
-			RequestID:   callOpts.requestID,
-			TableName:   declaredViewTableName(plan, response.result.Update),
-			Columns:     declaredViewColumns(plan, response.result.Update, r.registry),
-			InitialRows: collectDeclaredInitialRows(response.result.Update),
-		}, nil
-	case <-ctx.Done():
-		return DeclaredViewSubscription{}, ctx.Err()
+	response := <-responseCh
+	if response.err != nil {
+		return DeclaredViewSubscription{}, response.err
 	}
+	return DeclaredViewSubscription{
+		Name:        entry.Name,
+		QueryID:     queryID,
+		RequestID:   callOpts.requestID,
+		TableName:   declaredViewTableName(plan, response.result.Update),
+		Columns:     declaredViewColumns(plan, response.result.Update, r.registry),
+		InitialRows: collectDeclaredInitialRows(response.result.Update),
+		cleanup: &declaredViewSubscriptionCleanup{
+			runtime: r,
+			connID:  callOpts.caller.ConnectionID,
+			queryID: queryID,
+		},
+	}, nil
 }
+
+// declaredViewRegisterReplyHook is test-only instrumentation for cancellation
+// races after executor registration and before ownership is returned.
+var declaredViewRegisterReplyHook func()
 
 type declaredViewRegisterResponse struct {
 	result subscription.SubscriptionSetRegisterResult
 	err    error
+}
+
+func (r *Runtime) unsubscribeDeclaredView(ctx context.Context, connID types.ConnectionID, queryID uint32) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	exec, err := r.readyExecutor()
+	if err != nil {
+		if errors.Is(err, ErrRuntimeClosed) {
+			return true, nil
+		}
+		return false, err
+	}
+	responseCh := make(chan declaredViewUnregisterResponse, 1)
+	cmd := executor.UnregisterSubscriptionSetCmd{
+		ConnID:  connID,
+		QueryID: queryID,
+		Context: ctx,
+		Reply: func(_ subscription.SubscriptionSetUnregisterResult, err error) {
+			responseCh <- declaredViewUnregisterResponse{err: err}
+		},
+	}
+	if err := exec.SubmitWithContext(ctx, cmd); err != nil {
+		if errors.Is(err, executor.ErrExecutorShutdown) {
+			return true, nil
+		}
+		return false, err
+	}
+	response := <-responseCh
+	switch {
+	case response.err == nil, errors.Is(response.err, subscription.ErrSubscriptionNotFound):
+		return true, nil
+	case errors.Is(response.err, subscription.ErrFinalQuery):
+		return true, response.err
+	case errors.Is(response.err, executor.ErrExecutorShutdown):
+		return true, nil
+	default:
+		return false, response.err
+	}
+}
+
+type declaredViewUnregisterResponse struct {
+	err error
 }
 
 type declaredViewAdmissionPlan struct {

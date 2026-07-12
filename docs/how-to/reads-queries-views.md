@@ -144,11 +144,15 @@ sub, err := rt.SubscribeView(
 if err != nil {
 	return err
 }
+defer sub.Close()
 _ = sub.InitialRows
 ```
 
-`SubscribeView` admits the subscription and returns initial rows. Protocol
-clients receive ongoing transaction updates through the protocol path.
+`SubscribeView` admits the subscription and returns initial rows plus ownership
+of the maintained local subscription. Always call `Close`; use
+`Unsubscribe(ctx)` instead when cleanup needs a caller-controlled context. Both
+operations are idempotent and safe across copies of the returned value.
+Protocol clients receive ongoing transaction updates through the protocol path.
 
 Declared views use the same parameter model as declared queries:
 
@@ -176,6 +180,10 @@ sub, err := rt.SubscribeView(
 		types.NewString("general"),
 	}),
 )
+if err != nil {
+	return err
+}
+defer sub.Close()
 ```
 
 ## SQL Surface
