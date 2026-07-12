@@ -6,14 +6,14 @@ tests. It uses Node Playwright against a live Shunter strict-auth fixture server
 Setup:
 
 ```sh
-npm install --prefix typescript/browser-integration
-npm --prefix typescript/browser-integration run install:browsers
+rtk npm ci --prefix typescript/browser-integration
+rtk npm --prefix typescript/browser-integration run install:browsers
 ```
 
 Run:
 
 ```sh
-npm --prefix typescript/browser-integration test
+rtk npm --prefix typescript/browser-integration test
 ```
 
 The strict-auth test verifies that browser-native `WebSocket` clients can observe

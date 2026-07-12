@@ -282,8 +282,8 @@ Typecheck the frontend-shaped client:
 
 ```bash
 cd examples/hosted-chat/frontend
-npm install
-npm run typecheck
+rtk npm ci
+rtk npm run typecheck
 ```
 
 The generated client imports `@shunter/client`, connects to the Shunter

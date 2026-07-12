@@ -126,7 +126,7 @@ async function loadPlaywright() {
     return await import("playwright");
   } catch (error) {
     if (error?.code === "ERR_MODULE_NOT_FOUND") {
-      throw new Error("Playwright is not installed. Run `npm install --prefix typescript/browser-integration`.");
+      throw new Error("Playwright is not installed. Run `rtk npm ci --prefix typescript/browser-integration`.");
     }
     throw error;
   }
