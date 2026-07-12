@@ -252,6 +252,9 @@ rtk go tool staticcheck ./...
 Staticcheck is expected to pass. Treat failures as real cleanup findings unless
 a task explicitly narrows the verification scope.
 
+The checked-in read-only GitHub Actions workflow and its exact local RTK command
+mapping are documented in [Continuous integration](docs/continuous-integration.md).
+
 ## Source Provenance
 
 Shunter is intended to be an independent clean-room implementation. The project
