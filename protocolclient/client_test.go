@@ -38,7 +38,7 @@ func TestDialSendsBearerTokenNegotiatesSubprotocolAndReadsIdentity(t *testing.T)
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	if identity != wantIdentity {
 		t.Fatalf("identity = %+v, want %+v", identity, wantIdentity)
@@ -227,7 +227,7 @@ func TestDialAllowsExplicitAnonymousConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 	if identity != wantIdentity {
 		t.Fatalf("identity = %+v, want %+v", identity, wantIdentity)
 	}
@@ -342,7 +342,7 @@ func TestClientSendAndReadUseProtocolCodecs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	requestID := client.NextRequestID()
 	if err := client.Send(ctx, protocol.CallReducerMsg{
@@ -408,7 +408,7 @@ func TestClientCallReducerWaitsForMatchingTransactionUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	update, err := client.CallReducer(ctx, "send_message", []byte{1, 2, 3})
 	if err != nil {
@@ -453,7 +453,7 @@ func TestClientCallReducerSurfacesFailedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	_, err = client.CallReducer(ctx, "send_message", nil)
 	if !errors.Is(err, ErrReducerFailed) {
@@ -483,7 +483,7 @@ func TestClientCallReducerRejectsMismatchedResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	_, err = client.CallReducer(ctx, "send_message", nil)
 	if !errors.Is(err, ErrResponseMismatch) {
@@ -790,7 +790,7 @@ func TestClientDeclaredQueryWaitsForMatchingResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	response, err := client.DeclaredQuery(ctx, "recent_messages")
 	if err != nil {
@@ -827,7 +827,7 @@ func TestClientDeclaredQueryRejectsMismatchedResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	_, err = client.DeclaredQuery(ctx, "recent_messages")
 	if !errors.Is(err, ErrResponseMismatch) {
@@ -861,7 +861,7 @@ func TestClientDeclaredQueryWithParametersWaitsForMatchingResponse(t *testing.T)
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	response, err := client.DeclaredQueryWithParameters(ctx, "recent_messages", []byte{9, 8, 7})
 	if err != nil {
@@ -901,7 +901,7 @@ func TestClientDeclaredQueryWithParametersSurfacesQueryError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	_, err = client.DeclaredQueryWithParameters(ctx, "recent_messages", nil)
 	if !errors.Is(err, ErrDeclaredQueryFailed) {
@@ -923,7 +923,7 @@ func TestClientDeclaredQueryWithParametersRequiresV2Subprotocol(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	_, err = client.DeclaredQueryWithParameters(ctx, "recent_messages", nil)
 	if !errors.Is(err, ErrProtocolVersion) {
@@ -957,7 +957,7 @@ func TestClientExecuteDeclaredQueryChoosesNoParameterRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	response, err := client.ExecuteDeclaredQuery(ctx, DeclaredQueryRequest{Name: "recent_messages"})
 	if err != nil {
@@ -1003,7 +1003,7 @@ func TestClientExecuteDeclaredQueryChoosesParameterizedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	response, err := client.ExecuteDeclaredQuery(ctx, DeclaredQueryRequest{
 		Name:          "recent_messages",
@@ -1046,7 +1046,7 @@ func TestClientExecuteDeclaredQueryWithParametersRequiresV2Subprotocol(t *testin
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	_, err = client.ExecuteDeclaredQuery(ctx, DeclaredQueryRequest{
 		Name:          "recent_messages",
@@ -1079,7 +1079,7 @@ func TestClientExecuteDeclaredQueryReusesResponseValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial returned error: %v", err)
 	}
-	defer client.Close(context.Background())
+	defer closeProtocolClientTestClient(t, client)
 
 	_, err = client.ExecuteDeclaredQuery(ctx, DeclaredQueryRequest{
 		Name:          "recent_messages",
@@ -1448,6 +1448,16 @@ func protocolClientTestServer(t *testing.T, handler http.HandlerFunc) *protocolC
 	srv := &protocolClientHTTPServer{Server: httptest.NewServer(handler)}
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func closeProtocolClientTestClient(t *testing.T, client *Client) {
+	t.Helper()
+	if client == nil || client.conn == nil {
+		return
+	}
+	if err := client.conn.CloseNow(); err != nil {
+		t.Errorf("CloseNow test client: %v", err)
+	}
 }
 
 func (s *protocolClientHTTPServer) wsURL() string {
