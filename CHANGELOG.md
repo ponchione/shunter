@@ -6,7 +6,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 - Added SHA-pinned, read-only GitHub Actions CI with separated Go quality/test,
   focused race, TypeScript package, browser integration, vulnerability, and
-  hosted/static gate jobs. A weekly/manual extended job runs the full uncached
+  hosted/static gate jobs. A shared, regression-tested whitespace checker
+  rejects errors introduced by each PR or push without reclassifying historical
+  fixtures and evidence. A weekly/manual extended job runs the full uncached
   race suite, and the CI documentation maps every gate to local RTK commands.
 - CLI commands now support interspersed flags, including the root-help forms
   that place `--format` after reducer, procedure, or query positionals. Literal
