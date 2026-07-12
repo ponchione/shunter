@@ -151,7 +151,10 @@ the staged tree is complete. A failed backup leaves no output path that can be
 mistaken for a usable backup and can be retried. It refuses symlink sources,
 existing output paths, nested destinations inside the source data directory,
 symlink entries, unsupported special files, and source trees that change while
-being copied.
+being copied. Staged directories remain owner-private and writable during the
+copy; final source directory modes are applied deepest-first after verification.
+This preserves readable, read-only directory trees without exposing incomplete
+staged contents through their final permissions.
 
 ## Restore
 

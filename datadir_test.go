@@ -41,6 +41,120 @@ func TestBackupAndRestoreDataDirHelpersCopyCompleteDirectory(t *testing.T) {
 	assertDataDirFileBytes(t, filepath.Join(restoreDir, "snapshots", "7", "snapshot"), []byte("snapshot-7"))
 }
 
+func TestBackupAndRestoreDataDirPreserveReadableReadOnlyDirectories(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	nestedDataDir := filepath.Join(dataDir, "snapshots", "7")
+	if err := os.MkdirAll(nestedDataDir, 0o755); err != nil {
+		t.Fatalf("create read-only source data dir: %v", err)
+	}
+	writeDataDirTestBytes(t, nestedDataDir, "snapshot", []byte("snapshot-7"))
+	if err := os.Chmod(nestedDataDir, 0o555); err != nil {
+		t.Fatalf("chmod nested source data dir: %v", err)
+	}
+	if err := os.Chmod(dataDir, 0o555); err != nil {
+		t.Fatalf("chmod source data dir: %v", err)
+	}
+
+	backupDir := filepath.Join(dir, "backup")
+	restoreDir := filepath.Join(dir, "restored")
+	t.Cleanup(func() {
+		makeDataDirTestDirectoriesWritable(t,
+			dataDir,
+			nestedDataDir,
+			backupDir,
+			filepath.Join(backupDir, "snapshots", "7"),
+			restoreDir,
+			filepath.Join(restoreDir, "snapshots", "7"),
+		)
+	})
+
+	if err := BackupDataDir(dataDir, backupDir); err != nil {
+		t.Fatalf("BackupDataDir read-only source: %v", err)
+	}
+	assertDataDirDirectoryMode(t, backupDir, 0o555)
+	assertDataDirDirectoryMode(t, filepath.Join(backupDir, "snapshots", "7"), 0o555)
+	assertDataDirFileBytes(t, filepath.Join(backupDir, "snapshots", "7", "snapshot"), []byte("snapshot-7"))
+
+	if err := RestoreDataDir(backupDir, restoreDir); err != nil {
+		t.Fatalf("RestoreDataDir read-only backup: %v", err)
+	}
+	assertDataDirDirectoryMode(t, restoreDir, 0o555)
+	assertDataDirDirectoryMode(t, filepath.Join(restoreDir, "snapshots", "7"), 0o555)
+	assertDataDirFileBytes(t, filepath.Join(restoreDir, "snapshots", "7", "snapshot"), []byte("snapshot-7"))
+}
+
+func TestBackupDataDirKeepsStagingDirectoriesPrivateWhileCopying(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	nestedDataDir := filepath.Join(dataDir, "snapshots")
+	if err := os.Mkdir(dataDir, 0o755); err != nil {
+		t.Fatalf("create source data dir: %v", err)
+	}
+	if err := os.Mkdir(nestedDataDir, 0o750); err != nil {
+		t.Fatalf("create nested source data dir: %v", err)
+	}
+	sourcePath := writeDataDirTestBytes(t, nestedDataDir, "snapshot", []byte("snapshot"))
+	backupDir := filepath.Join(dir, "backup")
+
+	observed := false
+	previous := copyRegularFileAfterCopyHook
+	copyRegularFileAfterCopyHook = func(path string) {
+		if path != sourcePath {
+			return
+		}
+		matches, err := filepath.Glob(filepath.Join(dir, ".backup.staging-*"))
+		if err != nil {
+			t.Fatalf("glob staging data dirs: %v", err)
+		}
+		if len(matches) != 1 {
+			t.Fatalf("staging data dirs = %#v, want one", matches)
+		}
+		assertDataDirDirectoryMode(t, matches[0], 0o700)
+		assertDataDirDirectoryMode(t, filepath.Join(matches[0], "snapshots"), 0o700)
+		observed = true
+	}
+	t.Cleanup(func() { copyRegularFileAfterCopyHook = previous })
+
+	if err := BackupDataDir(dataDir, backupDir); err != nil {
+		t.Fatalf("BackupDataDir: %v", err)
+	}
+	if !observed {
+		t.Fatal("backup copy hook did not observe the staged tree")
+	}
+	assertDataDirDirectoryMode(t, backupDir, 0o755)
+	assertDataDirDirectoryMode(t, filepath.Join(backupDir, "snapshots"), 0o750)
+}
+
+func TestBackupDataDirReadOnlyTreeSyncFailureRemovesStaging(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	nestedDataDir := filepath.Join(dataDir, "snapshots")
+	if err := os.MkdirAll(nestedDataDir, 0o755); err != nil {
+		t.Fatalf("create source data dir: %v", err)
+	}
+	writeDataDirTestBytes(t, nestedDataDir, "snapshot", []byte("snapshot"))
+	if err := os.Chmod(nestedDataDir, 0o555); err != nil {
+		t.Fatalf("chmod nested source data dir: %v", err)
+	}
+	if err := os.Chmod(dataDir, 0o555); err != nil {
+		t.Fatalf("chmod source data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		makeDataDirTestDirectoriesWritable(t, dataDir, nestedDataDir)
+	})
+
+	failure := errors.New("injected staged-tree sync failure")
+	installOfflineCopySyncFailure(t, 1, failure)
+	backupDir := filepath.Join(dir, "backup")
+	err := BackupDataDir(dataDir, backupDir)
+	if !errors.Is(err, failure) {
+		t.Fatalf("BackupDataDir error = %v, want injected sync failure", err)
+	}
+	assertPathMissing(t, backupDir)
+	assertNoOfflineCopyStagingEntries(t, dir, "backup")
+}
+
 func TestBackupAndRestoreCleanShutdownRuntimeRecoversState(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := filepath.Join(dir, "data")
@@ -938,6 +1052,26 @@ func writeDataDirTestBytes(t *testing.T, dir, name string, data []byte) string {
 		t.Fatalf("write test fixture: %v", err)
 	}
 	return path
+}
+
+func assertDataDirDirectoryMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat directory %s: %v", path, err)
+	}
+	if !info.IsDir() || info.Mode().Perm() != want {
+		t.Fatalf("directory %s mode = %v, want %v", path, info.Mode(), want)
+	}
+}
+
+func makeDataDirTestDirectoriesWritable(t *testing.T, paths ...string) {
+	t.Helper()
+	for _, path := range paths {
+		if err := os.Chmod(path, 0o700); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("make test directory %s writable: %v", path, err)
+		}
+	}
 }
 
 func assertDataDirFileBytes(t *testing.T, path string, want []byte) {

@@ -28,10 +28,12 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   commit-time work; cancellation and registration-response races now either
   return an owned subscription or leave none installed.
 - Offline `BackupDataDir` and `RestoreDataDir` now copy into a private adjacent
-  staging tree, verify the source remained stable, sync all file and directory
-  entries, and publish with a parent-synced rename. Failures remove staging and
-  never expose a partial backup or restored `DataDir`; an initially empty
-  restore destination is restored to empty on failure.
+  staging tree, verify the source remained stable, apply final directory modes
+  deepest-first only after copying completes, sync all file and directory
+  entries, and publish with a parent-synced rename. Readable, read-only source
+  directories are supported. Failures remove staging and never expose a partial
+  backup or restored `DataDir`; an initially empty restore destination is
+  restored to empty on failure.
 - The pinned Go toolchain advances within the supported 1.26 line to 1.26.5,
   incorporating standard-library fixes for GO-2026-5037, GO-2026-5039, and
   GO-2026-5856 found reachable by the repository vulnerability scan. The

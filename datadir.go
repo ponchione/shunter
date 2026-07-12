@@ -103,17 +103,14 @@ func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestinat
 	removeStaging := true
 	defer func() {
 		if removeStaging {
-			if err := removeOfflineCopyTree(staging); err != nil {
+			if err := removeOfflineCopyTreeForCleanup(staging); err != nil {
 				retErr = errors.Join(retErr, fmt.Errorf("remove staging data dir %s: %w", staging, err))
 			} else if err := syncOfflineCopyDir(parent); err != nil {
 				retErr = errors.Join(retErr, fmt.Errorf("sync removal of staging data dir %s: %w", staging, err))
 			}
 		}
 	}()
-	if err := chmodOfflineCopyPath(staging, srcInfo.Mode().Perm()); err != nil {
-		return fmt.Errorf("chmod staging data dir %s: %w", staging, err)
-	}
-	if err := copyDirectoryContents(src, staging); err != nil {
+	if err := copyDirectoryContents(src, staging, srcInfo.Mode().Perm()); err != nil {
 		return err
 	}
 	if err := syncOfflineCopyTree(staging); err != nil {
@@ -152,7 +149,7 @@ func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestinat
 		if rollbackErr == nil {
 			rollbackErr = syncOfflineCopyDir(parent)
 		} else {
-			removeErr := removeOfflineCopyTree(dst)
+			removeErr := removeOfflineCopyTreeForCleanup(dst)
 			if removeErr == nil {
 				removeErr = syncOfflineCopyDir(parent)
 			}
@@ -272,8 +269,14 @@ func inspectMissingOrEmptyDir(path string) (fs.FileInfo, bool, error) {
 	return info, true, nil
 }
 
-func copyDirectoryContents(src, dst string) error {
+type offlineCopyDirectoryMode struct {
+	path string
+	mode fs.FileMode
+}
+
+func copyDirectoryContents(src, dst string, rootMode fs.FileMode) error {
 	expected := make(map[string]fs.FileInfo)
+	directoryModes := []offlineCopyDirectoryMode{{path: dst, mode: rootMode}}
 	if err := filepath.WalkDir(src, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -299,12 +302,12 @@ func copyDirectoryContents(src, dst string) error {
 		expected[rel] = info
 		switch {
 		case entry.IsDir():
-			if err := os.MkdirAll(target, mode.Perm()); err != nil {
+			// Keep every staged directory owner-private and writable until all
+			// children have been copied and the source tree has been verified.
+			if err := os.Mkdir(target, 0o700); err != nil {
 				return fmt.Errorf("create destination directory %s: %w", target, err)
 			}
-			if err := os.Chmod(target, mode.Perm()); err != nil {
-				return fmt.Errorf("chmod destination directory %s: %w", target, err)
-			}
+			directoryModes = append(directoryModes, offlineCopyDirectoryMode{path: target, mode: mode.Perm()})
 			return nil
 		case mode.IsRegular():
 			return copyRegularFile(path, target, mode.Perm(), info)
@@ -314,7 +317,22 @@ func copyDirectoryContents(src, dst string) error {
 	}); err != nil {
 		return err
 	}
-	return verifyOfflineCopySource(src, expected)
+	if err := verifyOfflineCopySource(src, expected); err != nil {
+		return err
+	}
+
+	// Apply final modes deepest-first so read-only parents never prevent
+	// finalizing their children. The staging root is therefore finalized last
+	// and remains private while any copied content is incomplete.
+	sort.Slice(directoryModes, func(i, j int) bool {
+		return len(directoryModes[i].path) > len(directoryModes[j].path)
+	})
+	for _, directory := range directoryModes {
+		if err := chmodOfflineCopyPath(directory.path, directory.mode); err != nil {
+			return fmt.Errorf("chmod destination directory %s: %w", directory.path, err)
+		}
+	}
+	return nil
 }
 
 func verifyOfflineCopySource(src string, expected map[string]fs.FileInfo) error {
@@ -377,6 +395,26 @@ func syncOfflineCopyTree(root string) error {
 		}
 	}
 	return nil
+}
+
+func removeOfflineCopyTreeForCleanup(root string) error {
+	// Final source modes may make staged directories read-only. Restore
+	// owner access before RemoveAll so a failure after mode finalization still
+	// honors the no-partial-artifact guarantee.
+	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if err := os.Chmod(path, 0o700); err != nil {
+				return fmt.Errorf("prepare directory %s for removal: %w", path, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return removeOfflineCopyTree(root)
 }
 
 // copyRegularFileAfterCopyHook is a test-only instrumentation point for
