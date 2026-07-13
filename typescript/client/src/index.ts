@@ -626,6 +626,7 @@ function authErrorFromCloseEvent(event: CloseEvent, message: string): ShunterAut
 interface PendingReducerCall {
   readonly name: string;
   readonly cleanup?: () => void;
+  abandoned: boolean;
   resolve(value: Uint8Array): void;
   reject(error: ShunterError): void;
 }
@@ -633,6 +634,7 @@ interface PendingReducerCall {
 interface PendingDeclaredQuery {
   readonly name: string;
   readonly cleanup?: () => void;
+  abandoned: boolean;
   resolve(value: Uint8Array): void;
   reject(error: ShunterError): void;
 }
@@ -641,6 +643,7 @@ interface PendingProcedureCall {
   readonly name: string;
   readonly messageId: Uint8Array;
   readonly cleanup?: () => void;
+  abandoned: boolean;
   resolve(value: Uint8Array): void;
   reject(error: ShunterError): void;
 }
@@ -668,6 +671,7 @@ interface PendingSubscription {
     reject(error: ShunterError): void;
   }>;
   readonly cleanup?: () => void;
+  abandoned: boolean;
   resolve(value: SubscriptionUnsubscribe | SubscriptionHandle<unknown>): void;
   reject(error: ShunterError): void;
 }
@@ -696,6 +700,7 @@ interface PendingUnsubscribe {
   readonly kind: "declared_view" | "table";
   readonly requestId: RequestID;
   readonly queryId: QueryID;
+  readonly abandonedSubscription?: PendingSubscription;
   resolve(): void;
   reject(error: ShunterError): void;
 }
@@ -1190,19 +1195,25 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return;
     }
     if (update.status.status === "failed") {
-      pending.reject(new ShunterValidationError(update.status.error || "Reducer call failed.", {
-        code: "reducer_failed",
-        details: update,
-      }));
+      if (!pending.abandoned) {
+        pending.reject(new ShunterValidationError(update.status.error || "Reducer call failed.", {
+          code: "reducer_failed",
+          details: update,
+        }));
+      }
       return;
     }
     const updateError = dispatchRawSubscriptionUpdates(update.status.updates, "TransactionUpdate");
     if (updateError !== undefined) {
-      pending.reject(updateError);
+      if (!pending.abandoned) {
+        pending.reject(updateError);
+      }
       failConnected(updateError);
       return;
     }
-    pending.resolve(update.rawFrame);
+    if (!pending.abandoned) {
+      pending.resolve(update.rawFrame);
+    }
   };
 
   const settleDeclaredQueryResponse = (response: OneOffQueryResponseMessage): void => {
@@ -1214,13 +1225,17 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     pending.cleanup?.();
     pendingDeclaredQueries.delete(messageKey);
     if (response.error !== undefined) {
-      pending.reject(new ShunterValidationError(response.error || "Declared query failed.", {
-        code: "declared_query_failed",
-        details: { name: pending.name, response },
-      }));
+      if (!pending.abandoned) {
+        pending.reject(new ShunterValidationError(response.error || "Declared query failed.", {
+          code: "declared_query_failed",
+          details: { name: pending.name, response },
+        }));
+      }
       return;
     }
-    pending.resolve(response.rawFrame);
+    if (!pending.abandoned) {
+      pending.resolve(response.rawFrame);
+    }
   };
 
   const settleProcedureResponse = (response: ProcedureResponseMessage): void => {
@@ -1232,13 +1247,17 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     pending.cleanup?.();
     pendingProcedureCalls.delete(messageKey);
     if (response.error !== undefined) {
-      pending.reject(new ShunterValidationError(response.error || "Procedure call failed.", {
-        code: "procedure_failed",
-        details: { name: pending.name, response },
-      }));
+      if (!pending.abandoned) {
+        pending.reject(new ShunterValidationError(response.error || "Procedure call failed.", {
+          code: "procedure_failed",
+          details: { name: pending.name, response },
+        }));
+      }
       return;
     }
-    pending.resolve(response.result);
+    if (!pending.abandoned) {
+      pending.resolve(response.result);
+    }
   };
 
   const cloneRawSubscriptionUpdate = (update: RawSubscriptionUpdate): RawSubscriptionUpdate => ({
@@ -1584,6 +1603,53 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     });
   };
 
+  const beginAbandonedSubscriptionCleanup = (
+    pending: PendingSubscription,
+    mode: "multi" | "single",
+  ): void => {
+    if (pendingUnsubscribesByQuery.has(pending.queryId)) {
+      failConnected(new ShunterProtocolError("Abandoned subscription received more than one applied response.", {
+        details: { kind: pending.kind, requestId: pending.requestId, queryId: pending.queryId },
+      }));
+      return;
+    }
+    const activeSocket = socket;
+    if (state.status !== "connected" || activeSocket === undefined) {
+      failConnected(new ShunterClosedClientError("Cannot clean up an abandoned subscription after disconnect."));
+      return;
+    }
+
+    let request: EncodedSubscriptionUnsubscribeRequest;
+    try {
+      request = (mode === "single" ? encodeUnsubscribeSingleRequest : encodeUnsubscribeMultiRequest)(
+        pending.queryId,
+        { requestId: allocateSubscriptionRequestId() },
+      );
+    } catch (error) {
+      failConnected(isShunterError(error)
+        ? error
+        : toShunterError(error, "validation", "Abandoned subscription cleanup request failed"));
+      return;
+    }
+
+    const pendingUnsubscribe: PendingUnsubscribe = {
+      kind: pending.kind,
+      requestId: request.requestId,
+      queryId: request.queryId,
+      abandonedSubscription: pending,
+      resolve: () => {},
+      reject: () => {},
+    };
+    pendingUnsubscribesByRequest.set(request.requestId, pendingUnsubscribe);
+    pendingUnsubscribesByQuery.set(request.queryId, pendingUnsubscribe);
+    try {
+      activeSocket.send(request.frame);
+    } catch (error) {
+      cleanupPendingUnsubscribe(pendingUnsubscribe);
+      failConnected(toShunterError(error, "transport", "Abandoned subscription cleanup send failed"));
+    }
+  };
+
   const unsubscribeOnce = (
     kind: PendingUnsubscribe["kind"],
     queryId: QueryID,
@@ -1734,6 +1800,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         eventTable: active.eventTable,
         replayEpoch: connectionEpoch,
         replayWaiters: new Set(),
+        abandoned: false,
         resolve: () => {},
         reject: (error) => {
           removeActiveSubscription(active.queryId);
@@ -1774,6 +1841,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           response,
         },
       }));
+      return;
+    }
+    if (pending.abandoned) {
+      beginAbandonedSubscriptionCleanup(pending, "single");
       return;
     }
     const active: ActiveSubscription = {
@@ -1857,6 +1928,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       }));
       return;
     }
+    if (pending.abandoned) {
+      beginAbandonedSubscriptionCleanup(pending, "multi");
+      return;
+    }
     registerActiveSubscription({
       kind: pending.kind,
       target: pending.target,
@@ -1907,8 +1982,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       details: { kind: pending.kind, target: pending.target, response },
     });
     settleReplayWaiters(pending, error);
-    pending.handle?.close(error);
-    pending.reject(error);
+    if (!pending.abandoned) {
+      pending.handle?.close(error);
+      pending.reject(error);
+    }
   };
 
   const settleUnsubscribeError = (response: SubscriptionErrorMessage): void => {
@@ -1921,11 +1998,16 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return;
     }
     cleanupPendingUnsubscribe(pending);
-    removeActiveSubscription(pending.queryId);
-    pending.reject(new ShunterValidationError(response.error || "Unsubscribe failed.", {
+    const error = new ShunterValidationError(response.error || "Unsubscribe failed.", {
       code: "unsubscribe_failed",
       details: { kind: pending.kind, response },
-    }));
+    });
+    if (pending.abandonedSubscription !== undefined) {
+      failConnected(error);
+      return;
+    }
+    removeActiveSubscription(pending.queryId);
+    pending.reject(error);
   };
 
   const settleActiveSubscriptionError = (response: SubscriptionErrorMessage): void => {
@@ -1958,7 +2040,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return;
     }
     cleanupPendingUnsubscribe(pending);
-    removeActiveSubscription(response.queryId);
+    if (pending.abandonedSubscription !== undefined) {
+      cleanupPendingSubscription(pending.abandonedSubscription);
+    } else {
+      removeActiveSubscription(response.queryId);
+    }
     pending.resolve();
   };
 
@@ -2014,6 +2100,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
                 code: "subscription_evaluation_failed",
                 details: response,
               }));
+              return;
+            }
+            if (
+              response.requestId !== undefined &&
+              pendingUnsubscribesByRequest.has(response.requestId)
+            ) {
+              settleUnsubscribeError(response);
               return;
             }
             settleSubscriptionError(response);
@@ -2340,8 +2433,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         let cleanup: (() => void) | undefined;
         if (options.signal !== undefined) {
           const abort = (): void => {
-            pendingReducerCalls.delete(request.requestId);
-            cleanup?.();
+            const pending = pendingReducerCalls.get(request.requestId);
+            if (pending === undefined || pending.abandoned) {
+              return;
+            }
+            pending.abandoned = true;
+            pending.cleanup?.();
             reject(new ShunterCallInterruptedError({
               operation: "reducer",
               name,
@@ -2357,6 +2454,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         pendingReducerCalls.set(request.requestId, {
           name,
           cleanup,
+          abandoned: false,
           resolve,
           reject,
         });
@@ -2398,8 +2496,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         let cleanup: (() => void) | undefined;
         if (options.signal !== undefined) {
           const abort = (): void => {
-            pendingProcedureCalls.delete(messageKey);
-            cleanup?.();
+            const pending = pendingProcedureCalls.get(messageKey);
+            if (pending === undefined || pending.abandoned) {
+              return;
+            }
+            pending.abandoned = true;
+            pending.cleanup?.();
             reject(new ShunterCallInterruptedError({
               operation: "procedure",
               name,
@@ -2416,6 +2518,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           name,
           messageId: new Uint8Array(request.messageId),
           cleanup,
+          abandoned: false,
           resolve,
           reject,
         });
@@ -2459,8 +2562,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         let cleanup: (() => void) | undefined;
         if (options.signal !== undefined) {
           const abort = (): void => {
-            pendingDeclaredQueries.delete(messageKey);
-            cleanup?.();
+            const pending = pendingDeclaredQueries.get(messageKey);
+            if (pending === undefined || pending.abandoned) {
+              return;
+            }
+            pending.abandoned = true;
+            pending.cleanup?.();
             reject(new ShunterClosedClientError("Declared query aborted before a response was received."));
           };
           options.signal.addEventListener("abort", abort, { once: true });
@@ -2471,6 +2578,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         pendingDeclaredQueries.set(messageKey, {
           name,
           cleanup,
+          abandoned: false,
           resolve,
           reject,
         });
@@ -2520,10 +2628,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         if (options.signal !== undefined) {
           const abort = (): void => {
             const pending = pendingSubscriptionsByRequest.get(request.requestId);
-            if (pending !== undefined) {
-              cleanupPendingSubscription(pending);
+            if (pending === undefined || pending.abandoned) {
+              return;
             }
-            cleanup?.();
+            pending.abandoned = true;
+            pending.cleanup?.();
             const abortError = new ShunterClosedClientError("Declared view subscription aborted before a response was received.");
             handle?.close(abortError);
             reject(abortError);
@@ -2547,6 +2656,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           decodeRow: options.decodeRow as RowDecoder<unknown> | undefined,
           handle,
           cleanup,
+          abandoned: false,
           resolve: resolve as (value: SubscriptionUnsubscribe | SubscriptionHandle<unknown>) => void,
           reject,
         };
@@ -2597,10 +2707,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         if (options.signal !== undefined) {
           const abort = (): void => {
             const pending = pendingSubscriptionsByRequest.get(request.requestId);
-            if (pending !== undefined) {
-              cleanupPendingSubscription(pending);
+            if (pending === undefined || pending.abandoned) {
+              return;
             }
-            cleanup?.();
+            pending.abandoned = true;
+            pending.cleanup?.();
             const abortError = new ShunterClosedClientError("Table subscription aborted before a response was received.");
             handle?.close(abortError);
             reject(abortError);
@@ -2627,6 +2738,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           handle,
           eventTable: options.eventTable,
           cleanup,
+          abandoned: false,
           resolve: resolve as (value: SubscriptionUnsubscribe | SubscriptionHandle<unknown>) => void,
           reject,
         };

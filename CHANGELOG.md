@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Aborted TypeScript reducer, procedure, query, and subscription requests now
+  retain their wire correlation IDs until the authoritative response arrives.
+  Late reducer deltas still update active subscriptions, and late successful
+  registrations are removed with a tracked compensating unsubscribe.
 - Hosted `Run` now reports HTTP shutdown, serving, and durability-finalization
   failures that occur during context cancellation instead of converting them
   to a successful exit; clean cancellation remains graceful.

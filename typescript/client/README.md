@@ -171,6 +171,11 @@ transport failures with configurable bounded backoff.
 subscription authority matters. Terminal connection failure or explicit close
 rejects pending synchronization waiters; aborted replay never reports a
 successful synchronized state.
+Aborting an in-flight reducer, procedure, query, or subscription rejects the
+local waiter but keeps its wire IDs reserved until the server response arrives.
+Late committed reducer responses still update active subscriptions, and a late
+successful subscription response is immediately paired with a tracked
+unsubscribe before its IDs are released.
 Token providers must resolve to strings; invalid results fail before a
 WebSocket is created.
 Apps can pass generated `shunterContract` metadata into `createShunterClient()`;

@@ -3484,6 +3484,17 @@ abortSockets[0].open();
 abortSockets[0].message(identityTokenFrame().buffer);
 await abortConnecting;
 
+const lateReducerUpdates = [];
+const lateReducerSubscription = abortClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x01020304,
+  onRawUpdate: (update) => lateReducerUpdates.push(update),
+});
+const lateReducerSubscriptionAppliedFrame = new Uint8Array(subscribeSingleAppliedFrame);
+new DataView(lateReducerSubscriptionAppliedFrame.buffer).setUint32(13, 0x01020304, true);
+abortSockets[0].message(lateReducerSubscriptionAppliedFrame);
+await lateReducerSubscription;
+
 const reducerAbort = new AbortController();
 const abortedReducer = abortClient.callReducer("send", new Uint8Array([0xaa]), {
   requestId: 0x21222324,
@@ -3498,9 +3509,19 @@ await assert.rejects(abortedReducer, (error) => {
   assert(error.cause instanceof ShunterClosedClientError);
   return true;
 });
+await assert.rejects(
+  abortClient.callReducer("send", new Uint8Array([0xcc]), { requestId: 0x21222324 }),
+  (error) => {
+    assert(error instanceof ShunterValidationError);
+    assert.equal(error.code, "reducer_request_id_in_use");
+    return true;
+  },
+);
 abortSockets[0].message(committedUpdateFrame);
 assert.equal(abortClient.state.status, "connected");
-const reusedReducerRequest = abortClient.callReducer("send", new Uint8Array([0xaa]), {
+assert.equal(lateReducerUpdates.length, 1);
+assert.equal(lateReducerUpdates[0].queryId, 0x01020304);
+const reusedReducerRequest = abortClient.callReducer("send", new Uint8Array([0xcc]), {
   requestId: 0x21222324,
 });
 abortSockets[0].message(committedUpdateFrame);
@@ -3520,9 +3541,19 @@ await assert.rejects(abortedProcedure, (error) => {
   assert(error.cause instanceof ShunterClosedClientError);
   return true;
 });
+await assert.rejects(
+  abortClient.callProcedure("refresh", new Uint8Array([0xcc]), {
+    messageId: new Uint8Array([0x03, 0x04]),
+  }),
+  (error) => {
+    assert(error instanceof ShunterValidationError);
+    assert.equal(error.code, "procedure_message_id_in_use");
+    return true;
+  },
+);
 abortSockets[0].message(procedureSuccessFrame);
 assert.equal(abortClient.state.status, "connected");
-const reusedProcedureRequest = abortClient.callProcedure("refresh", new Uint8Array([0xbb]), {
+const reusedProcedureRequest = abortClient.callProcedure("refresh", new Uint8Array([0xcc]), {
   messageId: new Uint8Array([0x03, 0x04]),
 });
 abortSockets[0].message(procedureSuccessFrame);
@@ -3535,6 +3566,16 @@ const abortedQuery = abortClient.runDeclaredQuery("recent_users", {
 });
 queryAbort.abort();
 await assert.rejects(abortedQuery, ShunterClosedClientError);
+await assert.rejects(
+  abortClient.runDeclaredQuery("recent_users", {
+    messageId: new Uint8Array([0x01, 0x02]),
+  }),
+  (error) => {
+    assert(error instanceof ShunterValidationError);
+    assert.equal(error.code, "declared_query_message_id_in_use");
+    return true;
+  },
+);
 abortSockets[0].message(oneOffSuccessFrame);
 assert.equal(abortClient.state.status, "connected");
 const reusedQueryRequest = abortClient.runDeclaredQuery("recent_users", {
@@ -3551,8 +3592,38 @@ const abortedSubscription = abortClient.subscribeTable("users", undefined, {
 });
 subscriptionAbort.abort();
 await assert.rejects(abortedSubscription, ShunterClosedClientError);
+await assert.rejects(
+  abortClient.subscribeTable("users", undefined, {
+    requestId: 0x01020304,
+    queryId: 0x11121314,
+  }),
+  (error) => {
+    assert(error instanceof ShunterValidationError);
+    assert.equal(error.code, "subscription_id_in_use");
+    return true;
+  },
+);
 abortSockets[0].message(subscribeSingleAppliedFrame);
 assert.equal(abortClient.state.status, "connected");
+assert.deepEqual(
+  abortSockets[0].sent.at(-1),
+  encodeUnsubscribeSingleRequest(0x11121314, { requestId: 1 }).frame,
+);
+await assert.rejects(
+  abortClient.subscribeTable("users", undefined, {
+    requestId: 0x01020304,
+    queryId: 0x11121314,
+  }),
+  (error) => {
+    assert(error instanceof ShunterValidationError);
+    assert.equal(error.code, "subscription_id_in_use");
+    return true;
+  },
+);
+abortSockets[0].message(unsubscribeSingleAppliedFrameFor({
+  requestId: 1,
+  queryId: 0x11121314,
+}));
 const reusedSubscription = abortClient.subscribeTable("users", undefined, {
   requestId: 0x01020304,
   queryId: 0x11121314,
@@ -3570,8 +3641,37 @@ const abortedViewSubscription = abortClient.subscribeDeclaredView("live_users", 
 });
 viewSubscriptionAbort.abort();
 await assert.rejects(abortedViewSubscription, ShunterClosedClientError);
+await assert.rejects(
+  abortClient.subscribeDeclaredView("live_users", {
+    requestId: 0x41424344,
+    queryId: 0x61626364,
+    returnHandle: true,
+  }),
+  (error) => {
+    assert(error instanceof ShunterValidationError);
+    assert.equal(error.code, "subscription_id_in_use");
+    return true;
+  },
+);
 abortSockets[0].message(subscribeAppliedFrame);
 assert.equal(abortClient.state.status, "connected");
+assert.deepEqual(
+  abortSockets[0].sent.at(-1),
+  encodeUnsubscribeMultiRequest(0x61626364, { requestId: 2 }).frame,
+);
+await assert.rejects(
+  abortClient.subscribeDeclaredView("live_users", {
+    requestId: 0x41424344,
+    queryId: 0x61626364,
+    returnHandle: true,
+  }),
+  (error) => {
+    assert(error instanceof ShunterValidationError);
+    assert.equal(error.code, "subscription_id_in_use");
+    return true;
+  },
+);
+abortSockets[0].message(bytesFromHex("0a0200000000000000000000006463626100000000"));
 const reusedViewSubscription = abortClient.subscribeDeclaredView("live_users", {
   requestId: 0x41424344,
   queryId: 0x61626364,
@@ -3582,6 +3682,43 @@ const reusedViewHandle = await reusedViewSubscription;
 assert.equal(reusedViewHandle.queryId, 0x61626364);
 assert.deepEqual(reusedViewHandle.state, { status: "active", rows: [] });
 await abortClient.close();
+
+const abortCleanupFailureSockets = [];
+const abortCleanupFailureClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    abortCleanupFailureSockets.push(socket);
+    return socket;
+  },
+});
+const abortCleanupFailureConnecting = abortCleanupFailureClient.connect();
+await nextTurn();
+abortCleanupFailureSockets[0].open();
+abortCleanupFailureSockets[0].message(identityTokenFrame().buffer);
+await abortCleanupFailureConnecting;
+const cleanupFailureAbort = new AbortController();
+const cleanupFailureSubscription = abortCleanupFailureClient.subscribeTable("users", undefined, {
+  requestId: 0x01020304,
+  queryId: 0x11121314,
+  signal: cleanupFailureAbort.signal,
+});
+cleanupFailureAbort.abort();
+await assert.rejects(cleanupFailureSubscription, ShunterClosedClientError);
+abortCleanupFailureSockets[0].message(subscribeSingleAppliedFrame);
+assert.deepEqual(
+  abortCleanupFailureSockets[0].sent.at(-1),
+  encodeUnsubscribeSingleRequest(0x11121314, { requestId: 1 }).frame,
+);
+abortCleanupFailureSockets[0].message(subscriptionErrorFrameFor({
+  requestId: 1,
+  queryId: 0x11121314,
+  error: "cleanup denied",
+}));
+assert.equal(abortCleanupFailureClient.state.status, "failed");
+assert(abortCleanupFailureClient.state.error instanceof ShunterValidationError);
+assert.equal(abortCleanupFailureClient.state.error.code, "unsubscribe_failed");
 
 const subscriptionSendFailureSockets = [];
 const subscriptionSendFailureClient = createShunterClient({
