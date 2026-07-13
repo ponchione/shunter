@@ -457,8 +457,6 @@ Review later:
 - Homogeneous arrays beyond the current string-only array kind.
 - Identity/connection ID column kinds.
 - Recursive value system.
-- Checked, saturating, or explicitly documented `Value.AsDuration` overflow
-  behavior.
 - JSON numeric normalization.
 
 ## Deferred Test Harness Expansion

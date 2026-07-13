@@ -89,7 +89,7 @@ Named Go types whose underlying type is one of the scalar types above are also s
 
 **Timestamp helper:** Timestamps in Shunter are stored as `int64` Unix microseconds. Go schemas can use `time.Time` directly; lower-level code can use `types.NewTimestampFromTime` / `Value.AsTime` to convert explicitly.
 
-**Duration helper:** Durations in Shunter are stored as signed microseconds. Go schemas can use `time.Duration` directly; lower-level code can use `types.NewDurationFromTime` / `Value.AsDuration` to convert explicitly.
+**Duration helper:** Durations in Shunter are stored as signed microseconds. Go schemas can use `time.Duration` directly; lower-level code can use `types.NewDurationFromTime` and `Value.AsDurationChecked` to convert explicitly. `MinTimeDurationMicros` and `MaxTimeDurationMicros` are the inclusive bounds representable by Go's nanosecond-based `time.Duration`. `Value.AsDuration` panics with `ErrDurationOutOfRange` outside those bounds rather than silently wrapping.
 
 **JSON helper:** JSON values are stored as canonical JSON bytes. Go schemas can use `json.RawMessage` directly; lower-level code can use `types.NewJSON` / `Value.AsJSON` to validate, canonicalize, and copy JSON payloads explicitly. Canonicalization rejects duplicate object keys and trailing tokens.
 

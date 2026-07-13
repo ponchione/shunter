@@ -18,6 +18,17 @@ var ErrInvalidFloat = errors.New("invalid float value")
 
 var ErrInvalidUTF8 = errors.New("invalid UTF-8")
 
+// ErrDurationOutOfRange reports a Shunter duration whose microsecond payload
+// cannot be represented by Go's nanosecond-based time.Duration.
+var ErrDurationOutOfRange = errors.New("duration out of range for time.Duration")
+
+// MinTimeDurationMicros and MaxTimeDurationMicros are the inclusive Shunter
+// microsecond bounds representable by time.Duration without overflow.
+const (
+	MinTimeDurationMicros int64 = math.MinInt64 / int64(time.Microsecond)
+	MaxTimeDurationMicros int64 = math.MaxInt64 / int64(time.Microsecond)
+)
+
 // ErrInvalidUUID identifies UUID text that is not canonical lowercase
 // RFC 4122 hyphenated form.
 var ErrInvalidUUID = errors.New("invalid UUID")
@@ -454,9 +465,27 @@ func (v Value) AsDurationMicros() int64 {
 	return v.i64
 }
 
-// AsDuration returns the Duration as a Go time.Duration.
+// AsDuration returns the Duration as a Go time.Duration. It panics with
+// ErrDurationOutOfRange when the stored microseconds are not representable;
+// callers handling untrusted or full-range values should use
+// AsDurationChecked.
 func (v Value) AsDuration() time.Duration {
-	return time.Duration(v.AsDurationMicros()) * time.Microsecond
+	duration, err := v.AsDurationChecked()
+	if err != nil {
+		panic(err)
+	}
+	return duration
+}
+
+// AsDurationChecked returns the Duration as a Go time.Duration or
+// ErrDurationOutOfRange when the stored microseconds exceed the explicit
+// representable bounds.
+func (v Value) AsDurationChecked() (time.Duration, error) {
+	micros := v.AsDurationMicros()
+	if micros < MinTimeDurationMicros || micros > MaxTimeDurationMicros {
+		return 0, fmt.Errorf("%w: microseconds=%d bounds=[%d,%d]", ErrDurationOutOfRange, micros, MinTimeDurationMicros, MaxTimeDurationMicros)
+	}
+	return time.Duration(micros) * time.Microsecond, nil
 }
 
 // AsArrayString returns a defensive copy of the string-array payload.

@@ -77,6 +77,22 @@ func TestValueRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDecodedDurationCheckedConversionRejectsOverflow(t *testing.T) {
+	for _, micros := range []int64{types.MinTimeDurationMicros - 1, types.MaxTimeDurationMicros + 1} {
+		var encoded bytes.Buffer
+		if err := EncodeValue(&encoded, types.NewDuration(micros)); err != nil {
+			t.Fatalf("EncodeValue(%d): %v", micros, err)
+		}
+		decoded, err := DecodeValue(&encoded)
+		if err != nil {
+			t.Fatalf("DecodeValue(%d): %v", micros, err)
+		}
+		if _, err := decoded.AsDurationChecked(); !errors.Is(err, types.ErrDurationOutOfRange) {
+			t.Fatalf("decoded AsDurationChecked(%d) error = %v, want ErrDurationOutOfRange", micros, err)
+		}
+	}
+}
+
 func TestUnknownTag(t *testing.T) {
 	_, err := DecodeValue(bytes.NewReader([]byte{99}))
 	if err == nil {

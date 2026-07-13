@@ -525,6 +525,51 @@ func TestDurationTimeHelperTruncatesToMicroseconds(t *testing.T) {
 	}
 }
 
+func TestDurationCheckedConversionBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		micros int64
+		want   time.Duration
+	}{
+		{name: "minimum", micros: MinTimeDurationMicros, want: time.Duration(MinTimeDurationMicros) * time.Microsecond},
+		{name: "maximum", micros: MaxTimeDurationMicros, want: time.Duration(MaxTimeDurationMicros) * time.Microsecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NewDuration(tc.micros).AsDurationChecked()
+			if err != nil {
+				t.Fatalf("AsDurationChecked: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("AsDurationChecked = %v, want %v", got, tc.want)
+			}
+			if direct := NewDuration(tc.micros).AsDuration(); direct != tc.want {
+				t.Fatalf("AsDuration = %v, want %v", direct, tc.want)
+			}
+		})
+	}
+}
+
+func TestDurationCheckedConversionRejectsFirstOverflow(t *testing.T) {
+	for _, micros := range []int64{MinTimeDurationMicros - 1, MaxTimeDurationMicros + 1} {
+		if _, err := NewDuration(micros).AsDurationChecked(); !errors.Is(err, ErrDurationOutOfRange) {
+			t.Fatalf("AsDurationChecked(%d) error = %v, want ErrDurationOutOfRange", micros, err)
+		}
+		func() {
+			defer func() {
+				if recovered := recover(); !errors.Is(asError(recovered), ErrDurationOutOfRange) {
+					t.Fatalf("AsDuration(%d) panic = %v, want ErrDurationOutOfRange", micros, recovered)
+				}
+			}()
+			_ = NewDuration(micros).AsDuration()
+		}()
+	}
+}
+
+func asError(value any) error {
+	err, _ := value.(error)
+	return err
+}
+
 func TestEqualAndCompareDuration(t *testing.T) {
 	if !NewDuration(1).Equal(NewDuration(1)) {
 		t.Fatal("identical durations not equal")
