@@ -19,6 +19,12 @@ func (c *Conn) runKeepalive(ctx context.Context) {
 		case <-c.closed:
 			return
 		case <-pingTicker.C:
+			last := c.lastActivity.Load()
+			if time.Now().UnixNano()-last >= int64(c.opts.IdleTimeout) {
+				c.requestDisconnect(ClosePolicy, CloseReasonIdleTimeout)
+				return
+			}
+
 			// Bound Ping so a stuck peer cannot delay the next idle check.
 			pingCtx, cancel := context.WithTimeout(ctx, c.opts.PingInterval)
 			if err := c.ws.Ping(pingCtx); err == nil {
@@ -36,10 +42,9 @@ func (c *Conn) runKeepalive(ctx context.Context) {
 			}
 
 			// Use a fresh clock sample because Ping may have blocked.
-			last := c.lastActivity.Load()
+			last = c.lastActivity.Load()
 			if time.Now().UnixNano()-last >= int64(c.opts.IdleTimeout) {
-				// Run the close handshake in the background; idle peers may not answer.
-				go closeWithHandshake(c.ws, ClosePolicy, CloseReasonIdleTimeout, c.opts.CloseHandshakeTimeout)
+				c.requestDisconnect(ClosePolicy, CloseReasonIdleTimeout)
 				return
 			}
 		}

@@ -38,12 +38,11 @@ func sendError(conn *Conn, msg any) {
 	}
 }
 
-// closeProtocolError sends a WebSocket close frame with status 1002
-// (protocol error). Runs in a goroutine because coder/websocket.Close
-// blocks on the close handshake.
+// closeProtocolError requests a status-1002 teardown from the lifecycle
+// supervisor. Disconnect remains the sole owner of the close handshake.
 func closeProtocolError(conn *Conn, reason string) {
 	logProtocolError(conn.Observer, "unknown", protocolErrorReason(reason), errorFromText(reason))
-	go closeWithHandshake(conn.ws, CloseProtocol, reason, conn.opts.CloseHandshakeTimeout)
+	conn.requestDisconnect(CloseProtocol, reason)
 }
 
 // runDispatchLoop reads frames, decodes messages, and dispatches handlers.
@@ -177,7 +176,7 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		case c.inflightSem <- struct{}{}:
 		default:
 			logProtocolBackpressure(c.Observer, "inbound", "buffer_full")
-			go closeWithHandshake(c.ws, ClosePolicy, CloseReasonTooManyRequests, c.opts.CloseHandshakeTimeout)
+			c.requestDisconnect(ClosePolicy, CloseReasonTooManyRequests)
 			return
 		}
 
@@ -192,9 +191,7 @@ func (c *Conn) runMessageHandler(kind string, run func()) {
 			err := fmt.Errorf("protocol handler panic: %v", recovered)
 			recordProtocolMessage(c.Observer, kind, "internal_error")
 			logProtocolError(c.Observer, kind, "handler_panic", err)
-			if c.ws != nil {
-				go closeWithHandshake(c.ws, CloseInternal, "internal error", c.closeHandshakeTimeout())
-			}
+			c.requestDisconnect(CloseInternal, "internal error")
 		}
 	}()
 	run()

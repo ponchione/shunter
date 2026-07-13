@@ -45,6 +45,7 @@ func buildProtocolOptions(cfg ProtocolConfig) (protocol.ProtocolOptions, error) 
 		WriteTimeout:           cfg.WriteTimeout,
 		DisconnectTimeout:      cfg.DisconnectTimeout,
 		OutgoingBufferMessages: cfg.OutgoingBufferMessages,
+		MaxOutboundQueuedBytes: cfg.MaxOutboundQueuedBytes,
 		IncomingQueueMessages:  cfg.IncomingQueueMessages,
 		MaxMessageSize:         cfg.MaxMessageSize,
 		MaxOutboundMessageSize: cfg.MaxOutboundMessageSize,
@@ -234,15 +235,26 @@ func (r *Runtime) serveStarted(ctx context.Context, ln net.Listener) error {
 }
 
 func serveHTTPWithLifecycle(ctx context.Context, ln net.Listener, handler http.Handler, start func(context.Context) error, stop func() error) error {
+	return serveHTTPServerWithLifecycle(ctx, ln, newServingHTTPServer(handler), start, stop)
+}
+
+type lifecycleHTTPServer interface {
+	Serve(net.Listener) error
+	Shutdown(context.Context) error
+}
+
+func serveHTTPServerWithLifecycle(ctx context.Context, ln net.Listener, httpServer lifecycleHTTPServer, start func(context.Context) error, stop func() error) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := start(ctx); err != nil {
-		_ = ln.Close()
-		return err
+		closeErr := ln.Close()
+		if closeErr != nil {
+			closeErr = fmt.Errorf("close listener after startup failure: %w", closeErr)
+		}
+		return errors.Join(err, closeErr)
 	}
 
-	httpServer := newServingHTTPServer(handler)
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpServer.Serve(ln) }()
 
@@ -253,23 +265,26 @@ func serveHTTPWithLifecycle(ctx context.Context, ln net.Listener, handler http.H
 		shutdownErr := httpServer.Shutdown(shutdownCtx)
 		closeErr := stop()
 		serveErr := <-errCh
-		if shutdownErr != nil && !errors.Is(shutdownErr, http.ErrServerClosed) {
-			return shutdownErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			return serveErr
-		}
-		return ctx.Err()
+		return errors.Join(
+			ctx.Err(),
+			wrapHTTPServerError("shutdown HTTP server", shutdownErr),
+			wrapHTTPServerError("stop runtime", closeErr),
+			wrapHTTPServerError("serve HTTP", serveErr),
+		)
 	case err := <-errCh:
 		closeErr := stop()
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
-		}
-		return closeErr
+		return errors.Join(
+			wrapHTTPServerError("serve HTTP", err),
+			wrapHTTPServerError("stop runtime", closeErr),
+		)
 	}
+}
+
+func wrapHTTPServerError(operation string, err error) error {
+	if err == nil || err == http.ErrServerClosed {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 func newServingHTTPServer(handler http.Handler) *http.Server {

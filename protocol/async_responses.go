@@ -18,7 +18,7 @@ func (s connOnlySender) Send(connID types.ConnectionID, msg any) error {
 	if s.conn == nil || connID != s.conn.ID {
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
 	}
-	return sendOnConn(s.conn, connID, msg, nil, nil)
+	return sendOnConn(s.conn, connID, msg)
 }
 
 // SendToConn enqueues one server message on conn using protocol framing and
@@ -27,7 +27,7 @@ func SendToConn(conn *Conn, msg any) error {
 	if conn == nil {
 		return ErrConnNotFound
 	}
-	return sendOnConn(conn, conn.ID, msg, nil, nil)
+	return sendOnConn(conn, conn.ID, msg)
 }
 
 func (s connOnlySender) SendTransactionUpdate(connID types.ConnectionID, update *TransactionUpdate) error {

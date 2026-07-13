@@ -25,6 +25,9 @@ func TestDefaultProtocolOptions(t *testing.T) {
 	if opts.OutgoingBufferMessages != DefaultOutgoingBufferMessages {
 		t.Errorf("OutgoingBufferMessages = %d, want %d", opts.OutgoingBufferMessages, DefaultOutgoingBufferMessages)
 	}
+	if opts.MaxOutboundQueuedBytes != DefaultMaxOutboundQueuedBytes {
+		t.Errorf("MaxOutboundQueuedBytes = %d, want %d", opts.MaxOutboundQueuedBytes, DefaultMaxOutboundQueuedBytes)
+	}
 	if opts.IncomingQueueMessages != 64 {
 		t.Errorf("IncomingQueueMessages = %d, want 64", opts.IncomingQueueMessages)
 	}
@@ -55,6 +58,9 @@ func TestNormalizeProtocolOptionsRejectsNegativeValues(t *testing.T) {
 	}
 	if _, err := NormalizeProtocolOptions(ProtocolOptions{MaxOutboundMessageSize: -1}); err == nil {
 		t.Fatal("expected negative MaxOutboundMessageSize to be rejected")
+	}
+	if _, err := NormalizeProtocolOptions(ProtocolOptions{MaxOutboundQueuedBytes: -1}); err == nil {
+		t.Fatal("expected negative MaxOutboundQueuedBytes to be rejected")
 	}
 }
 

@@ -22,6 +22,7 @@ func TestOutgoingBackpressure_BufferFullDisconnects(t *testing.T) {
 	inbox := &fakeInbox{}
 	mgr := NewConnManager()
 	mgr.Add(conn)
+	runRequestedDisconnectOwnerWithLifecycle(conn, inbox, mgr)
 	s := NewClientSender(mgr, inbox)
 
 	msg := SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
@@ -87,6 +88,7 @@ func TestOutgoingBackpressureConcurrentSlowClientShortSoak(t *testing.T) {
 		conn := testConnDirect(&opts)
 		conns = append(conns, conn)
 		mgr.Add(conn)
+		runRequestedDisconnectOwnerWithLifecycle(conn, inbox, mgr)
 	}
 	sender := NewClientSender(mgr, inbox)
 	msg := SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: nil}
@@ -189,6 +191,7 @@ func TestOutgoingBackpressure_FurtherSendsAfterDisconnect(t *testing.T) {
 	inbox := &fakeInbox{}
 	mgr := NewConnManager()
 	mgr.Add(conn)
+	runRequestedDisconnectOwnerWithLifecycle(conn, inbox, mgr)
 	s := NewClientSender(mgr, inbox)
 
 	msg := SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}

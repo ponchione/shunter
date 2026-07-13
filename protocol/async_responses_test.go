@@ -114,7 +114,7 @@ func TestConnOnlySenderBufferFullDisconnectsLifecycleConn(t *testing.T) {
 	inbox := &fakeInbox{}
 	mgr := NewConnManager()
 	mgr.Add(conn)
-	conn.bindDisconnect(inbox, mgr)
+	runRequestedDisconnectOwnerWithLifecycle(conn, inbox, mgr)
 
 	conn.OutboundCh <- []byte{0xff}
 	sender := connOnlySender{conn: conn}
@@ -144,7 +144,7 @@ func TestSendErrorBufferFullDisconnectsLifecycleConn(t *testing.T) {
 	inbox := &fakeInbox{}
 	mgr := NewConnManager()
 	mgr.Add(conn)
-	conn.bindDisconnect(inbox, mgr)
+	runRequestedDisconnectOwnerWithLifecycle(conn, inbox, mgr)
 
 	conn.OutboundCh <- []byte{0xff}
 	sendError(conn, SubscriptionError{Error: "overflow"})

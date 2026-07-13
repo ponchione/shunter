@@ -25,6 +25,7 @@ func testConnDirect(opts *ProtocolOptions) *Conn {
 		readCtx:             readCtx,
 		cancelRead:          cancelRead,
 		closed:              make(chan struct{}),
+		disconnectRequested: make(chan struct{}),
 	}
 }
 
@@ -35,6 +36,7 @@ func drainServerMsg(t *testing.T, conn *Conn) (uint8, any) {
 	t.Helper()
 	select {
 	case frame := <-conn.OutboundCh:
+		conn.releaseOutboundBytes(len(frame))
 		return decodeOutboundServerFrame(t, conn, frame)
 	default:
 		t.Fatal("expected a message on OutboundCh but channel was empty")
@@ -46,6 +48,7 @@ func drainServerMsgEventually(t *testing.T, conn *Conn) (uint8, any) {
 	t.Helper()
 	select {
 	case frame := <-conn.OutboundCh:
+		conn.releaseOutboundBytes(len(frame))
 		return decodeOutboundServerFrame(t, conn, frame)
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected a message on OutboundCh but channel stayed empty")
@@ -105,4 +108,23 @@ func overlongSQLQuery() string {
 		b.WriteString(suffix)
 	}
 	return b.String()
+}
+
+// runRequestedDisconnectOwner supplies the lifecycle coordinator for loop-level
+// tests that intentionally exercise fatal paths outside HandleSubscribe.
+func runRequestedDisconnectOwner(c *Conn) <-chan struct{} {
+	return runRequestedDisconnectOwnerWithLifecycle(c, nil, nil)
+}
+
+func runRequestedDisconnectOwnerWithLifecycle(c *Conn, inbox ExecutorInbox, mgr *ConnManager) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-c.disconnectRequested
+		termination := c.disconnectRequest
+		ctx, cancel := context.WithTimeout(context.Background(), c.disconnectTimeout())
+		defer cancel()
+		c.Disconnect(ctx, termination.code, termination.reason, inbox, mgr)
+	}()
+	return done
 }

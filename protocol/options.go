@@ -32,6 +32,10 @@ type ProtocolOptions struct {
 	// OutgoingBufferMessages caps the per-connection outbound queue.
 	// Overflow triggers a 1008 close per SPEC-005 §10.1.
 	OutgoingBufferMessages int
+	// MaxOutboundQueuedBytes caps the encoded frames retained in the
+	// per-connection outbound queue. Overflow triggers the same 1008 close as
+	// the message-count limit.
+	MaxOutboundQueuedBytes int64
 	// IncomingQueueMessages caps inbound per-connection queue depth.
 	// Overflow triggers a 1008 close per SPEC-005 §10.2.
 	IncomingQueueMessages int
@@ -43,8 +47,13 @@ type ProtocolOptions struct {
 	MaxOutboundMessageSize int
 }
 
-// DefaultOutgoingBufferMessages is the per-client outbound queue capacity.
-const DefaultOutgoingBufferMessages = 16 * 1024
+const (
+	// DefaultOutgoingBufferMessages is the per-client outbound queue capacity.
+	DefaultOutgoingBufferMessages = 1024
+	// DefaultMaxOutboundQueuedBytes bounds retained encoded frames while still
+	// admitting one maximum-sized uncompressed message plus envelope overhead.
+	DefaultMaxOutboundQueuedBytes int64 = 65 * 1024 * 1024
+)
 
 // DefaultProtocolOptions returns SPEC-005 §12 default values.
 func DefaultProtocolOptions() ProtocolOptions {
@@ -55,6 +64,7 @@ func DefaultProtocolOptions() ProtocolOptions {
 		WriteTimeout:           5 * time.Second,
 		DisconnectTimeout:      5 * time.Second,
 		OutgoingBufferMessages: DefaultOutgoingBufferMessages,
+		MaxOutboundQueuedBytes: DefaultMaxOutboundQueuedBytes,
 		IncomingQueueMessages:  64,
 		MaxMessageSize:         4 * 1024 * 1024,
 		MaxOutboundMessageSize: 64 * 1024 * 1024,
@@ -81,6 +91,9 @@ func NormalizeProtocolOptions(opts ProtocolOptions) (ProtocolOptions, error) {
 	}
 	if opts.OutgoingBufferMessages < 0 {
 		return ProtocolOptions{}, fmt.Errorf("outgoing buffer messages must not be negative")
+	}
+	if opts.MaxOutboundQueuedBytes < 0 {
+		return ProtocolOptions{}, fmt.Errorf("max outbound queued bytes must not be negative")
 	}
 	if opts.IncomingQueueMessages < 0 {
 		return ProtocolOptions{}, fmt.Errorf("incoming queue messages must not be negative")
@@ -110,6 +123,9 @@ func NormalizeProtocolOptions(opts ProtocolOptions) (ProtocolOptions, error) {
 	}
 	if opts.OutgoingBufferMessages == 0 {
 		opts.OutgoingBufferMessages = defaults.OutgoingBufferMessages
+	}
+	if opts.MaxOutboundQueuedBytes == 0 {
+		opts.MaxOutboundQueuedBytes = defaults.MaxOutboundQueuedBytes
 	}
 	if opts.IncomingQueueMessages == 0 {
 		opts.IncomingQueueMessages = defaults.IncomingQueueMessages

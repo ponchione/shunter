@@ -7,13 +7,17 @@ import (
 	"github.com/ponchione/websocket"
 )
 
+type connectionTermination struct {
+	code   websocket.StatusCode
+	reason string
+}
+
 // Disconnect tears down a connection once: drop subscriptions, run
 // OnDisconnect, remove the Conn, signal local goroutines, and close the socket.
 func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason string, inbox ExecutorInbox, mgr *ConnManager) {
 	if c == nil {
 		return
 	}
-	c.disconnectStarted.Store(true)
 	c.closeOnce.Do(func() {
 		if inbox != nil {
 			if err := inbox.DisconnectClientSubscriptions(ctx, c.ID); err != nil {
@@ -27,14 +31,21 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 			mgr.Remove(c.ID)
 			recordProtocolConnections(c.Observer, mgr.ActiveCount())
 		}
-		if c.cancelRead != nil {
-			c.cancelRead()
-		}
+		c.outboundMu.Lock()
+		c.outboundStopped = true
+		c.outboundMu.Unlock()
 		if c.closed != nil {
 			close(c.closed)
 		}
 		if c.ws != nil {
-			go closeWithHandshake(c.ws, code, reason, c.closeHandshakeTimeout())
+			go func() {
+				closeWithHandshake(c.ws, code, reason, c.closeHandshakeTimeout())
+				if c.cancelRead != nil {
+					c.cancelRead()
+				}
+			}()
+		} else if c.cancelRead != nil {
+			c.cancelRead()
 		}
 		if c.Observer != nil {
 			c.Observer.LogProtocolConnectionClosed(c.ID, closeReason(code, reason))
@@ -62,13 +73,22 @@ func (c *Conn) superviseLifecycle(
 	outboundDone <-chan struct{},
 ) {
 	select {
+	case <-c.disconnectRequested:
 	case <-dispatchDone:
 	case <-keepaliveDone:
 	case <-outboundDone:
 	}
+	termination := connectionTermination{code: code, reason: reason}
+	if c.disconnectRequested != nil {
+		select {
+		case <-c.disconnectRequested:
+			termination = c.disconnectRequest
+		default:
+		}
+	}
 	disconnectCtx, cancel := context.WithTimeout(ctx, c.disconnectTimeout())
 	defer cancel()
-	c.Disconnect(disconnectCtx, code, reason, inbox, mgr)
+	c.Disconnect(disconnectCtx, termination.code, termination.reason, inbox, mgr)
 	<-dispatchDone
 	<-keepaliveDone
 	<-outboundDone

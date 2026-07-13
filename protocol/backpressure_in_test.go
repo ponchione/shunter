@@ -71,6 +71,7 @@ func TestIncomingBackpressure_ExceedLimitCloses1008(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	opts.IncomingQueueMessages = 2
 	conn, clientWS := testConnPair(t, &opts)
+	runRequestedDisconnectOwner(conn)
 
 	// Handlers block forever so inflight never decreases.
 	block := make(chan struct{})

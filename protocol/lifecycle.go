@@ -129,7 +129,6 @@ type CallReducerRequest struct {
 // RunLifecycle admits one connection and sends its IdentityToken.
 // OnConnect rejection closes the socket without registering the connection.
 func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnManager) error {
-	c.bindDisconnect(inbox, mgr)
 	if err := mgr.reserve(c); err != nil {
 		_ = c.ws.Close(websocket.StatusPolicyViolation, "connection_id already in use")
 		return err

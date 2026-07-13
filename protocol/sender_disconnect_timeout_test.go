@@ -62,11 +62,9 @@ func (b *blockingInbox) CallReducer(context.Context, CallReducerRequest) error {
 }
 
 // TestEnqueueOnConnOverflowDisconnectBoundsOnInboxHang is the primary
-// sender-disconnect-context pin. Fails if
-// connManagerSender.enqueueOnConn reverts to spawning Disconnect with
-// a Background context (or any ctx that never cancels under
-// DisconnectTimeout), which would leak the detached goroutine for the
-// process lifetime when the inbox hangs.
+// sender-disconnect-context pin. It verifies that overflow reaches the
+// lifecycle coordinator and that the coordinator bounds Disconnect by
+// DisconnectTimeout when the inbox hangs.
 func TestEnqueueOnConnOverflowDisconnectBoundsOnInboxHang(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	opts.OutgoingBufferMessages = 1
@@ -76,6 +74,7 @@ func TestEnqueueOnConnOverflowDisconnectBoundsOnInboxHang(t *testing.T) {
 	inbox := newBlockingInbox()
 	mgr := NewConnManager()
 	mgr.Add(conn)
+	runRequestedDisconnectOwnerWithLifecycle(conn, inbox, mgr)
 	s := NewClientSender(mgr, inbox)
 
 	msg := SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
@@ -92,10 +91,10 @@ func TestEnqueueOnConnOverflowDisconnectBoundsOnInboxHang(t *testing.T) {
 	select {
 	case <-inbox.started:
 	case <-time.After(1 * time.Second):
-		t.Fatal("detached Disconnect goroutine never reached DisconnectClientSubscriptions")
+		t.Fatal("lifecycle disconnect owner never reached DisconnectClientSubscriptions")
 	}
 
-	// The detached goroutine must exit within DisconnectTimeout + slack
+	// The lifecycle disconnect owner must exit within DisconnectTimeout + slack
 	// even though the inbox blocks until ctx cancels. conn.closed firing
 	// proves Disconnect reached step 4 of the SPEC-005 §5.3 teardown.
 	deadline := time.After(opts.DisconnectTimeout + 1*time.Second)
@@ -126,8 +125,8 @@ func TestEnqueueOnConnOverflowDisconnectBoundsOnInboxHang(t *testing.T) {
 }
 
 // TestEnqueueOnConnOverflowDisconnectDeliversOnInboxOK pins the
-// happy-path contract: when the inbox returns promptly the detached
-// Disconnect goroutine completes quickly, well under DisconnectTimeout.
+// happy-path contract: when the inbox returns promptly the lifecycle
+// disconnect owner completes quickly, well under DisconnectTimeout.
 // Fails if a future refactor serialises on the bounded ctx instead of
 // returning on first completion.
 func TestEnqueueOnConnOverflowDisconnectDeliversOnInboxOK(t *testing.T) {
@@ -139,6 +138,7 @@ func TestEnqueueOnConnOverflowDisconnectDeliversOnInboxOK(t *testing.T) {
 	inbox := &fakeInbox{}
 	mgr := NewConnManager()
 	mgr.Add(conn)
+	runRequestedDisconnectOwnerWithLifecycle(conn, inbox, mgr)
 	s := NewClientSender(mgr, inbox)
 
 	msg := SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}

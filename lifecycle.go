@@ -44,6 +44,10 @@ var (
 
 var runtimeStartAfterDurabilityHook func(*Runtime) error
 
+var closeStartupDurability = func(worker *commitlog.DurabilityWorker) (uint64, error) {
+	return worker.Close()
+}
+
 // Ready reports whether Start has completed and runtime-owned workers are running.
 func (r *Runtime) Ready() bool {
 	return r.ready.Load()
@@ -93,29 +97,28 @@ func (r *Runtime) Start(ctx context.Context) (startErr error) {
 			r.startupDone = nil
 		}
 		r.mu.Unlock()
-		close(startupDone)
-		if startErr != nil && r.startInterruptedByClose() {
-			startErr = ErrRuntimeClosed
+		if startErr != nil && r.startInterruptedByClose() && !errors.Is(startErr, ErrRuntimeClosed) {
+			startErr = errors.Join(ErrRuntimeClosed, startErr)
 		}
+		if startErr != nil {
+			r.recordStartFailure(ctx, startErr, time.Since(startedAt))
+		}
+		close(startupDone)
 	}()
 	r.recordRuntimeMetrics()
 
 	if err := ctx.Err(); err != nil {
-		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 	if err := r.engine.Start(ctx); err != nil {
 		err = fmt.Errorf("start schema engine: %w", err)
-		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 	if r.buildConfig.EnableProtocol {
 		if _, _, err := buildAuthConfig(r.config); err != nil {
-			r.recordStartFailure(ctx, err, time.Since(startedAt))
 			return err
 		}
 		if _, err := buildProtocolOptions(r.config.Protocol); err != nil {
-			r.recordStartFailure(ctx, err, time.Since(startedAt))
 			return err
 		}
 	}
@@ -126,15 +129,16 @@ func (r *Runtime) Start(ctx context.Context) (startErr error) {
 	durability, err := commitlog.NewDurabilityWorkerWithResumePlan(r.dataDir, r.resumePlan, durabilityOptions)
 	if err != nil {
 		err = fmt.Errorf("start durability worker: %w", err)
-		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 	cleanupDurability := true
 	defer func() {
 		if cleanupDurability {
-			finalDurableTxID, closeErr := durability.Close()
+			finalDurableTxID, closeErr := closeStartupDurability(durability)
 			if closeErr == nil {
 				r.refreshStartupRecoveryAfterDurabilityClose(types.TxID(finalDurableTxID))
+			} else {
+				startErr = errors.Join(startErr, fmt.Errorf("close durability worker after failed start: %w", closeErr))
 			}
 		}
 	}()
@@ -142,13 +146,11 @@ func (r *Runtime) Start(ctx context.Context) (startErr error) {
 	if runtimeStartAfterDurabilityHook != nil {
 		if err := runtimeStartAfterDurabilityHook(r); err != nil {
 			err = fmt.Errorf("start runtime lifecycle: %w", err)
-			r.recordStartFailure(ctx, err, time.Since(startedAt))
 			return err
 		}
 	}
 
 	if err := ctx.Err(); err != nil {
-		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 	if err := r.runMigrationHooks(ctx, durability); err != nil {
@@ -157,14 +159,12 @@ func (r *Runtime) Start(ctx context.Context) (startErr error) {
 		if blocksRetry {
 			err = fmt.Errorf("%w: %w", ErrRuntimeRestartRequired, err)
 		}
-		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		if blocksRetry {
 			r.blockStartRetry(err)
 		}
 		return err
 	}
 	if err := ctx.Err(); err != nil {
-		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 
@@ -193,7 +193,6 @@ func (r *Runtime) Start(ctx context.Context) (startErr error) {
 	scheduler := exec.SchedulerFor()
 	if err := exec.Startup(ctx, scheduler); err != nil {
 		err = fmt.Errorf("startup executor: %w", err)
-		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 
@@ -212,7 +211,6 @@ func (r *Runtime) Start(ctx context.Context) (startErr error) {
 		r.mu.Unlock()
 		lifecycleCancel()
 		fanOutCancel()
-		r.recordStartFailure(ctx, ErrRuntimeClosed, time.Since(startedAt))
 		return ErrRuntimeClosed
 	}
 	r.lifecycleCancel = lifecycleCancel
@@ -230,7 +228,6 @@ func (r *Runtime) Start(ctx context.Context) (startErr error) {
 			r.mu.Unlock()
 			lifecycleCancel()
 			fanOutCancel()
-			r.recordStartFailure(ctx, err, time.Since(startedAt))
 			return err
 		}
 	}
@@ -407,7 +404,7 @@ func (r *Runtime) blockStartRetry(err error) {
 		return
 	}
 	r.mu.Lock()
-	if r.stateName == RuntimeStateFailed {
+	if r.stateName == RuntimeStateFailed || r.stateName == RuntimeStateStarting {
 		r.startRetryBlockedErr = err
 	}
 	r.mu.Unlock()

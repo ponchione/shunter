@@ -2,20 +2,21 @@ package protocol
 
 import "testing"
 
-// TestShunterDefaultOutgoingBufferMatchesReference pins the outbound-lag
-// decision recorded in
-// `working-docs/shunter-design-decisions.md#outbound-lag-policy`: the per-connection outbound
-// queue default matches the reference runtime constant
-// `CLIENT_CHANNEL_CAPACITY = 16 * KB` at
-// `reference tree crates/core/src/client/client_connection.rs:657`.
-func TestShunterDefaultOutgoingBufferMatchesReference(t *testing.T) {
-	const referenceClientChannelCapacity = 16 * 1024
-	if DefaultOutgoingBufferMessages != referenceClientChannelCapacity {
-		t.Fatalf("DefaultOutgoingBufferMessages = %d, want %d (reference CLIENT_CHANNEL_CAPACITY)",
-			DefaultOutgoingBufferMessages, referenceClientChannelCapacity)
+// TestShunterDefaultOutgoingBufferPolicy pins Shunter's independent retained
+// memory policy. The byte ceiling is large enough for one maximum-sized
+// uncompressed message and small enough to be a practical per-client bound.
+func TestShunterDefaultOutgoingBufferPolicy(t *testing.T) {
+	if DefaultOutgoingBufferMessages != 1024 {
+		t.Fatalf("DefaultOutgoingBufferMessages = %d, want 1024", DefaultOutgoingBufferMessages)
 	}
-	if got := DefaultProtocolOptions().OutgoingBufferMessages; got != referenceClientChannelCapacity {
-		t.Fatalf("DefaultProtocolOptions().OutgoingBufferMessages = %d, want %d",
-			got, referenceClientChannelCapacity)
+	opts := DefaultProtocolOptions()
+	if opts.OutgoingBufferMessages != DefaultOutgoingBufferMessages {
+		t.Fatalf("DefaultProtocolOptions().OutgoingBufferMessages = %d, want %d", opts.OutgoingBufferMessages, DefaultOutgoingBufferMessages)
+	}
+	if opts.MaxOutboundQueuedBytes != DefaultMaxOutboundQueuedBytes {
+		t.Fatalf("MaxOutboundQueuedBytes = %d, want %d", opts.MaxOutboundQueuedBytes, DefaultMaxOutboundQueuedBytes)
+	}
+	if opts.MaxOutboundQueuedBytes <= int64(opts.MaxOutboundMessageSize) {
+		t.Fatalf("MaxOutboundQueuedBytes = %d, want envelope headroom above MaxOutboundMessageSize %d", opts.MaxOutboundQueuedBytes, opts.MaxOutboundMessageSize)
 	}
 }

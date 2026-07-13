@@ -28,9 +28,12 @@ type Conn struct {
 	Observer            Observer
 
 	// OutboundCh is the bounded per-connection outbound queue. The
-	// backpressure design (SPEC-005 §10.1, Epic 6) uses the
-	// fullness of this channel to decide between enqueue and close.
-	OutboundCh chan []byte
+	// backpressure design (SPEC-005 §10.1, Epic 6) applies both message-count
+	// and retained-byte ceilings before enqueue.
+	OutboundCh          chan []byte
+	outboundMu          sync.Mutex
+	outboundQueuedBytes int64
+	outboundStopped     bool
 
 	// inflightSem limits concurrent in-flight inbound messages.
 	// Capacity is IncomingQueueMessages. The dispatch loop acquires
@@ -46,9 +49,9 @@ type Conn struct {
 	closeOnce sync.Once
 	closed    chan struct{}
 
-	disconnectStarted atomic.Bool
-	disconnectInbox   ExecutorInbox
-	disconnectMgr     *ConnManager
+	disconnectRequestOnce sync.Once
+	disconnectRequested   chan struct{}
+	disconnectRequest     connectionTermination
 
 	// lastActivity is the unix-nanos timestamp of the most recent
 	// inbound signal observed on this connection: a Pong reply to
@@ -80,55 +83,41 @@ func NewConn(
 	}
 	readCtx, cancelRead := context.WithCancel(context.Background())
 	c := &Conn{
-		ID:              id,
-		Identity:        identity,
-		Token:           token,
-		ProtocolVersion: CurrentProtocolVersion,
-		Compression:     compression,
-		OutboundCh:      make(chan []byte, normalized.OutgoingBufferMessages),
-		inflightSem:     make(chan struct{}, normalized.IncomingQueueMessages),
-		ws:              ws,
-		opts:            &normalized,
-		readCtx:         readCtx,
-		cancelRead:      cancelRead,
-		closed:          make(chan struct{}),
+		ID:                  id,
+		Identity:            identity,
+		Token:               token,
+		ProtocolVersion:     CurrentProtocolVersion,
+		Compression:         compression,
+		OutboundCh:          make(chan []byte, normalized.OutgoingBufferMessages),
+		inflightSem:         make(chan struct{}, normalized.IncomingQueueMessages),
+		ws:                  ws,
+		opts:                &normalized,
+		readCtx:             readCtx,
+		cancelRead:          cancelRead,
+		closed:              make(chan struct{}),
+		disconnectRequested: make(chan struct{}),
 	}
 	c.MarkActivity()
 	return c
 }
 
-func (c *Conn) bindDisconnect(inbox ExecutorInbox, mgr *ConnManager) {
-	c.disconnectInbox = inbox
-	c.disconnectMgr = mgr
-}
-
-func (c *Conn) startOutboundOverflowDisconnect(inbox ExecutorInbox, mgr *ConnManager) bool {
+func (c *Conn) requestDisconnect(code websocket.StatusCode, reason string) bool {
 	if c == nil {
 		return false
 	}
-	if inbox == nil {
-		inbox = c.disconnectInbox
-	}
-	if mgr == nil {
-		mgr = c.disconnectMgr
-	}
-	if inbox == nil || mgr == nil {
-		return false
-	}
-	select {
-	case <-c.closed:
-		return true
-	default:
-	}
-	if !c.disconnectStarted.CompareAndSwap(false, true) {
-		return true
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), c.disconnectTimeout())
-		defer cancel()
-		c.Disconnect(ctx, websocket.StatusPolicyViolation, CloseReasonSendBufferFull, inbox, mgr)
-	}()
-	return true
+	requested := false
+	c.disconnectRequestOnce.Do(func() {
+		c.outboundMu.Lock()
+		c.outboundStopped = true
+		c.outboundMu.Unlock()
+		if c.disconnectRequested == nil {
+			c.disconnectRequested = make(chan struct{})
+		}
+		c.disconnectRequest = connectionTermination{code: code, reason: reason}
+		close(c.disconnectRequested)
+		requested = true
+	})
+	return requested
 }
 
 func (c *Conn) disconnectTimeout() time.Duration {

@@ -127,6 +127,7 @@ func TestDispatchLoop_ValidSubscribe(t *testing.T) {
 
 func TestDispatchLoop_HandlerPanicClosesInternal(t *testing.T) {
 	conn, client := testConnPair(t, nil)
+	runRequestedDisconnectOwner(conn)
 
 	handlers := &MessageHandlers{
 		OnSubscribeSingle: func(context.Context, *Conn, *SubscribeSingleMsg) {
@@ -302,6 +303,7 @@ func TestDispatchLoop_CompressionNegotiatedAcceptsPlainClientMessage(t *testing.
 
 func TestDispatchLoop_TextFrameCloses(t *testing.T) {
 	conn, client := testConnPair(t, nil)
+	runRequestedDisconnectOwner(conn)
 
 	handlers := &MessageHandlers{
 		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
@@ -337,6 +339,7 @@ func TestDispatchLoop_TextFrameCloses(t *testing.T) {
 
 func TestDispatchLoop_UnknownTagCloses(t *testing.T) {
 	conn, client := testConnPair(t, nil)
+	runRequestedDisconnectOwner(conn)
 
 	handlers := &MessageHandlers{}
 
@@ -416,6 +419,7 @@ func (o *recordingProtocolObserver) LogProtocolBackpressure(string, string) {}
 
 func TestDispatchLoop_NilHandlerCloses(t *testing.T) {
 	conn, client := testConnPair(t, nil)
+	runRequestedDisconnectOwner(conn)
 
 	// All handler fields are nil.
 	handlers := &MessageHandlers{}
@@ -450,6 +454,7 @@ func TestDispatchLoop_NilHandlerCloses(t *testing.T) {
 
 func TestDispatchLoop_NilHandlersCloses(t *testing.T) {
 	conn, client := testConnPair(t, nil)
+	runRequestedDisconnectOwner(conn)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -479,6 +484,7 @@ func TestDispatchLoop_NilHandlersCloses(t *testing.T) {
 
 func TestDispatchLoop_MalformedBodyCloses(t *testing.T) {
 	conn, client := testConnPair(t, nil)
+	runRequestedDisconnectOwner(conn)
 
 	handlers := &MessageHandlers{
 		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {

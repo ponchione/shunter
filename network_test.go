@@ -33,6 +33,7 @@ func TestBuildProtocolOptionsAppliesOverrides(t *testing.T) {
 		WriteTimeout:           4 * time.Second,
 		DisconnectTimeout:      5 * time.Second,
 		OutgoingBufferMessages: 17,
+		MaxOutboundQueuedBytes: 21,
 		IncomingQueueMessages:  18,
 		MaxMessageSize:         19,
 		MaxOutboundMessageSize: 20,
@@ -46,6 +47,7 @@ func TestBuildProtocolOptionsAppliesOverrides(t *testing.T) {
 		opts.WriteTimeout != 4*time.Second ||
 		opts.DisconnectTimeout != 5*time.Second ||
 		opts.OutgoingBufferMessages != 17 ||
+		opts.MaxOutboundQueuedBytes != 21 ||
 		opts.IncomingQueueMessages != 18 ||
 		opts.MaxMessageSize != 19 ||
 		opts.MaxOutboundMessageSize != 20 {
@@ -61,6 +63,7 @@ func TestBuildProtocolOptionsRejectsNegativeValues(t *testing.T) {
 		{WriteTimeout: -time.Second},
 		{DisconnectTimeout: -time.Second},
 		{OutgoingBufferMessages: -1},
+		{MaxOutboundQueuedBytes: -1},
 		{IncomingQueueMessages: -1},
 		{MaxMessageSize: -1},
 		{MaxOutboundMessageSize: -1},
@@ -651,6 +654,69 @@ func TestServingHTTPServerSetsDefensiveTimeouts(t *testing.T) {
 	}
 	if srv.IdleTimeout != defaultHTTPIdleTimeout {
 		t.Fatalf("IdleTimeout = %v, want %v", srv.IdleTimeout, defaultHTTPIdleTimeout)
+	}
+}
+
+type fakeLifecycleHTTPServer struct {
+	serveStarted    chan struct{}
+	shutdownRelease chan struct{}
+	waitForShutdown bool
+	serveErr        error
+	shutdownErr     error
+}
+
+func (s *fakeLifecycleHTTPServer) Serve(net.Listener) error {
+	close(s.serveStarted)
+	if s.waitForShutdown {
+		<-s.shutdownRelease
+	}
+	return s.serveErr
+}
+
+func (s *fakeLifecycleHTTPServer) Shutdown(context.Context) error {
+	if s.waitForShutdown {
+		close(s.shutdownRelease)
+	}
+	return s.shutdownErr
+}
+
+func TestServeHTTPWithLifecycleJoinsConcurrentShutdownErrors(t *testing.T) {
+	shutdownErr := errors.New("shutdown failure")
+	serveErr := errors.New("serve failure")
+	stopErr := errors.New("runtime stop failure")
+	server := &fakeLifecycleHTTPServer{
+		serveStarted:    make(chan struct{}),
+		shutdownRelease: make(chan struct{}),
+		waitForShutdown: true,
+		serveErr:        serveErr,
+		shutdownErr:     shutdownErr,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serveHTTPServerWithLifecycle(ctx, nil, server, func(context.Context) error { return nil }, func() error { return stopErr })
+	}()
+	<-server.serveStarted
+	cancel()
+	err := <-errCh
+	for _, want := range []error{context.Canceled, shutdownErr, serveErr, stopErr} {
+		if !errors.Is(err, want) {
+			t.Fatalf("serve error = %v, want errors.Is(..., %v)", err, want)
+		}
+	}
+}
+
+func TestServeHTTPWithLifecycleJoinsServeAndStopErrors(t *testing.T) {
+	serveErr := errors.New("serve failure")
+	stopErr := errors.New("runtime stop failure")
+	server := &fakeLifecycleHTTPServer{
+		serveStarted:    make(chan struct{}),
+		shutdownRelease: make(chan struct{}),
+		serveErr:        serveErr,
+	}
+	err := serveHTTPServerWithLifecycle(context.Background(), nil, server, func(context.Context) error { return nil }, func() error { return stopErr })
+	if !errors.Is(err, serveErr) || !errors.Is(err, stopErr) {
+		t.Fatalf("serve error = %v, want joined serve and stop failures", err)
 	}
 }
 

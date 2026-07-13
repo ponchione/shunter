@@ -82,8 +82,8 @@ func TestDispatchLoop_HandlerCtxCancelsOnConnClose(t *testing.T) {
 	// runDispatchLoop blocks inside ws.Read(readCtx) after the handler
 	// is spawned; readCtx is tied to the outer ctx and c.readCtx, not
 	// c.closed, so close(conn.closed) alone does not unblock Read. In
-	// production, Conn.Disconnect invokes c.cancelRead() immediately
-	// before close(c.closed), which fires c.readCtx.Done() and cancels
+	// production, Conn.Disconnect completes its bounded close handshake and
+	// then invokes c.cancelRead(), which fires c.readCtx.Done() and cancels
 	// readCtx. The test takes the equivalent via cancel() here since
 	// this test drives close(c.closed) directly rather than through
 	// Disconnect.

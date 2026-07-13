@@ -165,6 +165,7 @@ func TestKeepaliveClosesIdleConnection(t *testing.T) {
 	opts.IdleTimeout = 120 * time.Millisecond
 	c, clientWS, cleanup := loopbackConn(t, opts)
 	defer cleanup()
+	runRequestedDisconnectOwner(c)
 
 	// Client does NOT read. With coder/websocket, Pong replies flow
 	// through the peer's read loop — if the client never reads, Pings

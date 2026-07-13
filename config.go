@@ -286,6 +286,7 @@ type ProtocolConfig struct {
 	WriteTimeout           time.Duration
 	DisconnectTimeout      time.Duration
 	OutgoingBufferMessages int
+	MaxOutboundQueuedBytes int64
 	IncomingQueueMessages  int
 	MaxMessageSize         int64
 	MaxOutboundMessageSize int

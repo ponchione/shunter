@@ -10,6 +10,7 @@ import (
 // runOutboundWriter drains OutboundCh to the WebSocket in FIFO order.
 // It exits on context cancellation, connection close, or write error.
 func (c *Conn) runOutboundWriter(ctx context.Context) {
+	defer c.stopAndAbandonOutboundQueue()
 	for {
 		select {
 		case <-ctx.Done():
@@ -24,6 +25,7 @@ func (c *Conn) runOutboundWriter(ctx context.Context) {
 			if !ok {
 				return
 			}
+			c.releaseOutboundBytes(len(frame))
 			if err := c.writeBinary(ctx, frame); err != nil {
 				logProtocolError(c.Observer, "unknown", "send_failed", err)
 				return
@@ -35,6 +37,7 @@ func (c *Conn) runOutboundWriter(ctx context.Context) {
 					if !ok {
 						return
 					}
+					c.releaseOutboundBytes(len(frame))
 					if err := c.writeBinary(ctx, frame); err != nil {
 						logProtocolError(c.Observer, "unknown", "send_failed", err)
 						return

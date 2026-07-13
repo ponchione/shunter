@@ -123,6 +123,11 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		s.writeRejected(w, "invalid SQL query limits: "+err.Error(), http.StatusInternalServerError, "rejected_internal", err)
 		return
 	}
+	subscriptionLimits, err := NormalizeSubscriptionLimits(s.SubscriptionLimits)
+	if err != nil {
+		s.writeRejected(w, "invalid subscription limits: "+err.Error(), http.StatusInternalServerError, "rejected_internal", err)
+		return
+	}
 
 	// 1. Auth — strict requires a token, anonymous mints on absence.
 	var authRejectionReason string
@@ -286,7 +291,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		// error), which drives the SPEC-005 §5.3 teardown once.
 		dispatchDone := make(chan struct{})
 		keepaliveDone := make(chan struct{})
-		handlers := s.buildMessageHandlersWithLimits(queryLimits)
+		handlers := s.buildMessageHandlersWithLimits(queryLimits, subscriptionLimits)
 		go func() {
 			c.runDispatchLoop(context.Background(), handlers)
 			close(dispatchDone)
@@ -356,11 +361,7 @@ func (s *Server) buildMessageHandlers() *MessageHandlers {
 	return s.buildMessageHandlersWithLimits(limits, subscriptionLimits)
 }
 
-func (s *Server) buildMessageHandlersWithLimits(queryLimits SQLQueryLimits, subscriptionLimits ...SubscriptionLimits) *MessageHandlers {
-	subLimits := SubscriptionLimits{MaxQueriesPerSet: DefaultSubscriptionMaxQueriesPerSet}
-	if len(subscriptionLimits) > 0 {
-		subLimits = subscriptionLimits[0]
-	}
+func (s *Server) buildMessageHandlersWithLimits(queryLimits SQLQueryLimits, subLimits SubscriptionLimits) *MessageHandlers {
 	handlers := &MessageHandlers{}
 	if s.Executor != nil && s.Schema != nil {
 		handlers.OnSubscribeSingle = func(ctx context.Context, conn *Conn, msg *SubscribeSingleMsg) {

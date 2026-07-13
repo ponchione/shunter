@@ -374,7 +374,7 @@ func TestSendProtocolProcedureMessageMissingProtocolSenderReturnsNotReady(t *tes
 	}
 }
 
-func TestSendProtocolProcedureMessageOverflowUsesClientSenderDisconnect(t *testing.T) {
+func TestSendProtocolProcedureMessageOverflowUsesClientSenderBackpressure(t *testing.T) {
 	rt := buildStartedRuntimeWithProcedureAndConfig(t, "notify", func(_ *ProcedureContext, _ []byte) ([]byte, error) {
 		return []byte("ok"), nil
 	}, Config{DataDir: t.TempDir(), EnableProtocol: true})
@@ -403,17 +403,6 @@ func TestSendProtocolProcedureMessageOverflowUsesClientSenderDisconnect(t *testi
 	}
 	if got := len(conn.OutboundCh); got != 1 {
 		t.Fatalf("overflow procedure response was enqueued; OutboundCh len = %d, want 1", got)
-	}
-	deadline := time.After(2 * time.Second)
-	for {
-		if got := mgr.Get(conn.ID); got == nil {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("connection still registered after overflow disconnect")
-		case <-time.After(10 * time.Millisecond):
-		}
 	}
 }
 

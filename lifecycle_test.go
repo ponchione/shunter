@@ -3,8 +3,11 @@ package shunter
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
+
+	"github.com/ponchione/shunter/commitlog"
 )
 
 func TestRuntimeInitialHealthIsBuiltAndNotReady(t *testing.T) {
@@ -254,6 +257,86 @@ func TestRuntimeStartFailureCleansPartialResources(t *testing.T) {
 	}
 	if err := rt.Close(); err != nil {
 		t.Fatalf("Close after retry: %v", err)
+	}
+}
+
+func TestRuntimeStartJoinsDurabilityCleanupFailureBeforeTelemetry(t *testing.T) {
+	logs := &recordingLogState{}
+	rt, err := Build(validChatModule(), Config{
+		DataDir: t.TempDir(),
+		Observability: ObservabilityConfig{
+			Logger: logs.logger(),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startFailure := errors.New("post-durability startup failure")
+	cleanupFailure := errors.New("durability cleanup failure")
+	oldStartHook := runtimeStartAfterDurabilityHook
+	oldCloseHook := closeStartupDurability
+	runtimeStartAfterDurabilityHook = func(*Runtime) error { return startFailure }
+	closeStartupDurability = func(worker *commitlog.DurabilityWorker) (uint64, error) {
+		finalTxID, closeErr := worker.Close()
+		return finalTxID, errors.Join(closeErr, cleanupFailure)
+	}
+	t.Cleanup(func() {
+		runtimeStartAfterDurabilityHook = oldStartHook
+		closeStartupDurability = oldCloseHook
+	})
+
+	err = rt.Start(context.Background())
+	if !errors.Is(err, startFailure) || !errors.Is(err, cleanupFailure) {
+		t.Fatalf("Start error = %v, want startup and durability cleanup failures", err)
+	}
+	if got := rt.Health().LastError; !strings.Contains(got, startFailure.Error()) || !strings.Contains(got, cleanupFailure.Error()) {
+		t.Fatalf("health LastError = %q, want both failures", got)
+	}
+	record := requireRecordedLog(t, logs, "runtime.start_failed")
+	loggedError, _ := record.attrs["error"].(string)
+	if !strings.Contains(loggedError, startFailure.Error()) || !strings.Contains(loggedError, cleanupFailure.Error()) {
+		t.Fatalf("runtime.start_failed error = %q, want both failures", loggedError)
+	}
+}
+
+func TestRuntimeStartInterruptedByClosePreservesAllFailures(t *testing.T) {
+	rt := buildValidTestRuntime(t)
+	startFailure := errors.New("startup hook failure")
+	cleanupFailure := errors.New("durability cleanup failure")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	oldStartHook := runtimeStartAfterDurabilityHook
+	oldCloseHook := closeStartupDurability
+	runtimeStartAfterDurabilityHook = func(*Runtime) error {
+		close(started)
+		<-release
+		return startFailure
+	}
+	closeStartupDurability = func(worker *commitlog.DurabilityWorker) (uint64, error) {
+		finalTxID, closeErr := worker.Close()
+		return finalTxID, errors.Join(closeErr, cleanupFailure)
+	}
+	t.Cleanup(func() {
+		runtimeStartAfterDurabilityHook = oldStartHook
+		closeStartupDurability = oldCloseHook
+	})
+
+	startErrCh := make(chan error, 1)
+	go func() { startErrCh <- rt.Start(context.Background()) }()
+	<-started
+	closeErrCh := make(chan error, 1)
+	go func() { closeErrCh <- rt.Close() }()
+	eventually(t, func() bool { return rt.startInterruptedByClose() })
+	close(release)
+
+	startErr := <-startErrCh
+	for _, want := range []error{ErrRuntimeClosed, startFailure, cleanupFailure} {
+		if !errors.Is(startErr, want) {
+			t.Fatalf("Start error = %v, want errors.Is(..., %v)", startErr, want)
+		}
+	}
+	if err := <-closeErrCh; err != nil {
+		t.Fatalf("Close error = %v, want nil", err)
 	}
 }
 
