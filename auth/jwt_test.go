@@ -22,7 +22,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-var testKey = []byte("test-secret-key")
+var testKey = []byte("0123456789abcdef0123456789abcdef")
 
 // mintHS256 builds an HS256-signed token for tests. The claims map is
 // passed through to jwt.MapClaims verbatim, giving each test fine
@@ -58,6 +58,36 @@ func TestValidateJWTEmptySigningKeyRejected(t *testing.T) {
 	}
 	if claims != nil {
 		t.Fatalf("ValidateJWT empty signing key claims = %+v, want nil", claims)
+	}
+}
+
+func TestValidateJWTConfigRejectsWeakHS256Keys(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *JWTConfig
+	}{
+		{
+			name: "legacy signing key",
+			cfg:  &JWTConfig{SigningKey: make([]byte, minHS256KeyBytes-1)},
+		},
+		{
+			name: "explicit verification key",
+			cfg: &JWTConfig{VerificationKeys: []JWTVerificationKey{{
+				Algorithm: JWTAlgorithmHS256,
+				Key:       make([]byte, minHS256KeyBytes-1),
+			}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateJWTConfig(tt.cfg)
+			if !errors.Is(err, ErrJWTInvalid) {
+				t.Fatalf("ValidateJWTConfig error = %v, want ErrJWTInvalid", err)
+			}
+			if !strings.Contains(err.Error(), "at least 32 bytes") {
+				t.Fatalf("ValidateJWTConfig error = %v, want minimum-key context", err)
+			}
+		})
 	}
 }
 
@@ -230,7 +260,7 @@ func TestValidateJWTNotBeforeRejected(t *testing.T) {
 }
 
 func TestValidateJWTBadSignatureRejected(t *testing.T) {
-	cfg := &JWTConfig{SigningKey: []byte("WRONG-KEY")}
+	cfg := &JWTConfig{SigningKey: []byte("fedcba9876543210fedcba9876543210")}
 	s := mintHS256(t, jwt.MapClaims{"sub": "a", "iss": "b"})
 	_, err := ValidateJWT(s, cfg)
 	if !errors.Is(err, ErrJWTInvalid) {
@@ -285,8 +315,8 @@ func TestValidateJWTLegacySigningKeyAcceptsHS256TokenWithKeyID(t *testing.T) {
 }
 
 func TestValidateJWTMultipleHS256VerificationKeysUsesKeyID(t *testing.T) {
-	oldKey := []byte("old-rotation-key")
-	newKey := []byte("new-rotation-key")
+	oldKey := []byte("0123456789abcdef-old-rotation-key")
+	newKey := []byte("0123456789abcdef-new-rotation-key")
 	cfg := &JWTConfig{
 		VerificationKeys: []JWTVerificationKey{
 			{Algorithm: JWTAlgorithmHS256, KeyID: "old", Key: oldKey},
@@ -312,12 +342,12 @@ func TestValidateJWTMultipleHS256VerificationKeysUsesKeyID(t *testing.T) {
 func TestValidateJWTKeyIDWithoutMatchingVerifierRejected(t *testing.T) {
 	cfg := &JWTConfig{
 		VerificationKeys: []JWTVerificationKey{
-			{Algorithm: JWTAlgorithmHS256, KeyID: "old", Key: []byte("old-rotation-key")},
+			{Algorithm: JWTAlgorithmHS256, KeyID: "old", Key: []byte("0123456789abcdef-old-rotation-key")},
 		},
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": "alice", "iss": "issuer"})
 	tok.Header["kid"] = "new"
-	s, err := tok.SignedString([]byte("new-rotation-key"))
+	s, err := tok.SignedString([]byte("0123456789abcdef-new-rotation-key"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,6 +388,25 @@ func TestValidateJWTRS256VerificationKeyAccepted(t *testing.T) {
 	}
 	if got := claims.Audience; len(got) != 1 || got[0] != "shunter-api" {
 		t.Fatalf("Audience = %#v, want shunter-api", got)
+	}
+}
+
+func TestValidateJWTConfigRejectsWeakRS256PublicKey(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, minRS256ModulusBits/2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &JWTConfig{VerificationKeys: []JWTVerificationKey{{
+		Algorithm: JWTAlgorithmRS256,
+		Key:       marshalPublicKeyPEM(t, &privateKey.PublicKey),
+	}}}
+
+	err = ValidateJWTConfig(cfg)
+	if !errors.Is(err, ErrJWTInvalid) {
+		t.Fatalf("ValidateJWTConfig error = %v, want ErrJWTInvalid", err)
+	}
+	if !strings.Contains(err.Error(), "between 2048 and 8192 bits") {
+		t.Fatalf("ValidateJWTConfig error = %v, want RSA modulus context", err)
 	}
 }
 

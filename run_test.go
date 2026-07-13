@@ -22,7 +22,7 @@ func TestConfigFromEnvMapsHostedVariables(t *testing.T) {
 	t.Setenv("SHUNTER_LISTEN_ADDR", "127.0.0.1:3111")
 	t.Setenv("SHUNTER_ENABLE_PROTOCOL", "true")
 	t.Setenv("SHUNTER_AUTH_MODE", "strict")
-	t.Setenv("SHUNTER_AUTH_SIGNING_KEY", "secret")
+	t.Setenv("SHUNTER_AUTH_SIGNING_KEY", "0123456789abcdef0123456789abcdef")
 	t.Setenv("SHUNTER_AUTH_ISSUERS", " issuer-a,issuer-b ,, ")
 	t.Setenv("SHUNTER_AUTH_AUDIENCES", " app ")
 
@@ -34,7 +34,7 @@ func TestConfigFromEnvMapsHostedVariables(t *testing.T) {
 		cfg.ListenAddr != "127.0.0.1:3111" ||
 		!cfg.EnableProtocol ||
 		cfg.AuthMode != AuthModeStrict ||
-		string(cfg.AuthSigningKey) != "secret" ||
+		string(cfg.AuthSigningKey) != "0123456789abcdef0123456789abcdef" ||
 		len(cfg.AuthIssuers) != 2 ||
 		cfg.AuthIssuers[0] != "issuer-a" ||
 		cfg.AuthIssuers[1] != "issuer-b" ||

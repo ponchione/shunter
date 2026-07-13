@@ -366,10 +366,14 @@ func rsaPublicKeyFromJWK(raw jwkDocumentKey) (*rsa.PublicKey, error) {
 	}
 	n := new(big.Int).SetBytes(nBytes)
 	e := new(big.Int).SetBytes(eBytes)
-	if n.BitLen() < 2048 || n.BitLen() > 8192 || !e.IsInt64() || e.Int64() <= 1 || e.Bit(0) == 0 || e.BitLen() > 31 {
+	if !e.IsInt64() || e.BitLen() > 31 {
 		return nil, fmt.Errorf("invalid RSA jwk")
 	}
-	return &rsa.PublicKey{N: n, E: int(e.Int64())}, nil
+	key := &rsa.PublicKey{N: n, E: int(e.Int64())}
+	if err := validateRSAPublicKey(key); err != nil {
+		return nil, fmt.Errorf("invalid RSA jwk: %w", err)
+	}
+	return key, nil
 }
 
 func ecdsaPublicKeyFromJWK(raw jwkDocumentKey) (*ecdsa.PublicKey, error) {

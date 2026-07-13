@@ -354,7 +354,7 @@ func TestCallReducerStrictLocalRequiresExplicitPermissions(t *testing.T) {
 	rt, err := Build(validChatModule().Reducer("send_message", noopReducer, WithReducerPermissions(PermissionMetadata{Required: []string{"messages:send"}})), Config{
 		DataDir:        t.TempDir(),
 		AuthMode:       AuthModeStrict,
-		AuthSigningKey: []byte("strict-local-secret"),
+		AuthSigningKey: []byte("strict-local-secret-0123456789abcd"),
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)

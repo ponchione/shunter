@@ -28,7 +28,7 @@ const (
 )
 
 func TestRuntimeGauntletReadAuthorizationEndToEnd(t *testing.T) {
-	signingKey := []byte("read-auth-gauntlet-signing-key")
+	signingKey := []byte("read-auth-gauntlet-signing-key-01")
 	rt := buildReadAuthGauntletRuntime(t, shunter.Config{
 		DataDir:        t.TempDir(),
 		AuthMode:       shunter.AuthModeStrict,
@@ -198,7 +198,7 @@ func TestRuntimeGauntletReadAuthorizationAllowAllBypassesPolicyAndVisibility(t *
 }
 
 func TestRuntimeGauntletReadAuthSubscriptionVisibilityTransitions(t *testing.T) {
-	signingKey := []byte("read-auth-gauntlet-signing-key")
+	signingKey := []byte("read-auth-gauntlet-signing-key-01")
 	rt := buildReadAuthGauntletRuntime(t, shunter.Config{
 		DataDir:        t.TempDir(),
 		AuthMode:       shunter.AuthModeStrict,

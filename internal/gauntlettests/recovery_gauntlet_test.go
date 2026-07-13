@@ -331,7 +331,7 @@ func TestRuntimeGauntletDevTokenReconnectAfterCleanRestart(t *testing.T) {
 	cfg := shunter.Config{
 		DataDir:        dataDir,
 		AuthMode:       shunter.AuthModeDev,
-		AuthSigningKey: []byte("gauntlet-dev-token-restart-key"),
+		AuthSigningKey: []byte("gauntlet-dev-token-restart-key-01"),
 	}
 	rt := buildGauntletRuntimeWithConfig(t, cfg, true)
 

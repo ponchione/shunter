@@ -135,7 +135,7 @@ func TestTracingRedactsFailureErrorsAndExcludesSensitiveAttributes(t *testing.T)
 		return nil, errors.New("authorization=Bearer abc.def args=raw-args row={secret-row} token=raw-token signing_key=raw-key sql=select * from messages where token='raw-token'; trailing text")
 	}), Config{
 		DataDir:        t.TempDir(),
-		AuthSigningKey: []byte("raw-signing-key"),
+		AuthSigningKey: []byte("raw-signing-key-0123456789abcdef01"),
 		Observability: ObservabilityConfig{
 			Redaction: RedactionConfig{ErrorMessageMaxBytes: 96},
 			Tracing: TracingConfig{

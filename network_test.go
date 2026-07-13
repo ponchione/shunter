@@ -206,8 +206,35 @@ func TestBuildAuthConfigStrictRequiresVerificationMaterial(t *testing.T) {
 	}
 }
 
+func TestBuildAuthConfigRejectsWeakHS256Keys(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+	}{
+		{
+			name: "legacy signing key",
+			cfg:  Config{AuthMode: AuthModeStrict, AuthSigningKey: []byte("too-short")},
+		},
+		{
+			name: "explicit verification key",
+			cfg: Config{AuthMode: AuthModeStrict, AuthVerificationKeys: []AuthVerificationKey{{
+				Algorithm: AuthAlgorithmHS256,
+				Key:       []byte("too-short"),
+			}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := buildAuthConfig(tt.cfg)
+			if !errors.Is(err, auth.ErrJWTInvalid) {
+				t.Fatalf("buildAuthConfig error = %v, want auth.ErrJWTInvalid", err)
+			}
+		})
+	}
+}
+
 func TestBuildAuthConfigStrictMapsIssuersAudiencesAndCopiesKey(t *testing.T) {
-	key := []byte("test-secret")
+	key := []byte("test-secret-0123456789abcdef012345")
 	issuers := []string{"issuer"}
 	audiences := []string{"app"}
 	extraClaims := []string{"email"}
@@ -259,7 +286,7 @@ func TestBuildAuthConfigStrictMapsIssuersAudiencesAndCopiesKey(t *testing.T) {
 }
 
 func TestBuildAuthConfigStrictAcceptsVerificationKeysWithoutSigningKey(t *testing.T) {
-	key := []byte("rotation-secret")
+	key := []byte("rotation-secret-0123456789abcdef01")
 	cfg := Config{
 		AuthMode: AuthModeStrict,
 		AuthVerificationKeys: []AuthVerificationKey{
@@ -339,7 +366,7 @@ func TestBuildAuthConfigStrictAcceptsOIDCDiscoveryIssuersWithoutLocalKey(t *test
 func TestBuildAuthConfigStrictDoesNotPromoteDiscoveryIssuerToIssuerPolicy(t *testing.T) {
 	jwtCfg, _, err := buildAuthConfig(Config{
 		AuthMode:       AuthModeStrict,
-		AuthSigningKey: []byte("test-secret"),
+		AuthSigningKey: []byte("test-secret-0123456789abcdef012345"),
 		AuthOIDCDiscoveryIssuers: []AuthOIDCDiscoveryIssuer{{
 			Issuer: "https://issuer.example",
 		}},
@@ -486,8 +513,8 @@ func TestConfigFromEnvRejectsMalformedOIDCIssuer(t *testing.T) {
 }
 
 func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
-	key := []byte("strict-runtime-secret")
-	verificationKey := []byte("runtime-verification-secret")
+	key := []byte("strict-runtime-secret-0123456789ab")
+	verificationKey := []byte("runtime-verification-secret-012345")
 	oidcAlgorithms := []AuthAlgorithm{AuthAlgorithmRS256}
 	discoveryAlgorithms := []AuthAlgorithm{AuthAlgorithmES256}
 	issuers := []string{"issuer"}
@@ -525,7 +552,7 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	extraClaims[0] = "mutated"
 
 	got := rt.Config()
-	if string(got.AuthSigningKey) != "strict-runtime-secret" {
+	if string(got.AuthSigningKey) != "strict-runtime-secret-0123456789ab" {
 		t.Fatalf("Config AuthSigningKey = %q, want original key", got.AuthSigningKey)
 	}
 	if len(got.AuthAudiences) != 1 || got.AuthAudiences[0] != "app" {
@@ -534,7 +561,7 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	if len(got.AuthIssuers) != 1 || got.AuthIssuers[0] != "issuer" {
 		t.Fatalf("Config AuthIssuers = %#v, want original issuer", got.AuthIssuers)
 	}
-	if len(got.AuthVerificationKeys) != 1 || string(got.AuthVerificationKeys[0].Key) != "runtime-verification-secret" {
+	if len(got.AuthVerificationKeys) != 1 || string(got.AuthVerificationKeys[0].Key) != "runtime-verification-secret-012345" {
 		t.Fatalf("Config AuthVerificationKeys = %#v, want detached original verification key", got.AuthVerificationKeys)
 	}
 	if len(got.AuthOIDCIssuers) != 1 || got.AuthOIDCIssuers[0].Algorithms[0] != AuthAlgorithmRS256 {
@@ -557,7 +584,7 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	got.AuthExtraClaims[0] = "changed"
 
 	again := rt.Config()
-	if string(again.AuthSigningKey) != "strict-runtime-secret" {
+	if string(again.AuthSigningKey) != "strict-runtime-secret-0123456789ab" {
 		t.Fatalf("second Config AuthSigningKey = %q, want detached original key", again.AuthSigningKey)
 	}
 	if len(again.AuthAudiences) != 1 || again.AuthAudiences[0] != "app" {
@@ -568,7 +595,7 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	}
 	if len(again.AuthVerificationKeys) != 1 ||
 		again.AuthVerificationKeys[0].KeyID != "runtime" ||
-		string(again.AuthVerificationKeys[0].Key) != "runtime-verification-secret" {
+		string(again.AuthVerificationKeys[0].Key) != "runtime-verification-secret-012345" {
 		t.Fatalf("second Config AuthVerificationKeys = %#v, want detached original verification key", again.AuthVerificationKeys)
 	}
 	if len(again.AuthOIDCIssuers) != 1 || again.AuthOIDCIssuers[0].Algorithms[0] != AuthAlgorithmRS256 {

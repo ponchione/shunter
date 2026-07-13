@@ -33,6 +33,9 @@ const (
 	MaxIssuerBytes  = 1024
 	MaxSubjectBytes = 1024
 
+	minHS256KeyBytes           = 32
+	minRS256ModulusBits        = 2048
+	maxRS256ModulusBits        = 8192
 	maxExtraClaims             = 32
 	MaxExtraClaimNameBytes     = 256
 	maxExtraClaimDepth         = 16
@@ -305,6 +308,9 @@ func resolveJWTVerificationKey(spec JWTVerificationKey) (resolvedJWTVerification
 	}
 	switch spec.Algorithm {
 	case JWTAlgorithmHS256:
+		if err := validateHS256Key(spec.Key); err != nil {
+			return resolvedJWTVerificationKey{}, err
+		}
 		return resolvedJWTVerificationKey{
 			algorithm: spec.Algorithm,
 			keyID:     spec.KeyID,
@@ -365,7 +371,27 @@ func parseRSAPublicKeyPEM(data []byte) (*rsa.PublicKey, error) {
 	if !ok {
 		return nil, fmt.Errorf("PEM public key is %T, want *rsa.PublicKey", key)
 	}
+	if err := validateRSAPublicKey(rsaKey); err != nil {
+		return nil, err
+	}
 	return rsaKey, nil
+}
+
+func validateHS256Key(key []byte) error {
+	if len(key) < minHS256KeyBytes {
+		return fmt.Errorf("HS256 key must be at least %d bytes", minHS256KeyBytes)
+	}
+	return nil
+}
+
+func validateRSAPublicKey(key *rsa.PublicKey) error {
+	if key == nil || key.N == nil || key.N.BitLen() < minRS256ModulusBits || key.N.BitLen() > maxRS256ModulusBits {
+		return fmt.Errorf("RS256 modulus must be between %d and %d bits", minRS256ModulusBits, maxRS256ModulusBits)
+	}
+	if key.E <= 1 || key.E&1 == 0 || key.E > 1<<31-1 {
+		return fmt.Errorf("RS256 public exponent must be an odd integer between 3 and %d", 1<<31-1)
+	}
+	return nil
 }
 
 func parseECDSAPublicKeyPEM(data []byte) (*ecdsa.PublicKey, error) {

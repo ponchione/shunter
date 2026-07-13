@@ -21,7 +21,7 @@ import (
 	"github.com/ponchione/shunter/auth"
 )
 
-var testSigningKey = []byte("upgrade-test-key")
+var testSigningKey = []byte("upgrade-test-key-0123456789abcdef0")
 
 func newTestServer(t *testing.T, s *Server) *httptest.Server {
 	t.Helper()

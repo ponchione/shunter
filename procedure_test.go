@@ -135,7 +135,7 @@ func TestCallProcedurePermissionDeniedBeforeHandlerExecution(t *testing.T) {
 	}, WithProcedurePermissions(PermissionMetadata{Required: []string{"notify:send"}})), Config{
 		DataDir:        t.TempDir(),
 		AuthMode:       AuthModeStrict,
-		AuthSigningKey: []byte("procedure-strict-secret"),
+		AuthSigningKey: []byte("procedure-strict-secret-0123456789"),
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -199,7 +199,7 @@ func TestProcedureCallReducerUsesSameCallerPermissions(t *testing.T) {
 		}, WithProcedurePermissions(PermissionMetadata{Required: []string{"notify:send"}})), Config{
 		DataDir:        t.TempDir(),
 		AuthMode:       AuthModeStrict,
-		AuthSigningKey: []byte("procedure-strict-secret"),
+		AuthSigningKey: []byte("procedure-strict-secret-0123456789"),
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)

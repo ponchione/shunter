@@ -31,6 +31,9 @@ func MintAnonymousToken(config *MintConfig) (string, types.Identity, error) {
 	if len(config.SigningKey) == 0 {
 		return "", types.Identity{}, fmt.Errorf("auth: mint signing key is required")
 	}
+	if err := validateHS256Key(config.SigningKey); err != nil {
+		return "", types.Identity{}, fmt.Errorf("auth: mint signing key: %w", err)
+	}
 	if config.Issuer == "" {
 		return "", types.Identity{}, fmt.Errorf("auth: mint issuer is required")
 	}

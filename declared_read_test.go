@@ -2324,7 +2324,7 @@ func TestDeclaredReadAllowAllPermissionsBypassesDeclarationPermission(t *testing
 		}), Config{
 		DataDir:        t.TempDir(),
 		AuthMode:       AuthModeStrict,
-		AuthSigningKey: []byte("strict-declared-read-secret"),
+		AuthSigningKey: []byte("strict-declared-read-secret-01234567"),
 	})
 	defer rt.Close()
 	insertMessage(t, rt, "hello")

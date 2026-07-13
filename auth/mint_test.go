@@ -46,6 +46,9 @@ func TestMintAnonymousTokenInvalidConfigFailsBeforeRandomRead(t *testing.T) {
 	cfg.SigningKey = nil
 	check("empty signing key", cfg, "signing key is required")
 	cfg = testMintConfig()
+	cfg.SigningKey = make([]byte, minHS256KeyBytes-1)
+	check("weak signing key", cfg, "at least 32 bytes")
+	cfg = testMintConfig()
 	cfg.Issuer = ""
 	check("empty issuer", cfg, "issuer is required")
 	cfg = testMintConfig()

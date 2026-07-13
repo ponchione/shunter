@@ -20,7 +20,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-const declaredReadProtocolSigningKey = "declared-read-protocol-secret"
+const declaredReadProtocolSigningKey = "declared-read-protocol-secret-01234567"
 
 func TestProtocolDeclaredQuerySucceedsWithDeclarationPermission(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
