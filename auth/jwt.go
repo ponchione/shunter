@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -197,7 +198,7 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 				return nil, fmt.Errorf("%w: %w: alg=%q", ErrJWTInvalid, ErrJWTUnsupportedAlg, alg)
 			}
 			return candidate.key, nil
-		}, jwt.WithValidMethods([]string{string(candidate.algorithm)}), jwt.WithIssuedAt())
+		}, jwt.WithValidMethods([]string{string(candidate.algorithm)}), jwt.WithIssuedAt(), jwt.WithJSONNumber())
 		if err == nil {
 			if !parsed.Valid {
 				lastErr = fmt.Errorf("%w: token reported invalid", ErrJWTInvalid)
@@ -472,12 +473,16 @@ func claimsFromValidatedToken(parsed *jwt.Token, config *JWTConfig, extraClaims 
 	c.Issuer = iss
 
 	// Optional claims — presence-tolerant.
-	if expFloat, ok := mc["exp"].(float64); ok {
-		t := time.Unix(int64(expFloat), 0)
+	if expSeconds, ok, err := numericDateSeconds(mc, "exp"); err != nil {
+		return nil, err
+	} else if ok {
+		t := time.Unix(expSeconds, 0)
 		c.ExpiresAt = &t
 	}
-	if iatFloat, ok := mc["iat"].(float64); ok {
-		c.IssuedAt = time.Unix(int64(iatFloat), 0)
+	if iatSeconds, ok, err := numericDateSeconds(mc, "iat"); err != nil {
+		return nil, err
+	} else if ok {
+		c.IssuedAt = time.Unix(iatSeconds, 0)
 	}
 	if hex, ok := mc["hex_identity"].(string); ok && hex != "" {
 		expected := DeriveIdentity(iss, sub).Hex()
@@ -502,6 +507,28 @@ func claimsFromValidatedToken(parsed *jwt.Token, config *JWTConfig, extraClaims 
 	c.Claims = claims
 
 	return c, nil
+}
+
+func numericDateSeconds(claims jwt.MapClaims, name string) (int64, bool, error) {
+	raw, ok := claims[name]
+	if !ok {
+		return 0, false, nil
+	}
+	switch value := raw.(type) {
+	case json.Number:
+		seconds, err := value.Int64()
+		if err != nil {
+			return 0, false, fmt.Errorf("%w: %s must be an integer NumericDate: %v", ErrJWTInvalid, name, err)
+		}
+		return seconds, true, nil
+	case float64:
+		if math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value || value < math.MinInt64 || value >= -float64(math.MinInt64) {
+			return 0, false, fmt.Errorf("%w: %s must be an in-range integer NumericDate", ErrJWTInvalid, name)
+		}
+		return int64(value), true, nil
+	default:
+		return 0, false, fmt.Errorf("%w: %s has invalid numeric type %T", ErrJWTInvalid, name, raw)
+	}
 }
 
 type extraClaimConfig struct {

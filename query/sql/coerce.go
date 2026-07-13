@@ -192,10 +192,15 @@ func coerceSigned(lit Literal, kind types.ValueKind, lo, hi int64, mk func(int64
 }
 
 func coerceUnsigned(lit Literal, kind types.ValueKind, hi uint64, mk func(uint64) types.Value) (types.Value, error) {
-	// LitBigInt always overflows narrow unsigned kinds; preserve source text in
-	// the InvalidLiteral error when available.
 	if lit.Kind == LitBigInt {
-		return types.Value{}, invalidLiteralFromSource(lit, kind)
+		if lit.Big == nil || lit.Big.Sign() < 0 || lit.Big.BitLen() > 64 {
+			return types.Value{}, invalidLiteralFromSource(lit, kind)
+		}
+		u := lit.Big.Uint64()
+		if u > hi {
+			return types.Value{}, invalidLiteralFromSource(lit, kind)
+		}
+		return mk(u), nil
 	}
 	if lit.Kind != LitInt {
 		return types.Value{}, mismatch(lit, kind)

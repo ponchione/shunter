@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -39,6 +40,40 @@ func TestNormalizeSQLQueryLimits(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExecuteCompiledSQLQueryMatchesUpperUint64Literal(t *testing.T) {
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "items",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint64},
+		},
+	}
+	sl := newMockSchema("items", ts.ID, ts.Columns...)
+	state := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		ts.ID: {{types.NewUint64(18446744073709551615)}},
+	}}}
+	compiled, err := CompileSQLQueryString(
+		"SELECT * FROM items WHERE id = 18446744073709551615",
+		sl,
+		nil,
+		SQLQueryValidationOptions{},
+	)
+	if err != nil {
+		t.Fatalf("CompileSQLQueryString: %v", err)
+	}
+	result, err := ExecuteCompiledSQLQueryWithLimits(
+		context.Background(),
+		compiled,
+		state,
+		sl,
+		SQLQueryLimits{MaxRows: 1, MaxBytes: 1024},
+	)
+	if err != nil {
+		t.Fatalf("ExecuteCompiledSQLQueryWithLimits: %v", err)
+	}
+	assertProductRowsEqual(t, result.Rows, []types.ProductValue{{types.NewUint64(18446744073709551615)}})
 }
 
 func TestExecuteCompiledSQLQueryWithLimits(t *testing.T) {
@@ -96,10 +131,33 @@ func TestExecuteCompiledSQLQueryWithLimits(t *testing.T) {
 		}
 	})
 
-	t.Run("offset beyond cap is rejected", func(t *testing.T) {
-		_, err := execute(t, "SELECT * FROM items LIMIT 1 OFFSET 3", SQLQueryLimits{MaxRows: 2, MaxBytes: 1 << 20})
-		if !errors.Is(err, ErrSQLQueryResultLimit) {
-			t.Fatalf("error = %v, want ErrSQLQueryResultLimit", err)
+	t.Run("offset beyond cap remains a result-only limit", func(t *testing.T) {
+		result, err := execute(t, "SELECT * FROM items LIMIT 1 OFFSET 3", SQLQueryLimits{MaxRows: 2, MaxBytes: 1 << 20})
+		if err != nil {
+			t.Fatalf("ExecuteCompiledSQLQueryWithLimits: %v", err)
+		}
+		assertProductRowsEqual(t, result.Rows, []types.ProductValue{{types.NewUint32(2), types.NewString("two")}})
+	})
+
+	t.Run("offset at and above boundary", func(t *testing.T) {
+		for _, offset := range []int{2, 3} {
+			result, err := execute(t, fmt.Sprintf("SELECT * FROM items LIMIT 1 OFFSET %d", offset), SQLQueryLimits{MaxRows: 2, MaxBytes: 1 << 20})
+			if err != nil {
+				t.Fatalf("offset %d: ExecuteCompiledSQLQueryWithLimits: %v", offset, err)
+			}
+			if len(result.Rows) != 1 {
+				t.Fatalf("offset %d: row count = %d, want 1", offset, len(result.Rows))
+			}
+		}
+	})
+
+	t.Run("limit zero accepts large offset without rows", func(t *testing.T) {
+		result, err := execute(t, "SELECT * FROM items LIMIT 0 OFFSET 18446744073709551615", SQLQueryLimits{MaxRows: 2, MaxBytes: 1 << 20})
+		if err != nil {
+			t.Fatalf("ExecuteCompiledSQLQueryWithLimits: %v", err)
+		}
+		if len(result.Rows) != 0 {
+			t.Fatalf("row count = %d, want 0", len(result.Rows))
 		}
 	})
 

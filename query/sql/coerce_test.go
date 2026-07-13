@@ -60,8 +60,82 @@ func TestCoerceIntToUnsigned(t *testing.T) {
 }
 
 func TestCoerceNegativeIntoUnsignedFails(t *testing.T) {
-	_, err := Coerce(Literal{Kind: LitInt, Int: -1}, types.KindUint64)
-	assertUnsupportedSQL(t, err)
+	for _, kind := range []types.ValueKind{
+		types.KindUint8,
+		types.KindUint16,
+		types.KindUint32,
+		types.KindUint64,
+		types.KindUint128,
+		types.KindUint256,
+	} {
+		t.Run(kind.String(), func(t *testing.T) {
+			_, err := Coerce(Literal{Kind: LitInt, Int: -1, Text: "-1"}, kind)
+			assertInvalidLiteral(t, err, "-1", AlgebraicName(kind))
+		})
+	}
+}
+
+func TestCoerceUint64FullDomain(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want uint64
+	}{
+		{name: "max int64", text: "9223372036854775807", want: math.MaxInt64},
+		{name: "max int64 plus one", text: "9223372036854775808", want: uint64(math.MaxInt64) + 1},
+		{name: "max uint64", text: "18446744073709551615", want: math.MaxUint64},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, lit := range []Literal{
+				mustParseNumericLiteral(t, tt.text),
+				{Kind: LitString, Str: tt.text},
+				{Kind: LitBytes, Text: tt.text},
+			} {
+				got, err := Coerce(lit, types.KindUint64)
+				if err != nil {
+					t.Fatalf("Coerce(%+v) error: %v", lit, err)
+				}
+				if got.AsUint64() != tt.want {
+					t.Fatalf("Coerce(%+v) = %d, want %d", lit, got.AsUint64(), tt.want)
+				}
+			}
+		})
+	}
+
+	overflow := "18446744073709551616"
+	_, err := Coerce(mustParseNumericLiteral(t, overflow), types.KindUint64)
+	assertInvalidLiteral(t, err, overflow, "U64")
+}
+
+func TestCoerceBigIntRejectsNarrowUnsignedOverflow(t *testing.T) {
+	tests := []struct {
+		kind types.ValueKind
+		text string
+	}{
+		{kind: types.KindUint8, text: "256"},
+		{kind: types.KindUint16, text: "65536"},
+		{kind: types.KindUint32, text: "4294967296"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.kind.String(), func(t *testing.T) {
+			n, ok := new(big.Int).SetString(tt.text, 10)
+			if !ok {
+				t.Fatalf("SetString(%q) failed", tt.text)
+			}
+			_, err := Coerce(Literal{Kind: LitBigInt, Big: n, Text: tt.text}, tt.kind)
+			assertInvalidLiteral(t, err, tt.text, AlgebraicName(tt.kind))
+		})
+	}
+}
+
+func mustParseNumericLiteral(t *testing.T, text string) Literal {
+	t.Helper()
+	lit, err := parseNumericLiteral(text)
+	if err != nil {
+		t.Fatalf("parseNumericLiteral(%q): %v", text, err)
+	}
+	return lit
 }
 
 func TestCoerceIntToSignedRangeCheck(t *testing.T) {

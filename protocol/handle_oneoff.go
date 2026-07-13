@@ -541,9 +541,6 @@ func oneOffExecutionRowLimit(limit, offset, maxRows int) (int, error) {
 	if limit == 0 || maxRows <= 0 {
 		return limit, nil
 	}
-	if offset > maxRows {
-		return 0, fmt.Errorf("%w: offset=%d cap=%d", ErrSQLQueryResultLimit, offset, maxRows)
-	}
 	detectionLimit := maxRows
 	if detectionLimit < math.MaxInt {
 		detectionLimit++

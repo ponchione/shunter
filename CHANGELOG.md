@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- SQL predicates now accept the full `Uint64` literal domain, configured JWT
+  extra claims preserve exact JSON numbers, and one-off row limits no longer
+  reject otherwise bounded queries solely because their `OFFSET` exceeds the
+  returned-row cap.
 - Runtime shutdown now cancels and waits for concurrent startup before releasing
   data-directory ownership. Commit-log segment creation syncs the containing
   directory before acknowledging durability, and durability-worker shutdown is

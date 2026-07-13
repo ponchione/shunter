@@ -604,6 +604,83 @@ func TestValidateJWTExtraClaimsPreserved(t *testing.T) {
 	}
 }
 
+func TestValidateJWTExtraClaimNumbersPreservePrecision(t *testing.T) {
+	cfg := &JWTConfig{
+		SigningKey:  testKey,
+		ExtraClaims: []string{"session_id", "max_i64", "max_u64", "nested", "ratio"},
+	}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub":        "alice",
+		"iss":        "issuer",
+		"session_id": json.Number("9007199254740993"),
+		"max_i64":    json.Number("9223372036854775807"),
+		"max_u64":    json.Number("18446744073709551615"),
+		"nested": map[string]any{
+			"values": []any{json.Number("9007199254740993"), json.Number("18446744073709551615")},
+		},
+		"ratio": json.Number("1.25"),
+	})
+
+	claims, err := ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants := map[string]string{
+		"session_id": "9007199254740993",
+		"max_i64":    "9223372036854775807",
+		"max_u64":    "18446744073709551615",
+		"nested":     `{"values":[9007199254740993,18446744073709551615]}`,
+		"ratio":      "1.25",
+	}
+	for name, want := range wants {
+		got, ok := claims.Claims.Get(name)
+		if !ok {
+			t.Fatalf("extra claim %q missing", name)
+		}
+		if string(got) != want {
+			t.Fatalf("extra claim %q = %s, want %s", name, got, want)
+		}
+	}
+}
+
+func TestValidateJWTNumericDatesWithJSONNumber(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	cfg := &JWTConfig{SigningKey: testKey}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub": "alice",
+		"iss": "issuer",
+		"iat": json.Number(fmt.Sprint(now.Add(-time.Minute).Unix())),
+		"nbf": json.Number(fmt.Sprint(now.Add(-time.Minute).Unix())),
+		"exp": json.Number(fmt.Sprint(now.Add(time.Hour).Unix())),
+	})
+
+	claims, err := ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.ExpiresAt == nil || claims.ExpiresAt.Unix() != now.Add(time.Hour).Unix() {
+		t.Fatalf("ExpiresAt = %v, want %v", claims.ExpiresAt, now.Add(time.Hour))
+	}
+	if claims.IssuedAt.Unix() != now.Add(-time.Minute).Unix() {
+		t.Fatalf("IssuedAt = %v, want %v", claims.IssuedAt, now.Add(-time.Minute))
+	}
+}
+
+func TestValidateJWTRejectsFractionalNormalizedNumericDate(t *testing.T) {
+	cfg := &JWTConfig{SigningKey: testKey}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub": "alice",
+		"iss": "issuer",
+		"iat": json.Number("1.5"),
+		"exp": json.Number(fmt.Sprint(time.Now().Add(time.Hour).Unix())),
+	})
+
+	_, err := ValidateJWT(s, cfg)
+	if !errors.Is(err, ErrJWTInvalid) {
+		t.Fatalf("ValidateJWT error = %v, want ErrJWTInvalid", err)
+	}
+}
+
 func TestValidateJWTExtraClaimsSkipMissing(t *testing.T) {
 	cfg := &JWTConfig{SigningKey: testKey, ExtraClaims: []string{"email", "role"}}
 	s := mintHS256(t, jwt.MapClaims{

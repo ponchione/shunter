@@ -52,6 +52,44 @@ func TestValidateJWTJWKSRS256FetchesAndCaches(t *testing.T) {
 	}
 }
 
+func TestValidateJWTJWKSExtraClaimNumberPreservesPrecision(t *testing.T) {
+	privateKey, jwk := generateRS256JWK(t, "rsa-precision")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJWKS(t, w, jwk)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &JWTConfig{
+		JWKS: []JWKSConfig{{
+			Issuer:   "https://issuer.example",
+			JWKSURL:  srv.URL,
+			CacheTTL: time.Hour,
+		}},
+		Issuers:     []string{"https://issuer.example"},
+		ExtraClaims: []string{"session_id"},
+		AuthMode:    AuthModeStrict,
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"sub":        "alice",
+		"iss":        "https://issuer.example",
+		"session_id": json.Number("9007199254740993"),
+	})
+	token.Header["kid"] = "rsa-precision"
+	signed, err := token.SignedString(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claims, err := ValidateJWT(signed, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := claims.Claims.Get("session_id")
+	if !ok || string(got) != "9007199254740993" {
+		t.Fatalf("session_id = %s, %v; want exact integer", got, ok)
+	}
+}
+
 func TestValidateJWTJWKSRefreshesForUnknownKeyID(t *testing.T) {
 	oldPrivateKey, oldJWK := generateRS256JWK(t, "old")
 	newPrivateKey, newJWK := generateRS256JWK(t, "new")
