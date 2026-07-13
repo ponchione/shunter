@@ -49,6 +49,8 @@ type Runtime struct {
 	protocolAcceptedConnections uint64
 	protocolRejectedConnections uint64
 	subscriptionDroppedClients  uint64
+	startupCancel               context.CancelFunc
+	startupDone                 chan struct{}
 	lifecycleCancel             context.CancelFunc
 	fanOutCancel                context.CancelFunc
 	schedulerWG                 sync.WaitGroup

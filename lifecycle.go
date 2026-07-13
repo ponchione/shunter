@@ -52,7 +52,7 @@ func (r *Runtime) Ready() bool {
 // Start performs runtime startup and returns once background ownership is ready.
 // The supplied context is a startup/cancellation context only; canceling it
 // after Start returns does not stop the runtime. Use Close for shutdown.
-func (r *Runtime) Start(ctx context.Context) error {
+func (r *Runtime) Start(ctx context.Context) (startErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -79,7 +79,25 @@ func (r *Runtime) Start(ctx context.Context) error {
 	r.stateName = RuntimeStateStarting
 	r.lastErr = nil
 	r.ready.Store(false)
+	startupCtx, startupCancel := context.WithCancel(ctx)
+	startupDone := make(chan struct{})
+	r.startupCancel = startupCancel
+	r.startupDone = startupDone
 	r.mu.Unlock()
+	ctx = startupCtx
+	defer func() {
+		startupCancel()
+		r.mu.Lock()
+		if r.startupDone == startupDone {
+			r.startupCancel = nil
+			r.startupDone = nil
+		}
+		r.mu.Unlock()
+		close(startupDone)
+		if startErr != nil && r.startInterruptedByClose() {
+			startErr = ErrRuntimeClosed
+		}
+	}()
 	r.recordRuntimeMetrics()
 
 	if err := ctx.Err(); err != nil {
@@ -243,7 +261,7 @@ func (r *Runtime) Close() error {
 		r.mu.Unlock()
 		return nil
 	}
-	if r.stateName == RuntimeStateBuilt || r.stateName == RuntimeStateFailed {
+	if (r.stateName == RuntimeStateBuilt || r.stateName == RuntimeStateFailed) && r.startupDone == nil {
 		r.stateName = RuntimeStateClosed
 		r.ready.Store(false)
 		r.mu.Unlock()
@@ -252,6 +270,8 @@ func (r *Runtime) Close() error {
 	}
 	r.stateName = RuntimeStateClosing
 	r.ready.Store(false)
+	startupCancel := r.startupCancel
+	startupDone := r.startupDone
 	lifecycleCancel := r.lifecycleCancel
 	fanOutCancel := r.fanOutCancel
 	exec := r.executor
@@ -261,6 +281,12 @@ func (r *Runtime) Close() error {
 	protocolInbox := r.protocolInbox
 	r.mu.Unlock()
 	r.recordRuntimeMetrics()
+	if startupCancel != nil {
+		startupCancel()
+	}
+	if startupDone != nil {
+		<-startupDone
+	}
 
 	if subscriptions != nil {
 		subscriptions.CloseFanOut()
@@ -328,6 +354,12 @@ func (r *Runtime) Close() error {
 		r.recordClosed(time.Since(startedAt))
 	}
 	return closeErr
+}
+
+func (r *Runtime) startInterruptedByClose() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stateName == RuntimeStateClosing || r.stateName == RuntimeStateClosed
 }
 
 func (r *Runtime) clearRuntimeGraphLocked() {

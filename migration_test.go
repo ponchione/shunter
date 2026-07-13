@@ -765,20 +765,17 @@ func TestRuntimeExecutorStartupCancelAfterDurableMigrationAllowsRetryFromDurable
 	requireRuntimeTableRowCount(t, restarted, "sys_clients", 0)
 }
 
-func TestRuntimeCloseDuringMigrationHookKeepsRuntimeNotReadyAndCloseIdempotent(t *testing.T) {
+func TestRuntimeCloseDuringMigrationHookCancelsStartupBeforeReturning(t *testing.T) {
 	dir := t.TempDir()
 	hookStarted := make(chan struct{})
-	releaseHook := make(chan struct{})
+	hookCanceled := make(chan struct{})
 	hookCalls := 0
 	mod := validChatModule().MigrationHook(func(ctx context.Context, _ *MigrationContext) error {
 		hookCalls++
 		close(hookStarted)
-		select {
-		case <-releaseHook:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		<-ctx.Done()
+		close(hookCanceled)
+		return ctx.Err()
 	})
 
 	rt, err := Build(mod, Config{DataDir: dir})
@@ -794,14 +791,17 @@ func TestRuntimeCloseDuringMigrationHookKeepsRuntimeNotReadyAndCloseIdempotent(t
 	if err := rt.Close(); err != nil {
 		t.Fatalf("Close during migration hook: %v", err)
 	}
-	requireRuntimeClosedWithoutStartupResources(t, rt)
-	if err := rt.Close(); err != nil {
-		t.Fatalf("second Close during blocked startup: %v", err)
+	select {
+	case <-hookCanceled:
+	default:
+		t.Fatal("Close returned before the migration hook observed startup cancellation")
 	}
-
-	close(releaseHook)
+	requireRuntimeClosedWithoutStartupResources(t, rt)
 	if err := <-startErr; !errors.Is(err, ErrRuntimeClosed) {
 		t.Fatalf("Start after Close during migration hook error = %v, want ErrRuntimeClosed", err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("second Close after canceled startup: %v", err)
 	}
 	if hookCalls != 1 {
 		t.Fatalf("hook calls = %d, want 1", hookCalls)
@@ -822,7 +822,7 @@ func TestRuntimeCloseDuringMigrationHookKeepsRuntimeNotReadyAndCloseIdempotent(t
 func TestRuntimeCloseDuringMigrationAfterDurableHookKeepsDurableStateRecoverable(t *testing.T) {
 	dir := t.TempDir()
 	secondHookStarted := make(chan struct{})
-	releaseSecondHook := make(chan struct{})
+	secondHookCanceled := make(chan struct{})
 	firstCalls := 0
 	secondCalls := 0
 	mod := validChatModule().
@@ -841,12 +841,9 @@ func TestRuntimeCloseDuringMigrationAfterDurableHookKeepsDurableStateRecoverable
 				return fmt.Errorf("second hook committed tx id = %d, want durable first hook horizon", mc.CommittedTxID())
 			}
 			close(secondHookStarted)
-			select {
-			case <-releaseSecondHook:
-				return nil
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+			<-ctx.Done()
+			close(secondHookCanceled)
+			return ctx.Err()
 		})
 
 	rt, err := Build(mod, Config{DataDir: dir})
@@ -865,14 +862,17 @@ func TestRuntimeCloseDuringMigrationAfterDurableHookKeepsDurableStateRecoverable
 	if err := rt.Close(); err != nil {
 		t.Fatalf("Close after durable migration hook: %v", err)
 	}
-	requireRuntimeClosedWithoutStartupResources(t, rt)
-	if err := rt.Close(); err != nil {
-		t.Fatalf("second Close after durable migration hook: %v", err)
+	select {
+	case <-secondHookCanceled:
+	default:
+		t.Fatal("Close returned before the second migration hook observed startup cancellation")
 	}
-
-	close(releaseSecondHook)
+	requireRuntimeClosedWithoutStartupResources(t, rt)
 	if err := <-startErr; !errors.Is(err, ErrRuntimeClosed) {
 		t.Fatalf("Start after Close following durable migration hook error = %v, want ErrRuntimeClosed", err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("second Close after durable migration hook: %v", err)
 	}
 	requireRuntimeClosedWithoutStartupResources(t, rt)
 
@@ -951,14 +951,14 @@ func TestRuntimeCloseDuringExecutorStartupAfterDurableMigrationUnwindsCleanly(t 
 		t.Fatal("runtime ready while blocked in executor startup")
 	}
 
-	if err := rt.Close(); err != nil {
-		t.Fatalf("Close during executor startup: %v", err)
+	closeErr := make(chan error, 1)
+	go func() { closeErr <- rt.Close() }()
+	eventually(t, func() bool { return rt.Health().State == RuntimeStateClosing })
+	select {
+	case err := <-closeErr:
+		t.Fatalf("Close returned before blocked executor startup unwound: %v", err)
+	default:
 	}
-	requireRuntimeClosedWithoutStartupResources(t, rt)
-	if err := rt.Close(); err != nil {
-		t.Fatalf("second Close during executor startup: %v", err)
-	}
-
 	metrics.releaseBlock()
 	select {
 	case err := <-startErr:
@@ -968,7 +968,18 @@ func TestRuntimeCloseDuringExecutorStartupAfterDurableMigrationUnwindsCleanly(t 
 	case <-time.After(2 * time.Second):
 		t.Fatal("Start did not unwind after Close during executor startup")
 	}
+	select {
+	case err := <-closeErr:
+		if err != nil {
+			t.Fatalf("Close during executor startup: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not return after executor startup unwound")
+	}
 	requireRuntimeClosedWithoutStartupResources(t, rt)
+	if err := rt.Close(); err != nil {
+		t.Fatalf("second Close during executor startup: %v", err)
+	}
 
 	restarted, err := Build(validChatModule(), Config{DataDir: dir})
 	if err != nil {
