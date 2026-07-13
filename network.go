@@ -47,6 +47,7 @@ func buildProtocolOptions(cfg ProtocolConfig) (protocol.ProtocolOptions, error) 
 		OutgoingBufferMessages: cfg.OutgoingBufferMessages,
 		IncomingQueueMessages:  cfg.IncomingQueueMessages,
 		MaxMessageSize:         cfg.MaxMessageSize,
+		MaxOutboundMessageSize: cfg.MaxOutboundMessageSize,
 	})
 	if err != nil {
 		return protocol.ProtocolOptions{}, fmt.Errorf("protocol %w", err)
@@ -320,6 +321,9 @@ func (r *Runtime) ensureProtocolGraphLocked() error {
 		SQLQueryLimits: protocol.SQLQueryLimits{
 			MaxRows:  r.buildConfig.OneOffQueryMaxRows,
 			MaxBytes: r.buildConfig.OneOffQueryMaxBytes,
+		},
+		SubscriptionLimits: protocol.SubscriptionLimits{
+			MaxQueriesPerSet: r.buildConfig.SubscriptionMaxQueriesPerSet,
 		},
 		DeclaredReads:     r,
 		Procedures:        r,

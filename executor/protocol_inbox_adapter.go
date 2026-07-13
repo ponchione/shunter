@@ -74,6 +74,7 @@ func (a *ProtocolInboxAdapter) RegisterSubscriptionSet(ctx context.Context, req 
 	if err := validateVariant(req.Variant); err != nil {
 		return err
 	}
+	var prepared *protocol.SubscriptionSetCommandResponse
 	cmd := RegisterSubscriptionSetCmd{
 		Request: subscription.SubscriptionSetRegisterRequest{
 			Context:                 ctx,
@@ -83,9 +84,22 @@ func (a *ProtocolInboxAdapter) RegisterSubscriptionSet(ctx context.Context, req 
 			Predicates:              preds,
 			PredicateHashIdentities: req.PredicateHashIdentities,
 			SQLText:                 req.SQLText,
+			PrepareSnapshot: func(updates []subscription.SubscriptionUpdate) error {
+				resp, err := a.prepareRegisterResponse(req, preds, updates)
+				if err != nil {
+					return err
+				}
+				prepared = &resp
+				return nil
+			},
 		},
 		Reply: func(result subscription.SubscriptionSetRegisterResult, replyErr error) {
 			if req.Reply == nil {
+				return
+			}
+			if replyErr == nil && prepared != nil {
+				setRegisterResponseDuration(prepared, result.TotalHostExecutionDurationMicros)
+				req.Reply(*prepared)
 				return
 			}
 			req.Reply(a.buildRegisterResponse(req, preds, result, replyErr))
@@ -190,6 +204,8 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 	if replyErr != nil {
 		errText := replyErr.Error()
 		switch {
+		case errors.Is(replyErr, subscription.ErrSubscriptionQuota):
+			// Quota rejections remain classifiable at the protocol boundary.
 		case errors.Is(replyErr, subscription.ErrInitialQuery) && req.Variant == protocol.SubscriptionSetVariantMulti:
 			// Reference `module_subscription_actor.rs:1383` substitutes
 			// the underlying initial-eval error with a canned
@@ -208,31 +224,65 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 			Error: newProtocolSubscriptionError(result.TotalHostExecutionDurationMicros, req.RequestID, req.QueryID, errText),
 		}
 	}
-	updates, err := encodeProtocolSubscriptionUpdates(result.Update)
+	resp, err := a.prepareRegisterResponse(req, preds, result.Update)
 	if err != nil {
 		return protocol.SubscriptionSetCommandResponse{
 			Error: newProtocolSubscriptionError(result.TotalHostExecutionDurationMicros, req.RequestID, req.QueryID, err.Error()),
 		}
 	}
+	setRegisterResponseDuration(&resp, result.TotalHostExecutionDurationMicros)
+	return resp
+}
+
+func (a *ProtocolInboxAdapter) prepareRegisterResponse(
+	req protocol.RegisterSubscriptionSetRequest,
+	preds []subscription.Predicate,
+	updates []subscription.SubscriptionUpdate,
+) (protocol.SubscriptionSetCommandResponse, error) {
 	if req.Variant == protocol.SubscriptionSetVariantMulti {
-		return protocol.SubscriptionSetCommandResponse{
-			MultiApplied: &protocol.SubscribeMultiApplied{RequestID: req.RequestID, QueryID: req.QueryID, Update: updates, TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros},
+		wireUpdates, err := encodeProtocolSubscriptionUpdates(updates)
+		if err != nil {
+			return protocol.SubscriptionSetCommandResponse{}, err
 		}
+		applied := &protocol.SubscribeMultiApplied{RequestID: req.RequestID, QueryID: req.QueryID, Update: wireUpdates}
+		if err := validatePreparedSubscriptionResponse(*applied, req.MaxResponseBytes); err != nil {
+			return protocol.SubscriptionSetCommandResponse{}, err
+		}
+		return protocol.SubscriptionSetCommandResponse{MultiApplied: applied}, nil
 	}
-	rows, err := protocol.EncodeProductRows(collectInsertRows(result.Update))
+	rows, err := protocol.EncodeProductRows(collectInsertRows(updates))
 	if err != nil {
-		return protocol.SubscriptionSetCommandResponse{
-			Error: newProtocolSubscriptionError(result.TotalHostExecutionDurationMicros, req.RequestID, req.QueryID, err.Error()),
-		}
+		return protocol.SubscriptionSetCommandResponse{}, err
 	}
-	return protocol.SubscriptionSetCommandResponse{
-		SingleApplied: &protocol.SubscribeSingleApplied{
-			RequestID:                        req.RequestID,
-			QueryID:                          req.QueryID,
-			TableName:                        a.singleTableName(preds, result.Update),
-			Rows:                             rows,
-			TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros,
-		},
+	applied := &protocol.SubscribeSingleApplied{
+		RequestID: req.RequestID,
+		QueryID:   req.QueryID,
+		TableName: a.singleTableName(preds, updates),
+		Rows:      rows,
+	}
+	if err := validatePreparedSubscriptionResponse(*applied, req.MaxResponseBytes); err != nil {
+		return protocol.SubscriptionSetCommandResponse{}, err
+	}
+	return protocol.SubscriptionSetCommandResponse{SingleApplied: applied}, nil
+}
+
+func validatePreparedSubscriptionResponse(msg any, maxBytes int) error {
+	size, err := protocol.ValidateServerMessageSize(msg, maxBytes)
+	if errors.Is(err, protocol.ErrOutboundMessageLimit) {
+		return subscription.NewQuotaError(subscription.ErrSnapshotByteLimit, "snapshot_response_bytes", size, maxBytes)
+	}
+	return err
+}
+
+func setRegisterResponseDuration(resp *protocol.SubscriptionSetCommandResponse, duration uint64) {
+	if resp == nil {
+		return
+	}
+	if resp.SingleApplied != nil {
+		resp.SingleApplied.TotalHostExecutionDurationMicros = duration
+	}
+	if resp.MultiApplied != nil {
+		resp.MultiApplied.TotalHostExecutionDurationMicros = duration
 	}
 }
 

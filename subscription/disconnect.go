@@ -13,6 +13,7 @@ func (m *Manager) DisconnectClient(connID types.ConnectionID) error {
 		m.dropSub(connID, s)
 	}
 	delete(m.querySets, connID)
+	delete(m.connectionUsage, connID)
 	if removedSets > 0 {
 		active := m.activeSets.Add(-int64(removedSets))
 		recordSubscriptionActive(m.observer, int(active))

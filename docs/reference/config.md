@@ -15,14 +15,18 @@ intent for the root runtime config.
 | `AuthMode` | Development or strict auth behavior. | Use zero-value dev mode for local work, strict mode for public serving. |
 | `OneOffQueryMaxRows` | Hosted raw and declared query result-row limit. | Zero uses 100,000 rows. Set lower for public or memory-constrained services. |
 | `OneOffQueryMaxBytes` | Hosted raw and declared query encoded row-list limit. | Zero uses 64 MiB. Set lower to bound response allocation. |
-| `SubscriptionInitialRowLimit` | Initial and final subscription snapshot row limit. | Zero uses 100,000 rows. Set from the largest measured legitimate snapshot. |
+| `SubscriptionInitialRowLimit` | Aggregate initial/final rows across one subscription set. | Zero uses 100,000 rows. Set from the largest measured legitimate whole-set snapshot. |
+| `SubscriptionSnapshotMaxBytes` | Aggregate encoded RowList bytes across one initial/final subscription set. | Zero uses 64 MiB. Checked before registry publication. |
+| `SubscriptionMaxQueriesPerSet` | Raw query strings admitted and compiled for one subscription set. | Zero uses 256. The decoder hard ceiling is 4,096. |
+| `SubscriptionMaxActiveSetsPerConnection` | Live client query IDs retained for one connection. | Zero uses 128. Unregister and disconnect release capacity. |
+| `SubscriptionMaxActiveSubscriptionsPerConnection` | Deduplicated internal live subscriptions retained for one connection. | Zero uses 1,024. Repeated predicates within one set consume one slot. |
 | `SubscriptionMaxMultiJoinRelations` | Optional live multi-way join relation-count limit. | Leave zero for compatibility; set before admitting untrusted/high-cardinality live views. |
 | `SubscriptionMaxMultiJoinRowsPerRelation` | Optional committed input-row limit for each live multi-way join relation. | Leave zero for compatibility; set from measured production envelopes. |
 
 Zero queue capacities are normalized to conservative non-zero defaults by the
-runtime. Zero query and initial-snapshot limits use the defaults above; zero
-subscription multi-way join limits mean unlimited. Negative resource limits are
-rejected during `Build`.
+runtime. Zero query and subscription admission/snapshot limits use the defaults
+above; zero subscription multi-way join limits mean unlimited. Negative
+resource limits are rejected during `Build`.
 
 ## Auth Fields
 
@@ -87,11 +91,14 @@ the 4096-byte per-claim and 16384-byte total defaults; negative values fail
 - `OutgoingBufferMessages`
 - `IncomingQueueMessages`
 - `MaxMessageSize`
+- `MaxOutboundMessageSize`
 
 Zero values use protocol package defaults. Set these only when you are tuning a
 measured serving workload or enforcing an application-specific message limit.
 `WriteTimeout` bounds each server-to-client WebSocket data write, which keeps a
 slow reader from blocking unrelated outbound delivery indefinitely.
+`MaxOutboundMessageSize` defaults to 64 MiB and caps the uncompressed encoded
+server message before final-frame allocation or optional compression.
 
 ## Observability Field
 

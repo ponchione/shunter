@@ -29,6 +29,10 @@ type SubscriptionSetRegisterRequest struct {
 	PredicateHashIdentities []*types.Identity
 	ClientIdentity          *types.Identity
 	RequestID               uint32
+	// PrepareSnapshot runs after all initial rows have passed aggregate budgets
+	// but before registry publication. Protocol callers use it to encode and
+	// size-check the response atomically with registration.
+	PrepareSnapshot func([]SubscriptionUpdate) error
 	// SQLText is the original Single-subscribe SQL used for final-eval errors.
 	SQLText string
 }
@@ -100,6 +104,7 @@ type Manager struct {
 	deltaIndexColumns map[TableID]map[ColID]int
 	updateColumns     map[TableID][]schema.ColumnSchema
 	querySets         map[types.ConnectionID]map[uint32][]types.SubscriptionID
+	connectionUsage   map[types.ConnectionID]connectionSubscriptionUsage
 	nextSubID         types.SubscriptionID
 	activeSets        atomic.Int64
 	droppedTotal      atomic.Uint64
@@ -109,9 +114,21 @@ type Manager struct {
 	fanoutClosedCh    chan struct{}
 	fanoutCloseOnce   sync.Once
 
-	// InitialRowLimit caps the initial-query row count returned to the
-	// client. Zero means unlimited.
+	// InitialRowLimit caps aggregate rows across one initial or final set
+	// snapshot. Zero means unlimited.
 	InitialRowLimit int
+	// SnapshotByteLimit caps aggregate encoded RowList bytes across one initial
+	// or final set snapshot. Zero means unlimited.
+	SnapshotByteLimit int
+	// MaxQueriesPerSet caps predicates admitted in one registration request.
+	// Zero means unlimited.
+	MaxQueriesPerSet int
+	// MaxActiveSetsPerConnection caps client-visible live query IDs per
+	// connection. Zero means unlimited.
+	MaxActiveSetsPerConnection int
+	// MaxActiveSubscriptionsPerConnection caps deduplicated internal
+	// subscriptions per connection. Zero means unlimited.
+	MaxActiveSubscriptionsPerConnection int
 	// MaxMultiJoinRelations caps the number of relations accepted by a live
 	// multi-way join. Zero means unlimited.
 	MaxMultiJoinRelations int
@@ -123,9 +140,35 @@ type Manager struct {
 // ManagerOption configures optional fields on the Manager.
 type ManagerOption func(*Manager)
 
-// WithInitialRowLimit sets the per-registration initial row cap.
+type connectionSubscriptionUsage struct {
+	sets          int
+	subscriptions int
+}
+
+// WithInitialRowLimit sets the aggregate per-set snapshot row cap.
 func WithInitialRowLimit(n int) ManagerOption {
 	return func(m *Manager) { m.InitialRowLimit = n }
+}
+
+// WithSnapshotByteLimit sets the aggregate per-set encoded RowList byte cap.
+func WithSnapshotByteLimit(n int) ManagerOption {
+	return func(m *Manager) { m.SnapshotByteLimit = n }
+}
+
+// WithMaxQueriesPerSet caps predicates in one registration request.
+func WithMaxQueriesPerSet(n int) ManagerOption {
+	return func(m *Manager) { m.MaxQueriesPerSet = n }
+}
+
+// WithMaxActiveSetsPerConnection caps live client query IDs per connection.
+func WithMaxActiveSetsPerConnection(n int) ManagerOption {
+	return func(m *Manager) { m.MaxActiveSetsPerConnection = n }
+}
+
+// WithMaxActiveSubscriptionsPerConnection caps live internal subscriptions
+// per connection after within-set predicate deduplication.
+func WithMaxActiveSubscriptionsPerConnection(n int) ManagerOption {
+	return func(m *Manager) { m.MaxActiveSubscriptionsPerConnection = n }
 }
 
 // WithMaxMultiJoinRelations caps live multi-way join relation count.
@@ -163,12 +206,47 @@ func NewManager(lookup SchemaLookup, resolver IndexResolver, opts ...ManagerOpti
 		deltaIndexColumns: make(map[TableID]map[ColID]int),
 		updateColumns:     make(map[TableID][]schema.ColumnSchema),
 		querySets:         make(map[types.ConnectionID]map[uint32][]types.SubscriptionID),
+		connectionUsage:   make(map[types.ConnectionID]connectionSubscriptionUsage),
 		fanoutClosedCh:    make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(m)
 	}
 	return m
+}
+
+func (m *Manager) reserveConnectionQuota(connID types.ConnectionID, subscriptions int) error {
+	usage := m.connectionUsage[connID]
+	if m.MaxActiveSetsPerConnection > 0 && usage.sets+1 > m.MaxActiveSetsPerConnection {
+		return NewQuotaError(ErrSubscriptionSetLimit, "active_sets", usage.sets+1, m.MaxActiveSetsPerConnection)
+	}
+	if m.MaxActiveSubscriptionsPerConnection > 0 && usage.subscriptions+subscriptions > m.MaxActiveSubscriptionsPerConnection {
+		return NewQuotaError(ErrSubscriptionCountLimit, "active_subscriptions", usage.subscriptions+subscriptions, m.MaxActiveSubscriptionsPerConnection)
+	}
+	usage.sets++
+	usage.subscriptions += subscriptions
+	m.connectionUsage[connID] = usage
+	return nil
+}
+
+func (m *Manager) releaseConnectionQuota(connID types.ConnectionID, sets, subscriptions int) {
+	usage, ok := m.connectionUsage[connID]
+	if !ok {
+		return
+	}
+	usage.sets -= sets
+	usage.subscriptions -= subscriptions
+	if usage.sets <= 0 && usage.subscriptions <= 0 {
+		delete(m.connectionUsage, connID)
+		return
+	}
+	if usage.sets < 0 {
+		usage.sets = 0
+	}
+	if usage.subscriptions < 0 {
+		usage.subscriptions = 0
+	}
+	m.connectionUsage[connID] = usage
 }
 
 type tableSchemaLookup interface {

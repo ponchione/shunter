@@ -399,6 +399,9 @@ func decodeSubscribeMulti(body []byte) (SubscribeMultiMsg, error) {
 	if err != nil {
 		return m, err
 	}
+	if count > MaxSubscribeMultiQueriesHard {
+		return m, fmt.Errorf("%w: SubscribeMulti query count %d exceeds hard limit %d", ErrMalformedMessage, count, MaxSubscribeMultiQueriesHard)
+	}
 	if err := requireCountFitsRemaining("SubscribeMulti query_strings", count, body, off, 4); err != nil {
 		return m, err
 	}

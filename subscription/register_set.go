@@ -64,7 +64,7 @@ func (c *initialRowCollector) addReturned(n int) error {
 	}
 	c.count += n
 	if c.limit > 0 && c.count > c.limit {
-		return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, c.limit)
+		return NewQuotaError(ErrInitialRowLimit, "snapshot_rows", c.count, c.limit)
 	}
 	return nil
 }
@@ -82,7 +82,7 @@ func copyRegisterSetOption[S, D any](label string, in []S, want int, out []D, co
 	return nil
 }
 
-func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, orderBy []OrderByColumn, limit *uint64, offset *uint64, view store.CommittedReadView, subID types.SubscriptionID, queryID uint32) ([]SubscriptionUpdate, error) {
+func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, orderBy []OrderByColumn, limit *uint64, offset *uint64, view store.CommittedReadView, subID types.SubscriptionID, queryID uint32, rowLimit int) ([]SubscriptionUpdate, error) {
 	if aggregate != nil {
 		return m.initialAggregateUpdates(ctx, pred, aggregate, view, subID, queryID)
 	}
@@ -107,11 +107,11 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection
 		var err error
 		switch p := p.(type) {
 		case Join:
-			rows, err = m.appendProjectedJoinRows(ctx, nil, view, p)
+			rows, err = m.appendProjectedJoinRows(ctx, nil, view, p, rowLimit)
 		case CrossJoin:
-			rows, err = m.appendProjectedCrossJoinRows(ctx, nil, view, p)
+			rows, err = m.appendProjectedCrossJoinRows(ctx, nil, view, p, rowLimit)
 		case MultiJoin:
-			rows, err = m.appendProjectedMultiJoinRows(ctx, nil, view, p, projection)
+			rows, err = m.appendProjectedMultiJoinRows(ctx, nil, view, p, projection, rowLimit)
 		}
 		if err != nil {
 			return nil, err
@@ -134,7 +134,7 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection
 		if len(tables) == 0 {
 			return nil, nil
 		}
-		collector := newInitialRowCollector(ctx, m.InitialRowLimit)
+		collector := newInitialRowCollector(ctx, rowLimit)
 		if err := collector.err(); err != nil {
 			return nil, err
 		}
@@ -389,7 +389,7 @@ func initialIndexedRange(pred Predicate, table TableID, resolver IndexResolver) 
 	return ColRange{}, zeroIdx, false
 }
 
-func (m *Manager) appendProjectedCrossJoinRows(ctx context.Context, out []types.ProductValue, view store.CommittedReadView, p CrossJoin) ([]types.ProductValue, error) {
+func (m *Manager) appendProjectedCrossJoinRows(ctx context.Context, out []types.ProductValue, view store.CommittedReadView, p CrossJoin, rowLimit int) ([]types.ProductValue, error) {
 	if view == nil {
 		return out, nil
 	}
@@ -409,8 +409,8 @@ func (m *Manager) appendProjectedCrossJoinRows(ctx context.Context, out []types.
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if m.InitialRowLimit > 0 && len(out) >= m.InitialRowLimit {
-			return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, m.InitialRowLimit)
+		if rowLimit > 0 && len(out) >= rowLimit {
+			return NewQuotaError(ErrInitialRowLimit, "snapshot_rows", len(out)+1, rowLimit)
 		}
 		out = append(out, row)
 		return nil
@@ -451,7 +451,7 @@ func (m *Manager) appendProjectedCrossJoinRows(ctx context.Context, out []types.
 	return out, nil
 }
 
-func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.ProductValue, view store.CommittedReadView, p Join) ([]types.ProductValue, error) {
+func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.ProductValue, view store.CommittedReadView, p Join, rowLimit int) ([]types.ProductValue, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -481,19 +481,19 @@ func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.Produ
 		if !hasProjectedIdx {
 			return nil, fmt.Errorf("%w: join=%d.%d=%d.%d", ErrJoinIndexUnresolved, p.Left, p.LeftCol, p.Right, p.RightCol)
 		}
-		return m.appendProjectedJoinRowsFromProjectedIndex(ctx, out, view, p, projectedTable, projectedJoinCol, projectedIdx, otherTable, otherJoinCol, orientedRows)
+		return m.appendProjectedJoinRowsFromProjectedIndex(ctx, out, view, p, projectedTable, projectedJoinCol, projectedIdx, otherTable, otherJoinCol, orientedRows, rowLimit)
 	}
 	projectedCandidates, filterProjected := initialIndexedFilterRowIDs(view, p.Filter, projectedTable, m.resolver)
 	otherCandidates, filterOther := initialIndexedFilterRowIDs(view, p.Filter, otherTable, m.resolver)
 	if hasProjectedIdx && initialJoinScanCost(view, otherTable, otherCandidates, filterOther) < initialJoinScanCost(view, projectedTable, projectedCandidates, filterProjected) {
-		return m.appendProjectedJoinRowsFromProjectedIndex(ctx, out, view, p, projectedTable, projectedJoinCol, projectedIdx, otherTable, otherJoinCol, orientedRows)
+		return m.appendProjectedJoinRowsFromProjectedIndex(ctx, out, view, p, projectedTable, projectedJoinCol, projectedIdx, otherTable, otherJoinCol, orientedRows, rowLimit)
 	}
 	add := func(row types.ProductValue) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if m.InitialRowLimit > 0 && len(out) >= m.InitialRowLimit {
-			return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, m.InitialRowLimit)
+		if rowLimit > 0 && len(out) >= rowLimit {
+			return NewQuotaError(ErrInitialRowLimit, "snapshot_rows", len(out)+1, rowLimit)
 		}
 		out = append(out, row)
 		return nil
@@ -546,6 +546,7 @@ func (m *Manager) appendProjectedJoinRowsFromProjectedIndex(
 	otherTable TableID,
 	otherJoinCol ColID,
 	orientedRows func(types.ProductValue, types.ProductValue) (types.ProductValue, types.ProductValue),
+	rowLimit int,
 ) ([]types.ProductValue, error) {
 	matchesByProjectedRow := make(map[types.RowID][]types.ProductValue)
 	pending := 0
@@ -581,8 +582,8 @@ func (m *Manager) appendProjectedJoinRowsFromProjectedIndex(
 			if !joinPairMatches(leftRow, p.Left, rightRow, p.Right, &p) {
 				continue
 			}
-			if m.InitialRowLimit > 0 && len(out)+pending >= m.InitialRowLimit {
-				return nil, fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, m.InitialRowLimit)
+			if rowLimit > 0 && len(out)+pending >= rowLimit {
+				return nil, NewQuotaError(ErrInitialRowLimit, "snapshot_rows", len(out)+pending+1, rowLimit)
 			}
 			matchesByProjectedRow[projectedRID] = append(matchesByProjectedRow[projectedRID], projectedRow)
 			pending++
@@ -669,9 +670,22 @@ func (m *Manager) RegisterSet(
 	if len(req.Predicates) == 0 {
 		return SubscriptionSetRegisterResult{}, fmt.Errorf("%w: subscription set requires at least one predicate", ErrInvalidPredicate)
 	}
+	if m.MaxQueriesPerSet > 0 && len(req.Predicates) > m.MaxQueriesPerSet {
+		return SubscriptionSetRegisterResult{}, NewQuotaError(ErrSubscriptionQueryLimit, "queries_per_set", len(req.Predicates), m.MaxQueriesPerSet)
+	}
 	ctx := req.Context
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if byQ := m.querySets[req.ConnID]; byQ != nil {
+		if _, live := byQ[req.QueryID]; live {
+			return SubscriptionSetRegisterResult{}, fmt.Errorf("%w: conn=%x query=%d",
+				ErrQueryIDAlreadyLive, req.ConnID[:4], req.QueryID)
+		}
+	}
+	usage := m.connectionUsage[req.ConnID]
+	if m.MaxActiveSetsPerConnection > 0 && usage.sets+1 > m.MaxActiveSetsPerConnection {
+		return SubscriptionSetRegisterResult{}, NewQuotaError(ErrSubscriptionSetLimit, "active_sets", usage.sets+1, m.MaxActiveSetsPerConnection)
 	}
 	canonicalPreds := make([]Predicate, 0, len(req.Predicates))
 	projections := make([][]ProjectionColumn, len(req.Predicates))
@@ -745,13 +759,6 @@ func (m *Manager) RegisterSet(
 	default:
 		hashIdentities = make([]*types.Identity, len(canonicalPreds))
 	}
-	// Duplicate QueryID rejection.
-	if byQ, ok := m.querySets[req.ConnID]; ok {
-		if _, live := byQ[req.QueryID]; live {
-			return SubscriptionSetRegisterResult{}, fmt.Errorf("%w: conn=%x query=%d",
-				ErrQueryIDAlreadyLive, req.ConnID[:4], req.QueryID)
-		}
-	}
 	// Dedup identical predicates within this call.
 	deduped := make([]Predicate, 0, len(canonicalPreds))
 	dedupedProjections := make([][]ProjectionColumn, 0, len(canonicalPreds))
@@ -778,10 +785,32 @@ func (m *Manager) RegisterSet(
 	if uint64(len(deduped)) > uint64(^types.SubscriptionID(0))-uint64(m.nextSubID) {
 		return SubscriptionSetRegisterResult{}, fmt.Errorf("%w: next=%d requested=%d", ErrSubscriptionIDOverflow, m.nextSubID, len(deduped))
 	}
-	// Allocate internal IDs + run initial snapshot per predicate.
+	if err := m.reserveConnectionQuota(req.ConnID, len(deduped)); err != nil {
+		return SubscriptionSetRegisterResult{}, err
+	}
+	quotaCommitted := false
 	startNextSubID := m.nextSubID
+	defer func() {
+		if quotaCommitted {
+			return
+		}
+		m.nextSubID = startNextSubID
+		m.releaseConnectionQuota(req.ConnID, 1, len(deduped))
+	}()
+	type pendingRegistration struct {
+		subID      types.SubscriptionID
+		predicate  Predicate
+		projection []ProjectionColumn
+		aggregate  *Aggregate
+		orderBy    []OrderByColumn
+		limit      *uint64
+		offset     *uint64
+		hash       QueryHash
+	}
+	pending := make([]pendingRegistration, 0, len(deduped))
 	allocated := make([]types.SubscriptionID, 0, len(deduped))
 	updates := make([]SubscriptionUpdate, 0, len(deduped))
+	budget := newSnapshotBudget(m.InitialRowLimit, m.SnapshotByteLimit)
 	for i, p := range deduped {
 		m.nextSubID++
 		subID := m.nextSubID
@@ -798,38 +827,52 @@ func (m *Manager) RegisterSet(
 		var initial []SubscriptionUpdate
 		if !sameConnReuse {
 			var err error
-			initial, err = m.initialUpdates(ctx, p, projection, aggregate, orderBy, limit, offset, view, subID, req.QueryID)
+			initial, err = m.initialUpdates(ctx, p, projection, aggregate, orderBy, limit, offset, view, subID, req.QueryID, budget.remainingRowLimit())
 			if err != nil {
-				// Unwind any partial state. dropSub handles registry maps + PruningIndexes
-				// eviction on last-ref; each allocated sub is dropped independently.
-				for _, sid := range allocated {
-					m.dropSub(req.ConnID, sid)
-				}
-				m.nextSubID = startNextSubID
 				return SubscriptionSetRegisterResult{}, fmt.Errorf("%w: %w", ErrInitialQuery, err)
 			}
 		}
-		qs := existing
-		if qs == nil {
-			qs = m.registry.createQueryState(hash, p, projection, aggregate, orderBy, limit, offset)
-			// SQLText is set only when the admission path knows the original
-			// SQL string (Single subscribe). Multi leaves it empty —
-			// reference `module_subscription_actor.rs:836` uses raw
-			// `return_on_err!` on the unsubscribe path and does not apply
-			// the `DBError::WithSql` suffix.
-			qs.sqlText = req.SQLText
-			placeSubscriptionForResolver(m.indexes, p, hash, m.resolver)
-			m.addDeltaIndexColumns(p)
+		if err := budget.add(initial); err != nil {
+			return SubscriptionSetRegisterResult{}, fmt.Errorf("%w: %w", ErrInitialQuery, err)
 		}
-		m.registry.addSubscriber(hash, req.ConnID, subID, req.RequestID, req.QueryID)
+		pending = append(pending, pendingRegistration{
+			subID:      subID,
+			predicate:  p,
+			projection: projection,
+			aggregate:  aggregate,
+			orderBy:    orderBy,
+			limit:      limit,
+			offset:     offset,
+			hash:       hash,
+		})
 		allocated = append(allocated, subID)
-		_ = qs
 		updates = append(updates, initial...)
+	}
+	if req.PrepareSnapshot != nil {
+		if err := req.PrepareSnapshot(updates); err != nil {
+			return SubscriptionSetRegisterResult{}, fmt.Errorf("%w: %w", ErrInitialQuery, err)
+		}
+	}
+
+	// Publish only after every predicate, aggregate budget, and response
+	// preparation has succeeded. No fallible operation follows this point.
+	for _, item := range pending {
+		qs := m.registry.getQuery(item.hash)
+		if qs == nil {
+			qs = m.registry.createQueryState(item.hash, item.predicate, item.projection, item.aggregate, item.orderBy, item.limit, item.offset)
+			// SQLText is set only when the admission path knows the original
+			// SQL string (Single subscribe). Multi leaves it empty.
+			qs.sqlText = req.SQLText
+			placeSubscriptionForResolver(m.indexes, item.predicate, item.hash, m.resolver)
+			m.addDeltaIndexColumns(item.predicate)
+		}
+		m.registry.addSubscriber(item.hash, req.ConnID, item.subID, req.RequestID, req.QueryID)
 	}
 	if m.querySets[req.ConnID] == nil {
 		m.querySets[req.ConnID] = make(map[uint32][]types.SubscriptionID)
 	}
 	m.querySets[req.ConnID][req.QueryID] = allocated
+	quotaCommitted = true
 	active := m.activeSets.Add(1)
 	recordSubscriptionActive(m.observer, int(active))
 	return SubscriptionSetRegisterResult{QueryID: req.QueryID, Update: updates}, nil
@@ -863,6 +906,7 @@ func (m *Manager) UnregisterSetContext(
 		return SubscriptionSetUnregisterResult{}, ErrSubscriptionNotFound
 	}
 	deletes := make([]SubscriptionUpdate, 0, len(sids))
+	budget := newSnapshotBudget(m.InitialRowLimit, m.SnapshotByteLimit)
 	var evalErr error
 	var evalSQL string
 	for _, sid := range sids {
@@ -877,17 +921,22 @@ func (m *Manager) UnregisterSetContext(
 		if view == nil || evalErr != nil {
 			continue
 		}
-		initial, err := m.initialUpdates(ctx, qs.predicate, qs.projection, qs.aggregate, qs.orderBy, qs.limit, qs.offset, view, sid, queryID)
+		initial, err := m.initialUpdates(ctx, qs.predicate, qs.projection, qs.aggregate, qs.orderBy, qs.limit, qs.offset, view, sid, queryID, budget.remainingRowLimit())
 		if err != nil {
 			evalErr = fmt.Errorf("%w: %w", ErrFinalQuery, err)
 			evalSQL = qs.sqlText
 			continue
 		}
-		for _, update := range initial {
-			update.Deletes = update.Inserts
-			update.Inserts = nil
-			deletes = append(deletes, update)
+		for i := range initial {
+			initial[i].Deletes = initial[i].Inserts
+			initial[i].Inserts = nil
 		}
+		if err := budget.add(initial); err != nil {
+			evalErr = fmt.Errorf("%w: %w", ErrFinalQuery, err)
+			evalSQL = qs.sqlText
+			continue
+		}
+		deletes = append(deletes, initial...)
 	}
 	for _, sid := range sids {
 		m.dropSub(connID, sid)
@@ -896,6 +945,7 @@ func (m *Manager) UnregisterSetContext(
 	if len(byQ) == 0 {
 		delete(m.querySets, connID)
 	}
+	m.releaseConnectionQuota(connID, 1, len(sids))
 	active := m.activeSets.Add(-1)
 	recordSubscriptionActive(m.observer, int(active))
 	if evalErr != nil {

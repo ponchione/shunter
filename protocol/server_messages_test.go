@@ -52,6 +52,33 @@ func TestEncodeServerMessageRejectsInvalidUTF8String(t *testing.T) {
 	}
 }
 
+func TestEncodeServerMessageOutboundLimitExactBoundary(t *testing.T) {
+	msg := SubscribeMultiApplied{
+		RequestID: 1,
+		QueryID:   2,
+		Update: []SubscriptionUpdate{{
+			QueryID:   2,
+			TableName: "items",
+			Inserts:   EncodeRowList([][]byte{{0x01, 0x02, 0x03}}),
+			Deletes:   EncodeRowList(nil),
+		}},
+	}
+	size, err := ValidateServerMessageSize(msg, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := EncodeServerMessageWithLimit(msg, size)
+	if err != nil {
+		t.Fatalf("exact outbound cap rejected: %v", err)
+	}
+	if len(frame) != size {
+		t.Fatalf("encoded size = %d, want %d", len(frame), size)
+	}
+	if _, err := EncodeServerMessageWithLimit(msg, size-1); !errors.Is(err, ErrOutboundMessageLimit) {
+		t.Fatalf("one byte over cap error = %v, want ErrOutboundMessageLimit", err)
+	}
+}
+
 func TestSubscribeSingleAppliedRoundTrip(t *testing.T) {
 	rows := EncodeRowList([][]byte{{0x01}, {0x02, 0x03}})
 	in := SubscribeSingleApplied{

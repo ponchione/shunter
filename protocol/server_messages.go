@@ -152,10 +152,30 @@ const (
 // EncodeServerMessage produces the uncompressed wire frame
 // [tag byte] [BSATN body]. Compression envelope wrapping is Story 1.4.
 func EncodeServerMessage(m any) ([]byte, error) {
+	return EncodeServerMessageWithLimit(m, 0)
+}
+
+// ValidateServerMessageSize validates m and reports its exact uncompressed
+// encoded size without allocating the final frame. A positive maxBytes applies
+// the configured outbound boundary.
+func ValidateServerMessageSize(m any, maxBytes int) (int, error) {
 	if err := validateServerMessageForEncode(m); err != nil {
-		return nil, err
+		return 0, err
 	}
 	size, err := encodedServerMessageSize(m)
+	if err != nil {
+		return 0, err
+	}
+	if maxBytes > 0 && size > maxBytes {
+		return size, fmt.Errorf("%w: encoded_bytes=%d cap=%d", ErrOutboundMessageLimit, size, maxBytes)
+	}
+	return size, nil
+}
+
+// EncodeServerMessageWithLimit encodes m after enforcing a positive
+// uncompressed message-size cap before bytes.Buffer.Grow.
+func EncodeServerMessageWithLimit(m any, maxBytes int) ([]byte, error) {
+	size, err := ValidateServerMessageSize(m, maxBytes)
 	if err != nil {
 		return nil, err
 	}

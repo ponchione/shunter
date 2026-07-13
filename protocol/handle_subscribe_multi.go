@@ -24,5 +24,17 @@ func handleSubscribeMultiWithVisibility(
 	sl SchemaLookup,
 	visibilityFilters []VisibilityFilter,
 ) {
-	handleSubscribeSetWithVisibility(ctx, conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantMulti, msg.QueryStrings, "", executor, sl, visibilityFilters)
+	handleSubscribeMultiWithVisibilityAndLimit(ctx, conn, msg, executor, sl, visibilityFilters, DefaultSubscriptionMaxQueriesPerSet)
+}
+
+func handleSubscribeMultiWithVisibilityAndLimit(
+	ctx context.Context,
+	conn *Conn,
+	msg *SubscribeMultiMsg,
+	executor ExecutorInbox,
+	sl SchemaLookup,
+	visibilityFilters []VisibilityFilter,
+	maxQueriesPerSet int,
+) {
+	handleSubscribeSetWithVisibilityAndLimit(ctx, conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantMulti, msg.QueryStrings, "", executor, sl, visibilityFilters, maxQueriesPerSet)
 }

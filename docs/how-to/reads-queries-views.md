@@ -231,9 +231,14 @@ Hosted raw and declared query results are capped by
 `Config.OneOffQueryMaxRows` and `Config.OneOffQueryMaxBytes`. Their zero values
 use 100,000 rows and a 64 MiB encoded row list. A client `LIMIT` cannot override
 these host limits, and ordered queries retain only the bounded top window while
-scanning. Initial and final subscription snapshots are separately capped by
-`Config.SubscriptionInitialRowLimit`, whose zero value is 100,000 rows. Lower
-these limits for untrusted or memory-constrained deployments.
+scanning. Initial and final subscription snapshots are capped across the whole
+set by `Config.SubscriptionInitialRowLimit` (100,000 rows by default) and
+`Config.SubscriptionSnapshotMaxBytes` (64 MiB of encoded RowList data by
+default). Hosted connections also default to at most 256 queries per set, 128
+active sets, and 1,024 deduplicated internal subscriptions. The protocol
+decoder independently rejects more than 4,096 queries, and
+`Protocol.MaxOutboundMessageSize` caps uncompressed server frames before final
+allocation. Lower these limits for untrusted or memory-constrained deployments.
 
 Aggregate reads currently accept `COUNT(*)`, `COUNT(column)`,
 `COUNT(DISTINCT column)`, and `SUM(column)`. `COUNT` results are non-null

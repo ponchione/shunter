@@ -15,6 +15,10 @@ var ErrMalformedMessage = errors.New("protocol: malformed message body")
 // configured transport size limit.
 var ErrMessageTooLarge = errors.New("protocol: message too large")
 
+// ErrOutboundMessageLimit reports a server message rejected before frame
+// allocation because it exceeds the configured outbound byte cap.
+var ErrOutboundMessageLimit = errors.New("protocol: outbound message limit exceeded")
+
 // ErrExecutorAdmissionRejected marks a connection rejected by executor
 // admission during OnConnect.
 var ErrExecutorAdmissionRejected = errors.New("protocol: executor admission rejected")

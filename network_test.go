@@ -35,6 +35,7 @@ func TestBuildProtocolOptionsAppliesOverrides(t *testing.T) {
 		OutgoingBufferMessages: 17,
 		IncomingQueueMessages:  18,
 		MaxMessageSize:         19,
+		MaxOutboundMessageSize: 20,
 	})
 	if err != nil {
 		t.Fatalf("buildProtocolOptions returned error: %v", err)
@@ -46,7 +47,8 @@ func TestBuildProtocolOptionsAppliesOverrides(t *testing.T) {
 		opts.DisconnectTimeout != 5*time.Second ||
 		opts.OutgoingBufferMessages != 17 ||
 		opts.IncomingQueueMessages != 18 ||
-		opts.MaxMessageSize != 19 {
+		opts.MaxMessageSize != 19 ||
+		opts.MaxOutboundMessageSize != 20 {
 		t.Fatalf("override mapping failed: %+v", opts)
 	}
 }
@@ -61,6 +63,7 @@ func TestBuildProtocolOptionsRejectsNegativeValues(t *testing.T) {
 		{OutgoingBufferMessages: -1},
 		{IncomingQueueMessages: -1},
 		{MaxMessageSize: -1},
+		{MaxOutboundMessageSize: -1},
 	}
 	for _, cfg := range cases {
 		if _, err := buildProtocolOptions(cfg); err == nil {
@@ -71,11 +74,12 @@ func TestBuildProtocolOptionsRejectsNegativeValues(t *testing.T) {
 
 func TestStartConfiguresProtocolSQLQueryLimits(t *testing.T) {
 	rt, err := Build(validChatModule(), Config{
-		DataDir:             t.TempDir(),
-		EnableProtocol:      true,
-		ListenAddr:          "127.0.0.1:0",
-		OneOffQueryMaxRows:  123,
-		OneOffQueryMaxBytes: 456,
+		DataDir:                      t.TempDir(),
+		EnableProtocol:               true,
+		ListenAddr:                   "127.0.0.1:0",
+		OneOffQueryMaxRows:           123,
+		OneOffQueryMaxBytes:          456,
+		SubscriptionMaxQueriesPerSet: 7,
 	})
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
@@ -91,6 +95,9 @@ func TestStartConfiguresProtocolSQLQueryLimits(t *testing.T) {
 	want := protocol.SQLQueryLimits{MaxRows: 123, MaxBytes: 456}
 	if got := rt.protocolServer.SQLQueryLimits; got != want {
 		t.Fatalf("SQLQueryLimits = %+v, want %+v", got, want)
+	}
+	if got := rt.protocolServer.SubscriptionLimits.MaxQueriesPerSet; got != 7 {
+		t.Fatalf("SubscriptionLimits.MaxQueriesPerSet = %d, want 7", got)
 	}
 }
 

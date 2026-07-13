@@ -65,6 +65,9 @@ type RegisterSubscriptionSetRequest struct {
 	// SQLText is the original SingleSubscribe SQL used to wrap initial-eval
 	// errors. Empty on Multi and non-SQL paths.
 	SQLText string
+	// MaxResponseBytes caps the prepared uncompressed Applied response before
+	// manager registry publication. Zero disables this adapter-level check.
+	MaxResponseBytes int
 }
 
 // UnregisterSubscriptionSetRequest drops every internal subscription

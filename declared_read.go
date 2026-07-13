@@ -634,6 +634,7 @@ func (r *Runtime) handleProtocolSubscribeDeclaredView(ctx context.Context, conn 
 	}
 	rows, err := encodeDeclaredReadRows(sub.InitialRows, sub.Columns)
 	if err != nil {
+		_ = sub.Close()
 		r.sendProtocolDeclaredViewError(conn, requestID, queryID, "encode error: "+err.Error(), receipt)
 		r.observability.RecordProtocolMessage("subscribe_declared_view", "internal_error")
 		return
@@ -645,6 +646,7 @@ func (r *Runtime) handleProtocolSubscribeDeclaredView(ctx context.Context, conn 
 		TableName:                        sub.TableName,
 		Rows:                             rows,
 	}); err != nil {
+		_ = sub.Close()
 		r.logProtocolDeclaredReadSendError("subscribe_declared_view", err)
 		r.observability.RecordProtocolMessage("subscribe_declared_view", "connection_closed")
 		return

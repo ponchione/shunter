@@ -29,7 +29,19 @@ func handleSubscribeSingleWithVisibility(
 	sl SchemaLookup,
 	visibilityFilters []VisibilityFilter,
 ) {
-	handleSubscribeSetWithVisibility(ctx, conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantSingle, []string{msg.QueryString}, msg.QueryString, executor, sl, visibilityFilters)
+	handleSubscribeSingleWithVisibilityAndLimit(ctx, conn, msg, executor, sl, visibilityFilters, DefaultSubscriptionMaxQueriesPerSet)
+}
+
+func handleSubscribeSingleWithVisibilityAndLimit(
+	ctx context.Context,
+	conn *Conn,
+	msg *SubscribeSingleMsg,
+	executor ExecutorInbox,
+	sl SchemaLookup,
+	visibilityFilters []VisibilityFilter,
+	maxQueriesPerSet int,
+) {
+	handleSubscribeSetWithVisibilityAndLimit(ctx, conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantSingle, []string{msg.QueryString}, msg.QueryString, executor, sl, visibilityFilters, maxQueriesPerSet)
 }
 
 type rawSubscribeAdmissionPlan struct {
@@ -135,7 +147,28 @@ func handleSubscribeSetWithVisibility(
 	sl SchemaLookup,
 	visibilityFilters []VisibilityFilter,
 ) {
+	handleSubscribeSetWithVisibilityAndLimit(ctx, conn, requestID, queryID, variant, queryStrings, sqlText, executor, sl, visibilityFilters, DefaultSubscriptionMaxQueriesPerSet)
+}
+
+func handleSubscribeSetWithVisibilityAndLimit(
+	ctx context.Context,
+	conn *Conn,
+	requestID, queryID uint32,
+	variant SubscriptionSetVariant,
+	queryStrings []string,
+	sqlText string,
+	executor ExecutorInbox,
+	sl SchemaLookup,
+	visibilityFilters []VisibilityFilter,
+	maxQueriesPerSet int,
+) {
 	receipt := time.Now()
+	if maxQueriesPerSet > 0 && len(queryStrings) > maxQueriesPerSet {
+		err := subscription.NewQuotaError(subscription.ErrSubscriptionQueryLimit, "queries_per_set", len(queryStrings), maxQueriesPerSet)
+		sendSubscribeCompileError(conn, receipt, requestID, queryID, err, sqlText)
+		recordProtocolMessage(conn.Observer, protocolSubscribeMetricKind(variant), "quota_rejected")
+		return
+	}
 	readSL := authorizedSchemaLookupForConn(sl, conn)
 	caller := readCallerContext(conn)
 	plan, failedSQL, err := compileRawSubscribeAdmissionPlan(queryStrings, readSL, caller, visibilityFilters)
@@ -155,12 +188,20 @@ func handleSubscribeSetWithVisibility(
 		Reply:                   makeSubscribeSetReply(conn, requestID, queryID, variant),
 		Receipt:                 receipt,
 		SQLText:                 sqlText,
+		MaxResponseBytes:        subscriptionResponseByteLimit(conn),
 	}); submitErr != nil {
 		sendExecutorUnavailableError(conn, receipt, requestID, queryID, submitErr)
 		recordProtocolMessage(conn.Observer, protocolSubscribeMetricKind(variant), "executor_rejected")
 		return
 	}
 	recordProtocolMessage(conn.Observer, protocolSubscribeMetricKind(variant), "ok")
+}
+
+func subscriptionResponseByteLimit(conn *Conn) int {
+	if conn == nil || conn.opts == nil {
+		return 0
+	}
+	return conn.opts.MaxOutboundMessageSize
 }
 
 func protocolSubscribeMetricKind(variant SubscriptionSetVariant) string {

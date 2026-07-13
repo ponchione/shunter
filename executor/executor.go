@@ -544,6 +544,10 @@ func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
 		cmd.Reply(res, err)
 	}
 	if err != nil {
+		if errors.Is(err, subscription.ErrSubscriptionQuota) {
+			e.traceSubscriptionRegister("rejected", err)
+			return "rejected"
+		}
 		e.traceSubscriptionRegister("internal_error", err)
 		return "internal_error"
 	}

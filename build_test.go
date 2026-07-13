@@ -219,6 +219,12 @@ func TestBuildWithBlankDataDirNormalizesToRuntimeDefault(t *testing.T) {
 	if rt.buildConfig.SubscriptionInitialRowLimit != defaultSubscriptionInitialRows {
 		t.Fatalf("SubscriptionInitialRowLimit = %d, want %d", rt.buildConfig.SubscriptionInitialRowLimit, defaultSubscriptionInitialRows)
 	}
+	if rt.buildConfig.SubscriptionSnapshotMaxBytes != defaultSubscriptionSnapshotBytes ||
+		rt.buildConfig.SubscriptionMaxQueriesPerSet != protocol.DefaultSubscriptionMaxQueriesPerSet ||
+		rt.buildConfig.SubscriptionMaxActiveSetsPerConnection != defaultSubscriptionActiveSets ||
+		rt.buildConfig.SubscriptionMaxActiveSubscriptionsPerConnection != defaultSubscriptionActiveSubscriptions {
+		t.Fatalf("subscription defaults = %+v", rt.buildConfig)
+	}
 }
 
 func TestBuildRejectsNegativeResourceLimits(t *testing.T) {
@@ -243,6 +249,26 @@ func TestBuildRejectsNegativeResourceLimits(t *testing.T) {
 			want: "subscription initial row limit must not be negative",
 		},
 		{
+			name: "subscription snapshot bytes",
+			cfg:  Config{DataDir: t.TempDir(), SubscriptionSnapshotMaxBytes: -1},
+			want: "subscription snapshot max bytes must not be negative",
+		},
+		{
+			name: "subscription queries per set",
+			cfg:  Config{DataDir: t.TempDir(), SubscriptionMaxQueriesPerSet: -1},
+			want: "subscription max queries per set must not be negative",
+		},
+		{
+			name: "subscription active sets",
+			cfg:  Config{DataDir: t.TempDir(), SubscriptionMaxActiveSetsPerConnection: -1},
+			want: "subscription max active sets per connection must not be negative",
+		},
+		{
+			name: "subscription active queries",
+			cfg:  Config{DataDir: t.TempDir(), SubscriptionMaxActiveSubscriptionsPerConnection: -1},
+			want: "subscription max active subscriptions per connection must not be negative",
+		},
+		{
 			name: "relations",
 			cfg:  Config{DataDir: t.TempDir(), SubscriptionMaxMultiJoinRelations: -1},
 			want: "subscription max multi-join relations must not be negative",
@@ -264,12 +290,27 @@ func TestBuildRejectsNegativeResourceLimits(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsSubscriptionQueryLimitAboveDecoderCeiling(t *testing.T) {
+	_, err := Build(validChatModule(), Config{
+		DataDir:                      t.TempDir(),
+		SubscriptionMaxQueriesPerSet: int(protocol.MaxSubscribeMultiQueriesHard) + 1,
+	})
+	if err == nil {
+		t.Fatal("Build returned nil error, want decoder-ceiling rejection")
+	}
+	assertErrorContains(t, err, "exceeds decoder hard limit")
+}
+
 func TestStartConfiguresSubscriptionLimits(t *testing.T) {
 	rt, err := Build(validChatModule(), Config{
-		DataDir:                                 t.TempDir(),
-		SubscriptionInitialRowLimit:             128,
-		SubscriptionMaxMultiJoinRelations:       4,
-		SubscriptionMaxMultiJoinRowsPerRelation: 256,
+		DataDir:                                         t.TempDir(),
+		SubscriptionInitialRowLimit:                     128,
+		SubscriptionSnapshotMaxBytes:                    1_024,
+		SubscriptionMaxQueriesPerSet:                    3,
+		SubscriptionMaxActiveSetsPerConnection:          4,
+		SubscriptionMaxActiveSubscriptionsPerConnection: 5,
+		SubscriptionMaxMultiJoinRelations:               4,
+		SubscriptionMaxMultiJoinRowsPerRelation:         256,
 	})
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
@@ -284,6 +325,10 @@ func TestStartConfiguresSubscriptionLimits(t *testing.T) {
 	}
 	if rt.subscriptions.InitialRowLimit != 128 {
 		t.Fatalf("InitialRowLimit = %d, want 128", rt.subscriptions.InitialRowLimit)
+	}
+	if rt.subscriptions.SnapshotByteLimit != 1_024 || rt.subscriptions.MaxQueriesPerSet != 3 ||
+		rt.subscriptions.MaxActiveSetsPerConnection != 4 || rt.subscriptions.MaxActiveSubscriptionsPerConnection != 5 {
+		t.Fatalf("subscription quota wiring = %+v", rt.subscriptions)
 	}
 	if rt.subscriptions.MaxMultiJoinRelations != 4 {
 		t.Fatalf("MaxMultiJoinRelations = %d, want 4", rt.subscriptions.MaxMultiJoinRelations)

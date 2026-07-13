@@ -38,6 +38,9 @@ type ProtocolOptions struct {
 	// MaxMessageSize is the largest frame payload the read layer
 	// accepts; larger frames cause a 1008 close.
 	MaxMessageSize int64
+	// MaxOutboundMessageSize caps an uncompressed encoded server message before
+	// allocation. Compression is applied only after this boundary passes.
+	MaxOutboundMessageSize int
 }
 
 // DefaultOutgoingBufferMessages is the per-client outbound queue capacity.
@@ -54,6 +57,7 @@ func DefaultProtocolOptions() ProtocolOptions {
 		OutgoingBufferMessages: DefaultOutgoingBufferMessages,
 		IncomingQueueMessages:  64,
 		MaxMessageSize:         4 * 1024 * 1024,
+		MaxOutboundMessageSize: 64 * 1024 * 1024,
 	}
 }
 
@@ -84,6 +88,9 @@ func NormalizeProtocolOptions(opts ProtocolOptions) (ProtocolOptions, error) {
 	if opts.MaxMessageSize < 0 {
 		return ProtocolOptions{}, fmt.Errorf("max message size must not be negative")
 	}
+	if opts.MaxOutboundMessageSize < 0 {
+		return ProtocolOptions{}, fmt.Errorf("max outbound message size must not be negative")
+	}
 
 	defaults := DefaultProtocolOptions()
 	if opts.PingInterval == 0 {
@@ -109,6 +116,9 @@ func NormalizeProtocolOptions(opts ProtocolOptions) (ProtocolOptions, error) {
 	}
 	if opts.MaxMessageSize == 0 {
 		opts.MaxMessageSize = defaults.MaxMessageSize
+	}
+	if opts.MaxOutboundMessageSize == 0 {
+		opts.MaxOutboundMessageSize = defaults.MaxOutboundMessageSize
 	}
 	return opts, nil
 }

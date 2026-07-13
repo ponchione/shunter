@@ -279,6 +279,49 @@ func TestHandleSubscribeSingleSuccess(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeMultiQueryCountLimitBeforeCompile(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+	queries := []string{
+		"SELECT * FROM users WHERE id = 1",
+		"SELECT * FROM users WHERE id = 2",
+		"SELECT * FROM missing WHERE id = 3",
+	}
+	handleSubscribeMultiWithVisibilityAndLimit(context.Background(), conn, &SubscribeMultiMsg{
+		RequestID: 1, QueryID: 2, QueryStrings: queries,
+	}, executor, sl, nil, 2)
+
+	se := requireSubscribeError(t, conn, 2)
+	if !strings.Contains(se.Error, subscription.ErrSubscriptionQueryLimit.Error()) {
+		t.Fatalf("SubscriptionError = %q, want query limit", se.Error)
+	}
+	requireNoSubscribeRegistration(t, executor)
+}
+
+func TestHandleSubscribeMultiQueryCountExactLimitSucceeds(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+	handleSubscribeMultiWithVisibilityAndLimit(context.Background(), conn, &SubscribeMultiMsg{
+		RequestID: 1,
+		QueryID:   2,
+		QueryStrings: []string{
+			"SELECT * FROM users WHERE id = 1",
+			"SELECT * FROM users WHERE id = 2",
+		},
+	}, executor, sl, nil, 2)
+
+	req := executor.getRegisterSetReq()
+	if req == nil || len(req.Predicates) != 2 {
+		t.Fatalf("register request = %+v, want two compiled predicates", req)
+	}
+}
+
 func TestHandleSubscribeSingle_QualifiedColumnsSameTable(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}

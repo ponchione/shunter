@@ -31,6 +31,9 @@ func TestDefaultProtocolOptions(t *testing.T) {
 	if opts.MaxMessageSize != 4*1024*1024 {
 		t.Errorf("MaxMessageSize = %d, want 4 MiB", opts.MaxMessageSize)
 	}
+	if opts.MaxOutboundMessageSize != 64*1024*1024 {
+		t.Errorf("MaxOutboundMessageSize = %d, want 64 MiB", opts.MaxOutboundMessageSize)
+	}
 }
 
 func TestNormalizeProtocolOptionsFillsDefaults(t *testing.T) {
@@ -49,6 +52,9 @@ func TestNormalizeProtocolOptionsRejectsNegativeValues(t *testing.T) {
 	}
 	if _, err := NormalizeProtocolOptions(ProtocolOptions{WriteTimeout: -1}); err == nil {
 		t.Fatal("expected negative WriteTimeout to be rejected")
+	}
+	if _, err := NormalizeProtocolOptions(ProtocolOptions{MaxOutboundMessageSize: -1}); err == nil {
+		t.Fatal("expected negative MaxOutboundMessageSize to be rejected")
 	}
 }
 

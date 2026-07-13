@@ -722,20 +722,16 @@ func TestUnregisterSetContextStopsFinalQueryOnContextCancelAndDropsSet(t *testin
 	}
 }
 
-// TestRegisterSetUnwindsPartialStateOnInitialQueryError — exercises the
-// atomic unwind when initialQuery fails partway through a Multi set.
-// With InitialRowLimit(1), the second predicate trips ErrInitialRowLimit
-// after the first has already placed itself on the registry and indexes;
-// the unwind must drop every trace — including the PruningIndexes rows
-// that plain unregisterSingle would leave behind. Reference:
-// rollback-on-failure parallel to
-// reference tree/module_subscription_manager.rs:1023.
+// TestRegisterSetUnwindsPartialStateOnInitialQueryError exercises atomic
+// registration when the second predicate exceeds the aggregate snapshot cap.
+// No registry or pruning-index entry is published until every predicate and
+// response-preparation step has succeeded.
 func TestRegisterSetUnwindsPartialStateOnInitialQueryError(t *testing.T) {
 	s := testSchema()
 	// Table(1) has 1 row so the first predicate finishes under the
 	// InitialRowLimit cap; Table(2) has 2 rows so the second predicate
-	// overruns and trips ErrInitialRowLimit after the first has already
-	// placed itself on the registry + indexes.
+	// overruns and trips ErrInitialRowLimit after the first result has consumed
+	// the aggregate budget.
 	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
 		1: {
 			{types.NewUint64(1), types.NewString("a")},

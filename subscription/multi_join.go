@@ -2,14 +2,13 @@ package subscription
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
-func (m *Manager) appendProjectedMultiJoinRows(ctx context.Context, out []types.ProductValue, view store.CommittedReadView, p MultiJoin, projection []ProjectionColumn) ([]types.ProductValue, error) {
-	rows, err := multiJoinRowsFromView(ctx, view, p, projection, m.InitialRowLimit)
+func (m *Manager) appendProjectedMultiJoinRows(ctx context.Context, out []types.ProductValue, view store.CommittedReadView, p MultiJoin, projection []ProjectionColumn, rowLimit int) ([]types.ProductValue, error) {
+	rows, err := multiJoinRowsFromView(ctx, view, p, projection, rowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +139,7 @@ func collectMultiJoinProjectedRows(ctx context.Context, p MultiJoin, rowsByRelat
 	var out []types.ProductValue
 	err := visitMultiJoinTuples(ctx, p, rowsByRelation, func(tuple []types.ProductValue) error {
 		if limit > 0 && len(out) >= limit {
-			return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, limit)
+			return NewQuotaError(ErrInitialRowLimit, "snapshot_rows", len(out)+1, limit)
 		}
 		out = append(out, projectMultiJoinTuple(tuple, p, projection))
 		return nil

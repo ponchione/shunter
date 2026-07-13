@@ -46,6 +46,8 @@ type Server struct {
 	// SQLQueryLimits bounds raw one-off query results. Zero values use hosted
 	// defaults. Declared-read implementations own their corresponding limits.
 	SQLQueryLimits SQLQueryLimits
+	// SubscriptionLimits bounds protocol-edge subscription request work.
+	SubscriptionLimits SubscriptionLimits
 	// DeclaredReads handles named QueryDeclaration and ViewDeclaration
 	// protocol messages. Raw SQL handlers remain wired through Schema/State
 	// and Executor; declared reads use this explicit name-based surface.
@@ -347,17 +349,25 @@ func (s *Server) buildMessageHandlers() *MessageHandlers {
 	if err != nil {
 		limits = SQLQueryLimits{MaxRows: DefaultSQLQueryMaxRows, MaxBytes: DefaultSQLQueryMaxBytes}
 	}
-	return s.buildMessageHandlersWithLimits(limits)
+	subscriptionLimits, subErr := NormalizeSubscriptionLimits(s.SubscriptionLimits)
+	if subErr != nil {
+		subscriptionLimits = SubscriptionLimits{MaxQueriesPerSet: DefaultSubscriptionMaxQueriesPerSet}
+	}
+	return s.buildMessageHandlersWithLimits(limits, subscriptionLimits)
 }
 
-func (s *Server) buildMessageHandlersWithLimits(queryLimits SQLQueryLimits) *MessageHandlers {
+func (s *Server) buildMessageHandlersWithLimits(queryLimits SQLQueryLimits, subscriptionLimits ...SubscriptionLimits) *MessageHandlers {
+	subLimits := SubscriptionLimits{MaxQueriesPerSet: DefaultSubscriptionMaxQueriesPerSet}
+	if len(subscriptionLimits) > 0 {
+		subLimits = subscriptionLimits[0]
+	}
 	handlers := &MessageHandlers{}
 	if s.Executor != nil && s.Schema != nil {
 		handlers.OnSubscribeSingle = func(ctx context.Context, conn *Conn, msg *SubscribeSingleMsg) {
-			handleSubscribeSingleWithVisibility(ctx, conn, msg, s.Executor, s.Schema, s.VisibilityFilters)
+			handleSubscribeSingleWithVisibilityAndLimit(ctx, conn, msg, s.Executor, s.Schema, s.VisibilityFilters, subLimits.MaxQueriesPerSet)
 		}
 		handlers.OnSubscribeMulti = func(ctx context.Context, conn *Conn, msg *SubscribeMultiMsg) {
-			handleSubscribeMultiWithVisibility(ctx, conn, msg, s.Executor, s.Schema, s.VisibilityFilters)
+			handleSubscribeMultiWithVisibilityAndLimit(ctx, conn, msg, s.Executor, s.Schema, s.VisibilityFilters, subLimits.MaxQueriesPerSet)
 		}
 	}
 	if s.Executor != nil {

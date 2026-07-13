@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Hosted subscription sets now have aggregate query, per-connection state,
+  snapshot-row, snapshot-byte, and outbound-message limits. Raw protocol
+  registration prepares the complete response before atomic registry
+  publication, and every failure, unregister, and disconnect path releases its
+  reserved capacity.
 - SQL predicates now accept the full `Uint64` literal domain, configured JWT
   extra claims preserve exact JSON numbers, and one-off row limits no longer
   reject otherwise bounded queries solely because their `OFFSET` exceeds the

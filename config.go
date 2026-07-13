@@ -79,9 +79,21 @@ type Config struct {
 	// OneOffQueryMaxBytes caps the encoded RowList bytes returned by hosted raw
 	// and declared queries. Zero uses 64 MiB.
 	OneOffQueryMaxBytes int
-	// SubscriptionInitialRowLimit caps rows evaluated for an initial or final
-	// subscription snapshot. Zero uses 100,000 rows.
+	// SubscriptionInitialRowLimit caps rows across an initial or final
+	// subscription-set snapshot in aggregate. Zero uses 100,000 rows.
 	SubscriptionInitialRowLimit int
+	// SubscriptionSnapshotMaxBytes caps aggregate encoded RowList bytes for an
+	// initial or final subscription-set snapshot. Zero uses 64 MiB.
+	SubscriptionSnapshotMaxBytes int
+	// SubscriptionMaxQueriesPerSet caps raw query strings admitted in one set.
+	// Zero uses 256; values cannot exceed the protocol decoder hard limit.
+	SubscriptionMaxQueriesPerSet int
+	// SubscriptionMaxActiveSetsPerConnection caps live client query IDs on one
+	// connection. Zero uses 128.
+	SubscriptionMaxActiveSetsPerConnection int
+	// SubscriptionMaxActiveSubscriptionsPerConnection caps deduplicated live
+	// internal subscriptions on one connection. Zero uses 1,024.
+	SubscriptionMaxActiveSubscriptionsPerConnection int
 	// SubscriptionMaxMultiJoinRelations caps live multi-way join relation
 	// count. Zero leaves the current unlimited behavior.
 	SubscriptionMaxMultiJoinRelations int
@@ -275,4 +287,5 @@ type ProtocolConfig struct {
 	OutgoingBufferMessages int
 	IncomingQueueMessages  int
 	MaxMessageSize         int64
+	MaxOutboundMessageSize int
 }

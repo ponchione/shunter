@@ -124,7 +124,11 @@ func sendOnConn(conn *Conn, connID types.ConnectionID, msg any, inbox ExecutorIn
 	if conn == nil {
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
 	}
-	frame, err := EncodeServerMessage(msg)
+	maxBytes := 0
+	if conn.opts != nil {
+		maxBytes = conn.opts.MaxOutboundMessageSize
+	}
+	frame, err := EncodeServerMessageWithLimit(msg, maxBytes)
 	if err != nil {
 		return fmt.Errorf("encode server message: %w", err)
 	}

@@ -16,11 +16,14 @@ import (
 )
 
 const (
-	defaultDataDir                 = "./shunter-data"
-	dataDirMode                    = 0o700
-	defaultExecutorQueueCapacity   = 256
-	defaultDurabilityQueueCapacity = 256
-	defaultSubscriptionInitialRows = 100_000
+	defaultDataDir                         = "./shunter-data"
+	dataDirMode                            = 0o700
+	defaultExecutorQueueCapacity           = 256
+	defaultDurabilityQueueCapacity         = 256
+	defaultSubscriptionInitialRows         = 100_000
+	defaultSubscriptionSnapshotBytes       = 64 << 20
+	defaultSubscriptionActiveSets          = 128
+	defaultSubscriptionActiveSubscriptions = 1_024
 )
 
 type runtimeBuildPreview struct {
@@ -116,6 +119,21 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	if cfg.SubscriptionInitialRowLimit < 0 {
 		return Config{}, "", fmt.Errorf("subscription initial row limit must not be negative")
 	}
+	if cfg.SubscriptionSnapshotMaxBytes < 0 {
+		return Config{}, "", fmt.Errorf("subscription snapshot max bytes must not be negative")
+	}
+	if cfg.SubscriptionMaxQueriesPerSet < 0 {
+		return Config{}, "", fmt.Errorf("subscription max queries per set must not be negative")
+	}
+	if uint64(cfg.SubscriptionMaxQueriesPerSet) > uint64(protocol.MaxSubscribeMultiQueriesHard) {
+		return Config{}, "", fmt.Errorf("subscription max queries per set %d exceeds decoder hard limit %d", cfg.SubscriptionMaxQueriesPerSet, protocol.MaxSubscribeMultiQueriesHard)
+	}
+	if cfg.SubscriptionMaxActiveSetsPerConnection < 0 {
+		return Config{}, "", fmt.Errorf("subscription max active sets per connection must not be negative")
+	}
+	if cfg.SubscriptionMaxActiveSubscriptionsPerConnection < 0 {
+		return Config{}, "", fmt.Errorf("subscription max active subscriptions per connection must not be negative")
+	}
 	if cfg.SubscriptionMaxMultiJoinRelations < 0 {
 		return Config{}, "", fmt.Errorf("subscription max multi-join relations must not be negative")
 	}
@@ -150,6 +168,18 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	}
 	if normalized.SubscriptionInitialRowLimit == 0 {
 		normalized.SubscriptionInitialRowLimit = defaultSubscriptionInitialRows
+	}
+	if normalized.SubscriptionSnapshotMaxBytes == 0 {
+		normalized.SubscriptionSnapshotMaxBytes = defaultSubscriptionSnapshotBytes
+	}
+	if normalized.SubscriptionMaxQueriesPerSet == 0 {
+		normalized.SubscriptionMaxQueriesPerSet = protocol.DefaultSubscriptionMaxQueriesPerSet
+	}
+	if normalized.SubscriptionMaxActiveSetsPerConnection == 0 {
+		normalized.SubscriptionMaxActiveSetsPerConnection = defaultSubscriptionActiveSets
+	}
+	if normalized.SubscriptionMaxActiveSubscriptionsPerConnection == 0 {
+		normalized.SubscriptionMaxActiveSubscriptionsPerConnection = defaultSubscriptionActiveSubscriptions
 	}
 	return normalized, dataDir, nil
 }

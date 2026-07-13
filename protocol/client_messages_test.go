@@ -3,6 +3,7 @@ package protocol
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -308,6 +309,22 @@ func TestDecodeClientMessageRejectsInvalidUTF8String(t *testing.T) {
 	_, _, err := DecodeClientMessage(frame.Bytes())
 	if !errors.Is(err, ErrMalformedMessage) {
 		t.Fatalf("err = %v, want ErrMalformedMessage", err)
+	}
+}
+
+func TestDecodeSubscribeMultiRejectsCountAboveHardLimitBeforeBodySizing(t *testing.T) {
+	var frame bytes.Buffer
+	frame.WriteByte(TagSubscribeMulti)
+	writeUint32(&frame, 1)
+	writeUint32(&frame, 2)
+	writeUint32(&frame, MaxSubscribeMultiQueriesHard+1)
+
+	_, _, err := DecodeClientMessage(frame.Bytes())
+	if !errors.Is(err, ErrMalformedMessage) {
+		t.Fatalf("DecodeClientMessage error = %v, want ErrMalformedMessage", err)
+	}
+	if !strings.Contains(err.Error(), "hard limit") {
+		t.Fatalf("DecodeClientMessage error = %v, want hard-limit detail", err)
 	}
 }
 

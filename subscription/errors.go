@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/ponchione/shunter/schema"
 )
@@ -24,8 +25,21 @@ var (
 
 // Registration errors (Story 4.2 / 4.5).
 var (
+	// ErrSubscriptionQuota classifies admission and snapshot resource-limit
+	// rejections separately from predicate and runtime failures.
+	ErrSubscriptionQuota = errors.New("subscription: quota exceeded")
+	// ErrSubscriptionQueryLimit reports too many predicates in one set.
+	ErrSubscriptionQueryLimit = errors.New("subscription: query count limit exceeded")
+	// ErrSubscriptionSetLimit reports too many active sets on one connection.
+	ErrSubscriptionSetLimit = errors.New("subscription: active set limit exceeded")
+	// ErrSubscriptionCountLimit reports too many active internal subscriptions
+	// on one connection.
+	ErrSubscriptionCountLimit = errors.New("subscription: active subscription limit exceeded")
 	// ErrInitialRowLimit — initial snapshot exceeded the configured row limit.
 	ErrInitialRowLimit = errors.New("subscription: initial row limit exceeded")
+	// ErrSnapshotByteLimit reports an initial or final snapshot whose encoded
+	// row-list data exceeds the configured aggregate byte limit.
+	ErrSnapshotByteLimit = errors.New("subscription: snapshot byte limit exceeded")
 	// ErrMultiJoinLimit — live multi-way join exceeds configured production limits.
 	ErrMultiJoinLimit = errors.New("subscription: multi-way join limit exceeded")
 	// ErrInitialQuery wraps initial-snapshot evaluation failures.
@@ -45,6 +59,29 @@ var (
 	// rows (SPEC-004 §4.1; PHASE-5-DEFERRED §D).
 	ErrJoinIndexUnresolved = errors.New("subscription: join index unresolved by resolver")
 )
+
+type quotaError struct {
+	cause    error
+	resource string
+	used     int
+	limit    int
+}
+
+func (e *quotaError) Error() string {
+	return fmt.Sprintf("%s: %s=%d cap=%d", e.cause, e.resource, e.used, e.limit)
+}
+
+func (e *quotaError) Unwrap() []error {
+	return []error{ErrSubscriptionQuota, e.cause}
+}
+
+// NewQuotaError returns a stable, classifiable subscription quota error.
+func NewQuotaError(cause error, resource string, used, limit int) error {
+	if cause == nil {
+		cause = ErrSubscriptionQuota
+	}
+	return &quotaError{cause: cause, resource: resource, used: used, limit: limit}
+}
 
 // Evaluation errors (Story 4.5 / 5.1).
 var (
