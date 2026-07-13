@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"math"
 	"strings"
 	"testing"
 
@@ -245,5 +246,96 @@ func TestJoinShapesEnforceOneOffByteBudget(t *testing.T) {
 				t.Fatalf("ExecuteCompiledSQLQueryWithLimits error = %v, want ErrSQLQueryResultLimit", err)
 			}
 		})
+	}
+}
+
+func TestOffsetBeyondRowCapAcrossOneOffQueryShapes(t *testing.T) {
+	aSchema := &schema.TableSchema{ID: 1, Name: "a", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: schema.KindUint32},
+		{Index: 1, Name: "join_key", Type: schema.KindUint32},
+	}}
+	bSchema := &schema.TableSchema{ID: 2, Name: "b", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: schema.KindUint32},
+		{Index: 1, Name: "join_key", Type: schema.KindUint32},
+	}}
+	cSchema := &schema.TableSchema{ID: 3, Name: "c", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: schema.KindUint32},
+		{Index: 1, Name: "join_key", Type: schema.KindUint32},
+	}}
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"a": {id: aSchema.ID, schema: aSchema},
+		"b": {id: bSchema.ID, schema: bSchema},
+		"c": {id: cSchema.ID, schema: cSchema},
+	}}
+	state := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(3), types.NewUint32(7)},
+			{types.NewUint32(1), types.NewUint32(7)},
+			{types.NewUint32(2), types.NewUint32(7)},
+		},
+		2: {{types.NewUint32(20), types.NewUint32(7)}},
+		3: {{types.NewUint32(30), types.NewUint32(7)}},
+	}}}
+	opts := SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true}
+	queries := []string{
+		"SELECT * FROM a LIMIT 1 OFFSET 2",
+		"SELECT * FROM a ORDER BY id LIMIT 1 OFFSET 2",
+		"SELECT b.* FROM a JOIN b ON a.join_key = b.join_key LIMIT 1 OFFSET 2",
+		"SELECT b.* FROM a JOIN b LIMIT 1 OFFSET 2",
+		"SELECT c.* FROM a JOIN b ON a.join_key = b.join_key JOIN c ON b.join_key = c.join_key LIMIT 1 OFFSET 2",
+	}
+	for _, query := range queries {
+		t.Run(query, func(t *testing.T) {
+			compiled, err := CompileSQLQueryString(query, sl, nil, opts)
+			if err != nil {
+				t.Fatalf("CompileSQLQueryString: %v", err)
+			}
+			result, err := ExecuteCompiledSQLQueryWithLimits(context.Background(), compiled, state, sl, SQLQueryLimits{MaxRows: 1, MaxBytes: 1 << 20})
+			if err != nil {
+				t.Fatalf("ExecuteCompiledSQLQueryWithLimits: %v", err)
+			}
+			if len(result.Rows) != 1 {
+				t.Fatalf("rows = %d, want 1", len(result.Rows))
+			}
+		})
+	}
+}
+
+func TestOffsetBeyondRowCapUsesOrderedIndexPath(t *testing.T) {
+	columns := []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}}
+	baseLookup := newMockSchema("items", 1, columns...)
+	sl := &indexedOneOffSchemaLookup{mockSchemaLookup: baseLookup, table: 1, column: 0, index: 9}
+	snapshot := &indexedCountingSnapshot{
+		mockSnapshot: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+			1: {{types.NewUint32(3)}, {types.NewUint32(1)}, {types.NewUint32(2)}},
+		}},
+		table: 1, column: 0, index: 9,
+	}
+	compiled, err := CompileSQLQueryString("SELECT * FROM items ORDER BY id LIMIT 1 OFFSET 2", sl, nil, SQLQueryValidationOptions{
+		AllowLimit: true, AllowOrderBy: true, AllowOffset: true,
+	})
+	if err != nil {
+		t.Fatalf("CompileSQLQueryString: %v", err)
+	}
+	result, err := ExecuteCompiledSQLQueryWithLimits(context.Background(), compiled, &mockStateAccess{snap: snapshot}, sl, SQLQueryLimits{MaxRows: 1, MaxBytes: 1 << 20})
+	if err != nil {
+		t.Fatalf("ExecuteCompiledSQLQueryWithLimits: %v", err)
+	}
+	assertProductRowsEqual(t, result.Rows, []types.ProductValue{{types.NewUint32(3)}})
+	if snapshot.indexRanges != 1 || snapshot.tableScans != 0 {
+		t.Fatalf("index ranges=%d table scans=%d, want 1/0", snapshot.indexRanges, snapshot.tableScans)
+	}
+}
+
+func TestOneOffScanLimitSaturates(t *testing.T) {
+	if got := oneOffScanLimit(math.MaxInt, 1); got != math.MaxInt {
+		t.Fatalf("oneOffScanLimit(MaxInt, 1) = %d, want MaxInt", got)
+	}
+	maxOffset := uint64(math.MaxUint64)
+	if got := oneOffRowOffset(&maxOffset); got != math.MaxInt {
+		t.Fatalf("oneOffRowOffset(MaxUint64) = %d, want MaxInt", got)
 	}
 }

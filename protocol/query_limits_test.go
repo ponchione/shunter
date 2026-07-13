@@ -121,6 +121,13 @@ func TestExecuteCompiledSQLQueryWithLimits(t *testing.T) {
 		}
 	})
 
+	t.Run("client limit above cap remains detectable", func(t *testing.T) {
+		_, err := execute(t, "SELECT * FROM items LIMIT 3", SQLQueryLimits{MaxRows: 2, MaxBytes: 1 << 20})
+		if !errors.Is(err, ErrSQLQueryResultLimit) {
+			t.Fatalf("error = %v, want ErrSQLQueryResultLimit", err)
+		}
+	})
+
 	t.Run("client limit within cap succeeds", func(t *testing.T) {
 		result, err := execute(t, "SELECT * FROM items LIMIT 2", SQLQueryLimits{MaxRows: 2, MaxBytes: 1 << 20})
 		if err != nil {
