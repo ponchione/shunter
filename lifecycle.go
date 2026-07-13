@@ -48,6 +48,10 @@ var closeStartupDurability = func(worker *commitlog.DurabilityWorker) (uint64, e
 	return worker.Close()
 }
 
+var closeRuntimeDurability = func(worker *commitlog.DurabilityWorker) (uint64, error) {
+	return worker.Close()
+}
+
 // Ready reports whether Start has completed and runtime-owned workers are running.
 func (r *Runtime) Ready() bool {
 	return r.ready.Load()
@@ -323,7 +327,7 @@ func (r *Runtime) Close() error {
 		r.observability.RecordSubscriptionActive(0)
 	}
 	if durability != nil {
-		finalDurableTxID, closeErr = durability.Close()
+		finalDurableTxID, closeErr = closeRuntimeDurability(durability)
 	}
 
 	r.mu.Lock()

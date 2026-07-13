@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/ponchione/shunter/commitlog"
 )
 
 func TestConfigFromEnvUsesDefaultsWhenUnset(t *testing.T) {
@@ -85,6 +87,52 @@ func TestRunBuildsServesAndStopsOnContextCancel(t *testing.T) {
 	case err := <-errCh:
 		if err != nil {
 			t.Fatalf("Run returned %v, want graceful nil on context cancellation", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not exit after context cancellation")
+	}
+}
+
+func TestRunReturnsDurabilityCloseFailureOnContextCancel(t *testing.T) {
+	startedHook := make(chan struct{})
+	oldStartHook := runtimeStartAfterDurabilityHook
+	runtimeStartAfterDurabilityHook = func(*Runtime) error {
+		close(startedHook)
+		return nil
+	}
+	closeFailure := errors.New("injected durability close failure")
+	oldCloseHook := closeRuntimeDurability
+	closeRuntimeDurability = func(worker *commitlog.DurabilityWorker) (uint64, error) {
+		finalTxID, err := worker.Close()
+		return finalTxID, errors.Join(err, closeFailure)
+	}
+	t.Cleanup(func() {
+		runtimeStartAfterDurabilityHook = oldStartHook
+		closeRuntimeDurability = oldCloseHook
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(ctx, validChatModule(), Config{
+			DataDir:    t.TempDir(),
+			ListenAddr: "127.0.0.1:0",
+		})
+	}()
+
+	select {
+	case <-startedHook:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not start runtime before deadline")
+	}
+	cancel()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, closeFailure) {
+			t.Fatalf("Run error = %v, want durability close failure", err)
+		}
+		if errors.Is(err, context.Canceled) {
+			t.Fatalf("Run error = %v, do not want context cancellation joined with durability close failure", err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not exit after context cancellation")

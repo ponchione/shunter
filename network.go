@@ -265,12 +265,15 @@ func serveHTTPServerWithLifecycle(ctx context.Context, ln net.Listener, httpServ
 		shutdownErr := httpServer.Shutdown(shutdownCtx)
 		closeErr := stop()
 		serveErr := <-errCh
-		return errors.Join(
-			ctx.Err(),
+		operationalErr := errors.Join(
 			wrapHTTPServerError("shutdown HTTP server", shutdownErr),
 			wrapHTTPServerError("stop runtime", closeErr),
 			wrapHTTPServerError("serve HTTP", serveErr),
 		)
+		if operationalErr != nil {
+			return operationalErr
+		}
+		return ctx.Err()
 	case err := <-errCh:
 		closeErr := stop()
 		return errors.Join(

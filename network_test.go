@@ -680,7 +680,7 @@ func (s *fakeLifecycleHTTPServer) Shutdown(context.Context) error {
 	return s.shutdownErr
 }
 
-func TestServeHTTPWithLifecycleJoinsConcurrentShutdownErrors(t *testing.T) {
+func TestServeHTTPWithLifecycleReturnsConcurrentShutdownErrors(t *testing.T) {
 	shutdownErr := errors.New("shutdown failure")
 	serveErr := errors.New("serve failure")
 	stopErr := errors.New("runtime stop failure")
@@ -699,10 +699,31 @@ func TestServeHTTPWithLifecycleJoinsConcurrentShutdownErrors(t *testing.T) {
 	<-server.serveStarted
 	cancel()
 	err := <-errCh
-	for _, want := range []error{context.Canceled, shutdownErr, serveErr, stopErr} {
+	for _, want := range []error{shutdownErr, serveErr, stopErr} {
 		if !errors.Is(err, want) {
 			t.Fatalf("serve error = %v, want errors.Is(..., %v)", err, want)
 		}
+	}
+	if errors.Is(err, context.Canceled) {
+		t.Fatalf("serve error = %v, do not want context cancellation to mask operational failures", err)
+	}
+}
+
+func TestServeHTTPWithLifecycleReturnsCleanCancellation(t *testing.T) {
+	server := &fakeLifecycleHTTPServer{
+		serveStarted:    make(chan struct{}),
+		shutdownRelease: make(chan struct{}),
+		waitForShutdown: true,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serveHTTPServerWithLifecycle(ctx, nil, server, func(context.Context) error { return nil }, func() error { return nil })
+	}()
+	<-server.serveStarted
+	cancel()
+	if err := <-errCh; !errors.Is(err, context.Canceled) {
+		t.Fatalf("serve error = %v, want context cancellation", err)
 	}
 }
 

@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Hosted `Run` now reports HTTP shutdown, serving, and durability-finalization
+  failures that occur during context cancellation instead of converting them
+  to a successful exit; clean cancellation remains graceful.
 - WebSocket connections now bound queued outbound frames by both count and
   retained encoded bytes, apply hosted subscription query limits before SQL
   compilation, route fatal close codes through one lifecycle owner, and retain
