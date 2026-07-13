@@ -230,9 +230,17 @@ Current read compatibility by surface:
 Hosted raw and declared query results are capped by
 `Config.OneOffQueryMaxRows` and `Config.OneOffQueryMaxBytes`. Their zero values
 use 100,000 rows and a 64 MiB encoded row list. A client `LIMIT` cannot override
-these host limits, and ordered queries retain only the bounded top window while
-scanning. Initial and final subscription snapshots are capped across the whole
-set by `Config.SubscriptionInitialRowLimit` (100,000 rows by default) and
+these host limits. Unordered queries account for projected rows before retaining
+them and stop at the first over-limit row. Ordered queries retain only the
+bounded top window while scanning, and the byte cap applies to the encoded row
+payloads currently retained in that heap, including rows retained for `OFFSET`
+and host-limit detection. An ordered query is rejected if that retained heap
+crosses the cap even when a later candidate might have replaced a larger row.
+The byte setting therefore bounds final response bytes and the encoded row
+payload portion of the result working set; it does not bound scan work,
+aggregate/distinct state, order keys, or all query memory. Initial and final
+subscription snapshots are capped across the whole set by
+`Config.SubscriptionInitialRowLimit` (100,000 rows by default) and
 `Config.SubscriptionSnapshotMaxBytes` (64 MiB of encoded RowList data by
 default). Hosted connections also default to at most 256 queries per set, 128
 active sets, and 1,024 deduplicated internal subscriptions. The protocol

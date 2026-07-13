@@ -76,8 +76,9 @@ type Config struct {
 	// OneOffQueryMaxRows caps rows returned by hosted raw and declared queries.
 	// Zero uses 100,000 rows.
 	OneOffQueryMaxRows int
-	// OneOffQueryMaxBytes caps the encoded RowList bytes returned by hosted raw
-	// and declared queries. Zero uses 64 MiB.
+	// OneOffQueryMaxBytes caps encoded RowList bytes retained and returned by
+	// hosted raw and declared queries. Zero uses 64 MiB. It does not cap scan
+	// work, aggregate state, order keys, or other query working memory.
 	OneOffQueryMaxBytes int
 	// SubscriptionInitialRowLimit caps rows across an initial or final
 	// subscription-set snapshot in aggregate. Zero uses 100,000 rows.

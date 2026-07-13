@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Hosted raw and declared queries now enforce encoded-byte limits while result
+  rows are retained across table, join, cross-join, and multi-join execution.
+  Ordered top-window heaps track replacement bytes, and the network encoder
+  checks its ceiling during its allocation-sizing pass instead of running a
+  separate full-result validation pass.
 - Hosted subscription sets now have aggregate query, per-connection state,
   snapshot-row, snapshot-byte, and outbound-message limits. Raw protocol
   registration prepares the complete response before atomic registry

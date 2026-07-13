@@ -18,6 +18,11 @@ func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, st
 	}
 	view := stateAccess.Snapshot()
 	defer view.Close()
+	resultColumns := multiJoinResultColumns(query, multi)
+	resultBudget, err := newEncodedResultBudget(resultColumns, limits.MaxBytes)
+	if err != nil {
+		return SQLQueryResult{}, err
+	}
 
 	rowLimit := oneOffRowLimit(query.Limit)
 	rowOffset := oneOffRowOffset(query.Offset)
@@ -33,25 +38,33 @@ func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, st
 			return SQLQueryResult{}, err
 		}
 		rows = sliceOneOffRows([]types.ProductValue{{aggregateValue}}, rowOffset, rowLimit)
+		for _, row := range rows {
+			if _, err := resultBudget.add(row); err != nil {
+				return SQLQueryResult{}, err
+			}
+		}
 	} else if rowLimit != 0 {
 		if len(query.OrderBy) != 0 {
-			ordered, err := evaluateOneOffMultiJoinOrderedRows(ctx, view, multi, resolver, query.ProjectionColumns, query.OrderBy, scanLimit)
+			ordered, err := evaluateOneOffMultiJoinOrderedRows(ctx, view, multi, resolver, query.ProjectionColumns, query.OrderBy, scanLimit, resultBudget)
 			if err != nil {
 				return SQLQueryResult{}, err
 			}
 			rows = materializeOrderedOneOffRows(ordered, rowOffset, rowLimit)
 		} else {
+			collector := newOneOffResultCollector(rowOffset, executionRowLimit, resultBudget)
 			err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
-				rows = append(rows, projectOneOffMultiJoinTuple(tuple, multi, query.ProjectionColumns))
-				return !oneOffLimitReached(len(rows), scanLimit)
+				return collector.Visit(projectOneOffMultiJoinTuple(tuple, multi, query.ProjectionColumns))
 			})
 			if err != nil {
 				return SQLQueryResult{}, err
 			}
-			rows = sliceOneOffRows(rows, rowOffset, rowLimit)
+			rows, err = collector.Result()
+			if err != nil {
+				return SQLQueryResult{}, err
+			}
 		}
 	}
-	result := SQLQueryResult{TableName: query.TableName, Columns: multiJoinResultColumns(query, multi), Rows: rows}
+	result := SQLQueryResult{TableName: query.TableName, Columns: resultColumns, Rows: rows}
 	return result, nil
 }
 
@@ -62,8 +75,8 @@ func multiJoinResultColumns(query compiledSQLQuery, multi *compiledSQLMultiJoin)
 	return query.resultColumns(multi.Relations[multi.ProjectedRelation].Schema.Columns)
 }
 
-func evaluateOneOffMultiJoinOrderedRows(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, resolver schema.IndexResolver, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy, capacity int) ([]orderedOneOffRow, error) {
-	collector := newOrderedOneOffCollector(orderBy, capacity)
+func evaluateOneOffMultiJoinOrderedRows(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, resolver schema.IndexResolver, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy, capacity int, budget *encodedResultBudget) ([]orderedOneOffRow, error) {
+	collector := newOrderedOneOffCollector(orderBy, capacity, budget)
 	var orderErr error
 	err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
 		key, err := orderKeysFromMultiJoinTuple(tuple, orderBy)
@@ -71,7 +84,10 @@ func evaluateOneOffMultiJoinOrderedRows(ctx context.Context, view store.Committe
 			orderErr = err
 			return false
 		}
-		collector.Add(projectOneOffMultiJoinTuple(tuple, multi, columns), key)
+		if err := collector.Add(projectOneOffMultiJoinTuple(tuple, multi, columns), key); err != nil {
+			orderErr = err
+			return false
+		}
 		return true
 	})
 	if err != nil {

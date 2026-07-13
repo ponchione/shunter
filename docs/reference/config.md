@@ -14,7 +14,7 @@ intent for the root runtime config.
 | `ListenAddr` | Address used by `Runtime.ListenAndServe`. | Set when Shunter owns the HTTP server lifecycle. |
 | `AuthMode` | Development or strict auth behavior. | Use zero-value dev mode for local work, strict mode for public serving. |
 | `OneOffQueryMaxRows` | Hosted raw and declared query result-row limit. | Zero uses 100,000 rows. Set lower for public or memory-constrained services. |
-| `OneOffQueryMaxBytes` | Hosted raw and declared query encoded row-list limit. | Zero uses 64 MiB. Set lower to bound response allocation. |
+| `OneOffQueryMaxBytes` | Hosted raw and declared query encoded row-list limit. | Zero uses 64 MiB. Unordered rows are checked before retention; ordered queries apply it to retained top-window row payloads. It does not bound all query working memory. |
 | `SubscriptionInitialRowLimit` | Aggregate initial/final rows across one subscription set. | Zero uses 100,000 rows. Set from the largest measured legitimate whole-set snapshot. |
 | `SubscriptionSnapshotMaxBytes` | Aggregate encoded RowList bytes across one initial/final subscription set. | Zero uses 64 MiB. Checked before registry publication. |
 | `SubscriptionMaxQueriesPerSet` | Raw query strings admitted and compiled for one subscription set. | Zero uses 256. The decoder hard ceiling is 4,096. |

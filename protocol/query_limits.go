@@ -3,8 +3,6 @@ package protocol
 import (
 	"errors"
 	"fmt"
-
-	"github.com/ponchione/shunter/bsatn"
 )
 
 const (
@@ -45,23 +43,9 @@ func NormalizeSQLQueryLimits(limits SQLQueryLimits) (SQLQueryLimits, error) {
 	return limits, nil
 }
 
-func validateSQLQueryResultLimits(result SQLQueryResult, limits SQLQueryLimits) error {
+func validateSQLQueryResultRowLimit(result SQLQueryResult, limits SQLQueryLimits) error {
 	if limits.MaxRows > 0 && len(result.Rows) > limits.MaxRows {
 		return fmt.Errorf("%w: rows=%d cap=%d", ErrSQLQueryResultLimit, len(result.Rows), limits.MaxRows)
-	}
-	if limits.MaxBytes <= 0 {
-		return nil
-	}
-	size := uint64(4)
-	for _, row := range result.Rows {
-		rowBytes, err := bsatn.EncodedProductValueSizeForColumns(row, result.Columns)
-		if err != nil {
-			return err
-		}
-		size += 4 + uint64(rowBytes)
-		if size > uint64(limits.MaxBytes) {
-			return fmt.Errorf("%w: encoded_bytes>%d", ErrSQLQueryResultLimit, limits.MaxBytes)
-		}
 	}
 	return nil
 }

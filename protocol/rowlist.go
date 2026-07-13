@@ -53,7 +53,7 @@ func EncodeRowListChecked(rows [][]byte) ([]byte, error) {
 // payload carried by protocol messages. Row payloads are treated as read-only:
 // bsatn.EncodeProductValue must not mutate shared ProductValue backing arrays.
 func EncodeProductRows(rows []types.ProductValue) ([]byte, error) {
-	return encodeProductRowsWith(rows, encodedProductValueSize, bsatn.AppendProductValue)
+	return encodeProductRowsWith(rows, encodedProductValueSize, bsatn.AppendProductValue, 0)
 }
 
 // EncodeProductRowsForSchema encodes ProductValue rows using nullable metadata from ts.
@@ -66,6 +66,10 @@ func EncodeProductRowsForSchema(rows []types.ProductValue, ts *schema.TableSchem
 
 // EncodeProductRowsForColumns encodes ProductValue rows using nullable metadata from columns.
 func EncodeProductRowsForColumns(rows []types.ProductValue, columns []schema.ColumnSchema) ([]byte, error) {
+	return encodeProductRowsForColumnsWithLimit(rows, columns, 0)
+}
+
+func encodeProductRowsForColumnsWithLimit(rows []types.ProductValue, columns []schema.ColumnSchema, maxBytes int) ([]byte, error) {
 	return encodeProductRowsWith(
 		rows,
 		func(row types.ProductValue) (int, error) {
@@ -74,6 +78,7 @@ func EncodeProductRowsForColumns(rows []types.ProductValue, columns []schema.Col
 		func(out []byte, row types.ProductValue) ([]byte, error) {
 			return bsatn.AppendProductValueForColumns(out, row, columns)
 		},
+		maxBytes,
 	)
 }
 
@@ -85,12 +90,15 @@ func encodedProductValueSize(row types.ProductValue) (int, error) {
 	return bsatn.EncodedProductValueSize(row), nil
 }
 
-func encodeProductRowsWith(rows []types.ProductValue, rowSize productRowSizer, appendRow productRowAppender) ([]byte, error) {
+func encodeProductRowsWith(rows []types.ProductValue, rowSize productRowSizer, appendRow productRowAppender, maxBytes int) ([]byte, error) {
 	count, err := checkedProtocolLen("product row count", len(rows))
 	if err != nil {
 		return nil, err
 	}
 	size := uint64(4)
+	if maxBytes > 0 && size > uint64(maxBytes) {
+		return nil, fmt.Errorf("%w: encoded_bytes=%d cap=%d", ErrSQLQueryResultLimit, size, maxBytes)
+	}
 	rowSizes := make([]uint32, len(rows))
 	for i, row := range rows {
 		n, err := rowSize(row)
@@ -103,6 +111,9 @@ func encodeProductRowsWith(rows []types.ProductValue, rowSize productRowSizer, a
 		}
 		rowSizes[i] = rowLen
 		size += 4 + uint64(n)
+		if maxBytes > 0 && size > uint64(maxBytes) {
+			return nil, fmt.Errorf("%w: encoded_bytes=%d cap=%d", ErrSQLQueryResultLimit, size, maxBytes)
+		}
 		if size > maxProtocolAlloc() {
 			return nil, fmt.Errorf("%w: encoded product rows size %d exceeds max allocation", ErrMessageTooLarge, size)
 		}

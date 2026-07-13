@@ -136,20 +136,6 @@ func compileRawSubscribeAdmissionPlan(
 	return plan, "", nil
 }
 
-func handleSubscribeSetWithVisibility(
-	ctx context.Context,
-	conn *Conn,
-	requestID, queryID uint32,
-	variant SubscriptionSetVariant,
-	queryStrings []string,
-	sqlText string,
-	executor ExecutorInbox,
-	sl SchemaLookup,
-	visibilityFilters []VisibilityFilter,
-) {
-	handleSubscribeSetWithVisibilityAndLimit(ctx, conn, requestID, queryID, variant, queryStrings, sqlText, executor, sl, visibilityFilters, DefaultSubscriptionMaxQueriesPerSet)
-}
-
 func handleSubscribeSetWithVisibilityAndLimit(
 	ctx context.Context,
 	conn *Conn,
