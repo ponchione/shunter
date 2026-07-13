@@ -122,6 +122,75 @@ func TestHostDataDirKeyResolvesSymlinkAliases(t *testing.T) {
 	}
 }
 
+func TestHostRejectsOverlappingDataDirectories(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		paths func(*testing.T) (string, string)
+	}{
+		{
+			name: "parent first",
+			paths: func(t *testing.T) (string, string) {
+				parent := filepath.Join(t.TempDir(), "parent")
+				return parent, filepath.Join(parent, "child")
+			},
+		},
+		{
+			name: "child first",
+			paths: func(t *testing.T) (string, string) {
+				parent := filepath.Join(t.TempDir(), "parent")
+				return filepath.Join(parent, "child"), parent
+			},
+		},
+		{
+			name: "symlinked parent",
+			paths: func(t *testing.T) (string, string) {
+				root := t.TempDir()
+				parent := filepath.Join(root, "parent")
+				if err := os.MkdirAll(parent, 0o755); err != nil {
+					t.Fatalf("create parent: %v", err)
+				}
+				link := filepath.Join(root, "parent-link")
+				if err := os.Symlink(parent, link); err != nil {
+					t.Skipf("create parent symlink: %v", err)
+				}
+				return link, filepath.Join(parent, "child")
+			},
+		},
+		{
+			name: "symlinked child",
+			paths: func(t *testing.T) (string, string) {
+				root := t.TempDir()
+				parent := filepath.Join(root, "parent")
+				child := filepath.Join(parent, "child")
+				if err := os.MkdirAll(child, 0o755); err != nil {
+					t.Fatalf("create child: %v", err)
+				}
+				link := filepath.Join(root, "child-link")
+				if err := os.Symlink(child, link); err != nil {
+					t.Skipf("create child symlink: %v", err)
+				}
+				return parent, link
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			firstDir, secondDir := tc.paths(t)
+			first := buildHostTestRuntime(t, "first", firstDir)
+			second := buildHostTestRuntime(t, "second", secondDir)
+
+			_, err := NewHost(
+				HostRuntime{Name: "first", RoutePrefix: "/first", Runtime: first},
+				HostRuntime{Name: "second", RoutePrefix: "/second", Runtime: second},
+			)
+			if err == nil {
+				t.Fatal("NewHost succeeded with overlapping runtime data directories")
+			}
+			assertErrorMentions(t, err, "data dir")
+			assertErrorMentions(t, err, "overlaps")
+		})
+	}
+}
+
 func TestHostStartsInRegistrationOrderAndCleansPartialStart(t *testing.T) {
 	chat := buildHostTestRuntime(t, "chat", t.TempDir())
 	ops := buildHostTestRuntime(t, "ops", t.TempDir())

@@ -106,8 +106,10 @@ func NewHost(modules ...HostRuntime) (*Host, error) {
 		if err != nil {
 			return nil, fmt.Errorf("host module %q data dir: %w", module.Name, err)
 		}
-		if existing, ok := dataDirs[dataDirKey]; ok {
-			return nil, fmt.Errorf("host module %q data dir conflicts with module %q", module.Name, existing)
+		for existingKey, existingModule := range dataDirs {
+			if sameOrNestedPath(existingKey, dataDirKey) || sameOrNestedPath(dataDirKey, existingKey) {
+				return nil, fmt.Errorf("host module %q data dir overlaps module %q", module.Name, existingModule)
+			}
 		}
 
 		host.modules = append(host.modules, hostRuntimeMount{
