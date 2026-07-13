@@ -74,8 +74,12 @@ type DurabilityWorker struct {
 	lastEnq    uint64
 	sends      sync.WaitGroup
 	done       chan struct{}
+	closeMu    sync.Mutex
 	closeOnce  sync.Once
 	signalOnce sync.Once
+	closed     bool
+	closeTxID  uint64
+	closeErr   error
 	opts       CommitLogOptions
 	dir        string
 	seg        *SegmentWriter
@@ -424,7 +428,14 @@ func (dw *DurabilityWorker) WaitUntilDurable(txID types.TxID) <-chan types.TxID 
 }
 
 // Close stops the worker and returns the final durable TxID and any fatal error.
+// Concurrent and repeated calls return the same result.
 func (dw *DurabilityWorker) Close() (uint64, error) {
+	dw.closeMu.Lock()
+	defer dw.closeMu.Unlock()
+	if dw.closed {
+		return dw.closeTxID, dw.closeErr
+	}
+
 	dw.stateMu.Lock()
 	dw.closing = true
 	dw.stateMu.Unlock()
@@ -456,9 +467,12 @@ func (dw *DurabilityWorker) Close() (uint64, error) {
 	}
 
 	dw.stateMu.Lock()
-	defer dw.stateMu.Unlock()
 	dw.closeWaitersLocked()
-	return dw.durable.Load(), errors.Join(dw.fatalErr, closeErr)
+	dw.closeTxID = dw.durable.Load()
+	dw.closeErr = errors.Join(dw.fatalErr, closeErr)
+	dw.closed = true
+	dw.stateMu.Unlock()
+	return dw.closeTxID, dw.closeErr
 }
 
 func (dw *DurabilityWorker) run() {

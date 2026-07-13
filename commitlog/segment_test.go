@@ -2,6 +2,7 @@ package commitlog
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,6 +10,56 @@ import (
 
 	"github.com/ponchione/shunter/types"
 )
+
+func stubSegmentDirectorySync(t *testing.T, syncDir func(string) error) {
+	t.Helper()
+	previous := syncSegmentDirectory
+	syncSegmentDirectory = syncDir
+	t.Cleanup(func() { syncSegmentDirectory = previous })
+}
+
+func TestCreateSegmentSynchronizesFileAndDirectoryBeforeReturn(t *testing.T) {
+	dir := t.TempDir()
+	var syncedPath string
+	stubSegmentDirectorySync(t, func(path string) error {
+		syncedPath = path
+		data, err := os.ReadFile(filepath.Join(dir, SegmentFileName(1)))
+		if err != nil {
+			return err
+		}
+		if len(data) != SegmentHeaderSize {
+			return fmt.Errorf("segment size during directory sync = %d, want %d", len(data), SegmentHeaderSize)
+		}
+		return nil
+	})
+
+	sw, err := CreateSegment(dir, 1)
+	if err != nil {
+		t.Fatalf("CreateSegment: %v", err)
+	}
+	defer sw.Close()
+	if syncedPath != dir {
+		t.Fatalf("synced directory = %q, want %q", syncedPath, dir)
+	}
+}
+
+func TestCreateSegmentReportsDirectorySyncFailure(t *testing.T) {
+	dir := t.TempDir()
+	syncErr := errors.New("injected directory sync failure")
+	stubSegmentDirectorySync(t, func(string) error { return syncErr })
+
+	sw, err := CreateSegment(dir, 1)
+	if sw != nil {
+		_ = sw.Close()
+		t.Fatal("CreateSegment returned a writer after directory sync failure")
+	}
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("CreateSegment error = %v, want injected directory sync failure", err)
+	}
+	if _, openErr := OpenSegment(filepath.Join(dir, SegmentFileName(1))); openErr != nil {
+		t.Fatalf("header-synced segment should remain recoverable after directory sync failure: %v", openErr)
+	}
+}
 
 // buildSegmentWithTxIDs writes records at the given TxIDs into a fresh
 // segment under dir. Returns the set of (txID, byte offset) pairs suitable

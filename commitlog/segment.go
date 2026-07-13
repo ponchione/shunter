@@ -72,6 +72,8 @@ func ReadSegmentHeader(r io.Reader) error {
 
 var crc32cTable = crc32.MakeTable(crc32.Castagnoli)
 
+var syncSegmentDirectory = syncDirPath
+
 // ComputeRecordCRC computes CRC32C over the record header + payload.
 func ComputeRecordCRC(rec *Record) uint32 {
 	var buf [RecordHeaderSize]byte
@@ -232,7 +234,8 @@ type SegmentWriter struct {
 	hasLastRecord    bool
 }
 
-// CreateSegment creates a new segment file.
+// CreateSegment creates a new segment file and synchronizes its header and
+// parent directory before returning it for appends.
 func CreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
 	path := filepath.Join(dir, SegmentFileName(startTxID))
 	if err := rejectBootstrapSegmentStart(startTxID, path); err != nil {
@@ -245,17 +248,22 @@ func CreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
 	if err != nil {
 		return nil, err
 	}
-	bw := bufio.NewWriter(f)
-	if err := WriteSegmentHeader(bw); err != nil {
-		f.Close()
-		return nil, err
-	}
-	return &SegmentWriter{
+	sw := &SegmentWriter{
 		file:    f,
-		bw:      bw,
+		bw:      bufio.NewWriter(f),
 		size:    SegmentHeaderSize,
 		startTx: startTxID,
-	}, nil
+	}
+	if err := WriteSegmentHeader(sw.bw); err != nil {
+		return nil, errors.Join(err, f.Close())
+	}
+	if err := sw.Sync(); err != nil {
+		return nil, errors.Join(fmt.Errorf("commitlog: sync new segment %s: %w", path, err), f.Close())
+	}
+	if err := syncSegmentDirectory(dir); err != nil {
+		return nil, errors.Join(fmt.Errorf("commitlog: sync new segment directory %s: %w", dir, err), f.Close())
+	}
+	return sw, nil
 }
 
 func requireCreatableSegmentPath(path string) error {

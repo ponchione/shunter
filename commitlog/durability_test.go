@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,90 @@ import (
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
+
+func TestNewDurabilityWorkerReportsInitialSegmentDirectorySyncFailure(t *testing.T) {
+	syncErr := errors.New("injected initial directory sync failure")
+	stubSegmentDirectorySync(t, func(string) error { return syncErr })
+
+	dw, err := NewDurabilityWorker(t.TempDir(), 1, DefaultCommitLogOptions())
+	if dw != nil {
+		_, _ = dw.Close()
+		t.Fatal("NewDurabilityWorker returned a worker after directory sync failure")
+	}
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("NewDurabilityWorker error = %v, want injected directory sync failure", err)
+	}
+}
+
+func TestDurabilityWorkerLatchesRolloverSegmentDirectorySyncFailure(t *testing.T) {
+	syncErr := errors.New("injected rollover directory sync failure")
+	syncCalls := 0
+	stubSegmentDirectorySync(t, func(string) error {
+		syncCalls++
+		if syncCalls == 2 {
+			return syncErr
+		}
+		return nil
+	})
+
+	opts := DefaultCommitLogOptions()
+	opts.MaxSegmentSize = 1
+	opts.OffsetIndexIntervalBytes = 0
+	opts.OffsetIndexCap = 0
+	dw, err := NewDurabilityWorker(t.TempDir(), 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait := dw.WaitUntilDurable(1)
+	dw.EnqueueCommitted(1, makeDurabilityTestChangeset(1))
+	if txID, ok := <-wait; !ok || txID != 1 {
+		t.Fatalf("durability waiter = (%d, %v), want (1, true)", txID, ok)
+	}
+	finalTxID, closeErr := dw.Close()
+	if finalTxID != 1 {
+		t.Fatalf("final durable tx = %d, want 1", finalTxID)
+	}
+	if !errors.Is(closeErr, syncErr) {
+		t.Fatalf("Close error = %v, want rollover directory sync failure", closeErr)
+	}
+	if syncCalls != 2 {
+		t.Fatalf("directory sync calls = %d, want initial creation and rollover", syncCalls)
+	}
+}
+
+func TestDurabilityWorkerConcurrentCloseReturnsOneStableResult(t *testing.T) {
+	opts := DefaultCommitLogOptions()
+	opts.OffsetIndexIntervalBytes = 0
+	opts.OffsetIndexCap = 0
+	dw, err := NewDurabilityWorker(t.TempDir(), 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(1, makeDurabilityTestChangeset(1))
+
+	const closers = 8
+	type closeResult struct {
+		txID uint64
+		err  error
+	}
+	results := make(chan closeResult, closers)
+	var wg sync.WaitGroup
+	for range closers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			txID, err := dw.Close()
+			results <- closeResult{txID: txID, err: err}
+		}()
+	}
+	wg.Wait()
+	close(results)
+	for result := range results {
+		if result.txID != 1 || result.err != nil {
+			t.Fatalf("concurrent Close result = (%d, %v), want (1, nil)", result.txID, result.err)
+		}
+	}
+}
 
 func makeDurabilityTestChangeset(txID uint64) *store.Changeset {
 	return &store.Changeset{
