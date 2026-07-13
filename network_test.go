@@ -69,6 +69,31 @@ func TestBuildProtocolOptionsRejectsNegativeValues(t *testing.T) {
 	}
 }
 
+func TestStartConfiguresProtocolSQLQueryLimits(t *testing.T) {
+	rt, err := Build(validChatModule(), Config{
+		DataDir:             t.TempDir(),
+		EnableProtocol:      true,
+		ListenAddr:          "127.0.0.1:0",
+		OneOffQueryMaxRows:  123,
+		OneOffQueryMaxBytes: 456,
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	if rt.protocolServer == nil {
+		t.Fatal("protocol server is nil after Start")
+	}
+	want := protocol.SQLQueryLimits{MaxRows: 123, MaxBytes: 456}
+	if got := rt.protocolServer.SQLQueryLimits; got != want {
+		t.Fatalf("SQLQueryLimits = %+v, want %+v", got, want)
+	}
+}
+
 func TestBuildAuthConfigDevGeneratesAnonymousMintConfig(t *testing.T) {
 	jwtCfg, mintCfg, err := buildAuthConfig(Config{AuthMode: AuthModeDev})
 	if err != nil {

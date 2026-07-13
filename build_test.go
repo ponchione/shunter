@@ -12,6 +12,7 @@ import (
 
 	"github.com/ponchione/shunter/commitlog"
 	"github.com/ponchione/shunter/executor"
+	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
@@ -209,14 +210,38 @@ func TestBuildWithBlankDataDirNormalizesToRuntimeDefault(t *testing.T) {
 	if !info.IsDir() {
 		t.Fatalf("default data dir path is not a directory")
 	}
+	if rt.buildConfig.OneOffQueryMaxRows != protocol.DefaultSQLQueryMaxRows {
+		t.Fatalf("OneOffQueryMaxRows = %d, want %d", rt.buildConfig.OneOffQueryMaxRows, protocol.DefaultSQLQueryMaxRows)
+	}
+	if rt.buildConfig.OneOffQueryMaxBytes != protocol.DefaultSQLQueryMaxBytes {
+		t.Fatalf("OneOffQueryMaxBytes = %d, want %d", rt.buildConfig.OneOffQueryMaxBytes, protocol.DefaultSQLQueryMaxBytes)
+	}
+	if rt.buildConfig.SubscriptionInitialRowLimit != defaultSubscriptionInitialRows {
+		t.Fatalf("SubscriptionInitialRowLimit = %d, want %d", rt.buildConfig.SubscriptionInitialRowLimit, defaultSubscriptionInitialRows)
+	}
 }
 
-func TestBuildRejectsNegativeSubscriptionMultiJoinLimits(t *testing.T) {
+func TestBuildRejectsNegativeResourceLimits(t *testing.T) {
 	tests := []struct {
 		name string
 		cfg  Config
 		want string
 	}{
+		{
+			name: "one-off rows",
+			cfg:  Config{DataDir: t.TempDir(), OneOffQueryMaxRows: -1},
+			want: "one-off query max rows must not be negative",
+		},
+		{
+			name: "one-off bytes",
+			cfg:  Config{DataDir: t.TempDir(), OneOffQueryMaxBytes: -1},
+			want: "one-off query max bytes must not be negative",
+		},
+		{
+			name: "subscription initial rows",
+			cfg:  Config{DataDir: t.TempDir(), SubscriptionInitialRowLimit: -1},
+			want: "subscription initial row limit must not be negative",
+		},
 		{
 			name: "relations",
 			cfg:  Config{DataDir: t.TempDir(), SubscriptionMaxMultiJoinRelations: -1},
@@ -232,16 +257,17 @@ func TestBuildRejectsNegativeSubscriptionMultiJoinLimits(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Build(validChatModule(), tt.cfg)
 			if err == nil {
-				t.Fatal("Build returned nil error, want negative multi-join limit rejection")
+				t.Fatal("Build returned nil error, want negative resource limit rejection")
 			}
 			assertErrorContains(t, err, tt.want)
 		})
 	}
 }
 
-func TestStartConfiguresSubscriptionMultiJoinLimits(t *testing.T) {
+func TestStartConfiguresSubscriptionLimits(t *testing.T) {
 	rt, err := Build(validChatModule(), Config{
 		DataDir:                                 t.TempDir(),
+		SubscriptionInitialRowLimit:             128,
 		SubscriptionMaxMultiJoinRelations:       4,
 		SubscriptionMaxMultiJoinRowsPerRelation: 256,
 	})
@@ -255,6 +281,9 @@ func TestStartConfiguresSubscriptionMultiJoinLimits(t *testing.T) {
 
 	if rt.subscriptions == nil {
 		t.Fatal("subscriptions manager is nil after Start")
+	}
+	if rt.subscriptions.InitialRowLimit != 128 {
+		t.Fatalf("InitialRowLimit = %d, want 128", rt.subscriptions.InitialRowLimit)
 	}
 	if rt.subscriptions.MaxMultiJoinRelations != 4 {
 		t.Fatalf("MaxMultiJoinRelations = %d, want 4", rt.subscriptions.MaxMultiJoinRelations)

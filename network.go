@@ -310,13 +310,17 @@ func (r *Runtime) ensureProtocolGraphLocked() error {
 	r.protocolInbox = inbox
 	r.protocolSender = clientSender
 	r.protocolServer = &protocol.Server{
-		JWT:               jwtCfg,
-		Mint:              mintCfg,
-		Options:           opts,
-		Executor:          inbox,
-		Conns:             conns,
-		Schema:            r.registry,
-		State:             committedStateAccess{state: r.state},
+		JWT:      jwtCfg,
+		Mint:     mintCfg,
+		Options:  opts,
+		Executor: inbox,
+		Conns:    conns,
+		Schema:   r.registry,
+		State:    committedStateAccess{state: r.state},
+		SQLQueryLimits: protocol.SQLQueryLimits{
+			MaxRows:  r.buildConfig.OneOffQueryMaxRows,
+			MaxBytes: r.buildConfig.OneOffQueryMaxBytes,
+		},
 		DeclaredReads:     r,
 		Procedures:        r,
 		VisibilityFilters: runtimeProtocolVisibilityFilters(r.module.visibilityFilters),

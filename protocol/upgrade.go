@@ -43,6 +43,9 @@ type Server struct {
 	// State provides read-only snapshot access for OneOffQuery.
 	// Required for OneOffQuery to work.
 	State CommittedStateAccess
+	// SQLQueryLimits bounds raw one-off query results. Zero values use hosted
+	// defaults. Declared-read implementations own their corresponding limits.
+	SQLQueryLimits SQLQueryLimits
 	// DeclaredReads handles named QueryDeclaration and ViewDeclaration
 	// protocol messages. Raw SQL handlers remain wired through Schema/State
 	// and Executor; declared reads use this explicit name-based surface.
@@ -111,6 +114,11 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	options, err := NormalizeProtocolOptions(s.Options)
 	if err != nil {
 		s.writeRejected(w, "invalid protocol options: "+err.Error(), http.StatusInternalServerError, "rejected_internal", err)
+		return
+	}
+	queryLimits, err := NormalizeSQLQueryLimits(s.SQLQueryLimits)
+	if err != nil {
+		s.writeRejected(w, "invalid SQL query limits: "+err.Error(), http.StatusInternalServerError, "rejected_internal", err)
 		return
 	}
 
@@ -276,7 +284,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		// error), which drives the SPEC-005 §5.3 teardown once.
 		dispatchDone := make(chan struct{})
 		keepaliveDone := make(chan struct{})
-		handlers := s.buildMessageHandlers()
+		handlers := s.buildMessageHandlersWithLimits(queryLimits)
 		go func() {
 			c.runDispatchLoop(context.Background(), handlers)
 			close(dispatchDone)
@@ -335,6 +343,14 @@ func (s *Server) recordRejected(result string, err error) {
 // client message type to the appropriate handler function, closing over
 // the Server's dependencies (executor, schema, state).
 func (s *Server) buildMessageHandlers() *MessageHandlers {
+	limits, err := NormalizeSQLQueryLimits(s.SQLQueryLimits)
+	if err != nil {
+		limits = SQLQueryLimits{MaxRows: DefaultSQLQueryMaxRows, MaxBytes: DefaultSQLQueryMaxBytes}
+	}
+	return s.buildMessageHandlersWithLimits(limits)
+}
+
+func (s *Server) buildMessageHandlersWithLimits(queryLimits SQLQueryLimits) *MessageHandlers {
 	handlers := &MessageHandlers{}
 	if s.Executor != nil && s.Schema != nil {
 		handlers.OnSubscribeSingle = func(ctx context.Context, conn *Conn, msg *SubscribeSingleMsg) {
@@ -357,7 +373,7 @@ func (s *Server) buildMessageHandlers() *MessageHandlers {
 	}
 	if s.Schema != nil && s.State != nil {
 		handlers.OnOneOffQuery = func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg) {
-			handleOneOffQueryWithVisibility(ctx, conn, msg, s.State, s.Schema, s.VisibilityFilters)
+			handleOneOffQueryWithVisibilityAndLimits(ctx, conn, msg, s.State, s.Schema, s.VisibilityFilters, queryLimits)
 		}
 	}
 	if s.DeclaredReads != nil {

@@ -11,7 +11,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, stateAccess CommittedStateAccess, resolver schema.IndexResolver) (SQLQueryResult, error) {
+func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, stateAccess CommittedStateAccess, resolver schema.IndexResolver, limits SQLQueryLimits) (SQLQueryResult, error) {
 	multi := query.MultiJoin
 	if multi == nil {
 		return SQLQueryResult{}, fmt.Errorf("multi-join metadata must not be nil")
@@ -21,12 +21,11 @@ func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, st
 
 	rowLimit := oneOffRowLimit(query.Limit)
 	rowOffset := oneOffRowOffset(query.Offset)
-	scanLimit := rowLimit
-	if len(query.OrderBy) != 0 {
-		scanLimit = -1
-	} else {
-		scanLimit = oneOffScanLimit(rowOffset, rowLimit)
+	executionRowLimit, err := oneOffExecutionRowLimit(rowLimit, rowOffset, limits.MaxRows)
+	if err != nil {
+		return SQLQueryResult{}, err
 	}
+	scanLimit := oneOffScanLimit(rowOffset, executionRowLimit)
 	var rows []types.ProductValue
 	if query.Aggregate != nil {
 		aggregateValue, err := evaluateOneOffMultiJoinAggregate(ctx, view, multi, resolver, query.Aggregate)
@@ -36,11 +35,11 @@ func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, st
 		rows = sliceOneOffRows([]types.ProductValue{{aggregateValue}}, rowOffset, rowLimit)
 	} else if rowLimit != 0 {
 		if len(query.OrderBy) != 0 {
-			ordered, err := evaluateOneOffMultiJoinOrderedRows(ctx, view, multi, resolver, query.ProjectionColumns, query.OrderBy)
+			ordered, err := evaluateOneOffMultiJoinOrderedRows(ctx, view, multi, resolver, query.ProjectionColumns, query.OrderBy, scanLimit)
 			if err != nil {
 				return SQLQueryResult{}, err
 			}
-			rows = materializeOrderedOneOffRows(ordered, query.OrderBy, rowOffset, rowLimit)
+			rows = materializeOrderedOneOffRows(ordered, rowOffset, rowLimit)
 		} else {
 			err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
 				rows = append(rows, projectOneOffMultiJoinTuple(tuple, multi, query.ProjectionColumns))
@@ -52,7 +51,8 @@ func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, st
 			rows = sliceOneOffRows(rows, rowOffset, rowLimit)
 		}
 	}
-	return SQLQueryResult{TableName: query.TableName, Columns: multiJoinResultColumns(query, multi), Rows: rows}, nil
+	result := SQLQueryResult{TableName: query.TableName, Columns: multiJoinResultColumns(query, multi), Rows: rows}
+	return result, nil
 }
 
 func multiJoinResultColumns(query compiledSQLQuery, multi *compiledSQLMultiJoin) []schema.ColumnSchema {
@@ -62,8 +62,8 @@ func multiJoinResultColumns(query compiledSQLQuery, multi *compiledSQLMultiJoin)
 	return query.resultColumns(multi.Relations[multi.ProjectedRelation].Schema.Columns)
 }
 
-func evaluateOneOffMultiJoinOrderedRows(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, resolver schema.IndexResolver, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy) ([]orderedOneOffRow, error) {
-	var rows []orderedOneOffRow
+func evaluateOneOffMultiJoinOrderedRows(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, resolver schema.IndexResolver, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy, capacity int) ([]orderedOneOffRow, error) {
+	collector := newOrderedOneOffCollector(orderBy, capacity)
 	var orderErr error
 	err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
 		key, err := orderKeysFromMultiJoinTuple(tuple, orderBy)
@@ -71,10 +71,7 @@ func evaluateOneOffMultiJoinOrderedRows(ctx context.Context, view store.Committe
 			orderErr = err
 			return false
 		}
-		rows = append(rows, orderedOneOffRow{
-			row: projectOneOffMultiJoinTuple(tuple, multi, columns),
-			key: key,
-		})
+		collector.Add(projectOneOffMultiJoinTuple(tuple, multi, columns), key)
 		return true
 	})
 	if err != nil {
@@ -83,7 +80,7 @@ func evaluateOneOffMultiJoinOrderedRows(ctx context.Context, view store.Committe
 	if orderErr != nil {
 		return nil, orderErr
 	}
-	return rows, nil
+	return collector.SortedRows(), nil
 }
 
 func visitOneOffMultiJoinTuples(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, resolver schema.IndexResolver, visit func([]types.ProductValue) bool) error {

@@ -70,6 +70,15 @@ type Config struct {
 	AnonymousTokenAudience string
 	AnonymousTokenTTL      time.Duration
 
+	// OneOffQueryMaxRows caps rows returned by hosted raw and declared queries.
+	// Zero uses protocol.DefaultSQLQueryMaxRows.
+	OneOffQueryMaxRows int
+	// OneOffQueryMaxBytes caps the encoded RowList bytes returned by hosted raw
+	// and declared queries. Zero uses protocol.DefaultSQLQueryMaxBytes.
+	OneOffQueryMaxBytes int
+	// SubscriptionInitialRowLimit caps rows evaluated for an initial or final
+	// subscription snapshot. Zero uses the hosted default.
+	SubscriptionInitialRowLimit int
 	// SubscriptionMaxMultiJoinRelations caps live multi-way join relation
 	// count. Zero leaves the current unlimited behavior.
 	SubscriptionMaxMultiJoinRelations int

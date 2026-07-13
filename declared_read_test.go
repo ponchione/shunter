@@ -287,6 +287,28 @@ func TestCallQueryOverPrivateBaseTableUsesDeclarationPermission(t *testing.T) {
 	}
 }
 
+func TestCallQueryEnforcesHostedResultLimits(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message", insertMessageReducer).
+		Query(QueryDeclaration{
+			Name:        "all_messages",
+			SQL:         "SELECT * FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}), Config{
+		DataDir:             t.TempDir(),
+		OneOffQueryMaxRows:  1,
+		OneOffQueryMaxBytes: 1 << 20,
+	})
+	defer rt.Close()
+	insertMessage(t, rt, "first")
+	insertMessage(t, rt, "second")
+
+	_, err := rt.CallQuery(context.Background(), "all_messages", WithDeclaredReadPermissions("messages:read"))
+	if !errors.Is(err, protocol.ErrSQLQueryResultLimit) {
+		t.Fatalf("CallQuery error = %v, want ErrSQLQueryResultLimit", err)
+	}
+}
+
 func TestDeclaredQueryOrderByDescOffsetLimit(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message", insertMessageReducer).

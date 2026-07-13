@@ -9,6 +9,7 @@ import (
 
 	"github.com/ponchione/shunter/commitlog"
 	"github.com/ponchione/shunter/executor"
+	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
@@ -19,6 +20,7 @@ const (
 	dataDirMode                    = 0o700
 	defaultExecutorQueueCapacity   = 256
 	defaultDurabilityQueueCapacity = 256
+	defaultSubscriptionInitialRows = 100_000
 )
 
 type runtimeBuildPreview struct {
@@ -105,6 +107,15 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	if cfg.DurabilityQueueCapacity < 0 {
 		return Config{}, "", fmt.Errorf("durability queue capacity must not be negative")
 	}
+	if cfg.OneOffQueryMaxRows < 0 {
+		return Config{}, "", fmt.Errorf("one-off query max rows must not be negative")
+	}
+	if cfg.OneOffQueryMaxBytes < 0 {
+		return Config{}, "", fmt.Errorf("one-off query max bytes must not be negative")
+	}
+	if cfg.SubscriptionInitialRowLimit < 0 {
+		return Config{}, "", fmt.Errorf("subscription initial row limit must not be negative")
+	}
 	if cfg.SubscriptionMaxMultiJoinRelations < 0 {
 		return Config{}, "", fmt.Errorf("subscription max multi-join relations must not be negative")
 	}
@@ -130,6 +141,15 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	}
 	if normalized.DurabilityQueueCapacity == 0 {
 		normalized.DurabilityQueueCapacity = defaultDurabilityQueueCapacity
+	}
+	if normalized.OneOffQueryMaxRows == 0 {
+		normalized.OneOffQueryMaxRows = protocol.DefaultSQLQueryMaxRows
+	}
+	if normalized.OneOffQueryMaxBytes == 0 {
+		normalized.OneOffQueryMaxBytes = protocol.DefaultSQLQueryMaxBytes
+	}
+	if normalized.SubscriptionInitialRowLimit == 0 {
+		normalized.SubscriptionInitialRowLimit = defaultSubscriptionInitialRows
 	}
 	return normalized, dataDir, nil
 }

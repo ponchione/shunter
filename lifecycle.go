@@ -175,6 +175,7 @@ func (r *Runtime) Start(ctx context.Context) (startErr error) {
 		r.registry,
 		subscription.WithFanOutInbox(fanOutInbox),
 		subscription.WithObserver(r.observability),
+		subscription.WithInitialRowLimit(r.buildConfig.SubscriptionInitialRowLimit),
 		subscription.WithMaxMultiJoinRelations(r.buildConfig.SubscriptionMaxMultiJoinRelations),
 		subscription.WithMaxMultiJoinRowsPerRelation(r.buildConfig.SubscriptionMaxMultiJoinRowsPerRelation),
 	)
