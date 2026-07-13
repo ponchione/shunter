@@ -145,8 +145,10 @@ Authoritative pins:
 
 Current contract:
 
-- `DefaultOutgoingBufferMessages` is `16 * 1024`.
-- Outbound queue overflow disconnects the client.
+- `DefaultOutgoingBufferMessages` is 1,024 and
+  `DefaultMaxOutboundQueuedBytes` is 65 MiB. These are Shunter resource-safety
+  choices, independent of reference-runtime constants.
+- Exceeding either outbound queue ceiling disconnects the client.
 - Fanout cleanup treats send-buffer overflow as a dropped-client path so
   subscription state is reclaimed.
 - Incoming request backpressure is a Shunter-specific defensive limit and is
@@ -157,7 +159,8 @@ Accepted divergence:
 - The reference lets the socket disappear without a clean close frame.
   Shunter sends WebSocket close code `1008` with reason `send buffer full`.
 
-Reopen only if a real Shunter client requires different lag behavior.
+Reopen only when measured Shunter workloads justify a different count/byte
+budget.
 
 Authoritative pins:
 

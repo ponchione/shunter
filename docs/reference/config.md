@@ -89,6 +89,7 @@ the 4096-byte per-claim and 16384-byte total defaults; negative values fail
 - `WriteTimeout`
 - `DisconnectTimeout`
 - `OutgoingBufferMessages`
+- `MaxOutboundQueuedBytes`
 - `IncomingQueueMessages`
 - `MaxMessageSize`
 - `MaxOutboundMessageSize`
@@ -97,6 +98,9 @@ Zero values use protocol package defaults. Set these only when you are tuning a
 measured serving workload or enforcing an application-specific message limit.
 `WriteTimeout` bounds each server-to-client WebSocket data write, which keeps a
 slow reader from blocking unrelated outbound delivery indefinitely.
+`OutgoingBufferMessages` defaults to 1,024 and `MaxOutboundQueuedBytes`
+defaults to 65 MiB. Exceeding either queue ceiling disconnects the slow client
+before another encoded application frame is retained.
 `MaxOutboundMessageSize` defaults to 64 MiB and caps the uncompressed encoded
 server message before final-frame allocation or optional compression.
 

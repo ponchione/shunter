@@ -843,7 +843,10 @@ Ordering guarantee on one connection:
 
 ### 10.1 Server → Client
 
-The server buffers outgoing messages per-client up to `OutgoingBufferMessages` (default: `16 * 1024` messages). If enqueueing the **next** outbound message would exceed that limit, the server MUST:
+The server buffers outgoing messages per-client up to both
+`OutgoingBufferMessages` (default: 1,024 messages) and
+`MaxOutboundQueuedBytes` (default: 65 MiB of encoded frames). If enqueueing the
+**next** outbound message would exceed either limit, the server MUST:
 1. leave already-queued messages untouched
 2. enqueue or send a Close frame if possible (`1008`, reason: `"send buffer full"`)
 3. stop accepting further outbound application messages for that connection
@@ -910,8 +913,12 @@ type ProtocolOptions struct {
     CloseHandshakeTimeout time.Duration
 
     // OutgoingBufferMessages: max queued outgoing messages per client.
-    // Default: 16 * 1024.
+    // Default: 1024.
     OutgoingBufferMessages int
+
+    // MaxOutboundQueuedBytes: max retained encoded frame bytes per client.
+    // Default: 65 MiB.
+    MaxOutboundQueuedBytes int64
 
     // IncomingQueueMessages: max queued incoming messages per client.
     // Default: 64.
@@ -1041,7 +1048,10 @@ Subscribe and OneOffQuery handlers need to resolve table names to IDs and valida
   token such as `v2.bsatn.shunter` or `v1.bsatn.shunter` (§2.2). Shunter does
   not admit the foreign reference token.
 - **Compression envelope tags:** Shunter uses `0x00` = none, `0x01` = brotli (reserved, unsupported — `ErrBrotliUnsupported`), `0x02` = gzip (§3.3). Negotiated `compression=gzip` applies to post-handshake server messages only; client messages remain uncompressed. Brotli should be implemented only if Shunter clients need it.
-- **Outgoing backpressure limit:** v1 bounds each connection's outbound queue at `OutgoingBufferMessages` with default `16 * 1024` (§10.1, §12). Shunter disconnects lagging clients to keep memory bounded.
+- **Outgoing backpressure limit:** v1 bounds each connection's outbound queue
+  by `OutgoingBufferMessages` (default 1,024) and
+  `MaxOutboundQueuedBytes` (default 65 MiB) (§10.1, §12). Shunter disconnects
+  lagging clients to keep memory bounded.
 - **TransactionUpdate shape:** v1 uses a heavy/light envelope split (§8.5, §8.8). `Failed` collapses Shunter's internal `failed_user`/`failed_panic`/`not_found` distinction onto one arm with the detail carried in the error string.
 - **Subscription RPC surface:** v1 exposes `SubscribeSingle`, `SubscribeMulti`, `UnsubscribeSingle`, `UnsubscribeMulti`, `CallReducer`, `OneOffQuery`, `DeclaredQuery`, and `SubscribeDeclaredView` (§6, §7). V2 adds parameterized declared-read request messages without changing raw SQL request shapes. There is no legacy single `Subscribe` / `Unsubscribe` wire family or separate `QuerySetId` protocol family.
 - **CallReducer wire shape:** v1 `CallReducer` carries `{request_id, reducer_name, args, flags}` (§7.3). The `flags` byte matches the reference `CallReducerFlags` (FullUpdate / NoSuccessNotify); no other flag values are defined in v1.

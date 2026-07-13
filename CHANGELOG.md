@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- WebSocket connections now bound queued outbound frames by both count and
+  retained encoded bytes, apply hosted subscription query limits before SQL
+  compilation, route fatal close codes through one lifecycle owner, and retain
+  concurrent startup, durability-cleanup, HTTP shutdown, serve, and runtime
+  close failures in joined errors.
 - Hosted raw and declared queries now enforce encoded-byte limits while result
   rows are retained across table, join, cross-join, and multi-join execution.
   Ordered top-window heaps track replacement bytes, and the network encoder
