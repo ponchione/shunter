@@ -4,6 +4,18 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Runtime shutdown now cancels and waits for concurrent startup before releasing
+  data-directory ownership. Commit-log segment creation syncs the containing
+  directory before acknowledging durability, and durability-worker shutdown is
+  concurrency-safe and returns a stable result to every caller.
+- Hosted raw and declared SQL results now default to 100,000-row and 64 MiB
+  limits, use bounded top-window retention for ordered queries, and expose
+  `OneOffQueryMaxRows` and `OneOffQueryMaxBytes`. Initial/final subscription
+  snapshots now default to a wired 100,000-row
+  `SubscriptionInitialRowLimit`.
+- Local HS256 verification and anonymous minting now require at least 32-byte
+  secrets. Local RS256 public keys now enforce the same 2048–8192-bit modulus
+  and valid-exponent checks as remote JWKS keys.
 - Added SHA-pinned, read-only GitHub Actions CI with separated Go quality/test,
   focused race, TypeScript package, browser integration, vulnerability, and
   hosted/static gate jobs. A shared, regression-tested whitespace checker

@@ -61,7 +61,8 @@ The handler does not start lifecycle. If you mount it yourself, call
 ## Close
 
 `Runtime.Close()` shuts down runtime-owned resources. It is safe to defer after
-a successful `Build`.
+a successful `Build`. A concurrent `Close` cancels and waits for an in-progress
+`Start` before it returns.
 
 For graceful service shutdown:
 

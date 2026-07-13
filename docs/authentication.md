@@ -42,6 +42,9 @@ Behavior:
 - `AuthSigningKey` validates legacy HS256 JWTs.
 - `AuthVerificationKeys` validates local HS256, RS256, or ES256 keys. RS256 and
   ES256 keys are PEM-encoded public keys or certificates.
+- Local HS256 secrets must be at least 32 bytes. Local and remote RS256 moduli
+  must be between 2048 and 8192 bits. Invalid key material fails startup before
+  protocol traffic is served.
 - `AuthOIDCIssuers` validates RS256 or ES256 tokens against remote JWKS
   documents for configured trusted issuers. Remote JWKS URLs must use HTTPS,
   except loopback HTTP URLs used by local tests and development tooling.
@@ -237,7 +240,7 @@ HS256 path and should not be used for third-party OIDC providers.
 Before deploying strict auth:
 
 1. Set `AuthMode: shunter.AuthModeStrict`.
-2. Provide a strong `AuthSigningKey` for HS256 tokens, configure
+2. Provide an `AuthSigningKey` of at least 32 bytes for HS256 tokens, configure
    `AuthVerificationKeys` for local HS256, RS256, or ES256 verification, or
    configure `AuthOIDCIssuers` for explicit remote RS256/ES256 JWKS
    verification. Use `AuthOIDCDiscoveryIssuers` only when a generic IdP

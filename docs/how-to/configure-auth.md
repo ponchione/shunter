@@ -47,8 +47,9 @@ cfg := shunter.Config{
 }
 ```
 
-The `AuthSigningKey` path validates HS256 JWTs. Tokens must include `iss` and
-`sub`. When configured, issuer and audience are checked.
+The `AuthSigningKey` path validates HS256 JWTs and requires at least 32 bytes of
+key material. Tokens must include `iss` and `sub`. When configured, issuer and
+audience are checked.
 
 For RS256 or ES256 tokens, configure local verification keys instead of an HMAC
 signing key:
@@ -70,8 +71,9 @@ cfg := shunter.Config{
 }
 ```
 
-`KeyID` matches the token header `kid` during local key rotation. Shunter does
-not need a local public key when the issuer exposes a JWKS endpoint:
+RS256 public-key moduli must be between 2048 and 8192 bits. `KeyID` matches the
+token header `kid` during local key rotation. Shunter does not need a local
+public key when the issuer exposes a JWKS endpoint:
 
 ```go
 cfg := shunter.Config{
@@ -303,7 +305,7 @@ The current stable parameter is `:sender`, derived from caller identity.
 ## Production Checklist
 
 - Set `AuthModeStrict` for public protocol serving.
-- Provide a strong `AuthSigningKey` for HS256, configure
+- Provide an `AuthSigningKey` of at least 32 bytes for HS256, configure
   `AuthVerificationKeys` for local HS256/RS256/ES256, or configure
   `AuthOIDCIssuers` for explicit remote RS256/ES256 JWKS verification. Use
   `AuthOIDCDiscoveryIssuers` when a generic IdP discovery document should

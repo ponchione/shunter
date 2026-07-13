@@ -31,8 +31,9 @@ const (
 )
 
 // AuthVerificationKey is one locally configured JWT verification key. Key is
-// an HMAC secret for HS256 and a PEM-encoded public key or certificate for
-// RS256/ES256. KeyID optionally matches the token header's `kid` value.
+// an HMAC secret of at least 32 bytes for HS256 and a PEM-encoded public key or
+// certificate for RS256/ES256. KeyID optionally matches the token header's
+// `kid` value.
 type AuthVerificationKey = auth.JWTVerificationKey
 
 // AuthOIDCIssuer configures remote JWKS verification for one trusted OIDC/JWT
@@ -56,6 +57,8 @@ type Config struct {
 	ListenAddr              string
 	AuthMode                AuthMode
 
+	// AuthSigningKey is the legacy HS256 signing/verification secret. Non-empty
+	// keys must be at least 32 bytes.
 	AuthSigningKey           []byte
 	AuthVerificationKeys     []AuthVerificationKey
 	AuthOIDCIssuers          []AuthOIDCIssuer
@@ -71,13 +74,13 @@ type Config struct {
 	AnonymousTokenTTL      time.Duration
 
 	// OneOffQueryMaxRows caps rows returned by hosted raw and declared queries.
-	// Zero uses protocol.DefaultSQLQueryMaxRows.
+	// Zero uses 100,000 rows.
 	OneOffQueryMaxRows int
 	// OneOffQueryMaxBytes caps the encoded RowList bytes returned by hosted raw
-	// and declared queries. Zero uses protocol.DefaultSQLQueryMaxBytes.
+	// and declared queries. Zero uses 64 MiB.
 	OneOffQueryMaxBytes int
 	// SubscriptionInitialRowLimit caps rows evaluated for an initial or final
-	// subscription snapshot. Zero uses the hosted default.
+	// subscription snapshot. Zero uses 100,000 rows.
 	SubscriptionInitialRowLimit int
 	// SubscriptionMaxMultiJoinRelations caps live multi-way join relation
 	// count. Zero leaves the current unlimited behavior.

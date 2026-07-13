@@ -13,19 +13,23 @@ intent for the root runtime config.
 | `EnableProtocol` | Enables WebSocket protocol serving. | Set true for external protocol clients. |
 | `ListenAddr` | Address used by `Runtime.ListenAndServe`. | Set when Shunter owns the HTTP server lifecycle. |
 | `AuthMode` | Development or strict auth behavior. | Use zero-value dev mode for local work, strict mode for public serving. |
+| `OneOffQueryMaxRows` | Hosted raw and declared query result-row limit. | Zero uses 100,000 rows. Set lower for public or memory-constrained services. |
+| `OneOffQueryMaxBytes` | Hosted raw and declared query encoded row-list limit. | Zero uses 64 MiB. Set lower to bound response allocation. |
+| `SubscriptionInitialRowLimit` | Initial and final subscription snapshot row limit. | Zero uses 100,000 rows. Set from the largest measured legitimate snapshot. |
 | `SubscriptionMaxMultiJoinRelations` | Optional live multi-way join relation-count limit. | Leave zero for compatibility; set before admitting untrusted/high-cardinality live views. |
 | `SubscriptionMaxMultiJoinRowsPerRelation` | Optional committed input-row limit for each live multi-way join relation. | Leave zero for compatibility; set from measured production envelopes. |
 
 Zero queue capacities are normalized to conservative non-zero defaults by the
-runtime. Zero subscription multi-way join limits mean unlimited. Negative
-subscription multi-way join limits are rejected during `Build`.
+runtime. Zero query and initial-snapshot limits use the defaults above; zero
+subscription multi-way join limits mean unlimited. Negative resource limits are
+rejected during `Build`.
 
 ## Auth Fields
 
 | Field | Purpose |
 | --- | --- |
-| `AuthSigningKey` | Legacy HS256 token signing/verification key. Required for strict protocol serving unless `AuthVerificationKeys`, `AuthOIDCIssuers`, or `AuthOIDCDiscoveryIssuers` is configured. |
-| `AuthVerificationKeys` | Local JWT verification keys for HS256, RS256, or ES256, with optional `KeyID`/`kid` matching for rotation. |
+| `AuthSigningKey` | Legacy HS256 token signing/verification key of at least 32 bytes. Required for strict protocol serving unless `AuthVerificationKeys`, `AuthOIDCIssuers`, or `AuthOIDCDiscoveryIssuers` is configured. |
+| `AuthVerificationKeys` | Local JWT verification keys for HS256, RS256, or ES256, with optional `KeyID`/`kid` matching for rotation. HS256 secrets require at least 32 bytes; RS256 moduli require 2048–8192 bits. |
 | `AuthOIDCIssuers` | Explicit remote JWKS verification sources for RS256 or ES256 JWTs. This config supplies keys, not issuer/audience policy. |
 | `AuthOIDCDiscoveryIssuers` | Generic OIDC discovery-document sources that resolve to JWKS verification sources. This config supplies keys, not issuer/audience policy. |
 | `AuthIssuers` | Accepted JWT issuer values when non-empty. |

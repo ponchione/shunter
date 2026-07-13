@@ -227,6 +227,14 @@ Current read compatibility by surface:
   access. `Runtime.CallQuery` and `Runtime.SubscribeView` are the local
   declared-read APIs.
 
+Hosted raw and declared query results are capped by
+`Config.OneOffQueryMaxRows` and `Config.OneOffQueryMaxBytes`. Their zero values
+use 100,000 rows and a 64 MiB encoded row list. A client `LIMIT` cannot override
+these host limits, and ordered queries retain only the bounded top window while
+scanning. Initial and final subscription snapshots are separately capped by
+`Config.SubscriptionInitialRowLimit`, whose zero value is 100,000 rows. Lower
+these limits for untrusted or memory-constrained deployments.
+
 Aggregate reads currently accept `COUNT(*)`, `COUNT(column)`,
 `COUNT(DISTINCT column)`, and `SUM(column)`. `COUNT` results are non-null
 `Uint64`; `COUNT(column)` and `COUNT(DISTINCT column)` ignore null argument

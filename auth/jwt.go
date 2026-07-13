@@ -54,9 +54,10 @@ const (
 
 // JWTVerificationKey is one locally configured JWT verification key.
 //
-// Key is an HMAC secret for HS256 and a PEM-encoded public key or certificate
-// for RS256/ES256. KeyID optionally matches the token header's `kid` value for
-// overlapping key rotation.
+// Key is an HMAC secret of at least 32 bytes for HS256 and a PEM-encoded public
+// key or certificate for RS256/ES256. RS256 moduli must be 2048-8192 bits.
+// KeyID optionally matches the token header's `kid` value for overlapping key
+// rotation.
 type JWTVerificationKey struct {
 	Algorithm JWTAlgorithm
 	KeyID     string
@@ -89,7 +90,8 @@ type OIDCDiscoveryConfig struct {
 
 // JWTConfig is the engine-level auth configuration. SigningKey
 // is the legacy HS256 verification key and remains supported for anonymous
-// token minting and existing strict-mode configuration. VerificationKeys adds
+// token minting and existing strict-mode configuration; it must be at least 32
+// bytes when present. VerificationKeys adds
 // explicit local verification keys for HS256, RS256, and ES256. JWKS adds
 // explicit remote RS256/ES256 verification keys. OIDCDiscovery resolves
 // discovery documents into JWKS verification sources on demand.

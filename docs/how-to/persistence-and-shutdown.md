@@ -59,7 +59,9 @@ if err := rt.Close(); err != nil {
 ```
 
 `Close` shuts down runtime-owned lifecycle, durability, executor,
-subscription, and protocol resources.
+subscription, and protocol resources. If called during `Start`, it cancels and
+waits for startup before returning, so offline tooling may safely use `Close` as
+the data-directory ownership boundary.
 
 ## Snapshot And Compaction
 

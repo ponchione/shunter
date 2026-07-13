@@ -15,7 +15,8 @@ var readRandom = rand.Read
 
 // MintConfig is the engine-level configuration for anonymous-mode
 // token minting (SPEC-005 §4.2). Deployment chooses issuer, audience,
-// signing key, and expiry policy; Shunter does not impose defaults.
+// signing key, and expiry policy; Shunter does not impose defaults. SigningKey
+// must contain at least 32 bytes.
 type MintConfig struct {
 	Issuer     string
 	Audience   string
