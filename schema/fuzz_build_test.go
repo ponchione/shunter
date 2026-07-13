@@ -16,6 +16,7 @@ const (
 func FuzzBuildPreviewRegistryExport(f *testing.F) {
 	for _, seed := range [][]byte{
 		nil,
+		[]byte("2"),
 		[]byte{0, 1, 2, 3, 4, 5},
 		[]byte("schema-build-public-surface"),
 		[]byte{13, 21, 34, 55, 89, 144, 233},
@@ -284,15 +285,21 @@ func assertSchemaBuildFuzzRegistry(t *testing.T, reg SchemaRegistry, export *Sch
 			t.Fatalf("%s operation=Registry.ColumnExists(%d,%d) observed=true expected=false",
 				label, id, len(table.Columns))
 		}
+		expectedIndexIDs := make(map[types.ColID]IndexID)
 		for _, idx := range table.Indexes {
 			if len(idx.Columns) != 1 {
 				continue
 			}
 			colID := types.ColID(idx.Columns[0])
+			if _, exists := expectedIndexIDs[colID]; !exists {
+				expectedIndexIDs[colID] = idx.ID
+			}
+		}
+		for colID, expectedID := range expectedIndexIDs {
 			gotID, ok := reg.IndexIDForColumn(id, colID)
-			if !ok || gotID != idx.ID || !reg.HasIndex(id, colID) {
+			if !ok || gotID != expectedID || !reg.HasIndex(id, colID) {
 				t.Fatalf("%s operation=Registry.IndexIDForColumn(%d,%d) observed=(%d,%v,%v) expected=(%d,true,true)",
-					label, id, colID, gotID, ok, reg.HasIndex(id, colID), idx.ID)
+					label, id, colID, gotID, ok, reg.HasIndex(id, colID), expectedID)
 			}
 		}
 
