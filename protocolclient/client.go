@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/ponchione/websocket"
@@ -35,12 +36,24 @@ type Options struct {
 }
 
 // Client is a small Shunter protocol client for admin and maintenance tooling.
+// Typed request methods serialize their wire operations; asynchronous
+// subscription messages encountered while awaiting a direct response are
+// preserved for the next Read call.
 type Client struct {
-	conn      *websocket.Conn
-	nextID    atomic.Uint32
-	identity  protocol.IdentityToken
-	subproto  string
-	closeDone atomic.Bool
+	conn        *websocket.Conn
+	nextID      atomic.Uint32
+	identity    protocol.IdentityToken
+	subproto    string
+	closeDone   atomic.Bool
+	operationMu sync.Mutex
+	writeMu     sync.Mutex
+	readMu      sync.Mutex
+	pending     []queuedServerMessage
+}
+
+type queuedServerMessage struct {
+	tag uint8
+	msg any
 }
 
 // Dial connects to a Shunter protocol endpoint and reads the initial identity frame.
@@ -133,6 +146,8 @@ func (c *Client) Send(ctx context.Context, msg any) error {
 	if err != nil {
 		return err
 	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	if err := c.conn.Write(ctx, websocket.MessageBinary, frame); err != nil {
 		return classifyContextError(ctx, err)
 	}
@@ -141,8 +156,19 @@ func (c *Client) Send(ctx context.Context, msg any) error {
 
 // Read reads and decodes one server protocol message.
 func (c *Client) Read(ctx context.Context) (uint8, any, error) {
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+	return c.readNextLocked(ctx)
+}
+
+func (c *Client) readNextLocked(ctx context.Context) (uint8, any, error) {
 	if c == nil || c.conn == nil {
 		return 0, nil, errors.New("protocol client is closed")
+	}
+	if len(c.pending) > 0 {
+		next := c.pending[0]
+		c.pending = c.pending[1:]
+		return next.tag, next.msg, nil
 	}
 	ctx = contextOrBackground(ctx)
 	typ, frame, err := c.conn.Read(ctx)
@@ -157,6 +183,30 @@ func (c *Client) Read(ctx context.Context) (uint8, any, error) {
 		return 0, nil, fmt.Errorf("%w: %w", ErrUnexpectedMessage, err)
 	}
 	return tag, msg, nil
+}
+
+// readSynchronousResponse skips and preserves asynchronous subscription
+// messages while one serialized request waits for its direct response.
+func (c *Client) readSynchronousResponse(ctx context.Context) (uint8, any, error) {
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+	var deferred []queuedServerMessage
+	defer func() {
+		if len(deferred) > 0 {
+			c.pending = append(deferred, c.pending...)
+		}
+	}()
+	for {
+		tag, msg, err := c.readNextLocked(ctx)
+		if err != nil {
+			return 0, nil, err
+		}
+		if tag == protocol.TagTransactionUpdateLight || tag == protocol.TagSubscriptionError {
+			deferred = append(deferred, queuedServerMessage{tag: tag, msg: msg})
+			continue
+		}
+		return tag, msg, nil
+	}
 }
 
 // Close gracefully closes the WebSocket connection once.

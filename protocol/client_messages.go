@@ -60,6 +60,7 @@ type DeclaredQueryWithParametersMsg struct {
 }
 
 // CallProcedureMsg invokes a module-owned procedure with raw BSATN arguments.
+// It is a v2-only request message.
 type CallProcedureMsg struct {
 	MessageID []byte
 	Name      string
@@ -220,7 +221,7 @@ func DecodeClientMessage(frame []byte) (uint8, any, error) {
 
 // DecodeClientMessageForVersion parses a wire frame for a negotiated protocol
 // version into its concrete message type. V2 accepts all V1 request messages
-// plus the V2-only parameterized declared-read request messages.
+// plus the V2-only parameterized declared-read and procedure messages.
 func DecodeClientMessageForVersion(version ProtocolVersion, frame []byte) (uint8, any, error) {
 	if len(frame) < 1 {
 		return 0, nil, fmt.Errorf("%w: empty frame", ErrMalformedMessage)

@@ -3,11 +3,17 @@ package shunter
 import (
 	"context"
 	"errors"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/ponchione/websocket"
 
 	"github.com/ponchione/shunter/commitlog"
+	"github.com/ponchione/shunter/protocol"
+	"github.com/ponchione/shunter/schema"
 )
 
 func TestRuntimeInitialHealthIsBuiltAndNotReady(t *testing.T) {
@@ -112,6 +118,75 @@ func TestRuntimeCloseIsIdempotent(t *testing.T) {
 	}
 	if err := rt.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
+	}
+}
+
+func TestRuntimeCloseWaitsForAndCompensatesBlockedProtocolAdmission(t *testing.T) {
+	onConnectEntered := make(chan struct{})
+	releaseOnConnect := make(chan struct{})
+	rt, err := Build(validChatModule().OnConnect(func(*schema.ReducerContext) error {
+		close(onConnectEntered)
+		<-releaseOnConnect
+		return nil
+	}), Config{DataDir: t.TempDir(), EnableProtocol: true})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	state := rt.state
+	sysClientsID, _, ok := rt.registry.TableByName("sys_clients")
+	if !ok {
+		t.Fatal("sys_clients table missing")
+	}
+
+	server := httptest.NewServer(rt.HTTPHandler())
+	defer server.Close()
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelDial()
+	client, _, err := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(server.URL, "http")+"/subscribe", &websocket.DialOptions{
+		Subprotocols: []string{protocol.SubprotocolV2},
+	})
+	if err != nil {
+		t.Fatalf("dial protocol: %v", err)
+	}
+	defer client.CloseNow()
+	select {
+	case <-onConnectEntered:
+	case <-time.After(time.Second):
+		t.Fatal("protocol admission did not enter OnConnect")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- rt.Close() }()
+	readCtx, cancelRead := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelRead()
+	if _, _, err := client.Read(readCtx); err == nil {
+		t.Fatal("admitting connection received a frame instead of closing at the runtime barrier")
+	}
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Runtime.Close returned before OnConnect completed: %v", err)
+	default:
+	}
+
+	close(releaseOnConnect)
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Runtime.Close: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Runtime.Close did not wait for admission compensation")
+	}
+	if got := rt.Health().State; got != RuntimeStateClosed {
+		t.Fatalf("runtime state = %q, want closed", got)
+	}
+	snapshot := state.Snapshot()
+	defer snapshot.Close()
+	if got := snapshot.RowCount(sysClientsID); got != 0 {
+		t.Fatalf("sys_clients rows after runtime shutdown = %d, want 0", got)
 	}
 }
 

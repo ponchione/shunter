@@ -180,14 +180,28 @@ func (r *Runtime) CallReducer(ctx context.Context, reducerName string, args []by
 	if !callOpts.permissionsSet && !callOpts.allowAllSet && r != nil && r.buildConfig.AuthMode == AuthModeDev {
 		callOpts.caller.AllowAllPermissions = true
 	}
-	return r.callReducerWithCallerAndRequest(ctx, reducerName, args, callOpts.caller, callOpts.requestID)
+	return r.callReducerWithCallerAndRequest(ctx, reducerName, args, callOpts.caller, callOpts.requestID, false, nil)
 }
 
-func (r *Runtime) callReducerWithCaller(ctx context.Context, reducerName string, args []byte, caller types.CallerContext) (ReducerResult, error) {
-	return r.callReducerWithCallerAndRequest(ctx, reducerName, args, caller, 0)
+func (r *Runtime) callReducerFromProcedure(
+	ctx context.Context,
+	reducerName string,
+	args []byte,
+	caller types.CallerContext,
+	deliveryReady <-chan struct{},
+) (ReducerResult, error) {
+	return r.callReducerWithCallerAndRequest(ctx, reducerName, args, caller, 0, true, deliveryReady)
 }
 
-func (r *Runtime) callReducerWithCallerAndRequest(ctx context.Context, reducerName string, args []byte, caller types.CallerContext, requestID uint32) (ReducerResult, error) {
+func (r *Runtime) callReducerWithCallerAndRequest(
+	ctx context.Context,
+	reducerName string,
+	args []byte,
+	caller types.CallerContext,
+	requestID uint32,
+	suppressCallerOutcome bool,
+	deliveryReady <-chan struct{},
+) (ReducerResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -207,7 +221,9 @@ func (r *Runtime) callReducerWithCallerAndRequest(ctx context.Context, reducerNa
 			RequestID:   requestID,
 			Source:      executor.CallSourceExternal,
 		},
-		ResponseCh: responseCh,
+		ResponseCh:            responseCh,
+		SuppressCallerOutcome: suppressCallerOutcome,
+		DeliveryReady:         deliveryReady,
 	}
 	if err := exec.SubmitWithContext(ctx, cmd); err != nil {
 		return ReducerResult{}, err

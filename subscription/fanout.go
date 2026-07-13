@@ -40,6 +40,12 @@ type FanOutMessage struct {
 	// adapter) owns the caller's heavy reply and FanOutMessage only needs
 	// CallerConnID to suppress the caller's light echo.
 	CallerOutcome *CallerOutcome
+
+	// DeliveryBarrierConnID and DeliveryReady delay delivery to one connection
+	// until a correlated direct response has been queued. Other recipients are
+	// unaffected.
+	DeliveryBarrierConnID *types.ConnectionID
+	DeliveryReady         <-chan struct{}
 }
 
 // PostCommitMeta carries executor-owned delivery metadata into the
@@ -59,7 +65,9 @@ type PostCommitMeta struct {
 	// fanout map entry that would be delivered to the caller connection.
 	// EvalAndBroadcast invokes it synchronously on the executor goroutine
 	// before enqueueing the FanOutMessage.
-	CaptureCallerUpdates func([]SubscriptionUpdate)
+	CaptureCallerUpdates  func([]SubscriptionUpdate)
+	DeliveryBarrierConnID *types.ConnectionID
+	DeliveryReady         <-chan struct{}
 }
 
 // SubscriptionError is the evaluation-failure payload queued for clients.

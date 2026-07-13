@@ -52,6 +52,7 @@ type Conn struct {
 	disconnectRequestOnce sync.Once
 	disconnectRequested   chan struct{}
 	disconnectRequest     connectionTermination
+	transportCloseOnce    sync.Once
 
 	// lastActivity is the unix-nanos timestamp of the most recent
 	// inbound signal observed on this connection: a Pong reply to
@@ -140,11 +141,13 @@ func (c *Conn) MarkActivity() {
 // ConnectionID. Used by cross-connection operations such as the
 // subscription fan-out delivery worker (fan-out integration).
 type ConnManager struct {
-	mu       sync.RWMutex
-	conns    map[types.ConnectionID]*Conn
-	reserved map[types.ConnectionID]*Conn
-	accepted atomic.Uint64
-	rejected atomic.Uint64
+	mu         sync.RWMutex
+	conns      map[types.ConnectionID]*Conn
+	reserved   map[types.ConnectionID]*Conn
+	closing    bool
+	admissions sync.WaitGroup
+	accepted   atomic.Uint64
+	rejected   atomic.Uint64
 }
 
 // NewConnManager returns an empty ConnManager.
@@ -179,6 +182,9 @@ func (m *ConnManager) reserve(conn *Conn) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.closing {
+		return ErrConnectionManagerClosed
+	}
 	if existing := m.conns[conn.ID]; existing != nil && existing != conn && !connIsClosed(existing) {
 		return ErrConnectionIDInUse
 	}
@@ -186,18 +192,20 @@ func (m *ConnManager) reserve(conn *Conn) error {
 		return ErrConnectionIDInUse
 	}
 	m.reserved[conn.ID] = conn
+	m.admissions.Add(1)
 	return nil
 }
 
-func (m *ConnManager) releaseReservation(conn *Conn) {
+func (m *ConnManager) finishAdmission(conn *Conn) {
 	if m == nil || conn == nil {
 		return
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.reserved[conn.ID] == conn {
 		delete(m.reserved, conn.ID)
 	}
+	m.mu.Unlock()
+	m.admissions.Done()
 }
 
 // Add registers conn in the manager. A duplicate live or admitting
@@ -211,6 +219,10 @@ func (m *ConnManager) Add(conn *Conn) error {
 		return ErrZeroConnectionID
 	}
 	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		return ErrConnectionManagerClosed
+	}
 	if existing := m.conns[conn.ID]; existing != nil && existing != conn && !connIsClosed(existing) {
 		m.mu.Unlock()
 		return ErrConnectionIDInUse
@@ -280,12 +292,21 @@ func (m *ConnManager) CloseAll(ctx context.Context, inbox ExecutorInbox) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	m.mu.RLock()
+	m.mu.Lock()
+	m.closing = true
 	conns := make([]*Conn, 0, len(m.conns))
 	for _, c := range m.conns {
 		conns = append(conns, c)
 	}
-	m.mu.RUnlock()
+	reserved := make([]*Conn, 0, len(m.reserved))
+	for _, c := range m.reserved {
+		reserved = append(reserved, c)
+	}
+	m.mu.Unlock()
+
+	for _, c := range reserved {
+		c.closeTransport(CloseNormal, CloseReasonServerShutdown)
+	}
 
 	var wg sync.WaitGroup
 	for _, c := range conns {
@@ -298,4 +319,5 @@ func (m *ConnManager) CloseAll(ctx context.Context, inbox ExecutorInbox) {
 		}(c)
 	}
 	wg.Wait()
+	m.admissions.Wait()
 }

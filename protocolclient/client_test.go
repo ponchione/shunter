@@ -69,6 +69,101 @@ func TestClientNextRequestIDSkipsZeroAfterWrap(t *testing.T) {
 	}
 }
 
+func TestClientConcurrentProcedureAndReducerPreserveInterleavedLightUpdate(t *testing.T) {
+	procedureReceived := make(chan struct{})
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
+			return
+		}
+		procedure, ok := msg.(protocol.CallProcedureMsg)
+		if !ok {
+			t.Errorf("first client message = %T, want CallProcedureMsg", msg)
+			return
+		}
+		close(procedureReceived)
+		writeProtocolClientServerMessage(t, ws, protocol.TransactionUpdateLight{
+			RequestID: 0,
+			Update:    []protocol.SubscriptionUpdate{{QueryID: 77, TableName: "messages"}},
+		})
+		writeProtocolClientServerMessage(t, ws, protocol.ProcedureResponse{
+			MessageID: procedure.MessageID,
+			Result:    []byte("procedure-ok"),
+		})
+
+		msg, ok = readProtocolClientMessage(t, r, ws)
+		if !ok {
+			return
+		}
+		reducer, ok := msg.(protocol.CallReducerMsg)
+		if !ok {
+			t.Errorf("second client message = %T, want CallReducerMsg", msg)
+			return
+		}
+		writeProtocolClientServerMessage(t, ws, protocol.TransactionUpdate{
+			Status: protocol.StatusCommitted{},
+			ReducerCall: protocol.ReducerCallInfo{
+				ReducerName: reducer.ReducerName,
+				RequestID:   reducer.RequestID,
+			},
+		})
+		<-r.Context().Done()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	client, _, err := Dial(ctx, Options{URL: srv.wsURL(), Token: "operator-token"})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer closeProtocolClientTestClient(t, client)
+
+	procedureResult := make(chan protocol.ProcedureResponse, 1)
+	procedureErr := make(chan error, 1)
+	go func() {
+		response, err := client.CallProcedure(ctx, "refresh", nil)
+		procedureResult <- response
+		procedureErr <- err
+	}()
+	select {
+	case <-procedureReceived:
+	case <-ctx.Done():
+		t.Fatalf("server did not receive procedure: %v", ctx.Err())
+	}
+	reducerResult := make(chan protocol.TransactionUpdate, 1)
+	reducerErr := make(chan error, 1)
+	go func() {
+		response, err := client.CallReducer(ctx, "send", nil)
+		reducerResult <- response
+		reducerErr <- err
+	}()
+
+	if err := <-procedureErr; err != nil {
+		t.Fatalf("CallProcedure: %v", err)
+	}
+	if got := <-procedureResult; string(got.Result) != "procedure-ok" {
+		t.Fatalf("procedure result = %q, want procedure-ok", got.Result)
+	}
+	if err := <-reducerErr; err != nil {
+		t.Fatalf("CallReducer: %v", err)
+	}
+	if got := <-reducerResult; got.ReducerCall.ReducerName != "send" {
+		t.Fatalf("reducer response = %+v, want send", got.ReducerCall)
+	}
+	tag, msg, err := client.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read preserved light update: %v", err)
+	}
+	light, ok := msg.(protocol.TransactionUpdateLight)
+	if tag != protocol.TagTransactionUpdateLight || !ok || len(light.Update) != 1 || light.Update[0].QueryID != 77 {
+		t.Fatalf("preserved message = tag %d %T %+v, want light query 77", tag, msg, msg)
+	}
+}
+
 func TestClientCloseDeadlineBoundsNonCooperatingPeer(t *testing.T) {
 	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		ws := acceptProtocolClientTestConn(t, w, r)

@@ -128,7 +128,7 @@ type OneOffQueryResponse struct {
 	TotalHostExecutionDuration int64
 }
 
-// ProcedureResponse is the server reply to CallProcedure.
+// ProcedureResponse is the v2 server reply to CallProcedure.
 type ProcedureResponse struct {
 	MessageID                  []byte
 	Error                      *string

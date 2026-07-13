@@ -1574,6 +1574,61 @@ sockets[0].message(procedureResponseFrameFor({
 assert.deepEqual(await procedureCall, new Uint8Array([0xde, 0xad]));
 sockets[0].sent.length = 0;
 
+const procedureReducerSockets = [];
+const procedureReducerClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/procedure-reducer",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    procedureReducerSockets.push(socket);
+    return socket;
+  },
+});
+const procedureReducerConnecting = procedureReducerClient.connect();
+await nextTurn();
+procedureReducerSockets[0].open();
+procedureReducerSockets[0].message(identityTokenFrame().buffer);
+await procedureReducerConnecting;
+const procedureReducerSubscription = procedureReducerClient.subscribeTable("users", undefined, {
+  requestId: 0x11121314,
+  queryId: 0x01020304,
+  returnHandle: true,
+  decodeRow: (row) => [...row].join("-"),
+});
+procedureReducerSockets[0].message(subscribeSingleAppliedFrameFor({
+  requestId: 0x11121314,
+  queryId: 0x01020304,
+  rows: rowListFrameFor([]),
+}).buffer);
+const procedureReducerHandle = await procedureReducerSubscription;
+const concurrentProcedure = procedureReducerClient.callProcedure("refresh", new Uint8Array(), {
+  requestId: 0x01020304,
+});
+const concurrentReducer = procedureReducerClient.callReducer("send", new Uint8Array([0xaa, 0xbb]), {
+  requestId: 0x21222324,
+});
+procedureReducerSockets[0].message(procedureResponseFrameFor({
+  messageId: new Uint8Array([0x04, 0x03, 0x02, 0x01]),
+  result: new Uint8Array([0xfe]),
+}).buffer);
+assert.deepEqual(await concurrentProcedure, new Uint8Array([0xfe]));
+procedureReducerSockets[0].message(transactionUpdateLightFrameFor({
+  requestId: 0,
+  updates: [{
+    queryId: 0x01020304,
+    tableName: "users",
+    inserts: [new Uint8Array([0x09])],
+  }],
+}).buffer);
+assert.deepEqual(procedureReducerHandle.state, { status: "active", rows: ["9"] });
+procedureReducerSockets[0].message(committedUpdateFrame.buffer);
+assert.deepEqual(await concurrentReducer, committedUpdateFrame);
+assert.deepEqual(procedureReducerHandle.state, {
+  status: "active",
+  rows: ["9", "1-2", "3"],
+});
+await procedureReducerClient.close();
+
 const concurrentConnectSockets = [];
 const concurrentConnectClient = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe",

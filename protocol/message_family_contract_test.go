@@ -170,6 +170,18 @@ func TestShunterParameterizedDeclaredReadShapes(t *testing.T) {
 	}
 }
 
+func TestShunterProcedureMessageShapes(t *testing.T) {
+	requestFields := msgFieldNames(CallProcedureMsg{})
+	if diff := cmp.Diff([]string{"MessageID", "Name", "Args"}, requestFields); diff != "" {
+		t.Fatalf("CallProcedureMsg fields mismatch (-want +got):\n%s", diff)
+	}
+
+	responseFields := msgFieldNames(ProcedureResponse{})
+	if diff := cmp.Diff([]string{"MessageID", "Error", "Result", "TotalHostExecutionDuration"}, responseFields); diff != "" {
+		t.Fatalf("ProcedureResponse fields mismatch (-want +got):\n%s", diff)
+	}
+}
+
 // TestShunterUnsubscribeMultiShape pins the new single/multi variant envelope.
 // Reference: UnsubscribeMulti { request_id, query_id } at
 // reference tree crates/client-api-messages/src/websocket/v1.rs:229.
@@ -275,6 +287,7 @@ func TestShunterTagByteStability(t *testing.T) {
 		{"TagSubscribeDeclaredView", TagSubscribeDeclaredView, 8},
 		{"TagDeclaredQueryWithParameters", TagDeclaredQueryWithParameters, 9},
 		{"TagSubscribeDeclaredViewWithParameters", TagSubscribeDeclaredViewWithParameters, 10},
+		{"TagCallProcedure", TagCallProcedure, 11},
 		{"TagIdentityToken", TagIdentityToken, 1},
 		{"TagSubscribeSingleApplied", TagSubscribeSingleApplied, 2},
 		{"TagUnsubscribeSingleApplied", TagUnsubscribeSingleApplied, 3},
@@ -285,6 +298,7 @@ func TestShunterTagByteStability(t *testing.T) {
 		{"TagTransactionUpdateLight", TagTransactionUpdateLight, 8},
 		{"TagSubscribeMultiApplied", TagSubscribeMultiApplied, 9},
 		{"TagUnsubscribeMultiApplied", TagUnsubscribeMultiApplied, 10},
+		{"TagProcedureResponse", TagProcedureResponse, 11},
 	}
 	for _, c := range cases {
 		if c.got != c.want {

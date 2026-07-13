@@ -272,6 +272,96 @@ func TestRunLifecycleRejectsLiveDuplicateConnectionIDBeforeOnConnect(t *testing.
 	}
 }
 
+type blockedAdmissionInbox struct {
+	*fakeInbox
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *blockedAdmissionInbox) OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity, principal types.AuthPrincipal) error {
+	close(b.started)
+	<-b.release
+	return b.fakeInbox.OnConnect(ctx, connID, identity, principal)
+}
+
+func TestCloseAllRejectsAndCleansAdmissionAcrossShutdownBarrier(t *testing.T) {
+	inbox := &blockedAdmissionInbox{
+		fakeInbox: &fakeInbox{},
+		started:   make(chan struct{}),
+		release:   make(chan struct{}),
+	}
+	mgr := NewConnManager()
+	opts := DefaultProtocolOptions()
+	conn, _, cleanup := loopbackConn(t, opts)
+	defer cleanup()
+
+	lifecycleDone := make(chan error, 1)
+	go func() {
+		lifecycleDone <- conn.RunLifecycle(context.Background(), inbox, mgr)
+	}()
+	select {
+	case <-inbox.started:
+	case <-time.After(time.Second):
+		t.Fatal("RunLifecycle did not enter OnConnect")
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		mgr.CloseAll(context.Background(), inbox)
+		close(closeDone)
+	}()
+	barrierDeadline := time.Now().Add(time.Second)
+	for {
+		mgr.mu.RLock()
+		closing := mgr.closing
+		mgr.mu.RUnlock()
+		if closing {
+			break
+		}
+		if time.Now().After(barrierDeadline) {
+			t.Fatal("CloseAll did not establish its admission barrier")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case <-closeDone:
+		t.Fatal("CloseAll returned before the reserved admission completed")
+	default:
+	}
+
+	close(inbox.release)
+	if err := <-lifecycleDone; !errors.Is(err, ErrConnectionManagerClosed) {
+		t.Fatalf("RunLifecycle error = %v, want ErrConnectionManagerClosed", err)
+	}
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("CloseAll did not wait for compensating admission cleanup")
+	}
+
+	if got := mgr.ActiveCount(); got != 0 {
+		t.Fatalf("ActiveCount = %d, want 0", got)
+	}
+	if got := mgr.AcceptedCount(); got != 0 {
+		t.Fatalf("AcceptedCount = %d, want 0", got)
+	}
+	onDisconnect, disconnectSubs, events := inbox.disconnectSnapshot()
+	if disconnectSubs != 1 || onDisconnect != 1 {
+		t.Fatalf("compensating disconnect calls = (subs=%d,onDisconnect=%d), want (1,1)", disconnectSubs, onDisconnect)
+	}
+	if want := []string{"DisconnectClientSubscriptions", "OnDisconnect"}; fmt.Sprint(events) != fmt.Sprint(want) {
+		t.Fatalf("compensating disconnect order = %v, want %v", events, want)
+	}
+	select {
+	case <-conn.closed:
+	case <-time.After(time.Second):
+		t.Fatal("reserved connection was not closed after compensating cleanup")
+	}
+	if err := mgr.reserve(testConnDirect(&opts)); !errors.Is(err, ErrConnectionManagerClosed) {
+		t.Fatalf("reserve after CloseAll error = %v, want ErrConnectionManagerClosed", err)
+	}
+}
+
 func TestRunLifecycleIdentityTokenWriteFailureRunsDisconnect(t *testing.T) {
 	inbox := &fakeInbox{}
 	mgr := NewConnManager()

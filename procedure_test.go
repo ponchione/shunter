@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ponchione/shunter/protocol"
+	"github.com/ponchione/shunter/protocolclient"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
@@ -239,13 +241,253 @@ func TestProcedureContextCallReducerNilContextUsesBackground(t *testing.T) {
 	})
 	defer rt.Close()
 
-	pctx := &ProcedureContext{runtime: rt}
+	pctx := &ProcedureContext{runtime: rt, active: true}
 	res, err := pctx.CallReducer("send_message", nil)
 	if err != nil {
 		t.Fatalf("ProcedureContext.CallReducer returned admission error: %v", err)
 	}
 	if res.Status != StatusCommitted || string(res.ReturnBSATN) != "ok" {
 		t.Fatalf("ProcedureContext.CallReducer result = (%v, %q, %v), want committed ok", res.Status, res.ReturnBSATN, res.Error)
+	}
+}
+
+func TestProcedureContextExpiresAfterHandlerExit(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		handler func(*ProcedureContext) ([]byte, error)
+		wantErr error
+	}{
+		{
+			name: "success",
+			handler: func(*ProcedureContext) ([]byte, error) {
+				return []byte("ok"), nil
+			},
+		},
+		{
+			name: "error",
+			handler: func(*ProcedureContext) ([]byte, error) {
+				return nil, errors.New("handler failed")
+			},
+			wantErr: errors.New("handler failed"),
+		},
+		{
+			name: "panic",
+			handler: func(*ProcedureContext) ([]byte, error) {
+				panic("handler panicked")
+			},
+			wantErr: ErrProcedurePanicked,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var escaped *ProcedureContext
+			rt, err := Build(validChatModule().
+				Reducer("after_return", func(_ *schema.ReducerContext, _ []byte) ([]byte, error) {
+					return nil, nil
+				}).
+				Procedure("escape", func(ctx *ProcedureContext, _ []byte) ([]byte, error) {
+					escaped = ctx
+					return tc.handler(ctx)
+				}), Config{DataDir: t.TempDir()})
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			if err := rt.Start(context.Background()); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			defer rt.Close()
+
+			_, callErr := rt.CallProcedure(context.Background(), "escape", nil)
+			if tc.wantErr == nil && callErr != nil {
+				t.Fatalf("CallProcedure: %v", callErr)
+			}
+			if tc.wantErr != nil {
+				if errors.Is(tc.wantErr, ErrProcedurePanicked) {
+					if !errors.Is(callErr, ErrProcedurePanicked) {
+						t.Fatalf("CallProcedure error = %v, want ErrProcedurePanicked", callErr)
+					}
+				} else if callErr == nil || callErr.Error() != tc.wantErr.Error() {
+					t.Fatalf("CallProcedure error = %v, want %v", callErr, tc.wantErr)
+				}
+			}
+			if escaped == nil {
+				t.Fatal("procedure context was not captured")
+			}
+			if _, err := escaped.CallReducer("after_return", nil); !errors.Is(err, ErrProcedureContextExpired) {
+				t.Fatalf("escaped CallReducer error = %v, want ErrProcedureContextExpired", err)
+			}
+		})
+	}
+}
+
+func TestProcedureContextExpiresAfterCancellation(t *testing.T) {
+	var escaped *ProcedureContext
+	entered := make(chan struct{})
+	rt := buildStartedRuntimeWithProcedure(t, "wait", func(ctx *ProcedureContext, _ []byte) ([]byte, error) {
+		escaped = ctx
+		close(entered)
+		<-ctx.Context.Done()
+		return nil, ctx.Context.Err()
+	})
+	defer rt.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := rt.CallProcedure(ctx, "wait", nil)
+		done <- err
+	}()
+	<-entered
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("CallProcedure error = %v, want context.Canceled", err)
+	}
+	if _, err := escaped.CallReducer("missing", nil); !errors.Is(err, ErrProcedureContextExpired) {
+		t.Fatalf("escaped CallReducer error = %v, want ErrProcedureContextExpired", err)
+	}
+}
+
+func TestProcedureReturnWaitsForRacingCallReducer(t *testing.T) {
+	reducerEntered := make(chan struct{})
+	releaseReducer := make(chan struct{})
+	reducerDone := make(chan error, 1)
+	var escaped *ProcedureContext
+	rt, err := Build(validChatModule().
+		Reducer("racing", func(_ *schema.ReducerContext, _ []byte) ([]byte, error) {
+			close(reducerEntered)
+			<-releaseReducer
+			return nil, nil
+		}).
+		Procedure("race", func(ctx *ProcedureContext, _ []byte) ([]byte, error) {
+			escaped = ctx
+			go func() {
+				res, err := ctx.CallReducer("racing", nil)
+				if err == nil {
+					err = res.Error
+				}
+				reducerDone <- err
+			}()
+			<-reducerEntered
+			return []byte("ok"), nil
+		}), Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer rt.Close()
+
+	procedureDone := make(chan error, 1)
+	go func() {
+		_, err := rt.CallProcedure(context.Background(), "race", nil)
+		procedureDone <- err
+	}()
+	<-reducerEntered
+	select {
+	case err := <-procedureDone:
+		t.Fatalf("CallProcedure returned before its racing reducer completed: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(releaseReducer)
+	if err := <-reducerDone; err != nil {
+		t.Fatalf("racing CallReducer: %v", err)
+	}
+	if err := <-procedureDone; err != nil {
+		t.Fatalf("CallProcedure: %v", err)
+	}
+	if _, err := escaped.CallReducer("racing", nil); !errors.Is(err, ErrProcedureContextExpired) {
+		t.Fatalf("post-return CallReducer error = %v, want ErrProcedureContextExpired", err)
+	}
+}
+
+func TestProtocolProcedureReducerProducesOneResponseThenCallerLightDelta(t *testing.T) {
+	const messagesTableID schema.TableID = 0
+	var nextID uint64
+	insert := func(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {
+		nextID++
+		_, err := ctx.DB.Insert(uint32(messagesTableID), types.ProductValue{
+			types.NewUint64(nextID),
+			types.NewString("from reducer"),
+		})
+		return nil, err
+	}
+	rt, err := Build(validChatModule().
+		Reducer("insert_message", insert).
+		Procedure("insert_from_procedure", func(ctx *ProcedureContext, _ []byte) ([]byte, error) {
+			result, err := ctx.CallReducer("insert_message", nil)
+			if err != nil {
+				return nil, err
+			}
+			if result.Error != nil {
+				return nil, result.Error
+			}
+			return []byte("inserted"), nil
+		}), Config{DataDir: t.TempDir(), EnableProtocol: true})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer rt.Close()
+
+	server := httptest.NewServer(rt.HTTPHandler())
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, _, err := protocolclient.Dial(ctx, protocolclient.Options{
+		URL:            "ws" + strings.TrimPrefix(server.URL, "http") + "/subscribe",
+		AllowAnonymous: true,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer client.Close(ctx)
+
+	if err := client.Send(ctx, protocol.SubscribeSingleMsg{
+		RequestID:   71,
+		QueryID:     72,
+		QueryString: "SELECT * FROM messages",
+	}); err != nil {
+		t.Fatalf("send subscription: %v", err)
+	}
+	if tag, msg, err := client.Read(ctx); err != nil {
+		t.Fatalf("read subscription applied: %v", err)
+	} else if tag != protocol.TagSubscribeSingleApplied {
+		t.Fatalf("subscription response = tag %d %T, want SubscribeSingleApplied", tag, msg)
+	}
+
+	response, err := client.CallProcedure(ctx, "insert_from_procedure", nil)
+	if err != nil {
+		t.Fatalf("CallProcedure: %v", err)
+	}
+	if string(response.Result) != "inserted" {
+		t.Fatalf("procedure result = %q, want inserted", response.Result)
+	}
+
+	tag, msg, err := client.Read(ctx)
+	if err != nil {
+		t.Fatalf("read procedure subscription delta: %v", err)
+	}
+	light, ok := msg.(protocol.TransactionUpdateLight)
+	if tag != protocol.TagTransactionUpdateLight || !ok {
+		t.Fatalf("procedure delta = tag %d %T, want TransactionUpdateLight", tag, msg)
+	}
+	if light.RequestID != 0 || len(light.Update) != 1 || light.Update[0].QueryID != 72 {
+		t.Fatalf("procedure light delta = %+v, want request 0 query 72", light)
+	}
+	rows, err := protocol.DecodeRowList(light.Update[0].Inserts)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("procedure light inserts = %d rows, error %v; want one row", len(rows), err)
+	}
+
+	direct, err := client.CallReducer(ctx, "insert_message", nil)
+	if err != nil {
+		t.Fatalf("CallReducer after procedure: %v", err)
+	}
+	committed, ok := direct.Status.(protocol.StatusCommitted)
+	if !ok || len(committed.Update) != 1 || committed.Update[0].QueryID != 72 {
+		t.Fatalf("direct reducer update = %#v, want one heavy caller delta for query 72", direct.Status)
 	}
 }
 

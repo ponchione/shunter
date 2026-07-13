@@ -68,12 +68,14 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 	}
 	if m.inbox != nil {
 		m.sendFanOut(meta.FanoutContext, FanOutMessage{
-			TxID:          txID,
-			TxDurable:     meta.TxDurable,
-			Fanout:        fanout,
-			Errors:        errs,
-			CallerConnID:  meta.CallerConnID,
-			CallerOutcome: meta.CallerOutcome,
+			TxID:                  txID,
+			TxDurable:             meta.TxDurable,
+			Fanout:                fanout,
+			Errors:                errs,
+			CallerConnID:          meta.CallerConnID,
+			CallerOutcome:         meta.CallerOutcome,
+			DeliveryBarrierConnID: meta.DeliveryBarrierConnID,
+			DeliveryReady:         meta.DeliveryReady,
 		})
 	}
 }

@@ -20,6 +20,13 @@ type CallReducerCmd struct {
 	Request            ReducerRequest
 	ResponseCh         chan<- ReducerResponse
 	ProtocolResponseCh chan<- ProtocolCallReducerResponse
+	// SuppressCallerOutcome keeps an externally authorized reducer call from
+	// synthesizing a direct CallReducer result. Procedures use this while still
+	// allowing ordinary light subscription delivery to their caller.
+	SuppressCallerOutcome bool
+	// DeliveryReady gates the procedure caller's light subscription delivery
+	// until its ProcedureResponse has been queued.
+	DeliveryReady <-chan struct{}
 }
 
 func (CallReducerCmd) isExecutorCommand() {}

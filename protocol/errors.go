@@ -27,5 +27,9 @@ var ErrExecutorAdmissionRejected = errors.New("protocol: executor admission reje
 // owned by a live or admitting connection.
 var ErrConnectionIDInUse = errors.New("protocol: connection_id already in use")
 
+// ErrConnectionManagerClosed marks admission rejected after runtime shutdown
+// established its connection-manager barrier.
+var ErrConnectionManagerClosed = errors.New("protocol: connection manager closed")
+
 //lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 var errSubscriptionRequiresTableShape = errors.New("Column projections are not supported in subscriptions; Subscriptions must return a table type")

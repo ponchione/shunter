@@ -12,8 +12,8 @@ const (
 	TagUnsubscribeMulti      uint8 = 6
 	TagDeclaredQuery         uint8 = 7
 	TagSubscribeDeclaredView uint8 = 8
-	// V2-only declared-read request messages. V1 connections reject these
-	// tags as unsupported for the negotiated protocol.
+	// V2-only declared-read and procedure request messages. V1 connections
+	// reject these tags as unsupported for the negotiated protocol.
 	TagDeclaredQueryWithParameters         uint8 = 9
 	TagSubscribeDeclaredViewWithParameters uint8 = 10
 	TagCallProcedure                       uint8 = 11
@@ -39,7 +39,7 @@ const (
 	TagTransactionUpdateLight   uint8 = 8
 	TagSubscribeMultiApplied    uint8 = 9  // single/multi variant variant split
 	TagUnsubscribeMultiApplied  uint8 = 10 // single/multi variant variant split
-	TagProcedureResponse        uint8 = 11
+	TagProcedureResponse        uint8 = 11 // v2-only response to TagCallProcedure
 )
 
 // IsReservedV1Tag reports whether tag is in the protocol-wide v1 reserved

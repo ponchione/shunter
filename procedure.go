@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/ponchione/shunter/protocol"
@@ -17,6 +18,9 @@ var (
 	ErrProcedurePermissionDenied = errors.New("shunter: procedure permission denied")
 	// ErrProcedurePanicked reports that a procedure panicked.
 	ErrProcedurePanicked = errors.New("shunter: procedure panicked")
+	// ErrProcedureContextExpired reports use of a ProcedureContext after its
+	// handler returned.
+	ErrProcedureContextExpired = errors.New("shunter: procedure context expired")
 )
 
 // ProcedureContext is the execution context passed to a procedure. It remains
@@ -26,6 +30,9 @@ type ProcedureContext struct {
 	ProcedureName string
 	Caller        types.CallerContext
 	runtime       *Runtime
+	mu            sync.RWMutex
+	active        bool
+	deliveryReady <-chan struct{}
 }
 
 // CallReducer invokes a reducer as the same caller. The reducer runs on the
@@ -34,11 +41,25 @@ func (c *ProcedureContext) CallReducer(name string, args []byte) (ReducerResult,
 	if c == nil || c.runtime == nil {
 		return ReducerResult{}, ErrRuntimeNotReady
 	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if !c.active {
+		return ReducerResult{}, ErrProcedureContextExpired
+	}
 	ctx := c.Context
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return c.runtime.callReducerWithCaller(ctx, name, args, c.Caller)
+	return c.runtime.callReducerFromProcedure(ctx, name, args, c.Caller, c.deliveryReady)
+}
+
+func (c *ProcedureContext) invalidate() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.active = false
+	c.mu.Unlock()
 }
 
 // ProcedureCallOption configures a local procedure call.
@@ -99,6 +120,16 @@ func (r *Runtime) CallProcedure(ctx context.Context, name string, args []byte, o
 }
 
 func (r *Runtime) callProcedureWithCaller(ctx context.Context, name string, args []byte, caller types.CallerContext) ([]byte, error) {
+	return r.callProcedureWithCallerAndDelivery(ctx, name, args, caller, nil)
+}
+
+func (r *Runtime) callProcedureWithCallerAndDelivery(
+	ctx context.Context,
+	name string,
+	args []byte,
+	caller types.CallerContext,
+	deliveryReady <-chan struct{},
+) ([]byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -128,11 +159,14 @@ func (r *Runtime) callProcedureWithCaller(ctx context.Context, name string, args
 		ProcedureName: procedure.Name,
 		Caller:        caller,
 		runtime:       r,
+		active:        true,
+		deliveryReady: deliveryReady,
 	}
 	var ret []byte
 	var err error
 	var panicked any
 	func() {
+		defer pctx.invalidate()
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				panicked = recovered
@@ -162,7 +196,9 @@ func (r *Runtime) HandleCallProcedure(ctx context.Context, conn *protocol.Conn, 
 		Permissions:         append([]string(nil), conn.Permissions...),
 		AllowAllPermissions: conn.AllowAllPermissions,
 	}
-	result, err := r.callProcedureWithCaller(ctx, msg.Name, msg.Args, caller)
+	deliveryReady := make(chan struct{})
+	defer close(deliveryReady)
+	result, err := r.callProcedureWithCallerAndDelivery(ctx, msg.Name, msg.Args, caller, deliveryReady)
 	response := protocol.ProcedureResponse{
 		MessageID:                  append([]byte(nil), msg.MessageID...),
 		Result:                     result,

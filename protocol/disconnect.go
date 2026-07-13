@@ -37,6 +37,21 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 		if c.closed != nil {
 			close(c.closed)
 		}
+		c.closeTransport(code, reason)
+		if c.Observer != nil {
+			c.Observer.LogProtocolConnectionClosed(c.ID, closeReason(code, reason))
+		}
+	})
+}
+
+func (c *Conn) closeTransport(code websocket.StatusCode, reason string) {
+	if c == nil {
+		return
+	}
+	c.transportCloseOnce.Do(func() {
+		c.outboundMu.Lock()
+		c.outboundStopped = true
+		c.outboundMu.Unlock()
 		if c.ws != nil {
 			go func() {
 				closeWithHandshake(c.ws, code, reason, c.closeHandshakeTimeout())
@@ -46,9 +61,6 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 			}()
 		} else if c.cancelRead != nil {
 			c.cancelRead()
-		}
-		if c.Observer != nil {
-			c.Observer.LogProtocolConnectionClosed(c.ID, closeReason(code, reason))
 		}
 	})
 }

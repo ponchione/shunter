@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -130,26 +131,30 @@ type CallReducerRequest struct {
 // OnConnect rejection closes the socket without registering the connection.
 func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnManager) error {
 	if err := mgr.reserve(c); err != nil {
-		_ = c.ws.Close(websocket.StatusPolicyViolation, "connection_id already in use")
+		reason := "connection_id already in use"
+		if errors.Is(err, ErrConnectionManagerClosed) {
+			reason = CloseReasonServerShutdown
+		}
+		c.closeTransport(websocket.StatusPolicyViolation, reason)
 		return err
 	}
-	reserved := true
-	defer func() {
-		if reserved {
-			mgr.releaseReservation(c)
-		}
-	}()
+	defer mgr.finishAdmission(c)
 	if err := inbox.OnConnect(ctx, c.ID, c.Identity, c.Principal.Copy()); err != nil {
-		_ = c.ws.Close(websocket.StatusPolicyViolation, CloseReasonOnConnectRejected)
+		c.closeTransport(websocket.StatusPolicyViolation, CloseReasonOnConnectRejected)
 		return fmt.Errorf("%w: onconnect rejected: %v", ErrExecutorAdmissionRejected, err)
 	}
 
 	// Register before first send so immediate fan-out can resolve this Conn.
 	if err := mgr.Add(c); err != nil {
-		_ = c.ws.Close(websocket.StatusPolicyViolation, "connection_id already in use")
+		if errors.Is(err, ErrConnectionManagerClosed) {
+			disconnectCtx, cancel := context.WithTimeout(context.Background(), c.disconnectTimeout())
+			defer cancel()
+			c.Disconnect(disconnectCtx, CloseNormal, CloseReasonServerShutdown, inbox, nil)
+		} else {
+			c.closeTransport(websocket.StatusPolicyViolation, "connection_id already in use")
+		}
 		return err
 	}
-	reserved = false
 	recordProtocolConnections(c.Observer, mgr.ActiveCount())
 
 	frame, err := encodeIdentityTokenFrame(IdentityToken{

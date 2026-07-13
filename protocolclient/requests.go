@@ -121,6 +121,8 @@ func runDialAndBeforeCloseHook() {
 
 // CallReducer sends a full-update reducer call and waits for its matching result.
 func (c *Client) CallReducer(ctx context.Context, name string, args []byte) (protocol.TransactionUpdate, error) {
+	c.operationMu.Lock()
+	defer c.operationMu.Unlock()
 	requestID := c.NextRequestID()
 	if err := c.Send(ctx, protocol.CallReducerMsg{
 		ReducerName: name,
@@ -131,7 +133,7 @@ func (c *Client) CallReducer(ctx context.Context, name string, args []byte) (pro
 		return protocol.TransactionUpdate{}, err
 	}
 
-	tag, msg, err := c.Read(ctx)
+	tag, msg, err := c.readSynchronousResponse(ctx)
 	if err != nil {
 		return protocol.TransactionUpdate{}, err
 	}
@@ -160,6 +162,8 @@ func (c *Client) CallReducer(ctx context.Context, name string, args []byte) (pro
 
 // DeclaredQuery sends a declared-query request without parameters.
 func (c *Client) DeclaredQuery(ctx context.Context, name string) (protocol.OneOffQueryResponse, error) {
+	c.operationMu.Lock()
+	defer c.operationMu.Unlock()
 	requestID := c.NextRequestID()
 	messageID := messageIDFromRequestID(requestID)
 	if err := c.Send(ctx, protocol.DeclaredQueryMsg{
@@ -173,6 +177,8 @@ func (c *Client) DeclaredQuery(ctx context.Context, name string) (protocol.OneOf
 
 // SQLQuery sends a raw one-off SQL read request.
 func (c *Client) SQLQuery(ctx context.Context, queryString string) (protocol.OneOffQueryResponse, error) {
+	c.operationMu.Lock()
+	defer c.operationMu.Unlock()
 	requestID := c.NextRequestID()
 	messageID := messageIDFromRequestID(requestID)
 	if err := c.Send(ctx, protocol.OneOffQueryMsg{
@@ -194,6 +200,8 @@ func (c *Client) ExecuteDeclaredQuery(ctx context.Context, request DeclaredQuery
 
 // DeclaredQueryWithParameters sends a v2 declared-query request with BSATN parameters.
 func (c *Client) DeclaredQueryWithParameters(ctx context.Context, name string, params []byte) (protocol.OneOffQueryResponse, error) {
+	c.operationMu.Lock()
+	defer c.operationMu.Unlock()
 	if version, ok := protocol.ProtocolVersionForSubprotocol(c.Subprotocol()); !ok || version < protocol.ProtocolVersionV2 {
 		return protocol.OneOffQueryResponse{}, fmt.Errorf("%w: negotiated subprotocol %q", ErrProtocolVersion, c.Subprotocol())
 	}
@@ -215,7 +223,7 @@ func (c *Client) readDeclaredQueryResponse(ctx context.Context, messageID []byte
 }
 
 func (c *Client) readOneOffQueryResponse(ctx context.Context, messageID []byte, failedErr error, label string) (protocol.OneOffQueryResponse, error) {
-	tag, msg, err := c.Read(ctx)
+	tag, msg, err := c.readSynchronousResponse(ctx)
 	if err != nil {
 		return protocol.OneOffQueryResponse{}, err
 	}
@@ -237,6 +245,8 @@ func (c *Client) readOneOffQueryResponse(ctx context.Context, messageID []byte, 
 
 // CallProcedure sends a procedure request and waits for its matching result.
 func (c *Client) CallProcedure(ctx context.Context, name string, args []byte) (protocol.ProcedureResponse, error) {
+	c.operationMu.Lock()
+	defer c.operationMu.Unlock()
 	if version, ok := protocol.ProtocolVersionForSubprotocol(c.Subprotocol()); !ok || version < protocol.ProtocolVersionV2 {
 		return protocol.ProcedureResponse{}, fmt.Errorf("%w: negotiated subprotocol %q", ErrProtocolVersion, c.Subprotocol())
 	}
@@ -249,7 +259,7 @@ func (c *Client) CallProcedure(ctx context.Context, name string, args []byte) (p
 	}); err != nil {
 		return protocol.ProcedureResponse{}, err
 	}
-	tag, msg, err := c.Read(ctx)
+	tag, msg, err := c.readSynchronousResponse(ctx)
 	if err != nil {
 		return protocol.ProcedureResponse{}, err
 	}

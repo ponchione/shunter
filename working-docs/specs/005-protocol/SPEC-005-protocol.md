@@ -54,7 +54,7 @@ The server-owned preference order is defined in `protocol/version.go`.
 Shunter accepts these subprotocol tokens:
 
 - `v2.bsatn.shunter` — current/default Shunter-native token. V2 adds
-  parameterized declared-read request messages.
+  parameterized declared-read requests and module procedure calls.
 - `v1.bsatn.shunter` — minimum supported Shunter-native token for existing v1
   clients and no-parameter declared reads.
 
@@ -248,7 +248,8 @@ For production deployments, an external identity provider may sign tokens. The e
 ```
 1. HTTP upgrade (authentication validated, protocol negotiated)
 2. WebSocket open → server sends IdentityToken
-3. Client ready: may send Subscribe, CallReducer, OneOffQuery, Unsubscribe
+3. Client ready: may send Subscribe, CallReducer, OneOffQuery, Unsubscribe,
+   and on v2 CallProcedure
 4. Ongoing: server sends TransactionUpdate after relevant commits
 5. Disconnect: either side sends Close frame
 ```
@@ -264,6 +265,18 @@ When the connection closes (for any reason), the protocol layer dispatches `OnDi
 ### 5.4 Keep-Alive
 
 The server sends a WebSocket Ping frame every `PingInterval` (default: 15 seconds). The client must respond with Pong. If no data (including Pong) is received within `IdleTimeout` (default: 30 seconds), the server sends a Close frame and closes the connection.
+
+### 5.5 Runtime Shutdown Admission Barrier
+
+Runtime shutdown atomically marks the connection manager closing before it
+snapshots active and reserved transports. New reservations and registrations
+then fail with `ErrConnectionManagerClosed`. Reserved transports are closed,
+and shutdown waits for every admission that began before the barrier. If its
+`OnConnect` transaction committed before registration was rejected by the
+barrier, the lifecycle runs compensating subscription cleanup and
+`OnDisconnect` before the executor stops, leaving no `sys_clients` row. No
+identity token or per-connection protocol loops start for that rejected
+admission.
 
 ---
 
@@ -283,11 +296,13 @@ The server sends a WebSocket Ping frame every `PingInterval` (default: 15 second
 | 8 | SubscribeDeclaredView |
 | 9 | DeclaredQueryWithParameters (v2 only) |
 | 10 | SubscribeDeclaredViewWithParameters (v2 only) |
+| 11 | CallProcedure (v2 only) |
 
 The `SubscribeSingle` / `UnsubscribeSingle` tags are the current v1 names for the former `Subscribe` / `Unsubscribe` byte values (1 and 2), which remain stable. `SubscribeMulti` / `UnsubscribeMulti` carry a query-set under one `query_id`. Canonical source is `protocol/tags.go`.
-V1 connections reject tags 9 and 10 as unsupported for the negotiated
+V1 connections reject tags 9, 10, and 11 as unsupported for the negotiated
 protocol. V2 connections may use tags 7 and 8 for no-parameter declared reads
-and tags 9 and 10 when sending encoded declared-read parameters.
+and tags 9 and 10 when sending encoded declared-read parameters. V2 tag 11
+invokes a module-owned procedure.
 
 ### Server→Client tags
 
@@ -303,6 +318,7 @@ and tags 9 and 10 when sending encoded declared-read parameters.
 | 8 | TransactionUpdateLight (non-caller delta-only) |
 | 9 | SubscribeMultiApplied |
 | 10 | UnsubscribeMultiApplied |
+| 11 | ProcedureResponse (v2 only) |
 
 Protocol-wide tag `0` and tags `128`–`255` are reserved and MUST remain fatal
 in supported protocol versions. Unassigned low tags are also fatal. New message
@@ -573,6 +589,36 @@ effective subscription queries. Supplying params to a no-parameter declaration
 or omitting params for a parameterized declaration is a declared-read error. V1
 connections MUST reject tag 10 before dispatch.
 
+### 7.7 CallProcedure
+
+V2-only invocation of a module-owned procedure. Procedures execute outside the
+serialized reducer executor but may call reducers through their scoped
+`ProcedureContext`.
+
+```
+tag:        11
+message_id: bytes     — opaque client-chosen correlator
+name:       string    — registered ProcedureDeclaration name
+args:       bytes     — raw BSATN procedure arguments
+```
+
+**Response:** `ProcedureResponse` (§8.12) carrying the identical `message_id`.
+V1 connections MUST reject tag 11 before dispatch. The declaration's required
+permissions are checked before handler execution. A missing procedure,
+permission failure, handler error, or recovered panic is returned in the
+correlated response's `error` field; it does not create a reducer-outcome
+envelope and does not by itself close the connection.
+
+A procedure may call one or more reducers as the same caller. Those internal
+calls retain external reducer permission checks, but MUST NOT emit a heavy
+`TransactionUpdate` or otherwise impersonate a direct `CallReducer` request.
+If an internal reducer changes one of the caller's active subscriptions, the
+caller receives an ordinary `TransactionUpdateLight` with `request_id = 0`.
+That procedure-caused light delta is queued only after the procedure's
+`ProcedureResponse`; other responses from independently concurrent client
+requests may interleave, so clients MUST correlate procedure responses by
+`message_id` and reducer outcomes by `request_id`.
+
 ---
 
 ## 8. Server→Client Messages
@@ -782,6 +828,23 @@ query_id:                           uint32 LE
 update:                             []SubscriptionUpdate    — one entry per emitted query/table family, with query_id set and Deletes populated
 ```
 
+### 8.12 ProcedureResponse
+
+V2-only response to `CallProcedure` (§7.7).
+
+```
+tag:                           11
+message_id:                    bytes             — exact request correlator
+error:                         Optional<string>  — absent on success
+result:                        bytes             — empty on error
+total_host_execution_duration: int64 LE          — server wall time in microseconds
+```
+
+Exactly one `ProcedureResponse` is emitted for an admitted `CallProcedure`.
+The internal reducer calls made by the handler never create additional direct
+call results. Procedure responses use the same per-connection outbound queue
+and limits as every other server message.
+
 ---
 
 ## 9. Subscription Semantics
@@ -836,6 +899,9 @@ Ordering guarantee on one connection:
 - `SubscribeSingleApplied` / `SubscribeMultiApplied(query_id)` MUST be delivered before any `TransactionUpdate` (heavy) or `TransactionUpdateLight` that references that `query_id`
 - for a reducer call made by this same connection, the heavy `TransactionUpdate` (§8.5) carrying the caller's `UpdateStatus` replaces any separate `TransactionUpdateLight` on the same commit; the caller is never double-delivered
 - if the client disconnects or removes the `(ConnID, QueryID)` entry before a queued Applied envelope is delivered, that later registration result is discarded rather than activating stale state
+- a procedure-triggered reducer delta for the procedure caller is delivered as
+  `TransactionUpdateLight` after the correlated `ProcedureResponse`, never as
+  an unsolicited heavy `TransactionUpdate`
 
 ---
 
@@ -853,6 +919,11 @@ The server buffers outgoing messages per-client up to both
 4. close the connection
 
 The overflow-causing application message is not delivered. The client must reconnect.
+
+This policy applies equally to direct `ProcedureResponse` messages and to
+procedure-triggered `TransactionUpdateLight` deltas. If either cannot be
+enqueued, the connection follows the same bounded overflow close path; the
+server does not block a procedure handler waiting for outbound capacity.
 
 **Design decision:** Disconnect on buffer overflow rather than drop messages. Dropped deltas would corrupt the client's local cache (it would be missing rows). Disconnection is recoverable: the client reconnects and re-subscribes, rebuilding the cache from a fresh `SubscribeSingleApplied` / `SubscribeMultiApplied`.
 
@@ -944,6 +1015,12 @@ The protocol layer sends commands to the executor via its inbox (`ExecutorComman
 
 The executor sends protocol-originated reducer outcomes back through `CallReducerCmd.ProtocolResponseCh`. The former standalone `ReducerCallResult` Go shape was replaced by the heavy `TransactionUpdate` envelope (§8.5); the response carries `UpdateStatus`, `ReducerCallInfo`, and caller metadata so the fan-out integration can route the caller's delta through the heavy envelope and the non-callers' deltas through `TransactionUpdateLight` (§8.8).
 
+`CallProcedure` dispatches through the module-owned `ProcedureHandler` rather
+than `ExecutorInbox`. A `ProcedureContext.CallReducer` still submits a
+`CallReducerCmd` for serialization and permission enforcement, with caller
+outcome suppression and a caller-only light-delivery barrier. The procedure
+handler queues `ProcedureResponse` before releasing that barrier.
+
 ```go
 type ExecutorInbox interface {
     OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity, principal types.AuthPrincipal) error
@@ -964,8 +1041,12 @@ Delivery contract:
 2. the fan-out worker treats each `CommitFanout[connID]` entry as the `[]SubscriptionUpdate` payload for one post-commit envelope
 3. any `SubscriptionError` entries in `FanOutMessage.Errors` are delivered before normal updates for the same batch
 4. if the commit originated from `CallReducer`, the fan-out/protocol integration routes the caller connection's update slice into `TransactionUpdate.Status::Committed.update` (§8.5); on `Failed` the caller receives the heavy envelope with an empty `update`. The caller is not also delivered a standalone `TransactionUpdateLight`.
-5. all remaining connection entries are delivered as `TransactionUpdateLight` messages (§8.8)
-6. protocol layer serializes, optionally compresses, and enqueues those messages to websocket connections
+5. if the commit originated from `ProcedureContext.CallReducer`, all matching
+   connections, including the procedure caller, remain ordinary light
+   recipients; the caller's delivery waits for its correlated
+   `ProcedureResponse` barrier
+6. all remaining connection entries are delivered as `TransactionUpdateLight` messages (§8.8)
+7. protocol layer serializes, optionally compresses, and enqueues those messages to websocket connections
 
 The fan-out worker constructs the heavy `TransactionUpdate` from the caller's `CommitFanout` slice plus the reducer-outcome metadata (`UpdateStatus`, `CallerIdentity`, `CallerConnectionID`, `ReducerCall`, `Timestamp`, `TotalHostExecutionDuration`) returned by the executor on `CallReducerCmd.ResponseCh`. Non-caller entries become `TransactionUpdateLight{RequestID, Update}`.
 
@@ -1025,6 +1106,7 @@ Subscribe and OneOffQuery handlers need to resolve table names to IDs and valida
 | `ErrMaxMessageSize` | Incoming frame exceeded configured read limit |
 | `ErrTooManyRequests` | Incoming in-flight queue would exceed `IncomingQueueMessages` |
 | `ErrZeroConnectionID` | Client-supplied connection_id is all zeros |
+| `ErrConnectionManagerClosed` | Connection admission crossed the runtime shutdown barrier |
 
 ---
 
@@ -1053,7 +1135,7 @@ Subscribe and OneOffQuery handlers need to resolve table names to IDs and valida
   `MaxOutboundQueuedBytes` (default 65 MiB) (§10.1, §12). Shunter disconnects
   lagging clients to keep memory bounded.
 - **TransactionUpdate shape:** v1 uses a heavy/light envelope split (§8.5, §8.8). `Failed` collapses Shunter's internal `failed_user`/`failed_panic`/`not_found` distinction onto one arm with the detail carried in the error string.
-- **Subscription RPC surface:** v1 exposes `SubscribeSingle`, `SubscribeMulti`, `UnsubscribeSingle`, `UnsubscribeMulti`, `CallReducer`, `OneOffQuery`, `DeclaredQuery`, and `SubscribeDeclaredView` (§6, §7). V2 adds parameterized declared-read request messages without changing raw SQL request shapes. There is no legacy single `Subscribe` / `Unsubscribe` wire family or separate `QuerySetId` protocol family.
+- **Subscription RPC surface:** v1 exposes `SubscribeSingle`, `SubscribeMulti`, `UnsubscribeSingle`, `UnsubscribeMulti`, `CallReducer`, `OneOffQuery`, `DeclaredQuery`, and `SubscribeDeclaredView` (§6, §7). V2 adds parameterized declared-read requests and `CallProcedure` / `ProcedureResponse` without changing raw SQL request shapes. There is no legacy single `Subscribe` / `Unsubscribe` wire family or separate `QuerySetId` protocol family.
 - **CallReducer wire shape:** v1 `CallReducer` carries `{request_id, reducer_name, args, flags}` (§7.3). The `flags` byte matches the reference `CallReducerFlags` (FullUpdate / NoSuccessNotify); no other flag values are defined in v1.
 - **SQL read surfaces:** v1 uses one SQL parser across raw subscriptions,
   one-off reads, declared queries, and declared views (§7.1.1). Admission gates
@@ -1096,6 +1178,8 @@ Subscribe and OneOffQuery handlers need to resolve table names to IDs and valida
 | CallReducer for unregistered reducer → heavy TransactionUpdate with `Status = Failed{Error}` (not-found) | Not-found outcome |
 | CallReducer with `Flags = NoSuccessNotify` + commit → caller is not echoed on Committed | NoSuccessNotify opt-out |
 | CallReducer + Subscribe to same table: caller receives heavy envelope only, non-callers receive light | No double-delivery to caller |
+| CallProcedure mutates a subscribed table → one correlated ProcedureResponse, then caller light delta with request_id 0 | Procedure reducer delivery and ordering |
+| CallProcedure concurrent with direct CallReducer → procedure and reducer correlations remain distinct | Allowed response interleaving |
 | Tag 7 on server→client frame → fatal decode error | Reserved-tag enforcement |
 | OneOffQuery → correct rows returned from committed snapshot; `message_id` echoed | One-off read semantics |
 | Unknown client message tag → protocol error close | Incoming framing validation |

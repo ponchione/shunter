@@ -162,6 +162,10 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	// post-commit client-visible outcomes, so confirmed-read recipients wait
 	// for the same durability signal as normal transaction updates.
 	for connID, errs := range msg.Errors {
+		if !waitForDeliveryReady(ctx, msg, connID) {
+			recordTraceFailure("context_canceled", ctx.Err())
+			return
+		}
 		if w.requiresConfirmedRead(connID) && !waitForDurable(ctx, msg.TxDurable, &durableWaited, &durableReady) {
 			recordTraceFailure("context_canceled", ctx.Err())
 			return
@@ -192,6 +196,10 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 		if msg.CallerConnID != nil && connID == *msg.CallerConnID {
 			continue
 		}
+		if !waitForDeliveryReady(ctx, msg, connID) {
+			recordTraceFailure("context_canceled", ctx.Err())
+			return
+		}
 		if w.requiresConfirmedRead(connID) && !waitForDurable(ctx, msg.TxDurable, &durableWaited, &durableReady) {
 			recordTraceFailure("context_canceled", ctx.Err())
 			return
@@ -210,6 +218,18 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 		if err := w.sender.SendTransactionUpdateHeavy(*effCallerConnID, *effCallerOutcome, callerUpdates, memo); err != nil {
 			recordTraceFailure(w.handleSendError(*effCallerConnID, err), err)
 		}
+	}
+}
+
+func waitForDeliveryReady(ctx context.Context, msg FanOutMessage, connID types.ConnectionID) bool {
+	if msg.DeliveryBarrierConnID == nil || msg.DeliveryReady == nil || connID != *msg.DeliveryBarrierConnID {
+		return true
+	}
+	select {
+	case <-msg.DeliveryReady:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 

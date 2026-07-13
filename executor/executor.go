@@ -1010,33 +1010,40 @@ func (e *Executor) postCommit(
 	meta := subscription.PostCommitMeta{TxDurable: e.durability.WaitUntilDurable(txID)}
 	if opts.source == CallSourceExternal && opts.callerConnID != nil && !opts.callerConnID.IsZero() {
 		callerConnID := *opts.callerConnID
-		callerOutcome := subscription.CallerOutcome{
-			Kind:                       subscription.CallerOutcomeCommitted,
-			RequestID:                  opts.callerRequestID,
-			Flags:                      opts.callerFlags,
-			CallerIdentity:             opts.callerIdentity,
-			ReducerName:                opts.reducerName,
-			ReducerID:                  opts.reducerID,
-			Args:                       opts.args,
-			Timestamp:                  opts.startTime.UnixMicro(),
-			TotalHostExecutionDuration: time.Since(opts.startTime).Microseconds(),
-		}
-		if cmd.ProtocolResponseCh != nil {
-			// For protocol-originated reducer calls the protocol inbox adapter owns
-			// the caller-visible heavy reply. Keep the caller out of light fan-out,
-			// capture its authoritative update slice from evaluation, but do not
-			// export CallerOutcome into the fan-out worker or it will deliver a
-			// second heavy envelope for the same commit.
-			meta.CallerConnID = &callerConnID
-			committedPayload = &CommittedCallerPayload{Outcome: callerOutcome}
-			meta.CaptureCallerUpdates = func(updates []subscription.SubscriptionUpdate) {
-				committedPayload.Updates = append([]subscription.SubscriptionUpdate(nil), updates...)
+		if cmd.SuppressCallerOutcome {
+			if cmd.DeliveryReady != nil {
+				meta.DeliveryBarrierConnID = &callerConnID
+				meta.DeliveryReady = cmd.DeliveryReady
 			}
 		} else {
-			// Non-protocol external callers keep the original fan-out-owned caller
-			// heavy delivery path.
-			meta.CallerConnID = &callerConnID
-			meta.CallerOutcome = &callerOutcome
+			callerOutcome := subscription.CallerOutcome{
+				Kind:                       subscription.CallerOutcomeCommitted,
+				RequestID:                  opts.callerRequestID,
+				Flags:                      opts.callerFlags,
+				CallerIdentity:             opts.callerIdentity,
+				ReducerName:                opts.reducerName,
+				ReducerID:                  opts.reducerID,
+				Args:                       opts.args,
+				Timestamp:                  opts.startTime.UnixMicro(),
+				TotalHostExecutionDuration: time.Since(opts.startTime).Microseconds(),
+			}
+			if cmd.ProtocolResponseCh != nil {
+				// For protocol-originated reducer calls the protocol inbox adapter owns
+				// the caller-visible heavy reply. Keep the caller out of light fan-out,
+				// capture its authoritative update slice from evaluation, but do not
+				// export CallerOutcome into the fan-out worker or it will deliver a
+				// second heavy envelope for the same commit.
+				meta.CallerConnID = &callerConnID
+				committedPayload = &CommittedCallerPayload{Outcome: callerOutcome}
+				meta.CaptureCallerUpdates = func(updates []subscription.SubscriptionUpdate) {
+					committedPayload.Updates = append([]subscription.SubscriptionUpdate(nil), updates...)
+				}
+			} else {
+				// Non-protocol external callers keep the original fan-out-owned caller
+				// heavy delivery path.
+				meta.CallerConnID = &callerConnID
+				meta.CallerOutcome = &callerOutcome
+			}
 		}
 	}
 	needsBroadcast, needsView := e.postCommitNeeds(changeset, meta)

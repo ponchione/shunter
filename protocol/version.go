@@ -12,7 +12,8 @@ const (
 	// ProtocolVersionV1 is the original Shunter-native BSATN protocol and the
 	// minimum version still accepted for v1 clients.
 	ProtocolVersionV1 ProtocolVersion = 1
-	// ProtocolVersionV2 adds parameterized declared-read request messages.
+	// ProtocolVersionV2 adds parameterized declared-read requests and module
+	// procedure call/response messages.
 	ProtocolVersionV2 ProtocolVersion = 2
 )
 
@@ -29,7 +30,7 @@ const (
 const SubprotocolV1 = "v1.bsatn.shunter"
 
 // SubprotocolV2 is the Shunter-native WebSocket subprotocol token for
-// parameterized declared-read request messages.
+// parameterized declared reads and module procedures.
 const SubprotocolV2 = "v2.bsatn.shunter"
 
 var protocolSubprotocols = map[ProtocolVersion]string{

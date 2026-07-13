@@ -92,7 +92,7 @@ WebSocket and BSATN frame contracts.
 Supported WebSocket subprotocol tokens are:
 
 - `v2.bsatn.shunter`: current/default protocol. V2 adds parameterized
-  declared-query and declared-view request messages.
+  declared-query and declared-view requests plus module procedure calls.
 - `v1.bsatn.shunter`: minimum supported protocol for existing v1 clients and
   no-parameter declared reads.
 
@@ -107,12 +107,14 @@ Stable client-to-server message families are `SubscribeSingle`,
 `OneOffQuery`, `DeclaredQuery`, and `SubscribeDeclaredView`. V2 also supports
 `DeclaredQueryWithParameters` and `SubscribeDeclaredViewWithParameters`; their
 `params` field is a BSATN product row encoded according to the declaration's
-parameter schema.
+parameter schema. V2 also supports `CallProcedure`, correlated by an opaque
+`message_id`.
 
 Stable server-to-client message families are `IdentityToken`,
 `SubscribeSingleApplied`, `UnsubscribeSingleApplied`,
 `SubscribeMultiApplied`, `UnsubscribeMultiApplied`, `SubscriptionError`,
-`TransactionUpdate`, `TransactionUpdateLight`, and `OneOffQueryResponse`.
+`TransactionUpdate`, `TransactionUpdateLight`, and `OneOffQueryResponse`. V2
+also supports `ProcedureResponse`.
 
 Tag `0` and tags `128` through `255` are reserved in supported protocol
 versions. Server tag `7` is reserved for the retired reducer-call result
