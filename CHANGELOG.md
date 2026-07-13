@@ -4,6 +4,23 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Procedure-internal reducer calls now retain external permission checks without
+  emitting unsolicited direct-reducer outcomes. The procedure caller receives
+  its normal light subscription delta after the correlated procedure response,
+  escaped `ProcedureContext` values reject reducer calls after handler exit,
+  and the Go protocol client preserves interleaved subscription messages while
+  serializing concurrent typed requests.
+- Runtime shutdown now establishes an admission barrier before closing active
+  and reserved protocol transports, waits for pre-barrier admissions, and
+  compensates any `OnConnect` commit that completes after the barrier.
+- Multi-runtime hosts now reject canonical data directories that overlap in
+  either parent/child direction, including symlink aliases.
+- `Value.AsDurationChecked` now reports full-range duration payloads that Go's
+  `time.Duration` cannot represent; `AsDuration` panics on overflow instead of
+  silently wrapping.
+- The public v2 protocol contract now documents `CallProcedure` and
+  `ProcedureResponse` tag 11, correlation, interleaving, backpressure, and
+  procedure-triggered subscription delta semantics.
 - Aborted TypeScript reducer, procedure, query, and subscription requests now
   retain their wire correlation IDs until the authoritative response arrives.
   Late reducer deltas still update active subscriptions, and late successful
