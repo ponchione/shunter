@@ -771,19 +771,25 @@ export function createShunterClient(options) {
             return;
         }
         if (update.status.status === "failed") {
-            pending.reject(new ShunterValidationError(update.status.error || "Reducer call failed.", {
-                code: "reducer_failed",
-                details: update,
-            }));
+            if (!pending.abandoned) {
+                pending.reject(new ShunterValidationError(update.status.error || "Reducer call failed.", {
+                    code: "reducer_failed",
+                    details: update,
+                }));
+            }
             return;
         }
         const updateError = dispatchRawSubscriptionUpdates(update.status.updates, "TransactionUpdate");
         if (updateError !== undefined) {
-            pending.reject(updateError);
+            if (!pending.abandoned) {
+                pending.reject(updateError);
+            }
             failConnected(updateError);
             return;
         }
-        pending.resolve(update.rawFrame);
+        if (!pending.abandoned) {
+            pending.resolve(update.rawFrame);
+        }
     };
     const settleDeclaredQueryResponse = (response) => {
         const messageKey = bytesKey(response.messageId);
@@ -794,13 +800,17 @@ export function createShunterClient(options) {
         pending.cleanup?.();
         pendingDeclaredQueries.delete(messageKey);
         if (response.error !== undefined) {
-            pending.reject(new ShunterValidationError(response.error || "Declared query failed.", {
-                code: "declared_query_failed",
-                details: { name: pending.name, response },
-            }));
+            if (!pending.abandoned) {
+                pending.reject(new ShunterValidationError(response.error || "Declared query failed.", {
+                    code: "declared_query_failed",
+                    details: { name: pending.name, response },
+                }));
+            }
             return;
         }
-        pending.resolve(response.rawFrame);
+        if (!pending.abandoned) {
+            pending.resolve(response.rawFrame);
+        }
     };
     const settleProcedureResponse = (response) => {
         const messageKey = bytesKey(response.messageId);
@@ -811,13 +821,17 @@ export function createShunterClient(options) {
         pending.cleanup?.();
         pendingProcedureCalls.delete(messageKey);
         if (response.error !== undefined) {
-            pending.reject(new ShunterValidationError(response.error || "Procedure call failed.", {
-                code: "procedure_failed",
-                details: { name: pending.name, response },
-            }));
+            if (!pending.abandoned) {
+                pending.reject(new ShunterValidationError(response.error || "Procedure call failed.", {
+                    code: "procedure_failed",
+                    details: { name: pending.name, response },
+                }));
+            }
             return;
         }
-        pending.resolve(response.result);
+        if (!pending.abandoned) {
+            pending.resolve(response.result);
+        }
     };
     const cloneRawSubscriptionUpdate = (update) => ({
         queryId: update.queryId,
@@ -1092,6 +1106,46 @@ export function createShunterClient(options) {
             code: "subscription_query_ids_exhausted",
         });
     };
+    const beginAbandonedSubscriptionCleanup = (pending, mode) => {
+        if (pendingUnsubscribesByQuery.has(pending.queryId)) {
+            failConnected(new ShunterProtocolError("Abandoned subscription received more than one applied response.", {
+                details: { kind: pending.kind, requestId: pending.requestId, queryId: pending.queryId },
+            }));
+            return;
+        }
+        const activeSocket = socket;
+        if (state.status !== "connected" || activeSocket === undefined) {
+            failConnected(new ShunterClosedClientError("Cannot clean up an abandoned subscription after disconnect."));
+            return;
+        }
+        let request;
+        try {
+            request = (mode === "single" ? encodeUnsubscribeSingleRequest : encodeUnsubscribeMultiRequest)(pending.queryId, { requestId: allocateSubscriptionRequestId() });
+        }
+        catch (error) {
+            failConnected(isShunterError(error)
+                ? error
+                : toShunterError(error, "validation", "Abandoned subscription cleanup request failed"));
+            return;
+        }
+        const pendingUnsubscribe = {
+            kind: pending.kind,
+            requestId: request.requestId,
+            queryId: request.queryId,
+            abandonedSubscription: pending,
+            resolve: () => { },
+            reject: () => { },
+        };
+        pendingUnsubscribesByRequest.set(request.requestId, pendingUnsubscribe);
+        pendingUnsubscribesByQuery.set(request.queryId, pendingUnsubscribe);
+        try {
+            activeSocket.send(request.frame);
+        }
+        catch (error) {
+            cleanupPendingUnsubscribe(pendingUnsubscribe);
+            failConnected(toShunterError(error, "transport", "Abandoned subscription cleanup send failed"));
+        }
+    };
     const unsubscribeOnce = (kind, queryId, encodeRequest, closedMessage, sendMessage) => {
         let unsubscribePromise;
         return () => {
@@ -1215,6 +1269,7 @@ export function createShunterClient(options) {
                 eventTable: active.eventTable,
                 replayEpoch: connectionEpoch,
                 replayWaiters: new Set(),
+                abandoned: false,
                 resolve: () => { },
                 reject: (error) => {
                     removeActiveSubscription(active.queryId);
@@ -1249,6 +1304,10 @@ export function createShunterClient(options) {
                     response,
                 },
             }));
+            return;
+        }
+        if (pending.abandoned) {
+            beginAbandonedSubscriptionCleanup(pending, "single");
             return;
         }
         const active = {
@@ -1329,6 +1388,10 @@ export function createShunterClient(options) {
             }));
             return;
         }
+        if (pending.abandoned) {
+            beginAbandonedSubscriptionCleanup(pending, "multi");
+            return;
+        }
         registerActiveSubscription({
             kind: pending.kind,
             target: pending.target,
@@ -1375,8 +1438,10 @@ export function createShunterClient(options) {
             details: { kind: pending.kind, target: pending.target, response },
         });
         settleReplayWaiters(pending, error);
-        pending.handle?.close(error);
-        pending.reject(error);
+        if (!pending.abandoned) {
+            pending.handle?.close(error);
+            pending.reject(error);
+        }
     };
     const settleUnsubscribeError = (response) => {
         const pending = pendingUnsubscribeForResponse(response.requestId, response.queryId, "SubscriptionError");
@@ -1384,11 +1449,16 @@ export function createShunterClient(options) {
             return;
         }
         cleanupPendingUnsubscribe(pending);
-        removeActiveSubscription(pending.queryId);
-        pending.reject(new ShunterValidationError(response.error || "Unsubscribe failed.", {
+        const error = new ShunterValidationError(response.error || "Unsubscribe failed.", {
             code: "unsubscribe_failed",
             details: { kind: pending.kind, response },
-        }));
+        });
+        if (pending.abandonedSubscription !== undefined) {
+            failConnected(error);
+            return;
+        }
+        removeActiveSubscription(pending.queryId);
+        pending.reject(error);
     };
     const settleActiveSubscriptionError = (response) => {
         if (response.queryId === undefined) {
@@ -1415,7 +1485,12 @@ export function createShunterClient(options) {
             return;
         }
         cleanupPendingUnsubscribe(pending);
-        removeActiveSubscription(response.queryId);
+        if (pending.abandonedSubscription !== undefined) {
+            cleanupPendingSubscription(pending.abandonedSubscription);
+        }
+        else {
+            removeActiveSubscription(response.queryId);
+        }
         pending.resolve();
     };
     const settleTransactionUpdateLight = (update) => {
@@ -1470,6 +1545,11 @@ export function createShunterClient(options) {
                                 code: "subscription_evaluation_failed",
                                 details: response,
                             }));
+                            return;
+                        }
+                        if (response.requestId !== undefined &&
+                            pendingUnsubscribesByRequest.has(response.requestId)) {
+                            settleUnsubscribeError(response);
                             return;
                         }
                         settleSubscriptionError(response);
@@ -1784,8 +1864,12 @@ export function createShunterClient(options) {
                 let cleanup;
                 if (options.signal !== undefined) {
                     const abort = () => {
-                        pendingReducerCalls.delete(request.requestId);
-                        cleanup?.();
+                        const pending = pendingReducerCalls.get(request.requestId);
+                        if (pending === undefined || pending.abandoned) {
+                            return;
+                        }
+                        pending.abandoned = true;
+                        pending.cleanup?.();
                         reject(new ShunterCallInterruptedError({
                             operation: "reducer",
                             name,
@@ -1801,6 +1885,7 @@ export function createShunterClient(options) {
                 pendingReducerCalls.set(request.requestId, {
                     name,
                     cleanup,
+                    abandoned: false,
                     resolve,
                     reject,
                 });
@@ -1843,8 +1928,12 @@ export function createShunterClient(options) {
                 let cleanup;
                 if (options.signal !== undefined) {
                     const abort = () => {
-                        pendingProcedureCalls.delete(messageKey);
-                        cleanup?.();
+                        const pending = pendingProcedureCalls.get(messageKey);
+                        if (pending === undefined || pending.abandoned) {
+                            return;
+                        }
+                        pending.abandoned = true;
+                        pending.cleanup?.();
                         reject(new ShunterCallInterruptedError({
                             operation: "procedure",
                             name,
@@ -1861,6 +1950,7 @@ export function createShunterClient(options) {
                     name,
                     messageId: new Uint8Array(request.messageId),
                     cleanup,
+                    abandoned: false,
                     resolve,
                     reject,
                 });
@@ -1905,8 +1995,12 @@ export function createShunterClient(options) {
                 let cleanup;
                 if (options.signal !== undefined) {
                     const abort = () => {
-                        pendingDeclaredQueries.delete(messageKey);
-                        cleanup?.();
+                        const pending = pendingDeclaredQueries.get(messageKey);
+                        if (pending === undefined || pending.abandoned) {
+                            return;
+                        }
+                        pending.abandoned = true;
+                        pending.cleanup?.();
                         reject(new ShunterClosedClientError("Declared query aborted before a response was received."));
                     };
                     options.signal.addEventListener("abort", abort, { once: true });
@@ -1917,6 +2011,7 @@ export function createShunterClient(options) {
                 pendingDeclaredQueries.set(messageKey, {
                     name,
                     cleanup,
+                    abandoned: false,
                     resolve,
                     reject,
                 });
@@ -1964,10 +2059,11 @@ export function createShunterClient(options) {
                 if (options.signal !== undefined) {
                     const abort = () => {
                         const pending = pendingSubscriptionsByRequest.get(request.requestId);
-                        if (pending !== undefined) {
-                            cleanupPendingSubscription(pending);
+                        if (pending === undefined || pending.abandoned) {
+                            return;
                         }
-                        cleanup?.();
+                        pending.abandoned = true;
+                        pending.cleanup?.();
                         const abortError = new ShunterClosedClientError("Declared view subscription aborted before a response was received.");
                         handle?.close(abortError);
                         reject(abortError);
@@ -1991,6 +2087,7 @@ export function createShunterClient(options) {
                     decodeRow: options.decodeRow,
                     handle,
                     cleanup,
+                    abandoned: false,
                     resolve: resolve,
                     reject,
                 };
@@ -2038,10 +2135,11 @@ export function createShunterClient(options) {
                 if (options.signal !== undefined) {
                     const abort = () => {
                         const pending = pendingSubscriptionsByRequest.get(request.requestId);
-                        if (pending !== undefined) {
-                            cleanupPendingSubscription(pending);
+                        if (pending === undefined || pending.abandoned) {
+                            return;
                         }
-                        cleanup?.();
+                        pending.abandoned = true;
+                        pending.cleanup?.();
                         const abortError = new ShunterClosedClientError("Table subscription aborted before a response was received.");
                         handle?.close(abortError);
                         reject(abortError);
@@ -2068,6 +2166,7 @@ export function createShunterClient(options) {
                     handle,
                     eventTable: options.eventTable,
                     cleanup,
+                    abandoned: false,
                     resolve: resolve,
                     reject,
                 };
