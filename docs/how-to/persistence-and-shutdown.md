@@ -126,10 +126,11 @@ removes its staging tree and leaves the output path absent, so it cannot be
 consumed as a backup and the same command can be retried. Backup refuses
 symlink sources, existing output paths, nested
 destinations inside the source `DataDir`, symlink entries, unsupported special
-files, and source files that change while being copied. Staged directories stay
-owner-private and writable until copying and source verification finish; source
-directory permission bits are then applied deepest-first before publication, so
-readable, read-only directories are preserved without blocking their children.
+files, and source entries that change while being copied, including the source
+root's identity or mode. Staged directories stay owner-private and writable
+until copying and source verification finish; source directory permission bits
+are then applied deepest-first before publication, so readable, read-only
+directories are preserved without blocking their children.
 
 ## Restore
 

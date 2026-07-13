@@ -110,7 +110,7 @@ func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestinat
 			}
 		}
 	}()
-	if err := copyDirectoryContents(src, staging, srcInfo.Mode().Perm()); err != nil {
+	if err := copyDirectoryContents(src, staging, srcInfo); err != nil {
 		return err
 	}
 	if err := syncOfflineCopyTree(staging); err != nil {
@@ -274,14 +274,21 @@ type offlineCopyDirectoryMode struct {
 	mode fs.FileMode
 }
 
-func copyDirectoryContents(src, dst string, rootMode fs.FileMode) error {
-	expected := make(map[string]fs.FileInfo)
-	directoryModes := []offlineCopyDirectoryMode{{path: dst, mode: rootMode}}
+func copyDirectoryContents(src, dst string, rootInfo fs.FileInfo) error {
+	expected := map[string]fs.FileInfo{".": rootInfo}
+	directoryModes := []offlineCopyDirectoryMode{{path: dst, mode: rootInfo.Mode().Perm()}}
 	if err := filepath.WalkDir(src, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if path == src {
+			info, err := entry.Info()
+			if err != nil {
+				return fmt.Errorf("stat source entry %s: %w", path, err)
+			}
+			if !sameFileSnapshot(rootInfo, info) {
+				return fmt.Errorf("source entry %s changed while copying; refusing to copy", path)
+			}
 			return nil
 		}
 		rel, err := filepath.Rel(src, path)
@@ -340,9 +347,6 @@ func verifyOfflineCopySource(src string, expected map[string]fs.FileInfo) error 
 	err := filepath.WalkDir(src, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
-		}
-		if path == src {
-			return nil
 		}
 		rel, err := filepath.Rel(src, path)
 		if err != nil {

@@ -388,6 +388,69 @@ func TestBackupDataDirRejectsSourceChangedDuringCopy(t *testing.T) {
 	assertDataDirFileBytes(t, sourcePath, []byte("mutated-segment"))
 }
 
+func TestBackupDataDirRejectsSourceRootModeChangedDuringCopy(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	sourcePath := writeDataDirTestBytes(t, dataDir, "00000000000000000001.log", []byte("segment-1"))
+	backupDir := filepath.Join(dir, "backup")
+	t.Cleanup(func() { makeDataDirTestDirectoriesWritable(t, dataDir) })
+
+	previous := copyRegularFileAfterCopyHook
+	copyRegularFileAfterCopyHook = func(path string) {
+		if path != sourcePath {
+			return
+		}
+		if err := os.Chmod(dataDir, 0o555); err != nil {
+			t.Fatalf("chmod source root during backup: %v", err)
+		}
+	}
+	t.Cleanup(func() { copyRegularFileAfterCopyHook = previous })
+
+	err := BackupDataDir(dataDir, backupDir)
+	if err == nil {
+		t.Fatal("BackupDataDir returned nil, want source root mutation error")
+	}
+	assertErrorContains(t, err, "changed while copying")
+	assertPathMissing(t, backupDir)
+	assertNoOfflineCopyStagingEntries(t, dir, "backup")
+}
+
+func TestBackupDataDirRejectsSourceRootReplacedBySymlinkDuringCopy(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	sourcePath := writeDataDirTestBytes(t, dataDir, "00000000000000000001.log", []byte("segment-1"))
+	movedDataDir := filepath.Join(dir, "moved-data")
+	backupDir := filepath.Join(dir, "backup")
+
+	previous := copyRegularFileAfterCopyHook
+	copyRegularFileAfterCopyHook = func(path string) {
+		if path != sourcePath {
+			return
+		}
+		if err := os.Rename(dataDir, movedDataDir); err != nil {
+			t.Fatalf("move source root during backup: %v", err)
+		}
+		if err := os.Symlink(movedDataDir, dataDir); err != nil {
+			t.Skipf("replace source root with symlink during backup: %v", err)
+		}
+	}
+	t.Cleanup(func() { copyRegularFileAfterCopyHook = previous })
+
+	err := BackupDataDir(dataDir, backupDir)
+	if err == nil {
+		t.Fatal("BackupDataDir returned nil, want source root replacement error")
+	}
+	assertErrorContains(t, err, "changed while copying")
+	assertPathMissing(t, backupDir)
+	assertNoOfflineCopyStagingEntries(t, dir, "backup")
+}
+
 func TestBackupDataDirFailurePhasesNeverPublishConsumableArtifact(t *testing.T) {
 	failure := errors.New("injected offline-copy failure")
 	for _, tc := range []struct {
