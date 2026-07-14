@@ -22,17 +22,19 @@ import (
 )
 
 const (
-	defaultJWKSCacheTTL       = 10 * time.Minute
-	defaultJWKSRefreshTimeout = 5 * time.Second
-	maxJWKSResponseBytes      = 1 << 20
+	defaultJWKSCacheTTL        = 10 * time.Minute
+	defaultJWKSRefreshTimeout  = 5 * time.Second
+	defaultJWKSRefreshCooldown = 30 * time.Second
+	maxJWKSResponseBytes       = 1 << 20
 )
 
 var jwksCaches sync.Map // map[string]*jwksCache
 
 type jwksCache struct {
-	mu        sync.Mutex
-	expiresAt time.Time
-	keys      []resolvedJWTVerificationKey
+	mu                  sync.Mutex
+	expiresAt           time.Time
+	lastForcedRefreshAt time.Time
+	keys                []resolvedJWTVerificationKey
 }
 
 type jwksDocument struct {
@@ -222,8 +224,18 @@ func keysForJWKS(source JWKSConfig, forceRefresh bool) ([]resolvedJWTVerificatio
 	defer cache.mu.Unlock()
 
 	now := time.Now()
-	if !forceRefresh && len(cache.keys) != 0 && now.Before(cache.expiresAt) {
+	cacheValid := len(cache.keys) != 0 && now.Before(cache.expiresAt)
+	if forceRefresh && cacheValid && !cache.lastForcedRefreshAt.IsZero() &&
+		now.Before(cache.lastForcedRefreshAt.Add(defaultJWKSRefreshCooldown)) {
 		return cloneResolvedJWTVerificationKeys(cache.keys), nil
+	}
+	if !forceRefresh && cacheValid {
+		return cloneResolvedJWTVerificationKeys(cache.keys), nil
+	}
+	if forceRefresh {
+		// Record the attempt before remote I/O. Concurrent waiters serialize on
+		// mu and reuse the current cache instead of each issuing another fetch.
+		cache.lastForcedRefreshAt = now
 	}
 	keys, err := fetchJWKS(source)
 	if err != nil {

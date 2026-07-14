@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -120,6 +121,142 @@ func TestValidateJWTJWKSRefreshesForUnknownKeyID(t *testing.T) {
 	}
 	if claims.Subject != "alice" {
 		t.Fatalf("claims = %+v, want alice", claims)
+	}
+}
+
+func TestValidateJWTJWKSBoundsSequentialUnknownKeyIDRefreshes(t *testing.T) {
+	trustedPrivateKey, trustedJWK := generateRS256JWK(t, "trusted")
+	missingPrivateKey, _ := generateRS256JWK(t, "missing")
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		writeJWKS(t, w, trustedJWK)
+	}))
+	t.Cleanup(srv.Close)
+
+	source := JWKSConfig{Issuer: "issuer", JWKSURL: srv.URL, CacheTTL: time.Hour}
+	cfg := &JWTConfig{JWKS: []JWKSConfig{source}, Issuers: []string{"issuer"}, AuthMode: AuthModeStrict}
+	if _, err := ValidateJWT(mintRS256Token(t, trustedPrivateKey, "trusted", "issuer"), cfg); err != nil {
+		t.Fatalf("warm trusted token: %v", err)
+	}
+	missingToken := mintRS256Token(t, missingPrivateKey, "missing", "issuer")
+	for range 2 {
+		if _, err := ValidateJWT(missingToken, cfg); err == nil {
+			t.Fatal("missing key token unexpectedly validated")
+		}
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("JWKS requests = %d, want one warm fetch and one bounded miss refresh", got)
+	}
+}
+
+func TestValidateJWTJWKSConcurrentUnknownKeyIDWaitersShareRefresh(t *testing.T) {
+	trustedPrivateKey, trustedJWK := generateRS256JWK(t, "trusted")
+	missingPrivateKey, _ := generateRS256JWK(t, "missing")
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		writeJWKS(t, w, trustedJWK)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &JWTConfig{
+		JWKS:     []JWKSConfig{{Issuer: "issuer", JWKSURL: srv.URL, CacheTTL: time.Hour}},
+		Issuers:  []string{"issuer"},
+		AuthMode: AuthModeStrict,
+	}
+	if _, err := ValidateJWT(mintRS256Token(t, trustedPrivateKey, "trusted", "issuer"), cfg); err != nil {
+		t.Fatalf("warm trusted token: %v", err)
+	}
+	missingToken := mintRS256Token(t, missingPrivateKey, "missing", "issuer")
+
+	const waiters = 16
+	start := make(chan struct{})
+	errs := make(chan error, waiters)
+	var wg sync.WaitGroup
+	for range waiters {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := ValidateJWT(missingToken, cfg)
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err == nil {
+			t.Fatal("missing key token unexpectedly validated")
+		}
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("JWKS requests = %d, want concurrent waiters to share one miss refresh", got)
+	}
+}
+
+func TestValidateJWTJWKSAcceptsRotationAfterRefreshCooldown(t *testing.T) {
+	oldPrivateKey, oldJWK := generateRS256JWK(t, "old")
+	missingPrivateKey, _ := generateRS256JWK(t, "missing")
+	newPrivateKey, newJWK := generateRS256JWK(t, "new")
+	keys := atomic.Value{}
+	keys.Store([]jwkDocumentKey{oldJWK})
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		writeJWKS(t, w, keys.Load().([]jwkDocumentKey)...)
+	}))
+	t.Cleanup(srv.Close)
+
+	source := JWKSConfig{Issuer: "issuer", JWKSURL: srv.URL, CacheTTL: time.Hour}
+	cfg := &JWTConfig{JWKS: []JWKSConfig{source}, Issuers: []string{"issuer"}, AuthMode: AuthModeStrict}
+	if _, err := ValidateJWT(mintRS256Token(t, oldPrivateKey, "old", "issuer"), cfg); err != nil {
+		t.Fatalf("warm old token: %v", err)
+	}
+	if _, err := ValidateJWT(mintRS256Token(t, missingPrivateKey, "missing", "issuer"), cfg); err == nil {
+		t.Fatal("missing key token unexpectedly validated")
+	}
+	keys.Store([]jwkDocumentKey{newJWK})
+
+	cacheAny, ok := jwksCaches.Load(jwksCacheKey(source))
+	if !ok {
+		t.Fatal("JWKS cache missing after validation")
+	}
+	cache := cacheAny.(*jwksCache)
+	cache.mu.Lock()
+	cache.lastForcedRefreshAt = time.Now().Add(-defaultJWKSRefreshCooldown - time.Second)
+	cache.mu.Unlock()
+
+	if _, err := ValidateJWT(mintRS256Token(t, newPrivateKey, "new", "issuer"), cfg); err != nil {
+		t.Fatalf("new key after refresh cooldown did not validate: %v", err)
+	}
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("JWKS requests = %d, want warm fetch, bounded miss, and post-cooldown rotation refresh", got)
+	}
+}
+
+func TestValidateJWTLocalKeySuccessSkipsJWKSForSameIssuer(t *testing.T) {
+	localPrivateKey, localPEM := generateRS256TestKey(t)
+	_, remoteJWK := generateRS256JWK(t, "remote")
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		writeJWKS(t, w, remoteJWK)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &JWTConfig{
+		VerificationKeys: []JWTVerificationKey{{Algorithm: JWTAlgorithmRS256, KeyID: "local", Key: localPEM}},
+		JWKS:             []JWKSConfig{{Issuer: "issuer", JWKSURL: srv.URL, CacheTTL: time.Hour}},
+		Issuers:          []string{"issuer"},
+		AuthMode:         AuthModeStrict,
+	}
+	if _, err := ValidateJWT(mintRS256Token(t, localPrivateKey, "local", "issuer"), cfg); err != nil {
+		t.Fatalf("local token did not validate: %v", err)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("JWKS requests = %d, want none after local verification success", got)
 	}
 }
 

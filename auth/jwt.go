@@ -180,16 +180,50 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	if err != nil {
 		return nil, errors.Join(ErrJWTInvalid, err)
 	}
-	candidates := selectJWTVerificationKeys(localKeys, alg, keyID)
+	// Keep configuration validation independent from remote resolution so a
+	// locally verified token can skip network access without accepting an
+	// invalid remote-source configuration.
+	if err := validateJWKSConfig(config); err != nil {
+		return nil, err
+	}
+	if err := validateOIDCDiscoveryConfig(config); err != nil {
+		return nil, err
+	}
+	localCandidates := selectJWTVerificationKeys(localKeys, alg, keyID)
+	parsed, lastErr, semanticErr := parseJWTWithCandidates(tokenString, alg, localCandidates)
+	if parsed != nil {
+		return claimsFromValidatedToken(parsed, config, extraClaims)
+	}
+	if semanticErr != nil {
+		return nil, errors.Join(ErrJWTInvalid, semanticErr)
+	}
+
 	remoteKeys, remoteErr := resolveJWKSVerificationKeys(config, alg, keyID, tokenIssuer)
-	if remoteErr != nil && len(candidates) == 0 {
+	if remoteErr != nil && len(localCandidates) == 0 {
 		return nil, errors.Join(ErrJWTInvalid, remoteErr)
 	}
-	candidates = append(candidates, selectJWTVerificationKeys(remoteKeys, alg, keyID)...)
-	if len(candidates) == 0 {
+	remoteCandidates := selectJWTVerificationKeys(remoteKeys, alg, keyID)
+	if len(localCandidates) == 0 && len(remoteCandidates) == 0 {
 		return nil, fmt.Errorf("%w: %w: alg=%q kid=%q", ErrJWTInvalid, ErrJWTUnsupportedAlg, alg, keyID)
 	}
 
+	parsed, remoteLastErr, semanticErr := parseJWTWithCandidates(tokenString, alg, remoteCandidates)
+	if parsed != nil {
+		return claimsFromValidatedToken(parsed, config, extraClaims)
+	}
+	if remoteLastErr != nil {
+		lastErr = remoteLastErr
+	}
+	if semanticErr != nil {
+		return nil, errors.Join(ErrJWTInvalid, semanticErr)
+	}
+	if lastErr != nil {
+		return nil, errors.Join(ErrJWTInvalid, lastErr)
+	}
+	return nil, fmt.Errorf("%w: token reported invalid", ErrJWTInvalid)
+}
+
+func parseJWTWithCandidates(tokenString string, alg JWTAlgorithm, candidates []resolvedJWTVerificationKey) (*jwt.Token, error, error) {
 	var lastErr error
 	var semanticErr error
 	for _, candidate := range candidates {
@@ -204,20 +238,14 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 				lastErr = fmt.Errorf("%w: token reported invalid", ErrJWTInvalid)
 				continue
 			}
-			return claimsFromValidatedToken(parsed, config, extraClaims)
+			return parsed, nil, nil
 		}
 		lastErr = err
 		if !errors.Is(err, jwt.ErrTokenSignatureInvalid) {
 			semanticErr = err
 		}
 	}
-	if semanticErr != nil {
-		return nil, errors.Join(ErrJWTInvalid, semanticErr)
-	}
-	if lastErr != nil {
-		return nil, errors.Join(ErrJWTInvalid, lastErr)
-	}
-	return nil, fmt.Errorf("%w: token reported invalid", ErrJWTInvalid)
+	return nil, lastErr, semanticErr
 }
 
 func jwtUnverifiedHeaderAndIssuer(tokenString string) (JWTAlgorithm, string, string, error) {

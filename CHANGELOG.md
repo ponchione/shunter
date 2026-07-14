@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Deduplicated subscriptions now retain original SQL per delivery, idle
+  connection deadlines run independently from ping cadence, and unknown JWT
+  key IDs share a per-source JWKS refresh cooldown. Successful local JWT
+  verification no longer contacts a remote source for the same issuer.
 - Hosted raw, declared, and live multi-way joins now share bounded candidate
   work accounting. One-off and subscription work limits return stable
   classified errors, and live relation count and per-relation row limits now
