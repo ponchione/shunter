@@ -612,6 +612,67 @@ func TestUpgradeAnonymousNoTokenMints(t *testing.T) {
 	}
 }
 
+func TestUpgradeAnonymousMaximumIssuerTokenReconnect(t *testing.T) {
+	issuer := strings.Repeat("i", auth.MaxIssuerBytes)
+	initialServer, initialRecorder := anonymousServer(t)
+	initialServer.JWT.Issuers = []string{issuer}
+	initialServer.Mint.Issuer = issuer
+	initialHTTPServer := newTestServer(t, initialServer)
+
+	initialConn, resp, err := dialWS(t, initialHTTPServer, wsDialOpts{
+		subprotocols: []string{"v1.bsatn.shunter"},
+	})
+	if err != nil {
+		t.Fatalf("anonymous initial dial: %v (resp=%v)", err, resp)
+	}
+	defer initialConn.Close(websocket.StatusNormalClosure, "")
+	initial := initialRecorder.waitLast(t)
+	if initial.Token == "" || initial.Identity.IsZero() {
+		t.Fatalf("anonymous initial upgrade = %+v, want minted token and identity", initial)
+	}
+
+	reconnectServer, reconnectRecorder := anonymousServer(t)
+	reconnectServer.JWT.Issuers = []string{issuer}
+	reconnectServer.Mint.Issuer = issuer
+	reconnectHTTPServer := newTestServer(t, reconnectServer)
+	reconnectConn, resp, err := dialWS(t, reconnectHTTPServer, wsDialOpts{
+		authHeader:   "Bearer " + initial.Token,
+		subprotocols: []string{"v1.bsatn.shunter"},
+	})
+	if err != nil {
+		t.Fatalf("anonymous token reconnect: %v (resp=%v)", err, resp)
+	}
+	defer reconnectConn.Close(websocket.StatusNormalClosure, "")
+	reconnected := reconnectRecorder.waitLast(t)
+	if reconnected.Token != "" || reconnected.Claims == nil {
+		t.Fatalf("reconnect upgrade = %+v, want validated presented token", reconnected)
+	}
+	if reconnected.Claims.Issuer != issuer || reconnected.Identity != initial.Identity {
+		t.Fatalf("reconnect issuer/identity did not round trip at exact boundary")
+	}
+}
+
+func TestUpgradeAnonymousOversizedIssuerRejectsBeforeTokenRoundTrip(t *testing.T) {
+	issuer := strings.Repeat("i", auth.MaxIssuerBytes+1)
+	server, _ := anonymousServer(t)
+	server.JWT.Issuers = []string{issuer}
+	server.Mint.Issuer = issuer
+	httpServer := newTestServer(t, server)
+
+	_, resp, err := dialWS(t, httpServer, wsDialOpts{
+		subprotocols: []string{"v1.bsatn.shunter"},
+	})
+	if err == nil {
+		t.Fatal("anonymous initial dial succeeded with oversized mint issuer")
+	}
+	if resp == nil || resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("anonymous initial dial status = %v, want 500", resp)
+	}
+	if body := responseBodyString(t, resp); body != authRejectedUnavailable+"\n" {
+		t.Fatalf("response body = %q, want sanitized auth-unavailable body", body)
+	}
+}
+
 func TestUpgradeZeroConnectionIDRejected(t *testing.T) {
 	s, _ := strictServer(t)
 	srv := newTestServer(t, s)

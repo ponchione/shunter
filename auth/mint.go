@@ -38,6 +38,9 @@ func MintAnonymousToken(config *MintConfig) (string, types.Identity, error) {
 	if config.Issuer == "" {
 		return "", types.Identity{}, fmt.Errorf("auth: mint issuer is required")
 	}
+	if len(config.Issuer) > MaxIssuerBytes {
+		return "", types.Identity{}, fmt.Errorf("auth: mint issuer: %w: exceeds %d bytes", ErrJWTClaimTooLarge, MaxIssuerBytes)
+	}
 	if config.Expiry < 0 {
 		return "", types.Identity{}, fmt.Errorf("auth: mint expiry must not be negative")
 	}

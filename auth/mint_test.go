@@ -52,8 +52,26 @@ func TestMintAnonymousTokenInvalidConfigFailsBeforeRandomRead(t *testing.T) {
 	cfg.Issuer = ""
 	check("empty issuer", cfg, "issuer is required")
 	cfg = testMintConfig()
+	cfg.Issuer = strings.Repeat("i", MaxIssuerBytes+1)
+	check("oversized issuer", cfg, "exceeds 1024 bytes")
+	cfg = testMintConfig()
 	cfg.Expiry = -time.Second
 	check("negative expiry", cfg, "expiry must not be negative")
+}
+
+func TestMintAnonymousTokenAcceptsMaximumIssuerLength(t *testing.T) {
+	cfg := testMintConfig()
+	cfg.Issuer = strings.Repeat("i", MaxIssuerBytes)
+	token, _, err := MintAnonymousToken(cfg)
+	if err != nil {
+		t.Fatalf("MintAnonymousToken exact issuer boundary: %v", err)
+	}
+	if _, err := ValidateJWT(token, &JWTConfig{
+		SigningKey: cfg.SigningKey,
+		Issuers:    []string{cfg.Issuer},
+	}); err != nil {
+		t.Fatalf("ValidateJWT exact issuer boundary: %v", err)
+	}
 }
 
 func TestMintAnonymousTokenValidatesRoundTrip(t *testing.T) {

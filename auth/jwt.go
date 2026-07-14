@@ -251,6 +251,9 @@ func jwtUnverifiedHeaderAndIssuer(tokenString string) (JWTAlgorithm, string, str
 // requiring a token. Hosts can call it at startup to catch malformed key
 // material before serving protocol traffic.
 func ValidateJWTConfig(config *JWTConfig) error {
+	if err := validateConfiguredJWTIssuers(config); err != nil {
+		return err
+	}
 	if _, err := resolveLocalJWTVerificationKeys(config); err != nil {
 		return err
 	}
@@ -264,6 +267,35 @@ func ValidateJWTConfig(config *JWTConfig) error {
 		return err
 	}
 	return nil
+}
+
+func validateConfiguredJWTIssuers(config *JWTConfig) error {
+	if config == nil {
+		return fmt.Errorf("%w: config is required", ErrJWTInvalid)
+	}
+	for i, issuer := range config.Issuers {
+		if err := validateConfiguredJWTIssuer(issuer, fmt.Sprintf("issuer allowlist entry %d", i+1)); err != nil {
+			return err
+		}
+	}
+	for i, source := range config.JWKS {
+		if err := validateConfiguredJWTIssuer(strings.TrimSpace(source.Issuer), fmt.Sprintf("jwks source %d issuer", i+1)); err != nil {
+			return err
+		}
+	}
+	for i, source := range config.OIDCDiscovery {
+		if err := validateConfiguredJWTIssuer(strings.TrimSpace(source.Issuer), fmt.Sprintf("oidc discovery source %d issuer", i+1)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateConfiguredJWTIssuer(issuer, label string) error {
+	if len(issuer) <= MaxIssuerBytes {
+		return nil
+	}
+	return fmt.Errorf("%w: %s: %w: exceeds %d bytes", ErrJWTInvalid, label, ErrJWTClaimTooLarge, MaxIssuerBytes)
 }
 
 // ValidateJWTExtraClaimsConfig validates the bounded extra-claim portion of a

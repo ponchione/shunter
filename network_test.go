@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,6 +118,32 @@ func TestBuildAuthConfigDevGeneratesAnonymousMintConfig(t *testing.T) {
 	}
 	if string(jwtCfg.SigningKey) != string(mintCfg.SigningKey) {
 		t.Fatal("dev auth JWT and mint signing keys differ")
+	}
+}
+
+func TestBuildAuthConfigDevAnonymousIssuerLengthBoundary(t *testing.T) {
+	issuer := strings.Repeat("i", auth.MaxIssuerBytes)
+	jwtCfg, mintCfg, err := buildAuthConfig(Config{
+		AuthMode:             AuthModeDev,
+		AnonymousTokenIssuer: issuer,
+	})
+	if err != nil {
+		t.Fatalf("buildAuthConfig exact issuer boundary: %v", err)
+	}
+	token, _, err := auth.MintAnonymousToken(mintCfg)
+	if err != nil {
+		t.Fatalf("MintAnonymousToken exact issuer boundary: %v", err)
+	}
+	if _, err := auth.ValidateJWT(token, jwtCfg); err != nil {
+		t.Fatalf("ValidateJWT exact issuer boundary: %v", err)
+	}
+
+	_, _, err = buildAuthConfig(Config{
+		AuthMode:             AuthModeDev,
+		AnonymousTokenIssuer: strings.Repeat("i", auth.MaxIssuerBytes+1),
+	})
+	if !errors.Is(err, auth.ErrJWTClaimTooLarge) {
+		t.Fatalf("buildAuthConfig oversized issuer error = %v, want ErrJWTClaimTooLarge", err)
 	}
 }
 

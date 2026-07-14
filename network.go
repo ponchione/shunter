@@ -70,15 +70,18 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 		if cfg.AnonymousTokenTTL < 0 {
 			return nil, nil, ErrAnonymousTokenTTLInvalid
 		}
+		issuer := cfg.AnonymousTokenIssuer
+		if issuer == "" {
+			issuer = "shunter-dev"
+		}
+		if len(issuer) > auth.MaxIssuerBytes {
+			return nil, nil, fmt.Errorf("anonymous token issuer: %w: exceeds %d bytes", auth.ErrJWTClaimTooLarge, auth.MaxIssuerBytes)
+		}
 		if len(signingKey) == 0 {
 			signingKey = make([]byte, 32)
 			if _, err := rand.Read(signingKey); err != nil {
 				return nil, nil, fmt.Errorf("generate dev auth signing key: %w", err)
 			}
-		}
-		issuer := cfg.AnonymousTokenIssuer
-		if issuer == "" {
-			issuer = "shunter-dev"
 		}
 		if len(issuers) > 0 && !slices.Contains(issuers, issuer) {
 			issuers = append(issuers, issuer)

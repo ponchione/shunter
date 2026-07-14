@@ -91,6 +91,25 @@ func TestValidateJWTConfigRejectsWeakHS256Keys(t *testing.T) {
 	}
 }
 
+func TestValidateJWTConfigIssuerLengthBoundary(t *testing.T) {
+	valid := &JWTConfig{
+		SigningKey: testKey,
+		Issuers:    []string{strings.Repeat("i", MaxIssuerBytes)},
+	}
+	if err := ValidateJWTConfig(valid); err != nil {
+		t.Fatalf("ValidateJWTConfig exact issuer boundary: %v", err)
+	}
+
+	invalid := &JWTConfig{
+		SigningKey: testKey,
+		Issuers:    []string{strings.Repeat("i", MaxIssuerBytes+1)},
+	}
+	err := ValidateJWTConfig(invalid)
+	if !errors.Is(err, ErrJWTInvalid) || !errors.Is(err, ErrJWTClaimTooLarge) {
+		t.Fatalf("ValidateJWTConfig oversized issuer error = %v, want ErrJWTInvalid and ErrJWTClaimTooLarge", err)
+	}
+}
+
 func TestValidateJWTFullyPopulated(t *testing.T) {
 	cfg := &JWTConfig{SigningKey: testKey, AuthMode: AuthModeStrict}
 	now := time.Now()
