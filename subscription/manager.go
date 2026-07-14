@@ -135,6 +135,9 @@ type Manager struct {
 	// MaxMultiJoinRowsPerRelation caps committed input rows per multi-way
 	// join relation. Zero means unlimited.
 	MaxMultiJoinRowsPerRelation int
+	// MaxMultiJoinWork caps candidate rows examined across one multi-way join
+	// snapshot or delta evaluation. Zero means unlimited.
+	MaxMultiJoinWork int
 }
 
 // ManagerOption configures optional fields on the Manager.
@@ -183,6 +186,12 @@ func WithMaxMultiJoinRowsPerRelation(n int) ManagerOption {
 	return func(m *Manager) { m.MaxMultiJoinRowsPerRelation = n }
 }
 
+// WithMaxMultiJoinWork caps candidate rows examined by each multi-way join
+// snapshot or delta evaluation. Non-positive values disable this guardrail.
+func WithMaxMultiJoinWork(n int) ManagerOption {
+	return func(m *Manager) { m.MaxMultiJoinWork = n }
+}
+
 // WithFanOutInbox wires the inbox channel used by EvalAndBroadcast to hand
 // off computed fanout payloads. Nil inbox (the default) means evaluation
 // still runs but no message is dispatched — useful for tests.
@@ -198,16 +207,19 @@ func WithObserver(observer Observer) ManagerOption {
 // NewManager constructs a Manager.
 func NewManager(lookup SchemaLookup, resolver IndexResolver, opts ...ManagerOption) *Manager {
 	m := &Manager{
-		schema:            lookup,
-		resolver:          resolver,
-		registry:          newQueryRegistry(),
-		indexes:           NewPruningIndexes(),
-		droppedPending:    make(map[types.ConnectionID]struct{}),
-		deltaIndexColumns: make(map[TableID]map[ColID]int),
-		updateColumns:     make(map[TableID][]schema.ColumnSchema),
-		querySets:         make(map[types.ConnectionID]map[uint32][]types.SubscriptionID),
-		connectionUsage:   make(map[types.ConnectionID]connectionSubscriptionUsage),
-		fanoutClosedCh:    make(chan struct{}),
+		schema:                      lookup,
+		resolver:                    resolver,
+		registry:                    newQueryRegistry(),
+		indexes:                     NewPruningIndexes(),
+		droppedPending:              make(map[types.ConnectionID]struct{}),
+		deltaIndexColumns:           make(map[TableID]map[ColID]int),
+		updateColumns:               make(map[TableID][]schema.ColumnSchema),
+		querySets:                   make(map[types.ConnectionID]map[uint32][]types.SubscriptionID),
+		connectionUsage:             make(map[types.ConnectionID]connectionSubscriptionUsage),
+		fanoutClosedCh:              make(chan struct{}),
+		MaxMultiJoinRelations:       DefaultMultiJoinMaxRelations,
+		MaxMultiJoinRowsPerRelation: DefaultMultiJoinMaxRowsPerRelation,
+		MaxMultiJoinWork:            DefaultMultiJoinMaxWork,
 	}
 	for _, opt := range opts {
 		opt(m)

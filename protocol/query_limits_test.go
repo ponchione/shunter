@@ -19,15 +19,16 @@ func TestNormalizeSQLQueryLimits(t *testing.T) {
 	}{
 		{
 			name: "defaults",
-			want: SQLQueryLimits{MaxRows: DefaultSQLQueryMaxRows, MaxBytes: DefaultSQLQueryMaxBytes},
+			want: SQLQueryLimits{MaxRows: DefaultSQLQueryMaxRows, MaxBytes: DefaultSQLQueryMaxBytes, MaxWork: DefaultSQLQueryMaxWork},
 		},
 		{
 			name:   "explicit",
-			limits: SQLQueryLimits{MaxRows: 12, MaxBytes: 34},
-			want:   SQLQueryLimits{MaxRows: 12, MaxBytes: 34},
+			limits: SQLQueryLimits{MaxRows: 12, MaxBytes: 34, MaxWork: 56},
+			want:   SQLQueryLimits{MaxRows: 12, MaxBytes: 34, MaxWork: 56},
 		},
 		{name: "negative rows", limits: SQLQueryLimits{MaxRows: -1}, wantErr: true},
 		{name: "negative bytes", limits: SQLQueryLimits{MaxBytes: -1}, wantErr: true},
+		{name: "negative work", limits: SQLQueryLimits{MaxWork: -1}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -37,6 +38,56 @@ func TestNormalizeSQLQueryLimits(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("NormalizeSQLQueryLimits() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMultiJoinWorkLimitStopsCartesianExecution(t *testing.T) {
+	aSchema := &schema.TableSchema{ID: 1, Name: "a", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: schema.KindUint32},
+		{Index: 1, Name: "join_key", Type: schema.KindUint32},
+	}}
+	bSchema := &schema.TableSchema{ID: 2, Name: "b", Columns: append([]schema.ColumnSchema(nil), aSchema.Columns...)}
+	bSchema.Name = "b"
+	cSchema := &schema.TableSchema{ID: 3, Name: "c", Columns: append([]schema.ColumnSchema(nil), aSchema.Columns...)}
+	cSchema.Name = "c"
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"a": {id: aSchema.ID, schema: aSchema},
+		"b": {id: bSchema.ID, schema: bSchema},
+		"c": {id: cSchema.ID, schema: cSchema},
+	}}
+	rows := []types.ProductValue{
+		{types.NewUint32(1), types.NewUint32(7)},
+		{types.NewUint32(2), types.NewUint32(7)},
+		{types.NewUint32(3), types.NewUint32(7)},
+	}
+	state := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: rows,
+		2: rows,
+		3: rows,
+	}}}
+	opts := SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true}
+	queries := []string{
+		"SELECT c.* FROM a JOIN b ON a.join_key = b.join_key JOIN c ON b.join_key = c.join_key WHERE c.id = 999",
+		"SELECT COUNT(*) AS n FROM a JOIN b ON a.join_key = b.join_key JOIN c ON b.join_key = c.join_key",
+	}
+	for _, query := range queries {
+		t.Run(query, func(t *testing.T) {
+			compiled, err := CompileSQLQueryString(query, sl, nil, opts)
+			if err != nil {
+				t.Fatalf("CompileSQLQueryString: %v", err)
+			}
+			_, err = ExecuteCompiledSQLQueryWithLimits(context.Background(), compiled, state, sl, SQLQueryLimits{
+				MaxRows:  100,
+				MaxBytes: 1 << 20,
+				MaxWork:  20,
+			})
+			if !errors.Is(err, ErrSQLQueryWorkLimit) {
+				t.Fatalf("execution error = %v, want ErrSQLQueryWorkLimit", err)
 			}
 		})
 	}

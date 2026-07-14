@@ -12,17 +12,26 @@ const (
 	// DefaultSQLQueryMaxBytes bounds the encoded RowList payload returned by
 	// hosted one-off and declared queries.
 	DefaultSQLQueryMaxBytes = 64 << 20
+	// DefaultSQLQueryMaxWork bounds candidate rows and index probes performed
+	// by one-off and declared multi-way joins.
+	DefaultSQLQueryMaxWork = 1_000_000
 )
 
 // ErrSQLQueryResultLimit reports that a query exceeded a host-controlled result
 // boundary. Client-supplied LIMIT clauses do not override this boundary.
 var ErrSQLQueryResultLimit = errors.New("protocol: SQL query result limit exceeded")
 
-// SQLQueryLimits bounds one-off and declared SQL query results. Zero values use
-// the hosted defaults when passed through NormalizeSQLQueryLimits.
+// ErrSQLQueryWorkLimit reports that a query exhausted its host-controlled
+// execution-work boundary before producing a result.
+var ErrSQLQueryWorkLimit = errors.New("protocol: SQL query work limit exceeded")
+
+// SQLQueryLimits bounds one-off and declared SQL query results and multi-way
+// join execution work. Zero values use the hosted defaults when passed through
+// NormalizeSQLQueryLimits.
 type SQLQueryLimits struct {
 	MaxRows  int
 	MaxBytes int
+	MaxWork  int
 }
 
 // NormalizeSQLQueryLimits validates limits and fills zero values with hosted
@@ -34,11 +43,17 @@ func NormalizeSQLQueryLimits(limits SQLQueryLimits) (SQLQueryLimits, error) {
 	if limits.MaxBytes < 0 {
 		return SQLQueryLimits{}, fmt.Errorf("SQL query max bytes must not be negative")
 	}
+	if limits.MaxWork < 0 {
+		return SQLQueryLimits{}, fmt.Errorf("SQL query max work must not be negative")
+	}
 	if limits.MaxRows == 0 {
 		limits.MaxRows = DefaultSQLQueryMaxRows
 	}
 	if limits.MaxBytes == 0 {
 		limits.MaxBytes = DefaultSQLQueryMaxBytes
+	}
+	if limits.MaxWork == 0 {
+		limits.MaxWork = DefaultSQLQueryMaxWork
 	}
 	return limits, nil
 }

@@ -111,6 +111,7 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection
 		case CrossJoin:
 			rows, err = m.appendProjectedCrossJoinRows(ctx, nil, view, p, rowLimit)
 		case MultiJoin:
+			ctx = m.withMultiJoinWorkBudget(ctx)
 			rows, err = m.appendProjectedMultiJoinRows(ctx, nil, view, p, projection, rowLimit)
 		}
 		if err != nil {

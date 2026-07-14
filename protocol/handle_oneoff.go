@@ -40,6 +40,7 @@ func handleOneOffQuery(
 	handleOneOffQueryWithVisibilityAndLimits(ctx, conn, msg, stateAccess, sl, nil, SQLQueryLimits{
 		MaxRows:  DefaultSQLQueryMaxRows,
 		MaxBytes: DefaultSQLQueryMaxBytes,
+		MaxWork:  DefaultSQLQueryMaxWork,
 	})
 }
 
@@ -54,6 +55,7 @@ func handleOneOffQueryWithVisibility(
 	handleOneOffQueryWithVisibilityAndLimits(ctx, conn, msg, stateAccess, sl, visibilityFilters, SQLQueryLimits{
 		MaxRows:  DefaultSQLQueryMaxRows,
 		MaxBytes: DefaultSQLQueryMaxBytes,
+		MaxWork:  DefaultSQLQueryMaxWork,
 	})
 }
 
@@ -115,7 +117,7 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 }
 
 // ExecuteCompiledSQLQueryWithLimits evaluates a precompiled query while
-// enforcing host-controlled row and encoded-byte result limits.
+// enforcing host-controlled result and multi-way-join work limits.
 func ExecuteCompiledSQLQueryWithLimits(ctx context.Context, compiled CompiledSQLQuery, stateAccess CommittedStateAccess, sl SchemaLookup, limits SQLQueryLimits) (SQLQueryResult, error) {
 	normalized, err := NormalizeSQLQueryLimits(limits)
 	if err != nil {

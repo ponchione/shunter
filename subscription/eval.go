@@ -493,6 +493,7 @@ func (m *Manager) evalQuery(ctx context.Context, qs *queryState, dv *DeltaView) 
 		if err := m.checkMultiJoinDeltaLimits(ctx, p, dv); err != nil {
 			return nil, err
 		}
+		ctx = m.withMultiJoinWorkBudget(ctx)
 		ins, del, err := evalMultiJoinDelta(ctx, dv, p, qs.projection)
 		if err != nil {
 			return nil, err

@@ -12,6 +12,7 @@ import (
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -116,6 +117,9 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	if cfg.OneOffQueryMaxBytes < 0 {
 		return Config{}, "", fmt.Errorf("one-off query max bytes must not be negative")
 	}
+	if cfg.OneOffQueryMaxWork < 0 {
+		return Config{}, "", fmt.Errorf("one-off query max work must not be negative")
+	}
 	if cfg.SubscriptionInitialRowLimit < 0 {
 		return Config{}, "", fmt.Errorf("subscription initial row limit must not be negative")
 	}
@@ -139,6 +143,9 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	}
 	if cfg.SubscriptionMaxMultiJoinRowsPerRelation < 0 {
 		return Config{}, "", fmt.Errorf("subscription max multi-join rows per relation must not be negative")
+	}
+	if cfg.SubscriptionMaxMultiJoinWork < 0 {
+		return Config{}, "", fmt.Errorf("subscription max multi-join work must not be negative")
 	}
 	if cfg.AuthMode != AuthModeDev && cfg.AuthMode != AuthModeStrict {
 		return Config{}, "", fmt.Errorf("auth mode is invalid")
@@ -166,6 +173,9 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	if normalized.OneOffQueryMaxBytes == 0 {
 		normalized.OneOffQueryMaxBytes = protocol.DefaultSQLQueryMaxBytes
 	}
+	if normalized.OneOffQueryMaxWork == 0 {
+		normalized.OneOffQueryMaxWork = protocol.DefaultSQLQueryMaxWork
+	}
 	if normalized.SubscriptionInitialRowLimit == 0 {
 		normalized.SubscriptionInitialRowLimit = defaultSubscriptionInitialRows
 	}
@@ -180,6 +190,15 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	}
 	if normalized.SubscriptionMaxActiveSubscriptionsPerConnection == 0 {
 		normalized.SubscriptionMaxActiveSubscriptionsPerConnection = defaultSubscriptionActiveSubscriptions
+	}
+	if normalized.SubscriptionMaxMultiJoinRelations == 0 {
+		normalized.SubscriptionMaxMultiJoinRelations = subscription.DefaultMultiJoinMaxRelations
+	}
+	if normalized.SubscriptionMaxMultiJoinRowsPerRelation == 0 {
+		normalized.SubscriptionMaxMultiJoinRowsPerRelation = subscription.DefaultMultiJoinMaxRowsPerRelation
+	}
+	if normalized.SubscriptionMaxMultiJoinWork == 0 {
+		normalized.SubscriptionMaxMultiJoinWork = subscription.DefaultMultiJoinMaxWork
 	}
 	return normalized, dataDir, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ponchione/shunter/internal/querywork"
 	"github.com/ponchione/shunter/internal/valueagg"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
@@ -16,6 +17,7 @@ func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, st
 	if multi == nil {
 		return SQLQueryResult{}, fmt.Errorf("multi-join metadata must not be nil")
 	}
+	ctx = querywork.WithBudget(ctx, limits.MaxWork)
 	view := stateAccess.Snapshot()
 	defer view.Close()
 	resultColumns := multiJoinResultColumns(query, multi)
@@ -175,6 +177,9 @@ func visitOneOffMultiJoinCandidateRows(ctx context.Context, view store.Committed
 			if err := ctx.Err(); err != nil {
 				return false, err
 			}
+			if err := chargeOneOffMultiJoinWork(ctx); err != nil {
+				return false, err
+			}
 			row, ok := view.GetRow(rel.Table, rid)
 			if !ok {
 				continue
@@ -189,11 +194,21 @@ func visitOneOffMultiJoinCandidateRows(ctx context.Context, view store.Committed
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
+		if err := chargeOneOffMultiJoinWork(ctx); err != nil {
+			return false, err
+		}
 		if !visit(row) {
 			return false, nil
 		}
 	}
 	return true, nil
+}
+
+func chargeOneOffMultiJoinWork(ctx context.Context) error {
+	if err := querywork.Charge(ctx); err != nil {
+		return fmt.Errorf("%w: %v", ErrSQLQueryWorkLimit, err)
+	}
+	return nil
 }
 
 func multiJoinPrefixConditionsMatch(conditions []compiledSQLMultiJoinCondition, tuple []types.ProductValue, depth int) bool {

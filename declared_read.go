@@ -266,6 +266,7 @@ func (r *Runtime) CallQuery(ctx context.Context, name string, opts ...DeclaredRe
 	result, err := protocol.ExecuteCompiledSQLQueryWithLimits(ctx, compiled, committedStateAccess{state: state}, r.registry, protocol.SQLQueryLimits{
 		MaxRows:  r.buildConfig.OneOffQueryMaxRows,
 		MaxBytes: r.buildConfig.OneOffQueryMaxBytes,
+		MaxWork:  r.buildConfig.OneOffQueryMaxWork,
 	})
 	if err != nil {
 		return DeclaredQueryResult{}, err

@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Hosted raw, declared, and live multi-way joins now share bounded candidate
+  work accounting. One-off and subscription work limits return stable
+  classified errors, and live relation count and per-relation row limits now
+  have finite defaults.
 - CLI success, version, backup, restore, code-generation, and hosted-chat
   maintenance output now propagates stdout write failures and returns a
   nonzero exit status instead of reporting success after truncated output.

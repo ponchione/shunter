@@ -341,6 +341,47 @@ func TestRegisterSetMultiJoinLimitRejectsLargeInputRelation(t *testing.T) {
 	}
 }
 
+func TestNewManagerUsesFiniteMultiJoinDefaults(t *testing.T) {
+	s := multiJoinTestSchema()
+	mgr := NewManager(s, s)
+	if mgr.MaxMultiJoinRelations != DefaultMultiJoinMaxRelations ||
+		mgr.MaxMultiJoinRowsPerRelation != DefaultMultiJoinMaxRowsPerRelation ||
+		mgr.MaxMultiJoinWork != DefaultMultiJoinMaxWork {
+		t.Fatalf("multi-join defaults = relations %d rows %d work %d", mgr.MaxMultiJoinRelations, mgr.MaxMultiJoinRowsPerRelation, mgr.MaxMultiJoinWork)
+	}
+}
+
+func TestRegisterSetMultiJoinWorkLimitStopsRejectedCartesianTuples(t *testing.T) {
+	s := multiJoinTestSchema()
+	pred := multiJoinUnfilteredTestPredicate()
+	pred.Filter = ColEq{Table: 3, Column: 0, Alias: 2, Value: types.NewUint64(999)}
+	for _, aggregate := range []*Aggregate{nil, countStarAggregate()} {
+		name := "projection"
+		if aggregate != nil {
+			name = "aggregate"
+		}
+		t.Run(name, func(t *testing.T) {
+			mgr := NewManager(s, s, WithMaxMultiJoinWork(20))
+			var aggregates []*Aggregate
+			if aggregate != nil {
+				aggregates = []*Aggregate{aggregate}
+			}
+			_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+				ConnID:     types.ConnectionID{1},
+				QueryID:    708,
+				Predicates: []Predicate{pred},
+				Aggregates: aggregates,
+			}, multiJoinCommitted(false))
+			if !errors.Is(err, ErrMultiJoinLimit) {
+				t.Fatalf("RegisterSet work error = %v, want ErrMultiJoinLimit", err)
+			}
+			if active := mgr.ActiveSubscriptionSets(); active != 0 {
+				t.Fatalf("ActiveSubscriptionSets = %d, want 0 after work-limit rejection", active)
+			}
+		})
+	}
+}
+
 func TestMultiJoinRuntimeLimitQueuesEvalError(t *testing.T) {
 	s := multiJoinTestSchema()
 	inbox := make(chan FanOutMessage, 1)
@@ -371,6 +412,44 @@ func TestMultiJoinRuntimeLimitQueuesEvalError(t *testing.T) {
 	}
 	if !strings.Contains(errs[0].Message, ErrMultiJoinLimit.Error()) {
 		t.Fatalf("subscription error = %q, want multi-join limit", errs[0].Message)
+	}
+	dropped := mgr.DrainDroppedClients()
+	if len(dropped) != 1 || dropped[0] != connID {
+		t.Fatalf("dropped clients = %v, want [%v]", dropped, connID)
+	}
+}
+
+func TestMultiJoinRuntimeWorkLimitQueuesEvalError(t *testing.T) {
+	s := multiJoinTestSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	connID := types.ConnectionID{18}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    709,
+		RequestID:  79,
+		Predicates: []Predicate{multiJoinUnfilteredTestPredicate()},
+	}, multiJoinCommitted(false)); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+
+	mgr.MaxMultiJoinWork = 10
+	extra := types.ProductValue{types.NewUint64(301), types.NewUint64(20)}
+	cs := &store.Changeset{
+		TxID: 1,
+		Tables: map[TableID]*store.TableChangeset{
+			3: {Inserts: []types.ProductValue{extra}},
+		},
+	}
+	mgr.EvalAndBroadcast(types.TxID(1), cs, multiJoinCommitted(true), PostCommitMeta{})
+
+	msg := <-inbox
+	errs := msg.Errors[connID]
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, ErrMultiJoinLimit.Error()) {
+		t.Fatalf("subscription errors = %v, want one multi-join limit", msg.Errors)
+	}
+	if updates := msg.Fanout[connID]; len(updates) != 0 {
+		t.Fatalf("fanout updates = %v, want none after work-limit failure", updates)
 	}
 	dropped := mgr.DrainDroppedClients()
 	if len(dropped) != 1 || dropped[0] != connID {

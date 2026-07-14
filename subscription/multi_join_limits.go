@@ -4,8 +4,30 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ponchione/shunter/internal/querywork"
 	"github.com/ponchione/shunter/store"
 )
+
+const (
+	// DefaultMultiJoinMaxRelations bounds live multi-way join graph breadth.
+	DefaultMultiJoinMaxRelations = 8
+	// DefaultMultiJoinMaxRowsPerRelation bounds each materialized live input.
+	DefaultMultiJoinMaxRowsPerRelation = 100_000
+	// DefaultMultiJoinMaxWork bounds candidate rows examined by one live
+	// snapshot or delta evaluation.
+	DefaultMultiJoinMaxWork = 1_000_000
+)
+
+func (m *Manager) withMultiJoinWorkBudget(ctx context.Context) context.Context {
+	return querywork.WithBudget(ctx, m.MaxMultiJoinWork)
+}
+
+func chargeMultiJoinWork(ctx context.Context) error {
+	if err := querywork.Charge(ctx); err != nil {
+		return fmt.Errorf("%w: %v", ErrMultiJoinLimit, err)
+	}
+	return nil
+}
 
 func (m *Manager) checkMultiJoinLimits(ctx context.Context, pred Predicate, view store.CommittedReadView) error {
 	multi, ok := pred.(MultiJoin)

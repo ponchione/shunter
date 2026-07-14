@@ -342,6 +342,7 @@ func (r *Runtime) ensureProtocolGraphLocked() error {
 		SQLQueryLimits: protocol.SQLQueryLimits{
 			MaxRows:  r.buildConfig.OneOffQueryMaxRows,
 			MaxBytes: r.buildConfig.OneOffQueryMaxBytes,
+			MaxWork:  r.buildConfig.OneOffQueryMaxWork,
 		},
 		SubscriptionLimits: protocol.SubscriptionLimits{
 			MaxQueriesPerSet: r.buildConfig.SubscriptionMaxQueriesPerSet,

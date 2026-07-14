@@ -43,8 +43,9 @@ type Server struct {
 	// State provides read-only snapshot access for OneOffQuery.
 	// Required for OneOffQuery to work.
 	State CommittedStateAccess
-	// SQLQueryLimits bounds raw one-off query results. Zero values use hosted
-	// defaults. Declared-read implementations own their corresponding limits.
+	// SQLQueryLimits bounds raw one-off query results and multi-way-join work.
+	// Zero values use hosted defaults. Declared-read implementations own their
+	// corresponding limits.
 	SQLQueryLimits SQLQueryLimits
 	// SubscriptionLimits bounds protocol-edge subscription request work.
 	SubscriptionLimits SubscriptionLimits
@@ -352,7 +353,7 @@ func (s *Server) recordRejected(result string, err error) {
 func (s *Server) buildMessageHandlers() *MessageHandlers {
 	limits, err := NormalizeSQLQueryLimits(s.SQLQueryLimits)
 	if err != nil {
-		limits = SQLQueryLimits{MaxRows: DefaultSQLQueryMaxRows, MaxBytes: DefaultSQLQueryMaxBytes}
+		limits = SQLQueryLimits{MaxRows: DefaultSQLQueryMaxRows, MaxBytes: DefaultSQLQueryMaxBytes, MaxWork: DefaultSQLQueryMaxWork}
 	}
 	subscriptionLimits, subErr := NormalizeSubscriptionLimits(s.SubscriptionLimits)
 	if subErr != nil {

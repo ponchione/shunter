@@ -15,6 +15,7 @@ import (
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -216,13 +217,19 @@ func TestBuildWithBlankDataDirNormalizesToRuntimeDefault(t *testing.T) {
 	if rt.buildConfig.OneOffQueryMaxBytes != protocol.DefaultSQLQueryMaxBytes {
 		t.Fatalf("OneOffQueryMaxBytes = %d, want %d", rt.buildConfig.OneOffQueryMaxBytes, protocol.DefaultSQLQueryMaxBytes)
 	}
+	if rt.buildConfig.OneOffQueryMaxWork != protocol.DefaultSQLQueryMaxWork {
+		t.Fatalf("OneOffQueryMaxWork = %d, want %d", rt.buildConfig.OneOffQueryMaxWork, protocol.DefaultSQLQueryMaxWork)
+	}
 	if rt.buildConfig.SubscriptionInitialRowLimit != defaultSubscriptionInitialRows {
 		t.Fatalf("SubscriptionInitialRowLimit = %d, want %d", rt.buildConfig.SubscriptionInitialRowLimit, defaultSubscriptionInitialRows)
 	}
 	if rt.buildConfig.SubscriptionSnapshotMaxBytes != defaultSubscriptionSnapshotBytes ||
 		rt.buildConfig.SubscriptionMaxQueriesPerSet != protocol.DefaultSubscriptionMaxQueriesPerSet ||
 		rt.buildConfig.SubscriptionMaxActiveSetsPerConnection != defaultSubscriptionActiveSets ||
-		rt.buildConfig.SubscriptionMaxActiveSubscriptionsPerConnection != defaultSubscriptionActiveSubscriptions {
+		rt.buildConfig.SubscriptionMaxActiveSubscriptionsPerConnection != defaultSubscriptionActiveSubscriptions ||
+		rt.buildConfig.SubscriptionMaxMultiJoinRelations != subscription.DefaultMultiJoinMaxRelations ||
+		rt.buildConfig.SubscriptionMaxMultiJoinRowsPerRelation != subscription.DefaultMultiJoinMaxRowsPerRelation ||
+		rt.buildConfig.SubscriptionMaxMultiJoinWork != subscription.DefaultMultiJoinMaxWork {
 		t.Fatalf("subscription defaults = %+v", rt.buildConfig)
 	}
 }
@@ -242,6 +249,11 @@ func TestBuildRejectsNegativeResourceLimits(t *testing.T) {
 			name: "one-off bytes",
 			cfg:  Config{DataDir: t.TempDir(), OneOffQueryMaxBytes: -1},
 			want: "one-off query max bytes must not be negative",
+		},
+		{
+			name: "one-off work",
+			cfg:  Config{DataDir: t.TempDir(), OneOffQueryMaxWork: -1},
+			want: "one-off query max work must not be negative",
 		},
 		{
 			name: "subscription initial rows",
@@ -278,6 +290,11 @@ func TestBuildRejectsNegativeResourceLimits(t *testing.T) {
 			cfg:  Config{DataDir: t.TempDir(), SubscriptionMaxMultiJoinRowsPerRelation: -1},
 			want: "subscription max multi-join rows per relation must not be negative",
 		},
+		{
+			name: "multi-join work",
+			cfg:  Config{DataDir: t.TempDir(), SubscriptionMaxMultiJoinWork: -1},
+			want: "subscription max multi-join work must not be negative",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -311,6 +328,7 @@ func TestStartConfiguresSubscriptionLimits(t *testing.T) {
 		SubscriptionMaxActiveSubscriptionsPerConnection: 5,
 		SubscriptionMaxMultiJoinRelations:               4,
 		SubscriptionMaxMultiJoinRowsPerRelation:         256,
+		SubscriptionMaxMultiJoinWork:                    512,
 	})
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
@@ -335,6 +353,9 @@ func TestStartConfiguresSubscriptionLimits(t *testing.T) {
 	}
 	if rt.subscriptions.MaxMultiJoinRowsPerRelation != 256 {
 		t.Fatalf("MaxMultiJoinRowsPerRelation = %d, want 256", rt.subscriptions.MaxMultiJoinRowsPerRelation)
+	}
+	if rt.subscriptions.MaxMultiJoinWork != 512 {
+		t.Fatalf("MaxMultiJoinWork = %d, want 512", rt.subscriptions.MaxMultiJoinWork)
 	}
 }
 

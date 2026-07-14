@@ -83,6 +83,7 @@ func TestStartConfiguresProtocolSQLQueryLimits(t *testing.T) {
 		ListenAddr:                   "127.0.0.1:0",
 		OneOffQueryMaxRows:           123,
 		OneOffQueryMaxBytes:          456,
+		OneOffQueryMaxWork:           789,
 		SubscriptionMaxQueriesPerSet: 7,
 	})
 	if err != nil {
@@ -96,7 +97,7 @@ func TestStartConfiguresProtocolSQLQueryLimits(t *testing.T) {
 	if rt.protocolServer == nil {
 		t.Fatal("protocol server is nil after Start")
 	}
-	want := protocol.SQLQueryLimits{MaxRows: 123, MaxBytes: 456}
+	want := protocol.SQLQueryLimits{MaxRows: 123, MaxBytes: 456, MaxWork: 789}
 	if got := rt.protocolServer.SQLQueryLimits; got != want {
 		t.Fatalf("SQLQueryLimits = %+v, want %+v", got, want)
 	}

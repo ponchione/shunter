@@ -189,6 +189,9 @@ func visitMultiJoinTuples(ctx context.Context, p MultiJoin, rowsByRelation [][]t
 			return nil
 		}
 		for _, row := range rowsByRelation[depth] {
+			if err := chargeMultiJoinWork(ctx); err != nil {
+				return err
+			}
 			tuple[depth] = row
 			if !multiJoinConditionsMatchPrefix(p.Conditions, tuple, depth) {
 				continue

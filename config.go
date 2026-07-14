@@ -80,6 +80,9 @@ type Config struct {
 	// hosted raw and declared queries. Zero uses 64 MiB. It does not cap scan
 	// work, aggregate state, order keys, or other query working memory.
 	OneOffQueryMaxBytes int
+	// OneOffQueryMaxWork caps candidate rows and index probes examined by
+	// hosted raw and declared multi-way joins. Zero uses 1,000,000 work units.
+	OneOffQueryMaxWork int
 	// SubscriptionInitialRowLimit caps rows across an initial or final
 	// subscription-set snapshot in aggregate. Zero uses 100,000 rows.
 	SubscriptionInitialRowLimit int
@@ -96,12 +99,15 @@ type Config struct {
 	// internal subscriptions on one connection. Zero uses 1,024.
 	SubscriptionMaxActiveSubscriptionsPerConnection int
 	// SubscriptionMaxMultiJoinRelations caps live multi-way join relation
-	// count. Zero leaves the current unlimited behavior.
+	// count. Zero uses 8 relations.
 	SubscriptionMaxMultiJoinRelations int
 	// SubscriptionMaxMultiJoinRowsPerRelation caps committed input rows per
-	// relation for live multi-way joins. Zero leaves the current unlimited
-	// behavior.
+	// relation for live multi-way joins. Zero uses 100,000 rows.
 	SubscriptionMaxMultiJoinRowsPerRelation int
+	// SubscriptionMaxMultiJoinWork caps candidate rows examined across one
+	// live multi-way join snapshot or delta evaluation. Zero uses 1,000,000
+	// work units.
+	SubscriptionMaxMultiJoinWork int
 
 	Protocol      ProtocolConfig
 	Observability ObservabilityConfig
