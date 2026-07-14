@@ -445,6 +445,12 @@ Snapshot creation MUST follow this order:
 7. `fsync` the snapshot directory again.
 
 On startup, any snapshot directory containing a `.lock` file is treated as incomplete and skipped.
+After publication is attempted, any rename or first directory-`fsync` failure
+MUST retain `.lock`. `RepairSnapshot` verifies the final file, fsyncs the
+directory, removes `.lock`, and fsyncs again. If verification fails,
+`DiscardIncompleteSnapshot` durably removes the data artifacts and lock before
+the same TX ID is rebuilt. Both operations require the caller to establish that
+no writer for the snapshot is still active.
 
 ### 5.6 Snapshot Trigger Policy
 
@@ -459,11 +465,17 @@ type SnapshotWriter interface {
 }
 ```
 
-v1 policy: the **recommended default is `SnapshotInterval = 0`** (no automatic interval-based snapshotting). The engine SHOULD call `CreateSnapshot` exactly once on graceful shutdown — immediately before closing the durability worker, while no new commits are being accepted.
+v1 policy: automatic interval-based snapshots are unsupported. The engine
+SHOULD call `CreateSnapshot` exactly once on graceful shutdown — immediately
+before closing the durability worker, while no new commits are being accepted.
 
 **Rationale:** Synchronous snapshot creation holds `CommittedState.mu` for read during full state serialization. For a 100 MB–1 GB working set this takes tens to hundreds of milliseconds, during which all commits block. Triggering snapshots under live write load is a significant latency hazard; the default avoids it entirely.
 
-**When to override:** Applications that require bounded recovery time and cannot guarantee graceful shutdown (e.g., processes that may be killed abruptly) may set `SnapshotInterval > 0` to trigger periodic snapshots, accepting the commit-latency cost. When using periodic mode, the executor MUST quiesce (stop accepting new writes) for the full duration of snapshot creation.
+`CommitLogOptions.SnapshotInterval` remains reserved for a future
+runtime/executor-owned policy. `NewDurabilityWorker` rejects every nonzero value
+with `ErrUnsupportedSnapshotInterval`; the durability worker cannot safely
+implement the policy because it owns neither committed state nor write
+quiescence.
 
 **Graceful-shutdown orchestration owner:** SPEC-002 exposes `CreateSnapshot` and `DurabilityHandle.Close` as the two shutdown-relevant calls, but the engine-level ordering — quiesce executor → flush in-flight commits to durable → final `CreateSnapshot` → `DurabilityHandle.Close` — is owned by SPEC-003. `CreateSnapshot` correctness is a SPEC-002 concern; sequencing it relative to executor lifecycle is not.
 
@@ -582,7 +594,7 @@ After a snapshot is successfully created at `snapshot_tx_id`:
 The root runtime `CompactCommitLog(snapshot_tx_id)` wrapper MUST verify that
 `snapshot_tx_id` names a completed snapshot before invoking compaction.
 
-**Snapshot retention (deferred v1):** This spec defines no automatic snapshot retention policy. After a snapshot lands and compaction sweeps superseded segments, the snapshot directory itself is never deleted by the engine. Operators are expected to prune `snapshots/{tx_id}/` directories out-of-band. Consequence: with `SnapshotInterval > 0`, snapshot directories accumulate without bound, and each is a full copy (no object dedup in v1). Retention policy choice (count-based / age-based / size-based) remains an open question. Until then, leaving snapshots in place is the documented v1 behavior.
+**Snapshot retention (deferred v1):** This spec defines no automatic snapshot retention policy. After a snapshot lands and compaction sweeps superseded segments, the snapshot directory itself is never deleted by the engine. Operators are expected to prune `snapshots/{tx_id}/` directories out-of-band. Manually created snapshot directories therefore accumulate without bound, and each is a full copy (no object dedup in v1). Retention policy choice (count-based / age-based / size-based) remains an open question. Until then, leaving snapshots in place is the documented v1 behavior.
 
 ---
 
@@ -601,12 +613,14 @@ type CommitLogOptions struct {
     // Default: 512 MiB.
     MaxSegmentSize int64
 
-    // MaxRecordPayloadBytes: hard upper bound for one encoded record payload.
-    // Default: 64 MiB.
+    // MaxRecordPayloadBytes: writer limit for one encoded record payload.
+    // Default and fixed format/recovery ceiling: 64 MiB.
+    // Values above 64 MiB are rejected.
     MaxRecordPayloadBytes uint32
 
-    // MaxRowBytes: hard upper bound for one encoded row value inside a payload.
-    // Default: 8 MiB.
+    // MaxRowBytes: writer limit for one encoded row value inside a payload.
+    // Default and fixed format/recovery/snapshot ceiling: 8 MiB.
+    // Values above 8 MiB are rejected.
     MaxRowBytes uint32
 
     // ChannelCapacity: durability goroutine input channel buffer size.
@@ -625,12 +639,9 @@ type CommitLogOptions struct {
     // at handle construction.
     FsyncMode FsyncMode
 
-    // SnapshotInterval: call CreateSnapshot after this many commits.
-    // 0 = never snapshot automatically.
-    // Default: 0 (no auto-snapshot). §5.6 explains why: synchronous
-    // snapshot creation holds CommittedState.mu for read for
-    // tens-to-hundreds of milliseconds, blocking commits. v1 recommends
-    // graceful-shutdown snapshotting only; auto-interval is opt-in.
+    // SnapshotInterval is reserved for future runtime-owned orchestration.
+    // Default: 0. Every nonzero value is rejected in v1 with
+    // ErrUnsupportedSnapshotInterval.
     SnapshotInterval uint64
 }
 ```

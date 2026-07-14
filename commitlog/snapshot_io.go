@@ -511,8 +511,11 @@ func (w *FileSnapshotWriter) createSnapshotFromBody(txID types.TxID, body snapsh
 	if err := CreateLockFile(snapshotDir); err != nil {
 		return &SnapshotCompletionError{Phase: "create-lock", Path: filepath.Join(snapshotDir, ".lock"), Err: err}
 	}
+	publicationAttempted := false
 	defer func() {
-		_ = w.removeLock(snapshotDir)
+		if !publicationAttempted {
+			_ = w.removeLock(snapshotDir)
+		}
 	}()
 
 	tmpPath := filepath.Join(snapshotDir, snapshotTempFileName)
@@ -549,6 +552,10 @@ func (w *FileSnapshotWriter) createSnapshotFromBody(txID types.TxID, body snapsh
 		return &SnapshotCompletionError{Phase: "close-temp", Path: tmpPath, Err: err}
 	}
 	finalPath := filepath.Join(snapshotDir, snapshotFileName)
+	// A rename implementation may publish the directory entry and still return
+	// an error. From this point onward the lock must remain until publication is
+	// durably repaired or the incomplete artifacts are durably discarded.
+	publicationAttempted = true
 	if err := w.rename(tmpPath, finalPath); err != nil {
 		return &SnapshotCompletionError{Phase: "rename", Path: finalPath, Err: err}
 	}
@@ -562,6 +569,62 @@ func (w *FileSnapshotWriter) createSnapshotFromBody(txID types.TxID, body snapsh
 	}
 	if err := w.syncDir(snapshotDir); err != nil {
 		return &SnapshotCompletionError{Phase: "sync-unlock", Path: snapshotDir, Err: err}
+	}
+	return nil
+}
+
+// RepairSnapshot verifies a locked snapshot, makes its published directory
+// entry durable, and completes the lock-removal protocol. Callers must ensure
+// no snapshot writer is still active for txID before repairing crash or fault
+// residue. Invalid snapshots remain locked and must be discarded explicitly.
+func RepairSnapshot(baseDir string, txID types.TxID, reg schema.SchemaRegistry) error {
+	snapshotDir := filepath.Join(baseDir, strconv.FormatUint(uint64(txID), 10))
+	if !HasLockFile(snapshotDir) {
+		return fmt.Errorf("%w: snapshot tx_id %d has no lock to repair", ErrSnapshot, txID)
+	}
+	snapshot, err := readSnapshotWithExpectedTxID(baseDir, txID)
+	if err != nil {
+		return &SnapshotCompletionError{Phase: "repair-verify", Path: snapshotDir, Err: err}
+	}
+	if err := compareSnapshotSchema(snapshot, reg); err != nil {
+		return &SnapshotCompletionError{Phase: "repair-schema", Path: snapshotDir, Err: err}
+	}
+	if err := syncDirPath(snapshotDir); err != nil {
+		return &SnapshotCompletionError{Phase: "repair-sync-snapshot", Path: snapshotDir, Err: err}
+	}
+	lockPath := filepath.Join(snapshotDir, ".lock")
+	if err := RemoveLockFile(snapshotDir); err != nil {
+		return &SnapshotCompletionError{Phase: "repair-remove-lock", Path: lockPath, Err: err}
+	}
+	if err := syncDirPath(snapshotDir); err != nil {
+		return &SnapshotCompletionError{Phase: "repair-sync-unlock", Path: snapshotDir, Err: err}
+	}
+	return nil
+}
+
+// DiscardIncompleteSnapshot durably removes the data files from a locked
+// snapshot directory, then removes the lock durably so CreateSnapshot can
+// safely rebuild the same txID. Callers must ensure no writer is still active.
+func DiscardIncompleteSnapshot(baseDir string, txID types.TxID) error {
+	snapshotDir := filepath.Join(baseDir, strconv.FormatUint(uint64(txID), 10))
+	if !HasLockFile(snapshotDir) {
+		return fmt.Errorf("%w: snapshot tx_id %d has no lock to discard", ErrSnapshot, txID)
+	}
+	for _, name := range []string{snapshotTempFileName, snapshotFileName} {
+		path := filepath.Join(snapshotDir, name)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return &SnapshotCompletionError{Phase: "discard-remove", Path: path, Err: err}
+		}
+	}
+	if err := syncDirPath(snapshotDir); err != nil {
+		return &SnapshotCompletionError{Phase: "discard-sync-data", Path: snapshotDir, Err: err}
+	}
+	lockPath := filepath.Join(snapshotDir, ".lock")
+	if err := RemoveLockFile(snapshotDir); err != nil {
+		return &SnapshotCompletionError{Phase: "discard-remove-lock", Path: lockPath, Err: err}
+	}
+	if err := syncDirPath(snapshotDir); err != nil {
+		return &SnapshotCompletionError{Phase: "discard-sync-unlock", Path: snapshotDir, Err: err}
 	}
 	return nil
 }

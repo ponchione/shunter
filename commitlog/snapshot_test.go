@@ -2309,7 +2309,7 @@ func TestCreateSnapshotTempFileFaultsReturnSnapshotCompletionErrorAndCleanArtifa
 	}
 }
 
-func TestCreateSnapshotRenameFailureReturnsSnapshotErrorAndCleansArtifacts(t *testing.T) {
+func TestCreateSnapshotRenameFailureRetainsLockUntilDurableDiscard(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()
 	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
@@ -2339,14 +2339,29 @@ func TestCreateSnapshotRenameFailureReturnsSnapshotErrorAndCleansArtifacts(t *te
 	}
 
 	snapshotDir := filepath.Join(baseDir, "snapshots", "92")
-	if HasLockFile(snapshotDir) {
-		t.Fatal("snapshot lock should be removed after rename failure")
+	if !HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should remain after indeterminate rename failure")
 	}
 	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotTempFileName)); !os.IsNotExist(err) {
 		t.Fatalf("snapshot temp file should be removed after rename failure, stat err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotFileName)); !os.IsNotExist(err) {
 		t.Fatalf("final snapshot should not exist after rename failure, stat err=%v", err)
+	}
+	if err := RepairSnapshot(filepath.Join(baseDir, "snapshots"), 92, reg); err == nil {
+		t.Fatal("repair should reject a locked snapshot with no published final file")
+	}
+	if err := DiscardIncompleteSnapshot(filepath.Join(baseDir, "snapshots"), 92); err != nil {
+		t.Fatalf("discard incomplete snapshot: %v", err)
+	}
+	if HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should be removed after durable discard")
+	}
+	if err := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg).CreateSnapshot(cs, 92); err != nil {
+		t.Fatalf("rebuild snapshot after discard: %v", err)
+	}
+	if _, err := ReadSnapshot(snapshotDir); err != nil {
+		t.Fatalf("rebuilt snapshot should be readable: %v", err)
 	}
 }
 
@@ -2382,8 +2397,27 @@ func TestCreateSnapshotDirectorySyncFailureReturnsSnapshotCompletionError(t *tes
 	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotFileName)); err != nil {
 		t.Fatalf("final snapshot should exist after rename before sync failure: %v", err)
 	}
+	if !HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should remain until the published rename is durable")
+	}
+	ids, err := ListSnapshots(filepath.Join(baseDir, "snapshots"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("locked snapshot should not be listed, got %v", ids)
+	}
+	if err := ValidateSnapshotForCompaction(filepath.Join(baseDir, "snapshots"), 93, reg); !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("locked snapshot compaction validation = %v, want ErrSnapshot", err)
+	}
+	if err := RepairSnapshot(filepath.Join(baseDir, "snapshots"), 93, reg); err != nil {
+		t.Fatalf("repair durable published snapshot: %v", err)
+	}
 	if HasLockFile(snapshotDir) {
-		t.Fatal("snapshot lock should be removed during sync-failure cleanup")
+		t.Fatal("snapshot lock should be removed after repair")
+	}
+	if err := ValidateSnapshotForCompaction(filepath.Join(baseDir, "snapshots"), 93, reg); err != nil {
+		t.Fatalf("repaired snapshot compaction validation: %v", err)
 	}
 }
 

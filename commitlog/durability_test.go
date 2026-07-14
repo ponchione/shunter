@@ -163,6 +163,27 @@ func TestNewDurabilityWorkerRejectsInvalidBatchAndSegmentOptions(t *testing.T) {
 			wantErr: "max row bytes must be positive",
 		},
 		{
+			name: "record payload above fixed format ceiling",
+			mutate: func(opts *CommitLogOptions) {
+				opts.MaxRecordPayloadBytes = formatMaxRecordPayloadBytes + 1
+			},
+			wantErr: "exceeds fixed format ceiling",
+		},
+		{
+			name: "row above fixed format ceiling",
+			mutate: func(opts *CommitLogOptions) {
+				opts.MaxRowBytes = formatMaxRowBytes + 1
+			},
+			wantErr: "exceeds fixed format ceiling",
+		},
+		{
+			name: "unsupported snapshot interval",
+			mutate: func(opts *CommitLogOptions) {
+				opts.SnapshotInterval = 1
+			},
+			wantErr: ErrUnsupportedSnapshotInterval.Error(),
+		},
+		{
 			name: "zero drain batch size",
 			mutate: func(opts *CommitLogOptions) {
 				opts.DrainBatchSize = 0
@@ -191,6 +212,30 @@ func TestNewDurabilityWorkerRejectsInvalidBatchAndSegmentOptions(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestNewDurabilityWorkerAcceptsFixedFormatCeilings(t *testing.T) {
+	opts := DefaultCommitLogOptions()
+	opts.MaxRecordPayloadBytes = formatMaxRecordPayloadBytes
+	opts.MaxRowBytes = formatMaxRowBytes
+
+	dw, err := NewDurabilityWorker(t.TempDir(), 1, opts)
+	if err != nil {
+		t.Fatalf("fixed format ceilings should be accepted: %v", err)
+	}
+	if _, err := dw.Close(); err != nil {
+		t.Fatalf("close worker: %v", err)
+	}
+}
+
+func TestNewDurabilityWorkerRejectsUnsupportedSnapshotIntervalSentinel(t *testing.T) {
+	opts := DefaultCommitLogOptions()
+	opts.SnapshotInterval = 10
+
+	_, err := NewDurabilityWorker(t.TempDir(), 1, opts)
+	if !errors.Is(err, ErrUnsupportedSnapshotInterval) {
+		t.Fatalf("error = %v, want ErrUnsupportedSnapshotInterval", err)
 	}
 }
 

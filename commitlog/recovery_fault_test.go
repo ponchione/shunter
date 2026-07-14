@@ -2796,8 +2796,8 @@ func TestCreateSnapshotPrePublishFailuresLeaveNoSelectableSnapshotAndCompleteLog
 			},
 			assertArtifacts: func(t *testing.T, snapshotDir string) {
 				t.Helper()
-				if HasLockFile(snapshotDir) {
-					t.Fatal("snapshot lock should be removed after rename failure cleanup")
+				if !HasLockFile(snapshotDir) {
+					t.Fatal("snapshot lock should remain after indeterminate rename failure")
 				}
 				for _, name := range []string{snapshotTempFileName, snapshotFileName} {
 					if _, err := os.Stat(filepath.Join(snapshotDir, name)); !os.IsNotExist(err) {
@@ -2807,9 +2807,8 @@ func TestCreateSnapshotPrePublishFailuresLeaveNoSelectableSnapshotAndCompleteLog
 			},
 			assertSnapshotLog: func(t *testing.T, report RecoveryReport) {
 				t.Helper()
-				assertSkippedSnapshot(t, report, 2, SnapshotSkipReadFailed)
-				if report.HasSelectedSnapshot {
-					t.Fatalf("selected snapshot = (%v, %d), want none", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+				if report.HasSelectedSnapshot || len(report.SkippedSnapshots) != 0 {
+					t.Fatalf("snapshot report = selected(%v, %d) skipped=%+v, want locked candidate ignored", report.HasSelectedSnapshot, report.SelectedSnapshotTxID, report.SkippedSnapshots)
 				}
 			},
 		},
@@ -2941,7 +2940,7 @@ func TestCreateSnapshotUnlockSyncFailureFailsLoudlyAndLeavesRecoverableSnapshot(
 	}
 }
 
-func TestCreateSnapshotDirectorySyncFailureFailsLoudlyAndLeavesRecoverableSnapshot(t *testing.T) {
+func TestCreateSnapshotDirectorySyncFailureLeavesSnapshotLockedUntilRepair(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
 	committed := buildRecoveryCommittedState(t, reg)
@@ -2978,11 +2977,27 @@ func TestCreateSnapshotDirectorySyncFailureFailsLoudlyAndLeavesRecoverableSnapsh
 	if completionErr.Phase != "sync-snapshot" || completionErr.Path != snapshotDir {
 		t.Fatalf("completion error = %+v, want sync-snapshot on snapshot dir", completionErr)
 	}
-	if HasLockFile(snapshotDir) {
-		t.Fatal("snapshot lock should be removed during sync-snapshot failure cleanup")
+	if !HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should remain after sync-snapshot failure")
 	}
 	if _, err := ReadSnapshot(snapshotDir); err != nil {
-		t.Fatalf("snapshot should be readable after sync-snapshot failure in current filesystem state: %v", err)
+		t.Fatalf("published snapshot should verify before repair: %v", err)
+	}
+	ids, err := ListSnapshots(writer.baseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("locked snapshot should not be listed, got %v", ids)
+	}
+	if err := ValidateSnapshotForCompaction(root, 9, reg); !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("locked snapshot compaction validation = %v, want ErrSnapshot", err)
+	}
+	if _, _, _, _, err := OpenAndRecoverWithReport(root, reg); !errors.Is(err, ErrNoData) {
+		t.Fatalf("recovery with only a locked snapshot = %v, want ErrNoData", err)
+	}
+	if err := RepairSnapshot(writer.baseDir, 9, reg); err != nil {
+		t.Fatalf("repair snapshot: %v", err)
 	}
 
 	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
@@ -3004,7 +3019,7 @@ func TestCreateSnapshotDirectorySyncFailureFailsLoudlyAndLeavesRecoverableSnapsh
 	}
 }
 
-func TestCreateSnapshotRenameAfterMoveFailureFailsLoudlyAndLeavesRecoverableSnapshot(t *testing.T) {
+func TestCreateSnapshotRenameAfterMoveFailureLeavesSnapshotLockedUntilRepair(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
 	committed := buildRecoveryCommittedState(t, reg)
@@ -3045,14 +3060,30 @@ func TestCreateSnapshotRenameAfterMoveFailureFailsLoudlyAndLeavesRecoverableSnap
 	if completionErr.Phase != "rename" || completionErr.Path != finalPath {
 		t.Fatalf("completion error = %+v, want rename on final snapshot path", completionErr)
 	}
-	if HasLockFile(snapshotDir) {
-		t.Fatal("snapshot lock should be removed after rename failure cleanup")
+	if !HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should remain after indeterminate rename failure")
 	}
 	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotTempFileName)); !os.IsNotExist(err) {
 		t.Fatalf("snapshot temp should not remain after moved rename failure, stat err=%v", err)
 	}
 	if _, err := ReadSnapshot(snapshotDir); err != nil {
-		t.Fatalf("snapshot should be readable after post-move rename failure in current filesystem state: %v", err)
+		t.Fatalf("published snapshot should verify before repair: %v", err)
+	}
+	ids, err := ListSnapshots(writer.baseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("locked snapshot should not be listed, got %v", ids)
+	}
+	if err := ValidateSnapshotForCompaction(root, 9, reg); !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("locked snapshot compaction validation = %v, want ErrSnapshot", err)
+	}
+	if _, _, _, _, err := OpenAndRecoverWithReport(root, reg); !errors.Is(err, ErrNoData) {
+		t.Fatalf("recovery with only a locked snapshot = %v, want ErrNoData", err)
+	}
+	if err := RepairSnapshot(writer.baseDir, 9, reg); err != nil {
+		t.Fatalf("repair snapshot: %v", err)
 	}
 
 	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)

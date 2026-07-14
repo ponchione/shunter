@@ -17,17 +17,27 @@ type FsyncMode uint8
 const (
 	FsyncBatch FsyncMode = 0
 	FsyncPerTx FsyncMode = 1
+
+	formatMaxRecordPayloadBytes uint32 = 64 << 20
+	formatMaxRowBytes           uint32 = 8 << 20
 )
 
 // CommitLogOptions configures the durability worker.
 type CommitLogOptions struct {
-	MaxSegmentSize        int64
+	MaxSegmentSize int64
+	// MaxRecordPayloadBytes is a writer policy bounded by the fixed 64 MiB
+	// format/recovery ceiling. Values above that ceiling are rejected.
 	MaxRecordPayloadBytes uint32
-	MaxRowBytes           uint32
-	ChannelCapacity       int
-	DrainBatchSize        int
-	FsyncMode             FsyncMode
-	SnapshotInterval      uint64
+	// MaxRowBytes is a writer policy bounded by the fixed 8 MiB
+	// format/recovery and snapshot ceiling. Values above it are rejected.
+	MaxRowBytes     uint32
+	ChannelCapacity int
+	DrainBatchSize  int
+	FsyncMode       FsyncMode
+	// SnapshotInterval is reserved for a future runtime-owned snapshot policy.
+	// The commit-log worker cannot safely snapshot mutable committed state, so
+	// every nonzero value is rejected instead of being silently ignored.
+	SnapshotInterval uint64
 	// OffsetIndexIntervalBytes gates the per-segment offset index writer.
 	// A pending candidate is flushed to the index once the bytes-since-last-
 	// append counter crosses this threshold. Zero disables indexing (the
@@ -46,8 +56,8 @@ type CommitLogOptions struct {
 func DefaultCommitLogOptions() CommitLogOptions {
 	return CommitLogOptions{
 		MaxSegmentSize:           512 << 20, // 512 MiB
-		MaxRecordPayloadBytes:    64 << 20,  // 64 MiB
-		MaxRowBytes:              8 << 20,   // 8 MiB
+		MaxRecordPayloadBytes:    formatMaxRecordPayloadBytes,
+		MaxRowBytes:              formatMaxRowBytes,
 		ChannelCapacity:          256,
 		DrainBatchSize:           64,
 		FsyncMode:                FsyncBatch,
@@ -120,14 +130,23 @@ func validateCommitLogOptions(opts CommitLogOptions) error {
 	if opts.MaxRecordPayloadBytes == 0 {
 		return fmt.Errorf("commitlog: max record payload bytes must be positive: %d", opts.MaxRecordPayloadBytes)
 	}
+	if opts.MaxRecordPayloadBytes > formatMaxRecordPayloadBytes {
+		return fmt.Errorf("commitlog: max record payload bytes %d exceeds fixed format ceiling %d", opts.MaxRecordPayloadBytes, formatMaxRecordPayloadBytes)
+	}
 	if opts.MaxRowBytes == 0 {
 		return fmt.Errorf("commitlog: max row bytes must be positive: %d", opts.MaxRowBytes)
+	}
+	if opts.MaxRowBytes > formatMaxRowBytes {
+		return fmt.Errorf("commitlog: max row bytes %d exceeds fixed format ceiling %d", opts.MaxRowBytes, formatMaxRowBytes)
 	}
 	if opts.ChannelCapacity < 0 {
 		return fmt.Errorf("commitlog: channel capacity must be non-negative: %d", opts.ChannelCapacity)
 	}
 	if opts.DrainBatchSize <= 0 {
 		return fmt.Errorf("commitlog: drain batch size must be positive: %d", opts.DrainBatchSize)
+	}
+	if opts.SnapshotInterval != 0 {
+		return fmt.Errorf("%w: %d", ErrUnsupportedSnapshotInterval, opts.SnapshotInterval)
 	}
 	return nil
 }

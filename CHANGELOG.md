@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Commit-log workers now reject row and record limits above the fixed recovery
+  ceilings and reject unsupported automatic snapshot intervals. Snapshot
+  publication failures retain their lock until an explicit durable repair or
+  discard, preventing recovery and compaction from trusting an un-fsynced
+  directory entry.
 - Reducers now receive a policy-enforcing database surface that keeps
   `sys_clients` and `sys_scheduled` read-only, never exposes the underlying
   store transaction, and leaves lifecycle replies nonblocking when callers

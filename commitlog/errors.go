@@ -18,6 +18,10 @@ var (
 	ErrMissingBaseSnapshot error = missingBaseSnapshotError{}
 	ErrNoData              error = noDataError{}
 	ErrUnknownFsyncMode    error = unknownFsyncModeError{}
+	// ErrUnsupportedSnapshotInterval reports a nonzero commit-log snapshot
+	// interval. Snapshot orchestration requires committed state and write
+	// quiescence, neither of which is owned by DurabilityWorker.
+	ErrUnsupportedSnapshotInterval = errors.New("commitlog: automatic snapshot interval is unsupported")
 
 	ErrOffsetIndexKeyNotFound error = offsetIndexKeyNotFoundError{}
 	ErrOffsetIndexFull        error = offsetIndexFullError{}
