@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Reducer and migration changesets now pass commit-log row and record-payload
+  limits before becoming visible, so oversized commits cannot poison the
+  durability worker. Protocol shutdown now honors cancellation while waiting
+  for reserved admissions and still cleans up admissions that finish late.
 - Deduplicated subscriptions now retain original SQL per delivery, idle
   connection deadlines run independently from ping cadence, and unknown JWT
   key IDs share a per-source JWKS refresh cooldown. Successful local JWT

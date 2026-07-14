@@ -229,6 +229,105 @@ func TestNewDurabilityWorkerAcceptsFixedFormatCeilings(t *testing.T) {
 	}
 }
 
+func TestDefaultCommitLogEncodingLimitsMatchRecoveryCeilings(t *testing.T) {
+	opts := DefaultCommitLogOptions()
+	if opts.MaxRowBytes != formatMaxRowBytes {
+		t.Fatalf("default max row bytes = %d, want recovery ceiling %d", opts.MaxRowBytes, formatMaxRowBytes)
+	}
+	if opts.MaxRecordPayloadBytes != formatMaxRecordPayloadBytes {
+		t.Fatalf("default max record payload bytes = %d, want recovery ceiling %d", opts.MaxRecordPayloadBytes, formatMaxRecordPayloadBytes)
+	}
+}
+
+func TestDurabilityWorkerValidationRejectsLimitsWithoutPoisoningWorker(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*CommitLogOptions)
+		invalid   *store.Changeset
+		valid     *store.Changeset
+		assertErr func(*testing.T, error)
+	}{
+		{
+			name: "row payload",
+			configure: func(opts *CommitLogOptions) {
+				opts.MaxRowBytes = 16
+			},
+			invalid: &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{
+				0: {
+					TableID: 0,
+					Inserts: []types.ProductValue{{types.NewUint64(1), types.NewString(strings.Repeat("x", 17))}},
+				},
+			}},
+			valid: &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{
+				0: {
+					TableID: 0,
+					Inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("ok")}},
+				},
+			}},
+			assertErr: func(t *testing.T, err error) {
+				t.Helper()
+				var rowErr *RowTooLargeError
+				if !errors.As(err, &rowErr) {
+					t.Fatalf("validation error = %v, want RowTooLargeError", err)
+				}
+			},
+		},
+		{
+			name: "record payload",
+			configure: func(opts *CommitLogOptions) {
+				opts.MaxRecordPayloadBytes = 40
+				opts.MaxRowBytes = 1024
+			},
+			invalid: &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{
+				0: {
+					TableID: 0,
+					Inserts: []types.ProductValue{
+						{types.NewUint64(1), types.NewString("payload-a")},
+						{types.NewUint64(2), types.NewString("payload-b")},
+					},
+				},
+			}},
+			valid: &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{
+				0: {
+					TableID: 0,
+					Inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("ok")}},
+				},
+			}},
+			assertErr: func(t *testing.T, err error) {
+				t.Helper()
+				var recordErr *RecordTooLargeError
+				if !errors.As(err, &recordErr) {
+					t.Fatalf("validation error = %v, want RecordTooLargeError", err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := DefaultCommitLogOptions()
+			tc.configure(&opts)
+			opts.OffsetIndexIntervalBytes = 0
+			opts.OffsetIndexCap = 0
+			dw, err := NewDurabilityWorker(t.TempDir(), 1, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.assertErr(t, dw.ValidateChangeset(tc.invalid))
+			if err := dw.FatalError(); err != nil {
+				t.Fatalf("worker fatal after validation rejection: %v", err)
+			}
+			if err := dw.ValidateChangeset(tc.valid); err != nil {
+				t.Fatalf("valid changeset validation: %v", err)
+			}
+			dw.EnqueueCommitted(1, tc.valid)
+			if finalTx, err := dw.Close(); err != nil || finalTx != 1 {
+				t.Fatalf("close after valid enqueue = (tx=%d, err=%v), want (1, nil)", finalTx, err)
+			}
+		})
+	}
+}
+
 func TestNewDurabilityWorkerRejectsUnsupportedSnapshotIntervalSentinel(t *testing.T) {
 	opts := DefaultCommitLogOptions()
 	opts.SnapshotInterval = 10

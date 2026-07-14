@@ -141,20 +141,24 @@ func (c *Conn) MarkActivity() {
 // ConnectionID. Used by cross-connection operations such as the
 // subscription fan-out delivery worker (fan-out integration).
 type ConnManager struct {
-	mu         sync.RWMutex
-	conns      map[types.ConnectionID]*Conn
-	reserved   map[types.ConnectionID]*Conn
-	closing    bool
-	admissions sync.WaitGroup
-	accepted   atomic.Uint64
-	rejected   atomic.Uint64
+	mu             sync.RWMutex
+	conns          map[types.ConnectionID]*Conn
+	reserved       map[types.ConnectionID]*Conn
+	closing        bool
+	admissions     int
+	admissionsDone chan struct{}
+	accepted       atomic.Uint64
+	rejected       atomic.Uint64
 }
 
 // NewConnManager returns an empty ConnManager.
 func NewConnManager() *ConnManager {
+	admissionsDone := make(chan struct{})
+	close(admissionsDone)
 	return &ConnManager{
-		conns:    make(map[types.ConnectionID]*Conn),
-		reserved: make(map[types.ConnectionID]*Conn),
+		conns:          make(map[types.ConnectionID]*Conn),
+		reserved:       make(map[types.ConnectionID]*Conn),
+		admissionsDone: admissionsDone,
 	}
 }
 
@@ -191,8 +195,11 @@ func (m *ConnManager) reserve(conn *Conn) error {
 	if reserved := m.reserved[conn.ID]; reserved != nil && reserved != conn {
 		return ErrConnectionIDInUse
 	}
+	if m.admissions == 0 {
+		m.admissionsDone = make(chan struct{})
+	}
 	m.reserved[conn.ID] = conn
-	m.admissions.Add(1)
+	m.admissions++
 	return nil
 }
 
@@ -204,8 +211,13 @@ func (m *ConnManager) finishAdmission(conn *Conn) {
 	if m.reserved[conn.ID] == conn {
 		delete(m.reserved, conn.ID)
 	}
+	if m.admissions > 0 {
+		m.admissions--
+		if m.admissions == 0 && m.admissionsDone != nil {
+			close(m.admissionsDone)
+		}
+	}
 	m.mu.Unlock()
-	m.admissions.Done()
 }
 
 // Add registers conn in the manager. A duplicate live or admitting
@@ -302,6 +314,7 @@ func (m *ConnManager) CloseAll(ctx context.Context, inbox ExecutorInbox) {
 	for _, c := range m.reserved {
 		reserved = append(reserved, c)
 	}
+	admissionsDone := m.admissionsDone
 	m.mu.Unlock()
 
 	for _, c := range reserved {
@@ -319,5 +332,11 @@ func (m *ConnManager) CloseAll(ctx context.Context, inbox ExecutorInbox) {
 		}(c)
 	}
 	wg.Wait()
-	m.admissions.Wait()
+	if admissionsDone == nil {
+		return
+	}
+	select {
+	case <-admissionsDone:
+	case <-ctx.Done():
+	}
 }

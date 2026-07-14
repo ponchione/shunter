@@ -11,9 +11,10 @@ import (
 // reducer fails. Implemented in SPEC-003 Epic 6.
 type SchedulerHandle = types.ReducerScheduler
 
-// DurabilityHandle receives committed changesets from the executor.
+// DurabilityHandle validates and receives committed changesets from the executor.
 // EnqueueCommitted must not silently drop accepted commits.
 type DurabilityHandle interface {
+	ValidateChangeset(changeset *store.Changeset) error
 	EnqueueCommitted(txID types.TxID, changeset *store.Changeset)
 	WaitUntilDurable(txID types.TxID) <-chan types.TxID
 	FatalError() error

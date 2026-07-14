@@ -12,6 +12,7 @@ import (
 
 type benchmarkDurability struct{}
 
+func (benchmarkDurability) ValidateChangeset(*store.Changeset) error      { return nil }
 func (benchmarkDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
 
 func (benchmarkDurability) WaitUntilDurable(txID types.TxID) <-chan types.TxID {

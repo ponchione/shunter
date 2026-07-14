@@ -11,6 +11,14 @@ import (
 // Commit applies the transaction's mutations to committed state and produces a changeset.
 // It revalidates constraints under the committed-state write lock before mutating state.
 func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
+	return CommitWithValidation(cs, tx, nil)
+}
+
+// CommitWithValidation applies the transaction only after validate accepts the
+// exact changeset that would be committed. Validation runs under the
+// committed-state write lock, after constraint revalidation and before any
+// visible state mutation.
+func CommitWithValidation(cs *CommittedState, tx *Transaction, validate func(*Changeset) error) (*Changeset, error) {
 	switch tx.state.Load() {
 	case transactionRolledBack:
 		return nil, ErrTransactionRolledBack
@@ -24,6 +32,24 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 	if err := revalidateCommit(cs, txState); err != nil {
 		return nil, err
 	}
+	changeset, err := prepareChangeset(cs, txState)
+	if err != nil {
+		return nil, err
+	}
+	if validate != nil {
+		if err := validate(changeset); err != nil {
+			return nil, err
+		}
+	}
+	if err := applyCommit(cs, tx); err != nil {
+		return nil, err
+	}
+
+	tx.finishCommitted()
+	return changeset, nil
+}
+
+func prepareChangeset(cs *CommittedState, txState *TxState) (*Changeset, error) {
 	changeset := &Changeset{
 		TxID:   0,
 		Tables: make(map[schema.TableID]*TableChangeset),
@@ -38,11 +64,11 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		}
 		tc := ensureTableChangeset(changeset, tableID, table.schema)
 		for _, rowID := range sortedCommitMapKeys(dels) {
-			oldRow, ok := table.DeleteRow(rowID)
+			oldRow, ok := table.rowView(rowID)
 			if !ok {
 				return nil, fmt.Errorf("%w: %d", ErrRowNotFound, rowID)
 			}
-			tc.Deletes = append(tc.Deletes, oldRow)
+			tc.Deletes = append(tc.Deletes, oldRow.Copy())
 		}
 	}
 
@@ -55,13 +81,42 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		}
 		tc := ensureTableChangeset(changeset, tableID, table.schema)
 		for _, rowID := range sortedCommitMapKeys(ins) {
-			row := ins[rowID]
-			if !table.schema.IsEvent {
-				if err := table.InsertRow(rowID, row); err != nil {
-					return nil, err
-				}
+			tc.Inserts = append(tc.Inserts, ins[rowID].Copy())
+		}
+	}
+	return changeset, nil
+}
+
+func applyCommit(cs *CommittedState, tx *Transaction) error {
+	txState := tx.tx
+	deletesByTable := txState.allTableDeletes()
+	for _, tableID := range sortedCommitMapKeys(deletesByTable) {
+		dels := deletesByTable[tableID]
+		table, ok := cs.tableLocked(tableID)
+		if !ok {
+			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
+		}
+		for _, rowID := range sortedCommitMapKeys(dels) {
+			if _, ok := table.DeleteRow(rowID); !ok {
+				return fmt.Errorf("%w: %d", ErrRowNotFound, rowID)
 			}
-			tc.Inserts = append(tc.Inserts, row.Copy())
+		}
+	}
+
+	insertsByTable := txState.allTableInserts()
+	for _, tableID := range sortedCommitMapKeys(insertsByTable) {
+		ins := insertsByTable[tableID]
+		table, ok := cs.tableLocked(tableID)
+		if !ok {
+			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
+		}
+		if table.schema.IsEvent {
+			continue
+		}
+		for _, rowID := range sortedCommitMapKeys(ins) {
+			if err := table.InsertRow(rowID, ins[rowID]); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -69,7 +124,7 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		next := tx.txNextRowIDs[tableID]
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
-			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
+			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
 		if table.schema.IsEvent {
 			continue
@@ -81,16 +136,14 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		next := tx.txSequences[tableID]
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
-			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
+			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
 		if table.schema.IsEvent {
 			continue
 		}
 		table.SetSequenceValue(next)
 	}
-
-	tx.finishCommitted()
-	return changeset, nil
+	return nil
 }
 
 // Rollback discards the transaction. No committed state mutation.

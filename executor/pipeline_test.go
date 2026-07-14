@@ -35,16 +35,19 @@ func (r *recorder) snapshot() []string {
 
 // fakeDurability records every EnqueueCommitted call.
 type fakeDurability struct {
-	rec      *recorder
-	txIDs    []types.TxID
-	payloads []*store.Changeset
-	block    chan struct{}     // if set, EnqueueCommitted waits on it
-	entered  chan struct{}     // optional test signal before blocking
-	waitCh   <-chan types.TxID // optional readiness channel returned by WaitUntilDurable
-	fatalErr error
-	panicOn  bool // panic when EnqueueCommitted is called
-	mu       sync.Mutex
+	rec         *recorder
+	txIDs       []types.TxID
+	payloads    []*store.Changeset
+	block       chan struct{}     // if set, EnqueueCommitted waits on it
+	entered     chan struct{}     // optional test signal before blocking
+	waitCh      <-chan types.TxID // optional readiness channel returned by WaitUntilDurable
+	fatalErr    error
+	validateErr error
+	panicOn     bool // panic when EnqueueCommitted is called
+	mu          sync.Mutex
 }
+
+func (f *fakeDurability) ValidateChangeset(*store.Changeset) error { return f.validateErr }
 
 func (f *fakeDurability) EnqueueCommitted(txID types.TxID, cs *store.Changeset) {
 	if f.block != nil {
@@ -311,6 +314,51 @@ func TestExecutorRejectsReducerWithoutCommitWhenDurabilityFatal(t *testing.T) {
 	}
 	if got := table.RowCount(); got != 0 {
 		t.Fatalf("row count = %d, want 0", got)
+	}
+}
+
+func TestExecutorRejectsDurabilityValidationBeforeCommitAndRecovers(t *testing.T) {
+	h := newPipelineHarness(t)
+	validationErr := errors.New("changeset exceeds durability limit")
+	h.dur.validateErr = validationErr
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.exec.Run(ctx)
+
+	resp := submit(t, h.exec, "InsertPlayer")
+	if resp.Status != StatusFailedInternal || !errors.Is(resp.Error, validationErr) {
+		t.Fatalf("rejected response = %+v, want failed internal validation error", resp)
+	}
+	if resp.TxID != 0 {
+		t.Fatalf("rejected tx id = %d, want 0", resp.TxID)
+	}
+	if got := h.cs.CommittedTxID(); got != 0 {
+		t.Fatalf("committed tx id after rejection = %d, want 0", got)
+	}
+	table, ok := h.cs.Table(0)
+	if !ok {
+		t.Fatal("missing players table")
+	}
+	if got := table.RowCount(); got != 0 {
+		t.Fatalf("row count after rejection = %d, want 0", got)
+	}
+	if got := len(h.dur.txIDs); got != 0 {
+		t.Fatalf("durability enqueues after rejection = %d, want 0", got)
+	}
+	if got := len(h.subs.txIDs); got != 0 {
+		t.Fatalf("subscription evaluations after rejection = %d, want 0", got)
+	}
+
+	h.dur.validateErr = nil
+	resp = submit(t, h.exec, "InsertPlayer")
+	if resp.Status != StatusCommitted || resp.TxID != 1 {
+		t.Fatalf("recovery response = %+v, want committed tx 1", resp)
+	}
+	if got := table.RowCount(); got != 1 {
+		t.Fatalf("row count after recovery commit = %d, want 1", got)
+	}
+	if got := len(h.dur.txIDs); got != 1 || h.dur.txIDs[0] != 1 {
+		t.Fatalf("durability tx ids after recovery = %v, want [1]", h.dur.txIDs)
 	}
 }
 

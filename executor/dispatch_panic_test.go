@@ -12,6 +12,7 @@ import (
 
 type fatalPanicDurability struct{}
 
+func (fatalPanicDurability) ValidateChangeset(*store.Changeset) error      { return nil }
 func (fatalPanicDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
 func (fatalPanicDurability) WaitUntilDurable(types.TxID) <-chan types.TxID { return nil }
 func (fatalPanicDurability) FatalError() error                             { panic("fatal probe") }

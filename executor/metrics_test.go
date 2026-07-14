@@ -386,6 +386,7 @@ func receiveReducerResponse(t *testing.T, ch <-chan ReducerResponse) ReducerResp
 
 type panicDurability struct{}
 
+func (panicDurability) ValidateChangeset(*store.Changeset) error      { return nil }
 func (panicDurability) EnqueueCommitted(types.TxID, *store.Changeset) { panic("durability failed") }
 func (panicDurability) WaitUntilDurable(types.TxID) <-chan types.TxID { return nil }
 func (panicDurability) FatalError() error                             { return nil }

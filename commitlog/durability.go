@@ -322,6 +322,16 @@ func removeFreshSegmentArtifact(dir string, startTxID uint64) error {
 	return nil
 }
 
+// ValidateChangeset verifies that cs can be encoded within this worker's
+// configured row and record-payload limits without mutating worker state.
+func (dw *DurabilityWorker) ValidateChangeset(cs *store.Changeset) error {
+	if dw == nil {
+		return nil
+	}
+	_, err := encodedChangesetSizeWithLimits(cs, dw.opts.MaxRowBytes, dw.opts.MaxRecordPayloadBytes)
+	return err
+}
+
 // EnqueueCommitted sends a committed changeset for durability.
 // Panics if closed or fatally errored.
 func (dw *DurabilityWorker) EnqueueCommitted(txID uint64, cs *store.Changeset) {

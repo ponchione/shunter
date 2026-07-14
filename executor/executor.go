@@ -1010,7 +1010,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 
 func (e *Executor) commitTransaction(tx *store.Transaction) (*store.Changeset, error) {
 	start := time.Now()
-	changeset, err := store.Commit(e.committed, tx)
+	changeset, err := store.CommitWithValidation(e.committed, tx, e.durability.ValidateChangeset)
 	result := "ok"
 	if err != nil {
 		result = "error"
@@ -1148,6 +1148,7 @@ func isUserCommitError(err error) bool {
 
 type noopDurability struct{}
 
+func (noopDurability) ValidateChangeset(*store.Changeset) error      { return nil }
 func (noopDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
 func (noopDurability) WaitUntilDurable(types.TxID) <-chan types.TxID { return nil }
 func (noopDurability) FatalError() error                             { return nil }

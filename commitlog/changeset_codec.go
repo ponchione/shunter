@@ -25,6 +25,11 @@ func EncodeChangeset(cs *store.Changeset) ([]byte, error) {
 }
 
 func encodeChangesetWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecordPayloadBytes uint32) ([]byte, error) {
+	size, err := encodedChangesetSizeWithLimits(cs, maxRowBytes, maxRecordPayloadBytes)
+	if err != nil {
+		return nil, err
+	}
+
 	// Sort table IDs for deterministic output.
 	tableCap := 0
 	if cs != nil {
@@ -40,27 +45,6 @@ func encodeChangesetWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecor
 	}
 	slices.Sort(tableIDs)
 
-	size := uint64(1 + 4)
-	for _, id := range tableIDs {
-		tc := cs.Tables[id]
-		size += 4
-		insertSize, err := encodedChangesetRowsSize(tc.Inserts, tc.Schema, maxRowBytes)
-		if err != nil {
-			return nil, err
-		}
-		deleteSize, err := encodedChangesetRowsSize(tc.Deletes, tc.Schema, maxRowBytes)
-		if err != nil {
-			return nil, err
-		}
-		size += insertSize + deleteSize
-		if err := validateRecordPayloadLen(size, maxRecordPayloadBytes); err != nil {
-			return nil, err
-		}
-	}
-	maxAlloc := uint64(math.MaxInt)
-	if size > maxAlloc {
-		return nil, fmt.Errorf("%w: changeset payload %d exceeds max allocation %d", ErrTraversal, size, maxAlloc)
-	}
 	tableCount, err := checkedChangesetCount("table count", len(tableIDs))
 	if err != nil {
 		return nil, err
@@ -74,7 +58,6 @@ func encodeChangesetWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecor
 		out = appendUint32LE(out, uint32(id))
 
 		// Inserts.
-		var err error
 		out, err = appendChangesetRows(out, tc.Inserts, tc.Schema, maxRowBytes)
 		if err != nil {
 			return nil, err
@@ -94,6 +77,48 @@ func encodeChangesetWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecor
 	}
 
 	return out, nil
+}
+
+func encodedChangesetSizeWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecordPayloadBytes uint32) (uint64, error) {
+	tableCap := 0
+	if cs != nil {
+		tableCap = len(cs.Tables)
+	}
+	tableIDs := make([]schema.TableID, 0, tableCap)
+	if cs != nil {
+		for id, tc := range cs.Tables {
+			if tc != nil {
+				tableIDs = append(tableIDs, id)
+			}
+		}
+	}
+	slices.Sort(tableIDs)
+	if _, err := checkedChangesetCount("table count", len(tableIDs)); err != nil {
+		return 0, err
+	}
+
+	size := uint64(1 + 4)
+	for _, id := range tableIDs {
+		tc := cs.Tables[id]
+		size += 4
+		insertSize, err := encodedChangesetRowsSize(tc.Inserts, tc.Schema, maxRowBytes)
+		if err != nil {
+			return 0, err
+		}
+		deleteSize, err := encodedChangesetRowsSize(tc.Deletes, tc.Schema, maxRowBytes)
+		if err != nil {
+			return 0, err
+		}
+		size += insertSize + deleteSize
+		if err := validateRecordPayloadLen(size, maxRecordPayloadBytes); err != nil {
+			return 0, err
+		}
+	}
+	maxAlloc := uint64(math.MaxInt)
+	if size > maxAlloc {
+		return 0, fmt.Errorf("%w: changeset payload %d exceeds max allocation %d", ErrTraversal, size, maxAlloc)
+	}
+	return size, nil
 }
 
 func encodedChangesetRowsSize(rows []types.ProductValue, ts *schema.TableSchema, maxRowBytes uint32) (uint64, error) {

@@ -249,7 +249,7 @@ func (e *migrationExecutor) runHook(ctx context.Context, hookIndex int, hook Mig
 		return result, fmt.Errorf("migration hook %d: %w", hookIndex+1, err)
 	}
 	tx.Seal()
-	changeset, err := store.Commit(e.state, tx)
+	changeset, err := store.CommitWithValidation(e.state, tx, e.durability.ValidateChangeset)
 	if err != nil {
 		store.Rollback(tx)
 		return result, fmt.Errorf("migration hook %d commit: %w", hookIndex+1, err)

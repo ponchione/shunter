@@ -477,6 +477,10 @@ type durabilityHandle struct {
 	worker *commitlog.DurabilityWorker
 }
 
+func (h durabilityHandle) ValidateChangeset(changeset *store.Changeset) error {
+	return h.worker.ValidateChangeset(changeset)
+}
+
 func (h durabilityHandle) EnqueueCommitted(txID types.TxID, changeset *store.Changeset) {
 	h.worker.EnqueueCommitted(uint64(txID), changeset)
 }
