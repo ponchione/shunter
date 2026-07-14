@@ -73,9 +73,11 @@ func (s DeclaredViewSubscription) Close() error {
 
 // Unsubscribe releases the maintained subscription. It is safe to call
 // repeatedly and concurrently. If cleanup is not admitted before ctx is
-// canceled, ownership remains live and a later call may retry. If cleanup
-// removes the subscription but reports a final-evaluation error, repeated calls
-// return that same terminal error.
+// canceled, ownership remains live and a later call may retry. An admitted
+// cleanup remains shared and in flight after caller cancellation until its
+// executor reply establishes whether ownership was released. If cleanup removes
+// the subscription but reports a final-evaluation error, repeated calls return
+// that same terminal error.
 func (s DeclaredViewSubscription) Unsubscribe(ctx context.Context) error {
 	if s.cleanup == nil {
 		return nil
@@ -92,6 +94,11 @@ type declaredViewSubscriptionCleanup struct {
 	terminalErr   error
 	inFlight      chan struct{}
 	unsubscribeFn func(context.Context) (bool, error)
+}
+
+type declaredViewCleanupResult struct {
+	released bool
+	err      error
 }
 
 func (c *declaredViewSubscriptionCleanup) unsubscribe(ctx context.Context) error {
@@ -131,18 +138,36 @@ func (c *declaredViewSubscriptionCleanup) unsubscribe(ctx context.Context) error
 		}
 		c.mu.Unlock()
 
-		released, err := unsubscribe(ctx)
-		c.mu.Lock()
-		if released {
-			c.done = true
-			c.terminalErr = err
-			c.runtime = nil
+		resultCh := make(chan declaredViewCleanupResult, 1)
+		go func() {
+			released, err := unsubscribe(ctx)
+			resultCh <- declaredViewCleanupResult{released: released, err: err}
+		}()
+		select {
+		case result := <-resultCh:
+			c.finishUnsubscribe(wait, result)
+			return result.err
+		case <-ctx.Done():
+			go func() {
+				c.finishUnsubscribe(wait, <-resultCh)
+			}()
+			return ctx.Err()
 		}
+	}
+}
+
+func (c *declaredViewSubscriptionCleanup) finishUnsubscribe(wait chan struct{}, result declaredViewCleanupResult) {
+	c.mu.Lock()
+	if result.released {
+		c.done = true
+		c.terminalErr = result.err
+		c.runtime = nil
+	}
+	if c.inFlight == wait {
 		c.inFlight = nil
 		close(wait)
-		c.mu.Unlock()
-		return err
 	}
+	c.mu.Unlock()
 }
 
 // DeclaredReadOption configures local named query/view calls.
@@ -293,7 +318,16 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 	if err := exec.SubmitWithContext(ctx, cmd); err != nil {
 		return DeclaredViewSubscription{}, err
 	}
-	response := <-responseCh
+	select {
+	case response := <-responseCh:
+		return r.declaredViewSubscriptionFromResponse(entry, plan, callOpts, queryID, response)
+	case <-ctx.Done():
+		go r.reconcileCanceledDeclaredViewRegistration(responseCh, callOpts.caller.ConnectionID, queryID)
+		return DeclaredViewSubscription{}, ctx.Err()
+	}
+}
+
+func (r *Runtime) declaredViewSubscriptionFromResponse(entry declaredReadEntry, plan declaredViewAdmissionPlan, callOpts declaredReadOptions, queryID uint32, response declaredViewRegisterResponse) (DeclaredViewSubscription, error) {
 	if response.err != nil {
 		return DeclaredViewSubscription{}, response.err
 	}
@@ -310,6 +344,19 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 			queryID: queryID,
 		},
 	}, nil
+}
+
+func (r *Runtime) reconcileCanceledDeclaredViewRegistration(responseCh <-chan declaredViewRegisterResponse, connID types.ConnectionID, queryID uint32) {
+	response := <-responseCh
+	if response.err != nil {
+		return
+	}
+	cleanup := &declaredViewSubscriptionCleanup{
+		runtime: r,
+		connID:  connID,
+		queryID: queryID,
+	}
+	_ = cleanup.unsubscribe(context.Background())
 }
 
 // declaredViewRegisterReplyHook is test-only instrumentation for cancellation
@@ -338,6 +385,9 @@ func (r *Runtime) unsubscribeDeclaredView(ctx context.Context, connID types.Conn
 		QueryID: queryID,
 		Context: ctx,
 		Reply: func(_ subscription.SubscriptionSetUnregisterResult, err error) {
+			if declaredViewUnregisterReplyHook != nil {
+				declaredViewUnregisterReplyHook()
+			}
 			responseCh <- declaredViewUnregisterResponse{err: err}
 		},
 	}
@@ -359,6 +409,10 @@ func (r *Runtime) unsubscribeDeclaredView(ctx context.Context, connID types.Conn
 		return false, response.err
 	}
 }
+
+// declaredViewUnregisterReplyHook is test-only instrumentation for cancellation
+// races after executor removal and before cleanup ownership is reconciled.
+var declaredViewUnregisterReplyHook func()
 
 type declaredViewUnregisterResponse struct {
 	err error

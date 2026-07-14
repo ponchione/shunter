@@ -104,6 +104,43 @@ func TestDeclaredViewSubscriptionCleanupErrorsAreRetryableOrTerminal(t *testing.
 	}
 }
 
+func TestDeclaredViewSubscriptionCanceledAcceptedFinalErrorBecomesTerminal(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	finalErr := errors.Join(subscription.ErrFinalQuery, context.Canceled)
+	var calls atomic.Int32
+	sub := DeclaredViewSubscription{cleanup: &declaredViewSubscriptionCleanup{
+		unsubscribeFn: func(context.Context) (bool, error) {
+			calls.Add(1)
+			close(started)
+			<-release
+			return true, finalErr
+		},
+	}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	firstResult := make(chan error, 1)
+	go func() { firstResult <- sub.Unsubscribe(ctx) }()
+	<-started
+	cancel()
+	if err := waitForOwnedViewCall(t, firstResult); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled Unsubscribe error = %v, want context.Canceled", err)
+	}
+
+	lateResult := make(chan error, 1)
+	go func() { lateResult <- sub.Close() }()
+	close(release)
+	if err := <-lateResult; !errors.Is(err, subscription.ErrFinalQuery) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("reconciled terminal error = %v, want ErrFinalQuery and context.Canceled", err)
+	}
+	if err := sub.Close(); !errors.Is(err, subscription.ErrFinalQuery) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("repeated terminal error = %v, want stable ErrFinalQuery and context.Canceled", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("cleanup calls = %d, want 1", got)
+	}
+}
+
 func TestSubscribeViewCancellationBeforeExecutorDispatchDoesNotLeak(t *testing.T) {
 	blockStarted := make(chan struct{})
 	releaseBlock := make(chan struct{})
@@ -134,16 +171,17 @@ func TestSubscribeViewCancellationBeforeExecutorDispatchDoesNotLeak(t *testing.T
 		t.Fatal("SubscribeView command was not queued behind blocking reducer")
 	}
 	cancel()
+	if err := waitForOwnedViewCall(t, subscribeDone); !errors.Is(err, context.Canceled) {
+		t.Fatalf("SubscribeView error = %v, want context.Canceled", err)
+	}
+	if active := rt.subscriptions.ActiveSubscriptionSets(); active != 0 {
+		t.Fatalf("active subscriptions before executor release = %d, want 0", active)
+	}
 	close(releaseBlock)
 	if err := <-reducerDone; err != nil {
 		t.Fatalf("blocking reducer: %v", err)
 	}
-	if err := <-subscribeDone; !errors.Is(err, context.Canceled) {
-		t.Fatalf("SubscribeView error = %v, want context.Canceled", err)
-	}
-	if active := rt.subscriptions.ActiveSubscriptionSets(); active != 0 {
-		t.Fatalf("active subscriptions after pre-dispatch cancellation = %d, want 0", active)
-	}
+	eventually(t, func() bool { return rt.subscriptions.ActiveSubscriptionSets() == 0 })
 }
 
 func TestDeclaredViewUnsubscribeCancellationBeforeDispatchCanRetry(t *testing.T) {
@@ -171,15 +209,15 @@ func TestDeclaredViewUnsubscribeCancellationBeforeDispatchCanRetry(t *testing.T)
 	go func() { unsubscribeDone <- sub.Unsubscribe(ctx) }()
 	waitForOwnedViewExecutorQueue(t, rt)
 	cancel()
-	close(releaseBlock)
-	if err := <-reducerDone; err != nil {
-		t.Fatalf("blocking reducer: %v", err)
-	}
-	if err := <-unsubscribeDone; !errors.Is(err, context.Canceled) {
+	if err := waitForOwnedViewCall(t, unsubscribeDone); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Unsubscribe error = %v, want context.Canceled", err)
 	}
 	if active := rt.subscriptions.ActiveSubscriptionSets(); active != 1 {
-		t.Fatalf("active subscriptions after canceled cleanup = %d, want 1", active)
+		t.Fatalf("active subscriptions before executor release = %d, want 1", active)
+	}
+	close(releaseBlock)
+	if err := <-reducerDone; err != nil {
+		t.Fatalf("blocking reducer: %v", err)
 	}
 	if err := sub.Close(); err != nil {
 		t.Fatalf("retry Close: %v", err)
@@ -189,7 +227,7 @@ func TestDeclaredViewUnsubscribeCancellationBeforeDispatchCanRetry(t *testing.T)
 	}
 }
 
-func TestSubscribeViewCancellationConcurrentWithCompletedRegistrationReturnsOwner(t *testing.T) {
+func TestSubscribeViewCancellationAfterCompletedRegistrationCompensatesLateSuccess(t *testing.T) {
 	rt := buildStartedOwnedViewRuntime(t, nil)
 	defer rt.Close()
 	replyStarted := make(chan struct{})
@@ -215,16 +253,59 @@ func TestSubscribeViewCancellationConcurrentWithCompletedRegistrationReturnsOwne
 	}()
 	<-replyStarted
 	cancel()
-	close(releaseReply)
-	result := <-resultCh
-	if result.err != nil {
-		t.Fatalf("SubscribeView after completed registration: %v", result.err)
+	result := waitForOwnedViewSubscribeCall(t, resultCh)
+	if !errors.Is(result.err, context.Canceled) {
+		t.Fatalf("SubscribeView error = %v, want context.Canceled", result.err)
 	}
-	if err := result.sub.Close(); err != nil {
-		t.Fatalf("Close returned owner: %v", err)
+	if active := rt.subscriptions.ActiveSubscriptionSets(); active != 1 {
+		t.Fatalf("active subscriptions before late reply = %d, want 1", active)
+	}
+	close(releaseReply)
+	eventually(t, func() bool { return rt.subscriptions.ActiveSubscriptionSets() == 0 })
+}
+
+func TestDeclaredViewUnsubscribeCancellationAfterRemovalReconcilesConcurrentCallers(t *testing.T) {
+	rt := buildStartedOwnedViewRuntime(t, nil)
+	defer rt.Close()
+	sub, err := rt.SubscribeView(context.Background(), "live_messages", 46)
+	if err != nil {
+		t.Fatalf("SubscribeView: %v", err)
+	}
+
+	replyStarted := make(chan struct{})
+	releaseReply := make(chan struct{})
+	previous := declaredViewUnregisterReplyHook
+	declaredViewUnregisterReplyHook = func() {
+		close(replyStarted)
+		<-releaseReply
+	}
+	t.Cleanup(func() { declaredViewUnregisterReplyHook = previous })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	unsubscribeDone := make(chan error, 1)
+	go func() { unsubscribeDone <- sub.Unsubscribe(ctx) }()
+	<-replyStarted
+	cancel()
+	if err := waitForOwnedViewCall(t, unsubscribeDone); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Unsubscribe error = %v, want context.Canceled", err)
 	}
 	if active := rt.subscriptions.ActiveSubscriptionSets(); active != 0 {
-		t.Fatalf("active subscriptions after returned owner cleanup = %d, want 0", active)
+		t.Fatalf("active subscriptions after accepted removal = %d, want 0", active)
+	}
+
+	const callers = 6
+	closeResults := make(chan error, callers)
+	for range callers {
+		go func() { closeResults <- sub.Close() }()
+	}
+	close(releaseReply)
+	for range callers {
+		if err := <-closeResults; err != nil {
+			t.Fatalf("concurrent Close after accepted removal: %v", err)
+		}
+	}
+	if err := sub.Close(); err != nil {
+		t.Fatalf("repeated terminal Close: %v", err)
 	}
 }
 
@@ -265,5 +346,36 @@ func waitForOwnedViewExecutorQueue(t *testing.T, rt *Runtime) {
 	}
 	if rt.executor.InboxDepth() == 0 {
 		t.Fatal("subscription command was not queued behind blocking reducer")
+	}
+}
+
+func waitForOwnedViewCall(t *testing.T, result <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("declared-view call did not return promptly after cancellation")
+		return nil
+	}
+}
+
+func waitForOwnedViewSubscribeCall(t *testing.T, result <-chan struct {
+	sub DeclaredViewSubscription
+	err error
+}) struct {
+	sub DeclaredViewSubscription
+	err error
+} {
+	t.Helper()
+	select {
+	case got := <-result:
+		return got
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("SubscribeView did not return promptly after cancellation")
+		return struct {
+			sub DeclaredViewSubscription
+			err error
+		}{}
 	}
 }
