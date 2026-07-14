@@ -116,7 +116,7 @@ func jwksForOIDCDiscovery(source OIDCDiscoveryConfig) (JWKSConfig, error) {
 
 	now := time.Now()
 	if cache.source.JWKSURL != "" && now.Before(cache.expiresAt) {
-		return cloneJWKSConfig(cache.source), nil
+		return oidcDiscoveryJWKSConfig(cache.source, normalized), nil
 	}
 	resolved, err := fetchOIDCDiscovery(normalized)
 	if err != nil {
@@ -128,7 +128,17 @@ func jwksForOIDCDiscovery(source OIDCDiscoveryConfig) (JWKSConfig, error) {
 	}
 	cache.source = resolved
 	cache.expiresAt = now.Add(ttl)
-	return cloneJWKSConfig(resolved), nil
+	return oidcDiscoveryJWKSConfig(resolved, normalized), nil
+}
+
+// oidcDiscoveryJWKSConfig overlays caller-owned operational settings on the
+// discovery-derived source. Discovery cache entries are shared process-wide,
+// so they must not retain one runtime's refresh behavior for another runtime.
+func oidcDiscoveryJWKSConfig(discovered JWKSConfig, source OIDCDiscoveryConfig) JWKSConfig {
+	discovered = cloneJWKSConfig(discovered)
+	discovered.CacheTTL = source.CacheTTL
+	discovered.RefreshTimeout = source.RefreshTimeout
+	return discovered
 }
 
 func oidcDiscoveryCacheKey(source OIDCDiscoveryConfig) string {
@@ -195,11 +205,9 @@ func fetchOIDCDiscovery(source OIDCDiscoveryConfig) (JWKSConfig, error) {
 		return JWKSConfig{}, fmt.Errorf("decode oidc discovery: %w", err)
 	}
 	return JWKSConfig{
-		Issuer:         issuer,
-		JWKSURL:        jwksURI,
-		Algorithms:     algorithms,
-		CacheTTL:       source.CacheTTL,
-		RefreshTimeout: source.RefreshTimeout,
+		Issuer:     issuer,
+		JWKSURL:    jwksURI,
+		Algorithms: algorithms,
 	}, nil
 }
 

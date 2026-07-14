@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"time"
@@ -196,7 +195,7 @@ func (e *Executor) runLifecycleReducer(
 		Principal:    principal.Copy(),
 		Timestamp:    time.Now().UTC(),
 	}
-	db := &reducerDBAdapter{tx: tx}
+	db := e.newReducerDBAdapter(tx)
 	scheduler := e.newSchedulerHandle(tx)
 	rctx := &types.ReducerContext{
 		ReducerName: rr.Name,
@@ -244,23 +243,8 @@ func (e *Executor) runLifecycleReducer(
 // the case where OnConnect never successfully inserted (e.g. auth failure
 // followed by a belt-and-suspenders disconnect from the protocol layer).
 func deleteSysClientsRow(tx *store.Transaction, sysID schema.TableID, conn types.ConnectionID) error {
-	var targetRowID types.RowID
-	found := false
-	for rowID, row := range tx.ScanTable(sysID) {
-		if int(SysClientsColConnectionID) >= len(row) {
-			continue
-		}
-		if !bytes.Equal(row[SysClientsColConnectionID].BytesView(), conn[:]) {
-			continue
-		}
-		targetRowID = rowID
-		found = true
-		break
-	}
-	if found {
-		return tx.Delete(sysID, targetRowID)
-	}
-	return nil
+	_, err := deleteSystemTableRowByPrimaryKey(tx, sysID, types.NewBytes(conn[:]))
+	return err
 }
 
 // sysClientsTableID resolves the sys_clients TableID via the executor's
@@ -278,8 +262,5 @@ func (e *Executor) sysClientsTableID() (schema.TableID, bool) {
 // respondLifecycle delivers a lifecycle-command response on the optional
 // ResponseCh. Lifecycle commands may be fire-and-forget (nil channel).
 func respondLifecycle(ch chan<- ReducerResponse, status ReducerStatus, txID types.TxID, err error) {
-	if ch == nil {
-		return
-	}
-	ch <- ReducerResponse{Status: status, Error: err, TxID: txID}
+	sendResponse(ch, ReducerResponse{Status: status, Error: err, TxID: txID})
 }

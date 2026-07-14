@@ -4,6 +4,14 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Reducers now receive a policy-enforcing database surface that keeps
+  `sys_clients` and `sys_scheduled` read-only, never exposes the underlying
+  store transaction, and leaves lifecycle replies nonblocking when callers
+  abandon full response channels.
+- Reflected table registration now preserves SDK visibility, OIDC discovery
+  cache hits retain each runtime's refresh timeout, failed multi-runtime host
+  startup leaves pre-started runtimes running, and system-table primary-key
+  operations use indexed transaction-visible lookups.
 - Commit-log compaction now fully validates the exact completed snapshot,
   transaction ID, and frozen schema before removing any covered segment or
   offset index.

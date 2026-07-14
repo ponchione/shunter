@@ -31,25 +31,22 @@ func maxScheduleID(cs *store.CommittedState, tableID schema.TableID) ScheduleID 
 // advanceOrDeleteSchedule updates the due schedule row in the reducer commit.
 // A missing row is allowed when Cancel races an already-queued firing.
 func (e *Executor) advanceOrDeleteSchedule(tx *store.Transaction, id ScheduleID, intendedNs int64) error {
-	target := uint64(id)
-	for rowID, row := range tx.ScanTable(e.schedTableID) {
-		if row[SysScheduledColScheduleID].AsUint64() != target {
-			continue
-		}
-		repeatNs := row[SysScheduledColRepeatNs].AsInt64()
-		if repeatNs == 0 {
-			return tx.Delete(e.schedTableID, rowID)
-		}
-		nextRunAtNs, ok := nextScheduleRepeatRunAt(intendedNs, repeatNs)
-		if !ok {
-			return tx.Delete(e.schedTableID, rowID)
-		}
-		newRow := row.Copy()
-		newRow[SysScheduledColNextRunAtNs] = types.NewInt64(nextRunAtNs)
-		_, err := tx.Update(e.schedTableID, rowID, newRow)
-		return err
+	rowID, row, found := systemTableRowByPrimaryKey(tx, e.schedTableID, types.NewUint64(uint64(id)))
+	if !found {
+		return nil
 	}
-	return nil
+	repeatNs := row[SysScheduledColRepeatNs].AsInt64()
+	if repeatNs == 0 {
+		return tx.Delete(e.schedTableID, rowID)
+	}
+	nextRunAtNs, ok := nextScheduleRepeatRunAt(intendedNs, repeatNs)
+	if !ok {
+		return tx.Delete(e.schedTableID, rowID)
+	}
+	newRow := row.Copy()
+	newRow[SysScheduledColNextRunAtNs] = types.NewInt64(nextRunAtNs)
+	_, err := tx.Update(e.schedTableID, rowID, newRow)
+	return err
 }
 
 // SchedulerFor returns a Scheduler wired to this executor.
@@ -237,34 +234,18 @@ func (e *Executor) sweepInvalidSchedules(ctx context.Context) error {
 }
 
 func deleteSysScheduledRow(tx *store.Transaction, tableID schema.TableID, id ScheduleID) error {
-	target := uint64(id)
-	for rowID, row := range tx.ScanTable(tableID) {
-		if row[SysScheduledColScheduleID].AsUint64() == target {
-			return tx.Delete(tableID, rowID)
-		}
-	}
-	return nil
+	_, err := deleteSystemTableRowByPrimaryKey(tx, tableID, types.NewUint64(uint64(id)))
+	return err
 }
 
 // Cancel removes the schedule row for id. Returns (true, nil) if a row was
 // found and marked for deletion, (false, nil) if no row matched, and a
 // non-nil error if the delete failed after a matching row was found.
-// v1 scans the table; sys_scheduled is expected to be small.
 func (h *schedulerHandle) Cancel(id ScheduleID) (bool, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if err := h.checkOpenLocked(); err != nil {
 		return false, err
 	}
-	target := uint64(id)
-	for rowID, row := range h.tx.ScanTable(h.tableID) {
-		if row[SysScheduledColScheduleID].AsUint64() != target {
-			continue
-		}
-		if err := h.tx.Delete(h.tableID, rowID); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-	return false, nil
+	return deleteSystemTableRowByPrimaryKey(h.tx, h.tableID, types.NewUint64(uint64(id)))
 }

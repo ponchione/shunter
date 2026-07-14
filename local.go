@@ -88,6 +88,9 @@ var (
 	ErrLocalReadNilCallback = errors.New("shunter: local read callback must not be nil")
 	// ErrPermissionDenied reports that a caller lacks required permissions.
 	ErrPermissionDenied = executor.ErrPermissionDenied
+	// ErrReducerSystemTableMutation reports that a reducer attempted to mutate
+	// an executor-owned system table through ReducerDB.
+	ErrReducerSystemTableMutation = executor.ErrReducerSystemTableMutation
 )
 
 // LocalReadView is the callback-scoped read-only view exposed by Runtime.Read.

@@ -705,6 +705,45 @@ func TestTypeScriptPublicProfileHidesPrivateAndInternalTableHelpers(t *testing.T
 	assertNotContains(t, ts, `secretEvents: { access:`)
 }
 
+func TestTypeScriptPublicProfileHonorsReflectedTableSDKVisibility(t *testing.T) {
+	type ReflectedMessages struct {
+		ID uint64 `shunter:"primarykey"`
+	}
+
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	if err := schema.RegisterTable[ReflectedMessages](b,
+		schema.WithTableName("messages"),
+		schema.WithTableSDKVisibility(schema.TableSDKVisibilityPrivate),
+	); err != nil {
+		t.Fatalf("RegisterTable failed: %v", err)
+	}
+	engine, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	contract := contractFixture()
+	found := false
+	for _, table := range engine.ExportSchema().Tables {
+		if table.Name == "messages" {
+			contract.Schema.Tables[0] = table
+			found = true
+			break
+		}
+	}
+	if !found || contract.Schema.Tables[0].SDK == nil || contract.Schema.Tables[0].SDK.Visibility != schema.TableSDKVisibilityPrivate {
+		t.Fatalf("reflected messages SDK metadata was not exported: %#v", contract.Schema.Tables[0].SDK)
+	}
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript, Profile: ProfilePublic})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	assertNotContains(t, string(out), `messages: "messages",`)
+	assertNotContains(t, string(out), `export interface MessagesRow {`)
+}
+
 func TestTypeScriptPublicProfileKeepsDeclaredReadDecodingForHiddenTables(t *testing.T) {
 	out, err := Generate(publicProfileContractFixture(), Options{
 		Language: LanguageTypeScript,

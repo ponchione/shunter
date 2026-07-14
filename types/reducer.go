@@ -20,6 +20,8 @@ type ReducerDB interface {
 	ScanTable(tableID uint32) iter.Seq2[RowID, ProductValue]
 	SeekIndex(tableID uint32, indexID uint32, key ...Value) iter.Seq2[RowID, ProductValue]
 	SeekIndexRange(tableID uint32, indexID uint32, lower, upper IndexBound) iter.Seq2[RowID, ProductValue]
+	// Underlying is retained for source compatibility and always returns nil.
+	// Reducers cannot access the executor-owned store transaction.
 	Underlying() any
 }
 

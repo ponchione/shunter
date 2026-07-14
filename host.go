@@ -149,11 +149,14 @@ func (h *Host) Start(ctx context.Context) error {
 
 	started := make([]hostRuntimeMount, 0, len(h.modules))
 	for _, module := range h.modules {
+		wasReady := module.runtime.Ready()
 		if err := module.runtime.Start(ctx); err != nil {
 			cleanupErr := closeHostModulesReverse(started)
 			return errors.Join(fmt.Errorf("start host module %q: %w", module.name, err), cleanupErr)
 		}
-		started = append(started, module)
+		if !wasReady {
+			started = append(started, module)
+		}
 	}
 	return nil
 }

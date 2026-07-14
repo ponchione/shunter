@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -189,14 +190,22 @@ func TestHandleCallReducerBeginExecuteCommitRollback(t *testing.T) {
 	_ = rr.Register(RegisteredReducer{Name: "user", Handler: func(*types.ReducerContext, []byte) ([]byte, error) { return nil, errors.New("user fail") }})
 	_ = rr.Register(RegisteredReducer{Name: "panic", Handler: func(*types.ReducerContext, []byte) ([]byte, error) { panic(errReducerBoom) }})
 	_ = rr.Register(RegisteredReducer{Name: "commit-user", Handler: func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
-		tx := ctx.DB.Underlying().(*store.Transaction)
-		tx.TxState().AddInsert(0, 999, types.ProductValue{types.NewUint64(1), types.NewString("dup")})
-		return nil, nil
+		row := types.ProductValue{types.NewUint64(100), types.NewString("duplicate-key")}
+		if _, err := ctx.DB.Insert(0, row); err != nil {
+			return nil, err
+		}
+		_ = players.AllocRowID() // skip the transaction's provisional row ID
+		return nil, players.InsertRow(players.AllocRowID(), row)
 	}})
 	_ = rr.Register(RegisteredReducer{Name: "commit-internal", Handler: func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
-		tx := ctx.DB.Underlying().(*store.Transaction)
-		tx.TxState().AddInsert(999, 1, types.ProductValue{types.NewUint64(9), types.NewString("ghost")})
-		return nil, nil
+		rowID, err := ctx.DB.Insert(0, types.ProductValue{types.NewUint64(101), types.NewString("tx-row")})
+		if err != nil {
+			return nil, err
+		}
+		if committedRowID := players.AllocRowID(); committedRowID != rowID {
+			return nil, fmt.Errorf("injected row ID = %d, want provisional %d", committedRowID, rowID)
+		}
+		return nil, players.InsertRow(rowID, types.ProductValue{types.NewUint64(102), types.NewString("committed-row")})
 	}})
 	_ = rr.Register(RegisteredReducer{Name: "OnConnect", Lifecycle: LifecycleOnConnect, Handler: func(*types.ReducerContext, []byte) ([]byte, error) { return nil, nil }})
 	rr.Freeze()

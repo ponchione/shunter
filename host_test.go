@@ -229,6 +229,47 @@ func TestHostStartsInRegistrationOrderAndCleansPartialStart(t *testing.T) {
 	}
 }
 
+func TestHostStartFailureDoesNotClosePreStartedRuntime(t *testing.T) {
+	chat := buildHostTestRuntime(t, "chat", t.TempDir())
+	ops := buildHostTestRuntime(t, "ops", t.TempDir())
+	if err := chat.Start(context.Background()); err != nil {
+		t.Fatalf("pre-start chat: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = ops.Close()
+		_ = chat.Close()
+	})
+
+	host, err := NewHost(
+		HostRuntime{Name: "chat", RoutePrefix: "/chat", Runtime: chat},
+		HostRuntime{Name: "ops", RoutePrefix: "/ops", Runtime: ops},
+	)
+	if err != nil {
+		t.Fatalf("NewHost returned error: %v", err)
+	}
+
+	injected := errors.New("injected host start failure")
+	oldHook := runtimeStartAfterDurabilityHook
+	runtimeStartAfterDurabilityHook = func(rt *Runtime) error {
+		if rt.ModuleName() == "ops" {
+			return injected
+		}
+		return nil
+	}
+	defer func() { runtimeStartAfterDurabilityHook = oldHook }()
+
+	err = host.Start(context.Background())
+	if err == nil || !errors.Is(err, injected) {
+		t.Fatalf("Start error = %v, want injected failure", err)
+	}
+	if !chat.Ready() || chat.Health().State != RuntimeStateReady {
+		t.Fatalf("pre-started runtime after failed Host.Start = %+v, want ready", chat.Health())
+	}
+	if ops.Ready() {
+		t.Fatal("failing runtime ready after failed Host.Start")
+	}
+}
+
 func TestHostCloseClosesEveryStartedRuntime(t *testing.T) {
 	chat := buildHostTestRuntime(t, "chat", t.TempDir())
 	ops := buildHostTestRuntime(t, "ops", t.TempDir())

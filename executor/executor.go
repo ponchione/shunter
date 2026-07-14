@@ -619,9 +619,25 @@ func (e *Executor) handleDisconnectClientSubscriptions(cmd DisconnectClientSubsc
 }
 
 type reducerDBAdapter struct {
-	mu     sync.Mutex
-	closed bool
-	tx     *store.Transaction
+	mu                  sync.Mutex
+	closed              bool
+	tx                  *store.Transaction
+	protectSystemTables bool
+	sysClientsTableID   schema.TableID
+	sysScheduledTableID schema.TableID
+}
+
+func (e *Executor) newReducerDBAdapter(tx *store.Transaction) *reducerDBAdapter {
+	sysClientsTableID, ok := e.sysClientsTableID()
+	if !ok {
+		panic("executor: sys_clients is not registered")
+	}
+	return &reducerDBAdapter{
+		tx:                  tx,
+		protectSystemTables: true,
+		sysClientsTableID:   sysClientsTableID,
+		sysScheduledTableID: e.schedTableID,
+	}
 }
 
 func (d *reducerDBAdapter) close() {
@@ -637,13 +653,33 @@ func (d *reducerDBAdapter) checkOpenLocked() error {
 	return nil
 }
 
+func (d *reducerDBAdapter) checkMutableTableLocked(tableID schema.TableID) error {
+	if !d.protectSystemTables {
+		return nil
+	}
+	var name string
+	switch tableID {
+	case d.sysClientsTableID:
+		name = SysClientsTableName
+	case d.sysScheduledTableID:
+		name = SysScheduledTableName
+	default:
+		return nil
+	}
+	return fmt.Errorf("%w: %s", ErrReducerSystemTableMutation, name)
+}
+
 func (d *reducerDBAdapter) Insert(tableID uint32, row types.ProductValue) (types.RowID, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err := d.checkOpenLocked(); err != nil {
 		return 0, err
 	}
-	return d.tx.Insert(schema.TableID(tableID), row)
+	tid := schema.TableID(tableID)
+	if err := d.checkMutableTableLocked(tid); err != nil {
+		return 0, err
+	}
+	return d.tx.Insert(tid, row)
 }
 
 func (d *reducerDBAdapter) Delete(tableID uint32, rowID types.RowID) error {
@@ -652,7 +688,11 @@ func (d *reducerDBAdapter) Delete(tableID uint32, rowID types.RowID) error {
 	if err := d.checkOpenLocked(); err != nil {
 		return err
 	}
-	return d.tx.Delete(schema.TableID(tableID), rowID)
+	tid := schema.TableID(tableID)
+	if err := d.checkMutableTableLocked(tid); err != nil {
+		return err
+	}
+	return d.tx.Delete(tid, rowID)
 }
 
 func (d *reducerDBAdapter) Update(tableID uint32, rowID types.RowID, newRow types.ProductValue) (types.RowID, error) {
@@ -661,7 +701,11 @@ func (d *reducerDBAdapter) Update(tableID uint32, rowID types.RowID, newRow type
 	if err := d.checkOpenLocked(); err != nil {
 		return 0, err
 	}
-	return d.tx.Update(schema.TableID(tableID), rowID, newRow)
+	tid := schema.TableID(tableID)
+	if err := d.checkMutableTableLocked(tid); err != nil {
+		return 0, err
+	}
+	return d.tx.Update(tid, rowID, newRow)
 }
 
 func (d *reducerDBAdapter) GetRow(tableID uint32, rowID types.RowID) (types.ProductValue, bool) {
@@ -719,12 +763,7 @@ func snapshotReducerRows(rows iter.Seq2[types.RowID, types.ProductValue]) iter.S
 }
 
 func (d *reducerDBAdapter) Underlying() any {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if err := d.checkOpenLocked(); err != nil {
-		return nil
-	}
-	return d.tx
+	return nil
 }
 
 func sendResponse[T any](ch chan<- T, resp T) bool {
@@ -815,7 +854,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		AllowAllPermissions: req.Caller.AllowAllPermissions,
 	}
 	tx := store.NewTransaction(e.committed, e.schemaReg)
-	db := &reducerDBAdapter{tx: tx}
+	db := e.newReducerDBAdapter(tx)
 	scheduler := e.newSchedulerHandle(tx)
 	rctx := &types.ReducerContext{
 		ReducerName: req.ReducerName,

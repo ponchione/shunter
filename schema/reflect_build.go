@@ -17,6 +17,10 @@ func buildTableDefinition(typeName string, fields []fieldInfo, opts ...TableOpti
 	if o.readPolicy != nil {
 		readPolicy = *o.readPolicy
 	}
+	sdk := TableSDKMetadata{}
+	if o.sdk != nil {
+		sdk = *o.sdk
+	}
 
 	columns := make([]ColumnDefinition, len(fields))
 	for i, f := range fields {
@@ -89,6 +93,7 @@ func buildTableDefinition(typeName string, fields []fieldInfo, opts ...TableOpti
 		Columns:    columns,
 		Indexes:    indexes,
 		ReadPolicy: readPolicy,
+		SDK:        sdk,
 	}, nil
 }
 

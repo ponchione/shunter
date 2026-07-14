@@ -164,6 +164,47 @@ func TestOIDCDiscoveryResultReusedFromCache(t *testing.T) {
 	}
 }
 
+func TestOIDCDiscoveryCacheDoesNotShareRefreshTimeoutBetweenConfigurations(t *testing.T) {
+	var requests atomic.Int32
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		writeOIDCDiscovery(t, w, oidcDiscoveryDoc(srv.URL, srv.URL+"/jwks", "RS256"))
+	}))
+	t.Cleanup(srv.Close)
+
+	base := OIDCDiscoveryConfig{
+		Issuer:       srv.URL,
+		DiscoveryURL: srv.URL,
+		CacheTTL:     time.Hour,
+	}
+	first := base
+	first.RefreshTimeout = time.Second
+	firstSource, err := jwksForOIDCDiscovery(first)
+	if err != nil {
+		t.Fatalf("first jwksForOIDCDiscovery returned error: %v", err)
+	}
+	if got := firstSource.RefreshTimeout; got != time.Second {
+		t.Fatalf("first refresh timeout = %v, want %v", got, time.Second)
+	}
+
+	second := base
+	second.RefreshTimeout = 9 * time.Second
+	secondSource, err := jwksForOIDCDiscovery(second)
+	if err != nil {
+		t.Fatalf("second jwksForOIDCDiscovery returned error: %v", err)
+	}
+	if got := secondSource.RefreshTimeout; got != 9*time.Second {
+		t.Fatalf("cached refresh timeout = %v, want caller configuration %v", got, 9*time.Second)
+	}
+	if got := secondSource.CacheTTL; got != time.Hour {
+		t.Fatalf("cached cache ttl = %v, want caller configuration %v", got, time.Hour)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("discovery requests = %d, want 1 shared discovery fetch", got)
+	}
+}
+
 func TestValidateJWTDiscoveredJWKSValidatesTokenEndToEnd(t *testing.T) {
 	privateKey, jwk := generateRS256JWK(t, "rsa-1")
 	var srv *httptest.Server

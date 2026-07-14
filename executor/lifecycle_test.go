@@ -172,6 +172,134 @@ func submitOnDisconnectWithPrincipal(t *testing.T, exec *Executor, conn types.Co
 	}
 }
 
+func TestLifecycleFullResponseChannelDoesNotBlockLaterExecutorCommands(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opt  lifecycleOpt
+		cmd  func(chan ReducerResponse) ExecutorCommand
+	}{
+		{
+			name: "connect failure",
+			opt: lifecycleOpt{
+				withOnConnect:    true,
+				onConnectPayload: &recordedHandler{err: errors.New("connect failed")},
+			},
+			cmd: func(ch chan ReducerResponse) ExecutorCommand {
+				return OnConnectCmd{ConnID: types.ConnectionID{1}, Identity: types.Identity{2}, ResponseCh: ch}
+			},
+		},
+		{
+			name: "disconnect failure",
+			opt: lifecycleOpt{
+				withOnDisconn:    true,
+				onDisconnPayload: &recordedHandler{err: errors.New("disconnect failed")},
+			},
+			cmd: func(ch chan ReducerResponse) ExecutorCommand {
+				return OnDisconnectCmd{ConnID: types.ConnectionID{3}, Identity: types.Identity{4}, ResponseCh: ch}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newLifecycleHarness(t, tc.opt)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go h.exec.Run(ctx)
+
+			full := make(chan ReducerResponse, 1)
+			full <- ReducerResponse{Status: StatusCommitted}
+			if err := h.exec.Submit(tc.cmd(full)); err != nil {
+				t.Fatal(err)
+			}
+
+			next := make(chan error, 1)
+			if err := h.exec.Submit(DisconnectClientSubscriptionsCmd{ResponseCh: next}); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-next:
+				if err != nil {
+					t.Fatalf("later executor command error = %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("full lifecycle response channel stalled the executor")
+			}
+		})
+	}
+}
+
+func TestLifecycleFullResponseChannelsDoNotBlockShutdownRejection(t *testing.T) {
+	h := newLifecycleHarness(t, lifecycleOpt{})
+	connectResponse := make(chan ReducerResponse, 1)
+	connectResponse <- ReducerResponse{Status: StatusCommitted}
+	disconnectResponse := make(chan ReducerResponse, 1)
+	disconnectResponse <- ReducerResponse{Status: StatusCommitted}
+	h.exec.inbox <- OnConnectCmd{ResponseCh: connectResponse}
+	h.exec.inbox <- OnDisconnectCmd{ResponseCh: disconnectResponse}
+
+	done := make(chan struct{})
+	go func() {
+		h.exec.startShutdown()
+		h.exec.rejectPendingCommandsOnShutdown()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("full lifecycle response channel blocked shutdown rejection")
+	}
+	if got := len(h.exec.inbox); got != 0 {
+		t.Fatalf("shutdown left %d commands queued, want 0", got)
+	}
+}
+
+func TestLifecycleFullResponseChannelDoesNotBlockPanicRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func(chan ReducerResponse) ExecutorCommand
+	}{
+		{
+			name: "connect",
+			cmd: func(ch chan ReducerResponse) ExecutorCommand {
+				return OnConnectCmd{ResponseCh: ch}
+			},
+		},
+		{
+			name: "disconnect",
+			cmd: func(ch chan ReducerResponse) ExecutorCommand {
+				return OnDisconnectCmd{ResponseCh: ch}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newLifecycleHarness(t, lifecycleOpt{})
+			reg := h.exec.schemaReg
+			h.exec.schemaReg = nil
+			full := make(chan ReducerResponse, 1)
+			full <- ReducerResponse{Status: StatusCommitted}
+
+			result := make(chan string, 1)
+			go func() { result <- h.exec.dispatchSafely(tc.cmd(full)) }()
+			select {
+			case got := <-result:
+				if got != "panic" {
+					t.Fatalf("dispatch result = %q, want panic", got)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("full lifecycle response channel blocked panic recovery")
+			}
+
+			h.exec.schemaReg = reg
+			next := make(chan error, 1)
+			if got := h.exec.dispatchSafely(DisconnectClientSubscriptionsCmd{ResponseCh: next}); got != "ok" {
+				t.Fatalf("later dispatch result = %q, want ok", got)
+			}
+			if err := <-next; err != nil {
+				t.Fatalf("later dispatch error = %v", err)
+			}
+		})
+	}
+}
+
 // sysClientsSnapshot returns (connID, identity, connectedAt) for every row
 // currently in sys_clients.
 func (h *lifecycleHarness) sysClientsSnapshot() []sysClientsRow {

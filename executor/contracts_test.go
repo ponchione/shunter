@@ -206,6 +206,7 @@ func TestEpic1InterfacesAndErrorsExist(t *testing.T) {
 		ErrCommitFailed,
 		ErrExecutorFatal,
 		ErrExecutorUnbufferedResponseChannel,
+		ErrReducerSystemTableMutation,
 		ErrInvalidScheduleInterval,
 	}
 	for _, err := range base {

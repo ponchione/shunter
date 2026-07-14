@@ -162,14 +162,14 @@ func TestReducerContextHandlesClosedAfterReducerReturn(t *testing.T) {
 
 	var leakedDB types.ReducerDB
 	var leakedScheduler types.ReducerScheduler
-	var leakedTx *store.Transaction
+	var underlyingDuringCall any
 	rr := NewReducerRegistry()
 	rr.Register(RegisteredReducer{
 		Name: "leak",
 		Handler: types.ReducerHandler(func(ctx *types.ReducerContext, args []byte) ([]byte, error) {
 			leakedDB = ctx.DB
 			leakedScheduler = ctx.Scheduler
-			leakedTx, _ = ctx.DB.Underlying().(*store.Transaction)
+			underlyingDuringCall = ctx.DB.Underlying()
 			return nil, nil
 		}),
 	})
@@ -202,20 +202,14 @@ func TestReducerContextHandlesClosedAfterReducerReturn(t *testing.T) {
 	if got := leakedDB.Underlying(); got != nil {
 		t.Fatalf("leaked DB Underlying = %T, want nil", got)
 	}
+	if underlyingDuringCall != nil {
+		t.Fatalf("DB Underlying during reducer call = %T, want nil", underlyingDuringCall)
+	}
 	if _, err := leakedScheduler.Schedule("leak", nil, time.Now()); !errors.Is(err, store.ErrTransactionClosed) {
 		t.Fatalf("leaked scheduler Schedule err=%v, want ErrTransactionClosed", err)
 	}
 	if _, err := leakedScheduler.ScheduleRepeat("leak", nil, 0); !errors.Is(err, store.ErrTransactionClosed) {
 		t.Fatalf("leaked scheduler ScheduleRepeat err=%v, want ErrTransactionClosed", err)
-	}
-	if leakedTx == nil {
-		t.Fatal("reducer did not expose underlying transaction during call")
-	}
-	if txState := leakedTx.TxState(); txState != nil {
-		t.Fatal("leaked transaction TxState should be nil after reducer return")
-	}
-	if _, err := leakedTx.Insert(tableID, types.ProductValue{types.NewUint64(2)}); !errors.Is(err, store.ErrTransactionClosed) {
-		t.Fatalf("leaked transaction Insert err=%v, want ErrTransactionClosed", err)
 	}
 }
 

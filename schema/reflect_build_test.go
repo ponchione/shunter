@@ -199,3 +199,36 @@ func TestRegisterTableAppliesOptionsOnce(t *testing.T) {
 		t.Fatal("option_once table missing")
 	}
 }
+
+func TestRegisterTablePreservesSDKVisibilityInRegistryAndExport(t *testing.T) {
+	type ReflectedTable struct {
+		ID uint64 `shunter:"primarykey"`
+	}
+
+	for _, visibility := range []TableSDKVisibility{
+		TableSDKVisibilityPublic,
+		TableSDKVisibilityInternal,
+		TableSDKVisibilityPrivate,
+	} {
+		t.Run(string(visibility), func(t *testing.T) {
+			b := NewBuilder()
+			b.SchemaVersion(1)
+			if err := RegisterTable[ReflectedTable](b, WithTableSDKVisibility(visibility)); err != nil {
+				t.Fatalf("RegisterTable failed: %v", err)
+			}
+			engine, err := b.Build(EngineOptions{})
+			if err != nil {
+				t.Fatalf("Build failed: %v", err)
+			}
+
+			_, table, ok := engine.Registry().TableByName("reflected_table")
+			if !ok {
+				t.Fatal("reflected_table missing from registry")
+			}
+			if got := table.SDK.Visibility; got != visibility {
+				t.Fatalf("registry SDK visibility = %q, want %q", got, visibility)
+			}
+			assertExportTableSDKVisibility(t, engine.ExportSchema().Tables, "reflected_table", visibility)
+		})
+	}
+}
