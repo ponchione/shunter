@@ -4,6 +4,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Executor shutdown now drains and rejects commands accepted before `Run`
+  starts, with atomic drain ownership across concurrent `Run` and `Shutdown`.
 - Commit-log workers now reject row and record limits above the fixed recovery
   ceilings and reject unsupported automatic snapshot intervals. Snapshot
   publication failures retain their lock until an explicit durable repair or

@@ -16,6 +16,12 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
+const (
+	executorDrainUnclaimed uint32 = iota
+	executorDrainRun
+	executorDrainShutdown
+)
+
 // ExecutorConfig configures the executor.
 type ExecutorConfig struct {
 	InboxCapacity int
@@ -72,7 +78,7 @@ type Executor struct {
 	snapshotFn      func() store.CommittedReadView
 	done            chan struct{}
 	doneOnce        sync.Once
-	runStarted      atomic.Bool
+	drainOwner      atomic.Uint32
 	shutdownCh      chan struct{}
 	closeOnce       sync.Once
 	inflightSubmits atomic.Int64
@@ -212,7 +218,7 @@ func (e *Executor) ShutdownStarted() bool {
 
 // Run processes commands until context is cancelled or inbox is closed.
 func (e *Executor) Run(ctx context.Context) {
-	if !e.runStarted.CompareAndSwap(false, true) {
+	if !e.drainOwner.CompareAndSwap(executorDrainUnclaimed, executorDrainRun) {
 		return
 	}
 	defer e.doneOnce.Do(func() { close(e.done) })
@@ -416,7 +422,8 @@ func isUnbufferedChannel[T any](ch chan<- T) bool {
 // Shutdown stops accepting new commands and waits for Run to finish.
 func (e *Executor) Shutdown() {
 	e.startShutdown()
-	if !e.runStarted.Load() {
+	if e.drainOwner.CompareAndSwap(executorDrainUnclaimed, executorDrainShutdown) {
+		e.rejectPendingCommandsOnShutdown()
 		e.doneOnce.Do(func() { close(e.done) })
 	}
 	<-e.done

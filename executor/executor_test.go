@@ -10,6 +10,7 @@ import (
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -313,9 +314,10 @@ func TestExecutorShutdown(t *testing.T) {
 
 func TestExecutorShutdownWithoutRunUnblocksBlockedSubmit(t *testing.T) {
 	exec, _ := setupExecutorWithObserver(nil, ExecutorConfig{InboxCapacity: 1})
+	firstResponse := make(chan ReducerResponse, 1)
 	if err := exec.Submit(CallReducerCmd{
 		Request:    ReducerRequest{ReducerName: "InsertPlayer", Source: CallSourceExternal},
-		ResponseCh: make(chan ReducerResponse, 1),
+		ResponseCh: firstResponse,
 	}); err != nil {
 		t.Fatalf("first submit: %v", err)
 	}
@@ -353,6 +355,14 @@ func TestExecutorShutdownWithoutRunUnblocksBlockedSubmit(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("blocked Submit did not unblock after Shutdown")
 	}
+	select {
+	case resp := <-firstResponse:
+		if !errors.Is(resp.Error, ErrExecutorShutdown) {
+			t.Fatalf("accepted command response error = %v, want ErrExecutorShutdown", resp.Error)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("accepted command was abandoned during Shutdown")
+	}
 }
 
 func TestExecutorShutdownWithoutRunUnblocksBlockedSubmitWithContext(t *testing.T) {
@@ -360,9 +370,10 @@ func TestExecutorShutdownWithoutRunUnblocksBlockedSubmitWithContext(t *testing.T
 	if err := exec.Startup(context.Background(), nil); err != nil {
 		t.Fatalf("Startup: %v", err)
 	}
+	firstResponse := make(chan ReducerResponse, 1)
 	if err := exec.SubmitWithContext(context.Background(), CallReducerCmd{
 		Request:    ReducerRequest{ReducerName: "InsertPlayer", Source: CallSourceExternal},
-		ResponseCh: make(chan ReducerResponse, 1),
+		ResponseCh: firstResponse,
 	}); err != nil {
 		t.Fatalf("first SubmitWithContext: %v", err)
 	}
@@ -399,6 +410,119 @@ func TestExecutorShutdownWithoutRunUnblocksBlockedSubmitWithContext(t *testing.T
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("blocked SubmitWithContext did not unblock after Shutdown")
+	}
+	select {
+	case resp := <-firstResponse:
+		if !errors.Is(resp.Error, ErrExecutorShutdown) {
+			t.Fatalf("accepted command response error = %v, want ErrExecutorShutdown", resp.Error)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("accepted command was abandoned during Shutdown")
+	}
+}
+
+func TestExecutorShutdownWithoutRunRejectsEveryCommandVariant(t *testing.T) {
+	exec, _ := setupExecutorWithObserver(nil, ExecutorConfig{InboxCapacity: 6})
+	callResponse := make(chan ReducerResponse, 1)
+	registerResponse := make(chan error, 1)
+	unregisterResponse := make(chan error, 1)
+	disconnectSubscriptionsResponse := make(chan error, 1)
+	connectResponse := make(chan ReducerResponse, 1)
+	disconnectResponse := make(chan ReducerResponse, 1)
+
+	commands := []ExecutorCommand{
+		CallReducerCmd{ResponseCh: callResponse},
+		RegisterSubscriptionSetCmd{Reply: func(_ subscription.SubscriptionSetRegisterResult, err error) {
+			registerResponse <- err
+		}},
+		UnregisterSubscriptionSetCmd{Reply: func(_ subscription.SubscriptionSetUnregisterResult, err error) {
+			unregisterResponse <- err
+		}},
+		DisconnectClientSubscriptionsCmd{ResponseCh: disconnectSubscriptionsResponse},
+		OnConnectCmd{ResponseCh: connectResponse},
+		OnDisconnectCmd{ResponseCh: disconnectResponse},
+	}
+	for _, cmd := range commands {
+		if err := exec.Submit(cmd); err != nil {
+			t.Fatalf("submit %T: %v", cmd, err)
+		}
+	}
+
+	exec.Shutdown()
+
+	for name, response := range map[string]<-chan error{
+		"register":                 registerResponse,
+		"unregister":               unregisterResponse,
+		"disconnect-subscriptions": disconnectSubscriptionsResponse,
+	} {
+		select {
+		case err := <-response:
+			if !errors.Is(err, ErrExecutorShutdown) {
+				t.Fatalf("%s error = %v, want ErrExecutorShutdown", name, err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s command was abandoned during Shutdown", name)
+		}
+	}
+	for name, response := range map[string]<-chan ReducerResponse{
+		"call":       callResponse,
+		"connect":    connectResponse,
+		"disconnect": disconnectResponse,
+	} {
+		select {
+		case resp := <-response:
+			if !errors.Is(resp.Error, ErrExecutorShutdown) {
+				t.Fatalf("%s response error = %v, want ErrExecutorShutdown", name, resp.Error)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s command was abandoned during Shutdown", name)
+		}
+	}
+}
+
+func TestExecutorConcurrentRunAndShutdownRejectsAcceptedCommand(t *testing.T) {
+	for i := range 100 {
+		exec, _ := setupExecutorWithObserver(nil, ExecutorConfig{InboxCapacity: 1})
+		response := make(chan ReducerResponse, 1)
+		if err := exec.Submit(CallReducerCmd{ResponseCh: response}); err != nil {
+			t.Fatalf("iteration %d submit: %v", i, err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		start := make(chan struct{})
+		runDone := make(chan struct{})
+		shutdownDone := make(chan struct{})
+		go func() {
+			<-start
+			exec.Run(ctx)
+			close(runDone)
+		}()
+		go func() {
+			<-start
+			exec.Shutdown()
+			close(shutdownDone)
+		}()
+		close(start)
+
+		select {
+		case <-runDone:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("iteration %d Run did not return", i)
+		}
+		select {
+		case <-shutdownDone:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("iteration %d Shutdown did not return", i)
+		}
+		select {
+		case resp := <-response:
+			if !errors.Is(resp.Error, ErrExecutorShutdown) {
+				t.Fatalf("iteration %d response error = %v, want ErrExecutorShutdown", i, resp.Error)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("iteration %d accepted command was abandoned", i)
+		}
 	}
 }
 
