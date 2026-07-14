@@ -393,7 +393,13 @@ export function createShunterClient(options) {
         state = current;
         const change = { previous, current };
         for (const listener of [...listeners]) {
-            listener(change);
+            try {
+                listener(change);
+            }
+            catch {
+                // State observers are notifications and cannot control connection
+                // lifecycle transitions or prevent later observers from running.
+            }
         }
     };
     const cleanupSocketListeners = (ws, handlers) => {
@@ -3526,7 +3532,13 @@ export function createSubscriptionHandle(options = {}) {
     });
     const setState = (next) => {
         state = next;
-        options.onStateChange?.(state);
+        try {
+            options.onStateChange?.(state);
+        }
+        catch {
+            // Managed-handle observers cannot interrupt transport cleanup, terminal
+            // bookkeeping, or settlement of the closed promise.
+        }
     };
     const finish = (closedState) => {
         if (state.status === "closed") {

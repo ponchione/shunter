@@ -235,6 +235,9 @@ Auto-generated subscription IDs skip those occupied request/query IDs.
 Passing `returnHandle: true` to either subscription method preserves the same
 acceptance and acknowledgement semantics while resolving with a
 `SubscriptionHandle` whose `unsubscribe()` is idempotent.
+Connection and managed-handle state observers are isolated notifications: an
+observer exception does not skip later connection observers, transport
+cleanup, terminal state bookkeeping, or `closed` promise settlement.
 Declared-view and table subscriptions can opt into raw row-list/update bytes
 with `onRawUpdate` and table-only `onRawRows` callbacks. Callback consumers can
 use `decodeRowList()` to split live RowList payloads into raw per-row bytes, or

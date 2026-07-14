@@ -775,7 +775,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     state = current;
     const change = { previous, current };
     for (const listener of [...listeners]) {
-      listener(change);
+      try {
+        listener(change);
+      } catch {
+        // State observers are notifications and cannot control connection
+        // lifecycle transitions or prevent later observers from running.
+      }
     }
   };
 
@@ -4741,7 +4746,12 @@ export function createSubscriptionHandle<Row = unknown>(
 
   const setState = (next: SubscriptionState<Row>): void => {
     state = next;
-    options.onStateChange?.(state);
+    try {
+      options.onStateChange?.(state);
+    } catch {
+      // Managed-handle observers cannot interrupt transport cleanup, terminal
+      // bookkeeping, or settlement of the closed promise.
+    }
   };
 
   const finish = (closedState: SubscriptionClosed): void => {

@@ -193,6 +193,31 @@ assert.equal(failedClosed.reason, "error");
 assert.equal(failedClosed.error.kind, "transport");
 assert.match(failedClosed.error.message, /denied/);
 
+let throwingObserverUnsubscribeCalls = 0;
+const throwingObserverStates = [];
+const throwingObserverHandle = createSubscriptionHandle({
+  initialRows: [{ id: 1 }],
+  onStateChange: (state) => {
+    throwingObserverStates.push(state.status);
+    if (state.status === "unsubscribing" || state.status === "closed") {
+      throw new Error(`observer rejected ${state.status}`);
+    }
+  },
+  unsubscribe: async () => {
+    throwingObserverUnsubscribeCalls += 1;
+  },
+});
+await Promise.all([
+  throwingObserverHandle.unsubscribe(),
+  throwingObserverHandle.unsubscribe(),
+]);
+assert.equal(throwingObserverUnsubscribeCalls, 1);
+assert.deepEqual(throwingObserverStates, ["unsubscribing", "closed"]);
+assert.deepEqual(throwingObserverHandle.state, { status: "closed" });
+assert.deepEqual(await throwingObserverHandle.closed, { reason: "unsubscribed" });
+await throwingObserverHandle.unsubscribe();
+assert.equal(throwingObserverUnsubscribeCalls, 1);
+
 class FakeWebSocket {
   constructor(url, protocols) {
     this.url = url;
@@ -296,6 +321,62 @@ function identityTokenFrame({ identityStart = 1, token = "server-token", connect
   }
   return frame;
 }
+
+const isolatedObserverSockets = [];
+const isolatedObserverStates = [];
+const isolatedObserverClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    isolatedObserverSockets.push(socket);
+    return socket;
+  },
+  onStateChange: () => {
+    throw new Error("connection observer failed");
+  },
+});
+isolatedObserverClient.onStateChange(({ current }) => isolatedObserverStates.push(current.status));
+const isolatedObserverConnecting = isolatedObserverClient.connect();
+const isolatedObserverSynchronization = isolatedObserverClient.whenSynchronized();
+await nextTurn();
+assert.equal(isolatedObserverSockets.length, 1);
+const isolatedObserverClosed = isolatedObserverClient.close(4001, "observer isolation");
+await assert.rejects(isolatedObserverConnecting, ShunterClosedClientError);
+await assert.rejects(isolatedObserverSynchronization, ShunterClosedClientError);
+await isolatedObserverClosed;
+assert.equal(isolatedObserverClient.state.status, "closed");
+assert.deepEqual(isolatedObserverStates, ["connecting", "closing", "closed"]);
+
+const failingObserverSockets = [];
+const failingObserverStates = [];
+const failingObserverClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    failingObserverSockets.push(socket);
+    return socket;
+  },
+  onStateChange: () => {
+    throw new Error("connection observer failed");
+  },
+});
+failingObserverClient.onStateChange(({ current }) => failingObserverStates.push(current.status));
+const failingObserverConnecting = failingObserverClient.connect();
+await nextTurn();
+failingObserverSockets[0].open();
+failingObserverSockets[0].message(identityTokenFrame().buffer);
+await failingObserverConnecting;
+const failingObserverReducer = failingObserverClient.callReducer("send", new Uint8Array([1]), {
+  requestId: 0x01020304,
+});
+failingObserverSockets[0].message(new Uint8Array([0xff]).buffer);
+await assert.rejects(failingObserverReducer, ShunterCallInterruptedError);
+assert.equal(failingObserverClient.state.status, "failed");
+assert.deepEqual(failingObserverStates, ["connecting", "connected", "failed"]);
+await failingObserverClient.close();
+assert.equal(failingObserverClient.state.status, "closed");
 
 const decodedIdentity = decodeIdentityTokenFrame(identityTokenFrame());
 assert.equal(decodedIdentity.token, "server-token");
