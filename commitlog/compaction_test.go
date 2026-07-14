@@ -148,7 +148,7 @@ func TestRunCompactionDeletesCoveredSegmentsAndFsyncsDirectory(t *testing.T) {
 		return nil
 	})
 
-	if err := RunCompaction(dir, 6); err != nil {
+	if err := runCompaction(dir, 6); err != nil {
 		t.Fatalf("RunCompaction() error = %v", err)
 	}
 	if syncCalls != 1 {
@@ -179,7 +179,7 @@ func TestCompactionRemovesSidecarIndex(t *testing.T) {
 
 	ignoreCompactionSyncDir(t)
 
-	if err := RunCompaction(dir, 6); err != nil {
+	if err := runCompaction(dir, 6); err != nil {
 		t.Fatalf("RunCompaction: %v", err)
 	}
 	assertFileMissing(t, seg1)
@@ -205,7 +205,7 @@ func TestRunCompactionRemovesCoveredSidecarSymlinkWithoutTouchingTarget(t *testi
 
 	ignoreCompactionSyncDir(t)
 
-	if err := RunCompaction(dir, 3); err != nil {
+	if err := runCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction: %v", err)
 	}
 	assertFileMissing(t, covered)
@@ -230,7 +230,7 @@ func TestCompactionToleratesMissingSidecar(t *testing.T) {
 
 	ignoreCompactionSyncDir(t)
 
-	if err := RunCompaction(dir, 3); err != nil {
+	if err := runCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction with no sidecars: %v", err)
 	}
 	assertFileMissing(t, seg1)
@@ -260,7 +260,7 @@ func TestRunCompactionWithoutSnapshotRetainsLogAndOffsetArtifacts(t *testing.T) 
 		return nil
 	})
 
-	if err := RunCompaction(dir, 0); err != nil {
+	if err := runCompaction(dir, 0); err != nil {
 		t.Fatalf("RunCompaction without snapshot: %v", err)
 	}
 	if syncCalls != 0 {
@@ -303,7 +303,7 @@ func TestRunCompactionRemovesOrphanedCoveredSidecarOnRetry(t *testing.T) {
 		return nil
 	})
 
-	if err := RunCompaction(dir, 3); err != nil {
+	if err := runCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
 	}
 	if syncCalls != 1 {
@@ -339,7 +339,7 @@ func TestRunCompactionRemovesOrphanedCoveredSidecarSymlinkOnRetry(t *testing.T) 
 		return nil
 	})
 
-	if err := RunCompaction(dir, 3); err != nil {
+	if err := runCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
 	}
 	if syncCalls != 1 {
@@ -389,7 +389,7 @@ func TestRunCompactionRemovesOrphanedCoveredSidecarDirectoryOnRetry(t *testing.T
 		return nil
 	})
 
-	if err := RunCompaction(dir, 3); err != nil {
+	if err := runCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
 	}
 	if syncCalls != 1 {
@@ -431,7 +431,7 @@ func TestRunCompactionRemovesCorruptOrphanedCoveredSidecarOnRetry(t *testing.T) 
 		return nil
 	})
 
-	if err := RunCompaction(dir, 3); err != nil {
+	if err := runCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
 	}
 	if syncCalls != 1 {
@@ -463,7 +463,7 @@ func TestRunCompactionRemovesCoveredOrphansButRetainsUncoveredOrphans(t *testing
 
 	ignoreCompactionSyncDir(t)
 
-	if err := RunCompaction(dir, 3); err != nil {
+	if err := runCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction: %v", err)
 	}
 	assertFileMissing(t, covered)
@@ -494,7 +494,7 @@ func TestRunCompactionIgnoresMalformedOffsetIndexArtifacts(t *testing.T) {
 
 	ignoreCompactionSyncDir(t)
 
-	if err := RunCompaction(dir, 3); err != nil {
+	if err := runCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction: %v", err)
 	}
 	assertFileMissing(t, covered)
@@ -525,7 +525,7 @@ func TestRunCompactionRemovesCoveredSymlinkOrphanButRetainsFutureSymlinkOrphan(t
 
 	ignoreCompactionSyncDir(t)
 
-	if err := RunCompaction(dir, 3); err != nil {
+	if err := runCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction: %v", err)
 	}
 	assertFileMissing(t, covered)
@@ -573,7 +573,7 @@ func TestRunCompactionRemovesCoveredOrphansAfterEntirePrefixGone(t *testing.T) {
 		return nil
 	})
 
-	if err := RunCompaction(dir, 6); err != nil {
+	if err := runCompaction(dir, 6); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
 	}
 	if syncCalls != 1 {
@@ -609,7 +609,7 @@ func TestRunCompactionRemovesCoveredOrphansWhenNoLogSegmentsRemain(t *testing.T)
 		return nil
 	})
 
-	if err := RunCompaction(dir, 6); err != nil {
+	if err := runCompaction(dir, 6); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
 	}
 	if syncCalls != 1 {
@@ -633,7 +633,7 @@ func TestRunCompactionSegmentRemovalFailureIncludesOperationPathAndWraps(t *test
 		return original(path)
 	})
 
-	err := RunCompaction(dir, 3)
+	err := runCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, removeErr, "remove covered segment", seg1)
 	assertFileExists(t, seg1)
 }
@@ -659,7 +659,7 @@ func TestRunCompactionSidecarRemovalFailureIncludesOperationPathAndWraps(t *test
 		return original(path)
 	})
 
-	err = RunCompaction(dir, 3)
+	err = runCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, removeErr, "remove covered offset index", idxPath)
 	assertFileExists(t, idxPath)
 }
@@ -688,7 +688,7 @@ func TestRunCompactionOrphanSidecarRemovalFailureIncludesOperationPathAndWraps(t
 		return original(path)
 	})
 
-	err = RunCompaction(dir, 3)
+	err = runCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, removeErr, "remove orphaned offset index", idxPath)
 	assertFileExists(t, idxPath)
 }
@@ -706,7 +706,7 @@ func TestRunCompactionSyncFailureIncludesOperationPathAndWraps(t *testing.T) {
 		return syncErr
 	})
 
-	err := RunCompaction(dir, 3)
+	err := runCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, syncErr, "sync directory", dir)
 }
 
@@ -728,12 +728,12 @@ func TestRunCompactionRetriesDirectorySyncAfterPriorSyncFailure(t *testing.T) {
 		return nil
 	})
 
-	err := RunCompaction(dir, 3)
+	err := runCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, syncErr, "sync directory", dir)
 	assertFileMissing(t, seg1)
 	assertFileExists(t, seg2)
 
-	if err := RunCompaction(dir, 3); err != nil {
+	if err := runCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
 	}
 	if syncCalls != 2 {
@@ -773,13 +773,13 @@ func TestRunCompactionRetriesDirectorySyncAfterOrphanSidecarCleanup(t *testing.T
 		return nil
 	})
 
-	err := RunCompaction(dir, 3)
+	err := runCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, syncErr, "sync directory", dir)
 	assertFileMissing(t, idx1Path)
 	assertFileExists(t, seg2)
 	assertFileExists(t, idx2Path)
 
-	if err := RunCompaction(dir, 3); err != nil {
+	if err := runCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
 	}
 	if syncCalls != 2 {
@@ -811,11 +811,11 @@ func TestRunCompactionRetriesDirectorySyncAfterOnlyOrphanSidecarCleanup(t *testi
 		return nil
 	})
 
-	err = RunCompaction(dir, 3)
+	err = runCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, syncErr, "sync directory", dir)
 	assertFileMissing(t, idxPath)
 
-	if err := RunCompaction(dir, 3); err != nil {
+	if err := runCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
 	}
 	if syncCalls != 2 {
@@ -828,7 +828,7 @@ func TestRunCompactionRejectsSnapshotBeyondDurableHorizon(t *testing.T) {
 	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
 	makeScanTestSegment(t, dir, 4, 4, 5)
 
-	err := RunCompaction(dir, 99)
+	err := runCompaction(dir, 99)
 	if err == nil {
 		t.Fatal("expected durable horizon rejection")
 	}
@@ -851,7 +851,7 @@ func TestRunCompactionRejectsCorruptCoveredSealedSegmentBeforeDeleting(t *testin
 		return nil
 	})
 
-	err := RunCompaction(dir, 5)
+	err := runCompaction(dir, 5)
 	if err == nil {
 		t.Fatal("expected corrupt covered sealed segment to abort compaction")
 	}
@@ -878,7 +878,7 @@ func TestRunCompactionRejectsDamagedCoveredSealedTailBeforeDeleting(t *testing.T
 		return nil
 	})
 
-	err := RunCompaction(dir, 5)
+	err := runCompaction(dir, 5)
 	assertHistoryGap(t, err, 3, 4)
 	if syncCalls != 0 {
 		t.Fatalf("syncDir calls = %d, want 0 after scan failure", syncCalls)
@@ -901,7 +901,7 @@ func TestRunCompactionRejectsSymlinkSegmentBeforeDeletingCoveredSegments(t *test
 		return nil
 	})
 
-	err := RunCompaction(dir, 3)
+	err := runCompaction(dir, 3)
 	if err == nil {
 		t.Fatal("expected symlink segment to abort compaction")
 	}
@@ -932,7 +932,7 @@ func TestRunCompactionRejectsDirectoryFirstSegmentBeforeSync(t *testing.T) {
 		return nil
 	})
 
-	err := RunCompaction(dir, 3)
+	err := runCompaction(dir, 3)
 	if err == nil {
 		t.Fatal("expected directory segment to abort compaction")
 	}
@@ -962,7 +962,7 @@ func TestRunCompactionDoesNotDeleteBoundarySegment(t *testing.T) {
 		return nil
 	})
 
-	if err := RunCompaction(dir, 1000); err != nil {
+	if err := runCompaction(dir, 1000); err != nil {
 		t.Fatalf("RunCompaction() error = %v", err)
 	}
 	if syncCalls != 1 {
@@ -999,7 +999,7 @@ func TestRunCompactionRetainsEmptyDamagedActiveTail(t *testing.T) {
 		return nil
 	})
 
-	if err := RunCompaction(dir, 2); err != nil {
+	if err := runCompaction(dir, 2); err != nil {
 		t.Fatalf("RunCompaction() error = %v", err)
 	}
 	if syncCalls != 1 {
@@ -1037,7 +1037,7 @@ func TestRunCompactionRetainsZeroLengthActiveTail(t *testing.T) {
 		return nil
 	})
 
-	if err := RunCompaction(dir, 2); err != nil {
+	if err := runCompaction(dir, 2); err != nil {
 		t.Fatalf("RunCompaction() error = %v", err)
 	}
 	if syncCalls != 1 {
@@ -1054,7 +1054,7 @@ func TestRunCompactionRejectsSnapshotBeyondZeroLengthActiveTailHorizon(t *testin
 	covered := makeScanTestSegment(t, dir, 1, 1, 2)
 	active := createZeroLengthSegment(t, dir, 3)
 
-	err := RunCompaction(dir, 3)
+	err := runCompaction(dir, 3)
 	if err == nil {
 		t.Fatal("expected durable horizon rejection")
 	}
@@ -1092,7 +1092,7 @@ func TestRunCompactionMalformedSegmentFilenameFailsBeforeDeletingCoveredSegments
 				t.Fatal(err)
 			}
 
-			err := RunCompaction(dir, 2)
+			err := runCompaction(dir, 2)
 			if err == nil {
 				t.Fatal("expected malformed segment filename to abort compaction")
 			}
@@ -1102,6 +1102,106 @@ func TestRunCompactionMalformedSegmentFilenameFailsBeforeDeletingCoveredSegments
 			assertFileExists(t, covered)
 			assertFileExists(t, active)
 			assertFileExists(t, malformed)
+		})
+	}
+}
+
+func TestRunCompactionRejectsInvalidSnapshotWithoutRemovingRecoverableLog(t *testing.T) {
+	for _, name := range []string{
+		"empty numeric directory",
+		"missing final file",
+		"truncated snapshot",
+		"checksum-corrupt snapshot",
+		"directory header mismatch",
+		"incompatible schema",
+		"failed snapshot write",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			committed, reg := buildSnapshotCommittedState(t)
+			writeSelectionSegmentRange(t, root, reg, 1, 2)
+			writeSelectionSegmentRange(t, root, reg, 3, 1)
+
+			artifacts := []string{
+				filepath.Join(root, SegmentFileName(1)),
+				filepath.Join(root, SegmentFileName(3)),
+			}
+			for _, startTxID := range []uint64{1, 2, 3} {
+				path := filepath.Join(root, OffsetIndexFileName(startTxID))
+				idx, err := CreateOffsetIndex(path, 4)
+				if err != nil {
+					t.Fatalf("CreateOffsetIndex(%d): %v", startTxID, err)
+				}
+				if err := idx.Close(); err != nil {
+					t.Fatalf("Close offset index %d: %v", startTxID, err)
+				}
+				artifacts = append(artifacts, path)
+			}
+
+			snapshotBase := filepath.Join(root, "snapshots")
+			snapshotDir := filepath.Join(snapshotBase, "2")
+			switch name {
+			case "empty numeric directory":
+				if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			case "missing final file":
+				if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(snapshotDir, "completed.marker"), []byte("not a snapshot"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			case "truncated snapshot":
+				writeSelectionSnapshot(t, root, reg, committed, 2)
+				path := filepath.Join(snapshotDir, snapshotFileName)
+				if err := os.Truncate(path, SnapshotHeaderSize+1); err != nil {
+					t.Fatal(err)
+				}
+			case "checksum-corrupt snapshot":
+				writeSelectionSnapshot(t, root, reg, committed, 2)
+				corruptSelectionSnapshot(t, root, 2)
+			case "directory header mismatch":
+				writeSelectionSnapshot(t, root, reg, committed, 1)
+				if err := os.Rename(filepath.Join(snapshotBase, "1"), snapshotDir); err != nil {
+					t.Fatal(err)
+				}
+			case "incompatible schema":
+				mismatchReg := buildSelectionRegistry(t, selectionRegistryConfig{tableName: "users"})
+				mismatchState := buildSelectionCommittedState(t, mismatchReg)
+				writeSelectionSnapshot(t, root, mismatchReg, mismatchState, 2)
+			case "failed snapshot write":
+				writer := NewSnapshotWriter(snapshotBase, reg).(*FileSnapshotWriter)
+				faultErr := errors.New("injected snapshot parent sync failure")
+				writer.syncDir = func(path string) error {
+					if path == snapshotBase {
+						return faultErr
+					}
+					return nil
+				}
+				committed.SetCommittedTxID(2)
+				if err := writer.CreateSnapshot(committed, 2); !errors.Is(err, faultErr) {
+					t.Fatalf("CreateSnapshot error = %v, want injected fault", err)
+				}
+			}
+
+			if err := RunCompaction(root, 2, reg); err == nil {
+				t.Fatal("RunCompaction succeeded with invalid snapshot")
+			}
+			for _, path := range artifacts {
+				assertFileExists(t, path)
+			}
+
+			if err := os.RemoveAll(snapshotBase); err != nil {
+				t.Fatalf("remove invalid snapshot before log-only recovery: %v", err)
+			}
+			recovered, maxTxID, err := OpenAndRecover(root, reg)
+			if err != nil {
+				t.Fatalf("original log did not recover: %v", err)
+			}
+			if maxTxID != 3 || recovered.CommittedTxID() != 3 {
+				t.Fatalf("recovered horizon = %d/%d, want 3", maxTxID, recovered.CommittedTxID())
+			}
 		})
 	}
 }

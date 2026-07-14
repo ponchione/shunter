@@ -3413,7 +3413,7 @@ func TestOpenAndRecoverAfterCompactionDeletesCoveredLogPrefix(t *testing.T) {
 		replayRecord{txID: 5, inserts: []types.ProductValue{{types.NewUint64(5), types.NewString("eve")}}},
 	)
 
-	if err := RunCompaction(root, 3); err != nil {
+	if err := runCompaction(root, 3); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(covered); !os.IsNotExist(err) {
@@ -3467,7 +3467,7 @@ func TestOpenAndRecoverAfterCompactionSyncFailureUsesSnapshotAndRemainingTail(t 
 		}
 		return syncErr
 	}
-	err := RunCompaction(root, 3)
+	err := runCompaction(root, 3)
 	syncDir = originalSyncDir
 	defer func() { syncDir = originalSyncDir }()
 	if !errors.Is(err, syncErr) {
@@ -3535,7 +3535,7 @@ func TestOpenAndRecoverAfterCompactionSyncFailureWithSidecarsUsesSnapshotAndTail
 		}
 		return syncErr
 	}
-	err := RunCompaction(root, 3)
+	err := runCompaction(root, 3)
 	syncDir = originalSyncDir
 	defer func() { syncDir = originalSyncDir }()
 	if !errors.Is(err, syncErr) {
@@ -3597,7 +3597,7 @@ func TestOpenAndRecoverAfterSnapshotOnlyCompactionRetrySyncFailure(t *testing.T)
 		}
 		return syncErr
 	}
-	err = RunCompaction(root, 3)
+	err = runCompaction(root, 3)
 	syncDir = originalSyncDir
 	defer func() { syncDir = originalSyncDir }()
 	if !errors.Is(err, syncErr) {
@@ -3631,7 +3631,7 @@ func TestOpenAndRecoverAfterSnapshotOnlyCompactionRetrySyncFailure(t *testing.T)
 		t.Fatalf("seed=0xf011c0de op=recover runtime_config=snapshot=3/segments=0/orphan_sidecars=0 operation=resume-plan observed=%+v expected=fresh-segment-4-next-4", plan)
 	}
 
-	if err := RunCompaction(root, 3); err != nil {
+	if err := runCompaction(root, 3); err != nil {
 		t.Fatalf("seed=0xf011c0de op=retry runtime_config=snapshot=3/segments=0/orphan_sidecars=0 operation=RunCompaction observed_error=%v expected=nil", err)
 	}
 }
@@ -3670,7 +3670,7 @@ func TestOpenAndRecoverAfterCompactionSegmentRemoveFailureUsesSnapshotAndTail(t 
 		}
 		return originalRemoveFile(path)
 	}
-	err := RunCompaction(root, 6)
+	err := runCompaction(root, 6)
 	removeFile = originalRemoveFile
 	defer func() { removeFile = originalRemoveFile }()
 	assertCompactionFailureContext(t, err, removeErr, "remove covered segment", failedCovered)
@@ -3708,7 +3708,7 @@ func TestOpenAndRecoverAfterCompactionSegmentRemoveFailureUsesSnapshotAndTail(t 
 		t.Fatalf("resume plan = %+v, want append-in-place on segment 7 at tx 9", plan)
 	}
 
-	if err := RunCompaction(root, 6); err != nil {
+	if err := runCompaction(root, 6); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
 	}
 	assertFileMissing(t, failedCovered)
@@ -3745,7 +3745,7 @@ func TestOpenAndRecoverAfterCompactionSidecarRemoveFailureIgnoresOrphanAndRetrie
 		}
 		return originalRemoveFile(path)
 	}
-	err = RunCompaction(root, 3)
+	err = runCompaction(root, 3)
 	removeFile = originalRemoveFile
 	defer func() { removeFile = originalRemoveFile }()
 	assertCompactionFailureContext(t, err, removeErr, "remove covered offset index", coveredIdx)
@@ -3774,7 +3774,7 @@ func TestOpenAndRecoverAfterCompactionSidecarRemoveFailureIgnoresOrphanAndRetrie
 		t.Fatalf("resume plan = %+v, want append-in-place on segment 4 at tx 6", plan)
 	}
 
-	if err := RunCompaction(root, 3); err != nil {
+	if err := runCompaction(root, 3); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
 	}
 	assertFileMissing(t, coveredIdx)

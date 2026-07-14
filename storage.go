@@ -3,6 +3,7 @@ package shunter
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/ponchione/shunter/commitlog"
 	"github.com/ponchione/shunter/schema"
@@ -47,10 +48,13 @@ func (r *Runtime) CompactCommitLog(snapshotTxID types.TxID) error {
 	if err != nil {
 		return err
 	}
-	if err := requireCompletedSnapshot(handles.dataDir, snapshotTxID); err != nil {
+	if err := commitlog.RunCompaction(handles.dataDir, snapshotTxID, handles.registry); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%w: tx_id %d: %w", ErrSnapshotNotFound, snapshotTxID, err)
+		}
 		return err
 	}
-	return commitlog.RunCompaction(handles.dataDir, snapshotTxID)
+	return nil
 }
 
 func (r *Runtime) storageHandles() (runtimeStorageHandles, error) {
@@ -90,17 +94,4 @@ func (r *Runtime) storageHandles() (runtimeStorageHandles, error) {
 		state:         r.state,
 		observability: r.observability,
 	}, nil
-}
-
-func requireCompletedSnapshot(dataDir string, snapshotTxID types.TxID) error {
-	snapshots, err := commitlog.ListSnapshots(dataDir)
-	if err != nil {
-		return err
-	}
-	for _, txID := range snapshots {
-		if txID == snapshotTxID {
-			return nil
-		}
-	}
-	return fmt.Errorf("%w: tx_id %d", ErrSnapshotNotFound, snapshotTxID)
 }

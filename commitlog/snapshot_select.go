@@ -15,6 +15,29 @@ func SelectSnapshot(baseDir string, durableHorizon types.TxID, reg schema.Schema
 	return snapshot, err
 }
 
+// ValidateSnapshotForCompaction requires one exact, completed snapshot that is
+// safe to use as the durable base for deleting covered commit-log segments.
+func ValidateSnapshotForCompaction(baseDir string, txID types.TxID, reg schema.SchemaRegistry) error {
+	snapshotDir, _ := resolveSnapshotAndLogDirs(baseDir)
+	dir := filepath.Join(snapshotDir, fmt.Sprintf("%d", txID))
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("%w: snapshot tx_id %d: %w", ErrSnapshot, txID, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("%w: snapshot tx_id %d path is not a directory", ErrSnapshot, txID)
+	}
+	if HasLockFile(dir) || HasSnapshotTempFile(dir) {
+		return fmt.Errorf("%w: snapshot tx_id %d is incomplete", ErrSnapshot, txID)
+	}
+
+	snapshot, err := readSnapshotWithExpectedTxID(snapshotDir, txID)
+	if err != nil {
+		return err
+	}
+	return compareSnapshotSchema(snapshot, reg)
+}
+
 func selectSnapshotWithReport(baseDir string, durableHorizon types.TxID, reg schema.SchemaRegistry) (*SnapshotData, []SkippedSnapshotReport, error) {
 	snapshotDir, logDir := resolveSnapshotAndLogDirs(baseDir)
 
@@ -65,7 +88,7 @@ func resolveSnapshotAndLogDirs(baseDir string) (string, string) {
 }
 
 func readSnapshotCandidate(snapshotDir string, txID types.TxID, reg schema.SchemaRegistry) (*SnapshotData, *SkippedSnapshotReport, error) {
-	snapshot, err := ReadSnapshot(filepath.Join(snapshotDir, fmt.Sprintf("%d", txID)))
+	snapshot, err := readSnapshotWithExpectedTxID(snapshotDir, txID)
 	if err != nil {
 		if isUnsafeSnapshotSelectionError(err) {
 			return nil, nil, err
@@ -76,18 +99,21 @@ func readSnapshotCandidate(snapshotDir string, txID types.TxID, reg schema.Schem
 			Detail: err.Error(),
 		}, nil
 	}
-	if snapshot.TxID != txID {
-		err := fmt.Errorf("%w: snapshot tx_id mismatch: directory=%d header=%d", ErrSnapshot, txID, snapshot.TxID)
-		return nil, &SkippedSnapshotReport{
-			TxID:   txID,
-			Reason: SnapshotSkipReadFailed,
-			Detail: err.Error(),
-		}, nil
-	}
 	if err := compareSnapshotSchema(snapshot, reg); err != nil {
 		return nil, nil, err
 	}
 	return snapshot, nil, nil
+}
+
+func readSnapshotWithExpectedTxID(snapshotDir string, txID types.TxID) (*SnapshotData, error) {
+	snapshot, err := ReadSnapshot(filepath.Join(snapshotDir, fmt.Sprintf("%d", txID)))
+	if err != nil {
+		return nil, err
+	}
+	if snapshot.TxID != txID {
+		return nil, fmt.Errorf("%w: snapshot tx_id mismatch: directory=%d header=%d", ErrSnapshot, txID, snapshot.TxID)
+	}
+	return snapshot, nil
 }
 
 func compareSnapshotSchema(snapshot *SnapshotData, reg schema.SchemaRegistry) error {

@@ -218,7 +218,7 @@ func TestRapidOpenAndRecoverAfterCompactionMatchesUncompactedSnapshotTail(t *tes
 			t.Fatalf("pre-compaction maxTxID = %d, want %d", beforeMaxTxID, finalTxID)
 		}
 
-		if err := RunCompaction(root, types.TxID(horizon)); err != nil {
+		if err := runCompaction(root, types.TxID(horizon)); err != nil {
 			t.Fatalf("RunCompaction at horizon %d: %v", horizon, err)
 		}
 		if _, err := os.Stat(coveredSegment); !os.IsNotExist(err) {
@@ -300,10 +300,10 @@ func TestRapidCompactionRetryRemovesCoveredOrphanIndexAndPreservesRecovery(t *te
 				beforeRetryPlan, horizon+1, finalTxID+1)
 		}
 
-		if err := RunCompaction(root, types.TxID(horizon)); err != nil {
+		if err := runCompaction(root, types.TxID(horizon)); err != nil {
 			t.Fatalf("RunCompaction retry at horizon %d with orphan index %s: %v", horizon, coveredIdxPath, err)
 		}
-		if err := RunCompaction(root, types.TxID(horizon)); err != nil {
+		if err := runCompaction(root, types.TxID(horizon)); err != nil {
 			t.Fatalf("RunCompaction second retry at horizon %d: %v", horizon, err)
 		}
 		rapidAssertFileMissing(t, coveredPath)
@@ -357,7 +357,7 @@ func TestRapidRunCompactionRejectsFutureSnapshotPreservesRecovery(t *testing.T) 
 		assertRapidReplayRows(t, before, log.models[len(log.records)])
 
 		futureSnapshotTxID := finalTxID + types.TxID(futureSnapshotDelta)
-		err = RunCompaction(root, futureSnapshotTxID)
+		err = runCompaction(root, futureSnapshotTxID)
 		if err == nil {
 			t.Fatalf("RunCompaction accepted future snapshot tx %d beyond durable horizon %d with segments=%+v report=%+v",
 				futureSnapshotTxID, finalTxID, segments, beforeReport)
@@ -581,7 +581,7 @@ func TestRapidOpenAndRecoverAfterBoundaryCompactionMatchesUncompacted(t *testing
 		}
 		assertRapidReplayRows(t, before, log.models[len(log.records)])
 
-		if err := RunCompaction(root, types.TxID(horizon)); err != nil {
+		if err := runCompaction(root, types.TxID(horizon)); err != nil {
 			t.Fatalf("RunCompaction at horizon %d with boundary %d..%d: %v", horizon, boundaryStartIndex+1, boundaryEndExclusive, err)
 		}
 		rapidAssertFileMissing(t, prefixPath)
@@ -661,7 +661,7 @@ func TestRapidOpenAndRecoverAfterFullHorizonCompactionKeepsActiveResume(t *testi
 				beforePlan, lastSegment.StartTx, finalTxID+1)
 		}
 
-		if err := RunCompaction(root, finalTxID); err != nil {
+		if err := runCompaction(root, finalTxID); err != nil {
 			t.Fatalf("RunCompaction at full horizon %d with %d segments: %v", finalTxID, segmentCount, err)
 		}
 		for i, segment := range segments[:len(segments)-1] {

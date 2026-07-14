@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -58,8 +59,18 @@ func Compact(segments []SegmentRange, snapshotTxID types.TxID) (deleted []string
 	return deleted, retained
 }
 
-// RunCompaction deletes sealed segments fully covered by snapshotTxID.
-func RunCompaction(dir string, snapshotTxID types.TxID) error {
+// RunCompaction validates the exact completed snapshot before deleting any
+// covered commit-log or offset-index artifact.
+func RunCompaction(dir string, snapshotTxID types.TxID, reg schema.SchemaRegistry) error {
+	if err := ValidateSnapshotForCompaction(dir, snapshotTxID, reg); err != nil {
+		return fmt.Errorf("commitlog: compact snapshot validation: %w", err)
+	}
+	return runCompaction(dir, snapshotTxID)
+}
+
+// runCompaction is the low-level deletion primitive. Runtime callers
+// must use RunCompaction so snapshot validation cannot be bypassed.
+func runCompaction(dir string, snapshotTxID types.TxID) error {
 	segments, durableHorizon, err := ScanSegments(dir)
 	if err != nil {
 		return err
