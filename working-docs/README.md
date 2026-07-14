@@ -9,10 +9,8 @@ The presence or numbering of a document does not establish the next task.
 
 - `deferred-functionality-backlog.md` - intentionally deferred product,
   runtime, and test-surface work that is not active for the current slice.
-- `actionable/` - only currently authorized, focused implementation slices;
-  historical closed slices may remain clearly marked as such.
 - `recommendations/` - optional, trigger-driven proposals awaiting explicit
-  promotion into `actionable/` or another owned implementation plan.
+  promotion into a dedicated, owned implementation plan.
 - `dependency-considerations.md` - dependency policy and dependency decisions.
 - `hosted-backend-roadmap.md` - current active-development direction for
   Shunter as an experimental Go-first backend/database runtime.
@@ -30,5 +28,7 @@ The presence or numbering of a document does not establish the next task.
 - `specs/` - numbered baseline subsystem contracts and scope notes.
 
 Use live code and tests before working-doc prose when they disagree.
-Neither `recommendations/` nor `actionable/` selects work by itself; a concrete
-user-authorized goal must establish the active slice.
+Recommendations do not select work by themselves; a concrete user-authorized
+goal must establish the active slice. Create a focused implementation plan only
+when an active task needs one, and remove it after its durable results have
+moved into code, tests, supported docs, or a standing tracker.

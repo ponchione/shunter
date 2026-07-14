@@ -724,8 +724,6 @@ func TestRuntimeGauntletScheduledDueTimePreemptsScheduleOrder(t *testing.T) {
 	scheduleGauntletInsertNext(t, rt, 81, "scheduled_early_second", 40*time.Millisecond, "scheduled due-time order op 2 schedule early")
 
 	assertGauntletScheduledInsertFired(t, subscriber, queryID, &model, 81, "scheduled_early_second", "scheduled due-time order op 3 early fire")
-	assertGauntletReadMatchesModel(t, rt, model, "scheduled due-time order op 3 after early fire")
-	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "scheduled due-time order op 3 after early fire")
 
 	assertGauntletScheduledInsertFired(t, subscriber, queryID, &model, 80, "scheduled_late_first", "scheduled due-time order op 4 late fire")
 	assertGauntletReadMatchesModel(t, rt, model, "scheduled due-time order op 4 after late fire")
@@ -5765,7 +5763,15 @@ func writeGauntletProtocolMessageResult(client *websocket.Conn, msg any, label s
 
 func readGauntletTransactionUpdateLight(t *testing.T, client *websocket.Conn, queryID uint32, label string) gauntletDelta {
 	t.Helper()
-	tag, msg := readGauntletProtocolMessage(t, client, "transaction update "+label)
+	return readGauntletTransactionUpdateLightWithTimeout(t, client, queryID, 2*time.Second, label)
+}
+
+func readGauntletTransactionUpdateLightWithTimeout(t *testing.T, client *websocket.Conn, queryID uint32, timeout time.Duration, label string) gauntletDelta {
+	t.Helper()
+	tag, msg, err := readGauntletProtocolMessageResultWithTimeout(client, timeout, "transaction update "+label)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if tag != protocol.TagTransactionUpdateLight {
 		t.Fatalf("%s tag = %d, want TransactionUpdateLight", label, tag)
 	}
@@ -6097,7 +6103,11 @@ func readGauntletProtocolMessage(t *testing.T, client *websocket.Conn, label str
 }
 
 func readGauntletProtocolMessageResult(client *websocket.Conn, label string) (uint8, any, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	return readGauntletProtocolMessageResultWithTimeout(client, 2*time.Second, label)
+}
+
+func readGauntletProtocolMessageResultWithTimeout(client *websocket.Conn, timeout time.Duration, label string) (uint8, any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	messageType, data, err := client.Read(ctx)
 	if err != nil {

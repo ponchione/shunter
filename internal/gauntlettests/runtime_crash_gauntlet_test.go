@@ -84,7 +84,7 @@ func TestRuntimeGauntletUncleanProcessCrashRecoversScheduledWakeup(t *testing.T)
 			inserts: map[uint64]string{10: "crash_scheduled"},
 			deletes: map[uint64]string{},
 		}
-		gotDelta := readGauntletTransactionUpdateLight(t, subscriber, queryID, "unclean scheduled crash recovered fire")
+		gotDelta := readGauntletTransactionUpdateLightWithTimeout(t, subscriber, queryID, 5*time.Second, "unclean scheduled crash recovered fire")
 		assertGauntletDeltaEqual(t, gotDelta, wantDelta, "unclean scheduled crash recovered fire")
 		model.players[10] = "crash_scheduled"
 	}

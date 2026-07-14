@@ -16,7 +16,7 @@ trigger:
 - concrete integration pressure
 - a specifically authorized release or distribution decision
 
-Promote a triggered proposal into `../actionable/` or another owned plan only
+Promote a triggered proposal into a dedicated, owned implementation plan only
 when its concrete implementation goal is authorized. File numbers are stable
 references, not priority. In particular, completing qualification does not make
 the product operating envelope or any other item the automatic next task.
