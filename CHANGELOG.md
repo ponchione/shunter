@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Pooled gzip decoders now detach compressed WebSocket frame buffers before
+  returning to the pool, preventing large inbound frames from being retained
+  between collections.
 - Executor shutdown now drains and rejects commands accepted before `Run`
   starts, with atomic drain ownership across concurrent `Run` and `Shutdown`.
 - Commit-log workers now reject row and record limits above the fixed recovery

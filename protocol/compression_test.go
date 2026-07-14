@@ -2,11 +2,14 @@ package protocol
 
 import (
 	"bytes"
+	"compress/gzip"
 	"errors"
 	"fmt"
+	"io"
 	"runtime"
 	"sync"
 	"testing"
+	"weak"
 )
 
 func TestEncodeFrameCompressionDisabled(t *testing.T) {
@@ -130,6 +133,49 @@ func TestUnwrapCompressedLargeBody(t *testing.T) {
 	if !bytes.Equal(got, body) {
 		t.Errorf("1 MiB round-trip failed")
 	}
+}
+
+type gzipRetentionReader struct {
+	*bytes.Reader
+}
+
+func TestReleaseGzipReaderDetachesInput(t *testing.T) {
+	body := make([]byte, 1<<20)
+	for i := range body {
+		body[i] = byte(i)
+	}
+	frame := EncodeFrame(TagTransactionUpdate, body, true, CompressionGzip)
+	input := weakReleasedGzipInput(t, frame[2:], body)
+
+	for range 10 {
+		runtime.GC()
+		if input.Value() == nil {
+			return
+		}
+		runtime.Gosched()
+	}
+	t.Fatal("pooled gzip reader retained its compressed input reader")
+}
+
+func weakReleasedGzipInput(t *testing.T, payload, want []byte) weak.Pointer[gzipRetentionReader] {
+	t.Helper()
+	input := &gzipRetentionReader{Reader: bytes.NewReader(payload)}
+	inputRef := weak.Make(input)
+	gr, err := gzip.NewReader(input)
+	if err != nil {
+		t.Fatalf("gzip.NewReader: %v", err)
+	}
+	got, err := io.ReadAll(gr)
+	if err != nil {
+		t.Fatalf("read gzip body: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("gzip body len = %d, want %d", len(got), len(want))
+	}
+	if err := releaseGzipReader(gr); err != nil {
+		t.Fatalf("release gzip reader: %v", err)
+	}
+	return inputRef
 }
 
 func TestUnwrapCompressedWithLimitRejectsOversizeNoneEnvelope(t *testing.T) {

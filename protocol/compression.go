@@ -17,6 +17,15 @@ var gzipWriterPool = sync.Pool{
 
 var gzipReaderPool sync.Pool
 
+// gzipReaderReleaseStream is a valid empty gzip stream used to detach pooled
+// readers from the caller-owned compressed frame before the reader is cached.
+// gzip.Reader.Close does not clear its underlying reader.
+var gzipReaderReleaseStream = []byte{
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0xff, 0x01, 0x00, 0x00, 0xff, 0xff, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+}
+
 // Compression byte values (SPEC-005 §3.3, aligned with
 // ignored reference tree
 // crates/client-api-messages/src/websocket/common.rs
@@ -160,8 +169,7 @@ func unwrapCompressed(frame []byte, maxMessageSize int64) (uint8, []byte, error)
 		}
 		maxBodySize, limited := bodyLimit(maxMessageSize)
 		body, err := readGzipBody(gr, maxBodySize, limited)
-		closeErr := gr.Close()
-		gzipReaderPool.Put(gr)
+		closeErr := releaseGzipReader(gr)
 		if err != nil {
 			if errors.Is(err, ErrMessageTooLarge) {
 				return 0, nil, err
@@ -175,6 +183,14 @@ func unwrapCompressed(frame []byte, maxMessageSize int64) (uint8, []byte, error)
 	default:
 		return 0, nil, fmt.Errorf("%w: mode=%d", ErrUnknownCompressionTag, mode)
 	}
+}
+
+func releaseGzipReader(gr *gzip.Reader) error {
+	closeErr := gr.Close()
+	if err := gr.Reset(bytes.NewReader(gzipReaderReleaseStream)); err == nil {
+		gzipReaderPool.Put(gr)
+	}
+	return closeErr
 }
 
 func checkUncompressedMessageSize(bodyLen int, maxMessageSize int64) error {
