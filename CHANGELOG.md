@@ -4,6 +4,18 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Commit-log compaction now fully validates the exact completed snapshot,
+  transaction ID, and frozen schema before removing any covered segment or
+  offset index.
+- Local declared-view subscribe and unsubscribe calls now return promptly on
+  cancellation while reconciling accepted late registrations and removals in
+  their shared ownership state.
+- TypeScript connection and managed-subscription state observers can no longer
+  interrupt lifecycle transitions, transport cleanup, or terminal promise
+  settlement when observer code throws.
+- Anonymous-token minting and runtime auth configuration now enforce the JWT
+  issuer byte limit before randomness or protocol resources are created, so a
+  dev token accepted initially remains valid on reconnect.
 - Procedure-internal reducer calls now retain external permission checks without
   emitting unsolicited direct-reducer outcomes. The procedure caller receives
   its normal light subscription delta after the correlated procedure response,
