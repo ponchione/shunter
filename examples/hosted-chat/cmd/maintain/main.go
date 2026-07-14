@@ -75,7 +75,7 @@ func runPrepareBackup(ctx context.Context, stdout, stderr io.Writer, args []stri
 	}
 	if err := writeBackupPreparationResult(stdout, result, *format); err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
-		return 2
+		return 1
 	}
 	return 0
 }
@@ -145,7 +145,7 @@ func runPreflight(stdout, stderr io.Writer, args []string) int {
 	}
 	if err := writePreflightReport(stdout, report, *format); err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
-		return 2
+		return 1
 	}
 	if !report.Compatible {
 		return 1
@@ -178,7 +178,7 @@ func runMigrate(ctx context.Context, stdout, stderr io.Writer, args []string) in
 	}
 	if err := writeMigrationResult(stdout, result, *format); err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
-		return 2
+		return 1
 	}
 	return 0
 }
@@ -227,15 +227,17 @@ func validateOutputFormat(format string) error {
 func writePreflightReport(w io.Writer, report shunter.DataDirCompatibilityReport, format string) error {
 	switch strings.TrimSpace(format) {
 	case "", formatText:
-		fmt.Fprintf(w, "status: %s\n", report.Status)
-		fmt.Fprintf(w, "compatible: %t\n", report.Compatible)
-		fmt.Fprintf(w, "data_dir: %s\n", report.DataDir)
-		fmt.Fprintf(w, "requires_backup: %t\n", report.RequiresBackup)
-		fmt.Fprintf(w, "requires_offline_hook: %t\n", report.RequiresOfflineHook)
+		var out strings.Builder
+		fmt.Fprintf(&out, "status: %s\n", report.Status)
+		fmt.Fprintf(&out, "compatible: %t\n", report.Compatible)
+		fmt.Fprintf(&out, "data_dir: %s\n", report.DataDir)
+		fmt.Fprintf(&out, "requires_backup: %t\n", report.RequiresBackup)
+		fmt.Fprintf(&out, "requires_offline_hook: %t\n", report.RequiresOfflineHook)
 		if report.BlockingError != "" {
-			fmt.Fprintf(w, "blocking_error: %s\n", report.BlockingError)
+			fmt.Fprintf(&out, "blocking_error: %s\n", report.BlockingError)
 		}
-		return nil
+		_, err := io.WriteString(w, out.String())
+		return err
 	case formatJSON:
 		data, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {
@@ -251,12 +253,14 @@ func writePreflightReport(w io.Writer, report shunter.DataDirCompatibilityReport
 func writeMigrationResult(w io.Writer, result shunter.MigrationRunResult, format string) error {
 	switch strings.TrimSpace(format) {
 	case "", formatText:
-		fmt.Fprintf(w, "status: migrated\n")
-		fmt.Fprintf(w, "data_dir: %s\n", result.DataDir)
-		fmt.Fprintf(w, "recovered_tx_id: %d\n", result.RecoveredTxID)
-		fmt.Fprintf(w, "durable_tx_id: %d\n", result.DurableTxID)
-		fmt.Fprintf(w, "hooks: %d\n", len(result.Hooks))
-		return nil
+		var out strings.Builder
+		fmt.Fprintf(&out, "status: migrated\n")
+		fmt.Fprintf(&out, "data_dir: %s\n", result.DataDir)
+		fmt.Fprintf(&out, "recovered_tx_id: %d\n", result.RecoveredTxID)
+		fmt.Fprintf(&out, "durable_tx_id: %d\n", result.DurableTxID)
+		fmt.Fprintf(&out, "hooks: %d\n", len(result.Hooks))
+		_, err := io.WriteString(w, out.String())
+		return err
 	case formatJSON:
 		data, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {
@@ -272,11 +276,13 @@ func writeMigrationResult(w io.Writer, result shunter.MigrationRunResult, format
 func writeBackupPreparationResult(w io.Writer, result backupPreparationResult, format string) error {
 	switch strings.TrimSpace(format) {
 	case "", formatText:
-		fmt.Fprintf(w, "status: %s\n", result.Status)
-		fmt.Fprintf(w, "data_dir: %s\n", result.DataDir)
-		fmt.Fprintf(w, "recovered_tx_id: %d\n", result.RecoveredTxID)
-		fmt.Fprintf(w, "snapshot_tx_id: %d\n", result.SnapshotTxID)
-		return nil
+		var out strings.Builder
+		fmt.Fprintf(&out, "status: %s\n", result.Status)
+		fmt.Fprintf(&out, "data_dir: %s\n", result.DataDir)
+		fmt.Fprintf(&out, "recovered_tx_id: %d\n", result.RecoveredTxID)
+		fmt.Fprintf(&out, "snapshot_tx_id: %d\n", result.SnapshotTxID)
+		_, err := io.WriteString(w, out.String())
+		return err
 	case formatJSON:
 		data, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {

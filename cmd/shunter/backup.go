@@ -28,7 +28,10 @@ func runBackup(stdout, stderr io.Writer, args []string) int {
 		writeCLIError(stderr, err)
 		return 1
 	}
-	writeCLIStatusf(stdout, "backed up %s to %s\n", strings.TrimSpace(*dataDir), strings.TrimSpace(*outputPath))
+	if err := writeCLIStatusf(stdout, "backed up %s to %s\n", strings.TrimSpace(*dataDir), strings.TrimSpace(*outputPath)); err != nil {
+		writeCLIError(stderr, err)
+		return 1
+	}
 	return 0
 }
 
@@ -53,6 +56,9 @@ func runRestore(stdout, stderr io.Writer, args []string) int {
 		writeCLIError(stderr, err)
 		return 1
 	}
-	writeCLIStatusf(stdout, "restored %s to %s\n", strings.TrimSpace(*backupPath), strings.TrimSpace(*dataDir))
+	if err := writeCLIStatusf(stdout, "restored %s to %s\n", strings.TrimSpace(*backupPath), strings.TrimSpace(*dataDir)); err != nil {
+		writeCLIError(stderr, err)
+		return 1
+	}
 	return 0
 }

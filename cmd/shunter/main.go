@@ -24,14 +24,12 @@ func run(stdout, stderr io.Writer, args []string) int {
 		return 0
 	}
 	if isVersionArg(args[0]) {
-		printVersion(stdout)
-		return 0
+		return writeVersion(stdout, stderr)
 	}
 
 	switch args[0] {
 	case "version":
-		printVersion(stdout)
-		return 0
+		return writeVersion(stdout, stderr)
 	case "call":
 		return runCall(stdout, stderr, args[1:])
 	case "procedure":
@@ -210,7 +208,10 @@ func runContractCodegen(stdout, stderr io.Writer, args []string) int {
 		writeCLIError(stderr, err)
 		return 1
 	}
-	writeCLIStatusf(stdout, "wrote %s\n", *outputPath)
+	if err := writeCLIStatusf(stdout, "wrote %s\n", *outputPath); err != nil {
+		writeCLIError(stderr, err)
+		return 1
+	}
 	return 0
 }
 
@@ -341,8 +342,9 @@ func writeCLIErrorf(stderr io.Writer, format string, args ...any) {
 	_, _ = fmt.Fprintf(stderr, format, args...)
 }
 
-func writeCLIStatusf(stdout io.Writer, format string, args ...any) {
-	_, _ = fmt.Fprintf(stdout, format, args...)
+func writeCLIStatusf(stdout io.Writer, format string, args ...any) error {
+	_, err := fmt.Fprintf(stdout, format, args...)
+	return err
 }
 
 func isHelpArg(arg string) bool {
@@ -353,21 +355,32 @@ func isVersionArg(arg string) bool {
 	return arg == "-version" || arg == "--version"
 }
 
-func printVersion(w io.Writer) {
+func writeVersion(stdout, stderr io.Writer) int {
+	if err := printVersion(stdout); err != nil {
+		writeCLIError(stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func printVersion(w io.Writer) error {
 	info := shunter.CurrentBuildInfo()
-	fmt.Fprintf(w, "shunter %s\n", info.Version)
+	var out strings.Builder
+	fmt.Fprintf(&out, "shunter %s\n", info.Version)
 	if info.Commit != "" {
-		fmt.Fprintf(w, "commit %s\n", info.Commit)
+		fmt.Fprintf(&out, "commit %s\n", info.Commit)
 	}
 	if info.Date != "" {
-		fmt.Fprintf(w, "date %s\n", info.Date)
+		fmt.Fprintf(&out, "date %s\n", info.Date)
 	}
 	if info.Dirty {
-		fmt.Fprintln(w, "dirty true")
+		fmt.Fprintln(&out, "dirty true")
 	}
 	if info.GoVersion != "" {
-		fmt.Fprintf(w, "go %s\n", info.GoVersion)
+		fmt.Fprintf(&out, "go %s\n", info.GoVersion)
 	}
+	_, err := io.WriteString(w, out.String())
+	return err
 }
 
 func printRootHelp(w io.Writer) {

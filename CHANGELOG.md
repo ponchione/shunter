@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- CLI success, version, backup, restore, code-generation, and hosted-chat
+  maintenance output now propagates stdout write failures and returns a
+  nonzero exit status instead of reporting success after truncated output.
 - Pooled gzip decoders now detach compressed WebSocket frame buffers before
   returning to the pool, preventing large inbound frames from being retained
   between collections.

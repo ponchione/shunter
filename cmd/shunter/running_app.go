@@ -622,8 +622,8 @@ func writeCallSuccess(stdout io.Writer, format string, contract shunter.ModuleCo
 	if strings.EqualFold(strings.TrimSpace(format), contractworkflow.FormatJSON) {
 		return writeJSON(stdout, out)
 	}
-	fmt.Fprintf(stdout, "Status: ok\nScope: running_app\nCommand: call\nTarget: %s\nModule: %s\nReducer: %s\nTransaction: %s\n", out.TargetURL, out.Module, out.Surface, out.TxStatus)
-	return nil
+	_, err := fmt.Fprintf(stdout, "Status: ok\nScope: running_app\nCommand: call\nTarget: %s\nModule: %s\nReducer: %s\nTransaction: %s\n", out.TargetURL, out.Module, out.Surface, out.TxStatus)
+	return err
 }
 
 type querySuccess struct {
@@ -668,8 +668,8 @@ func writeProcedureSuccess(stdout io.Writer, format string, contract shunter.Mod
 	if strings.EqualFold(strings.TrimSpace(format), contractworkflow.FormatJSON) {
 		return writeJSON(stdout, out)
 	}
-	fmt.Fprintf(stdout, "Status: ok\nScope: running_app\nCommand: procedure\nTarget: %s\nModule: %s\nProcedure: %s\nResult bytes: %d\n", out.TargetURL, out.Module, out.Surface, len(response.Result))
-	return nil
+	_, err := fmt.Fprintf(stdout, "Status: ok\nScope: running_app\nCommand: procedure\nTarget: %s\nModule: %s\nProcedure: %s\nResult bytes: %d\n", out.TargetURL, out.Module, out.Surface, len(response.Result))
+	return err
 }
 
 func writeQuerySuccess(stdout io.Writer, format string, contract shunter.ModuleContract, target string, identity protocol.IdentityToken, response protocol.OneOffQueryResponse, name string) error {
@@ -704,8 +704,8 @@ func writeQueryRowsSuccess(stdout io.Writer, format string, contract shunter.Mod
 	if strings.EqualFold(strings.TrimSpace(format), contractworkflow.FormatJSON) {
 		return writeJSON(stdout, out)
 	}
-	fmt.Fprintf(stdout, "Status: ok\nScope: running_app\nCommand: query\nTarget: %s\nModule: %s\n%s: %s\nRows: %d\n", out.TargetURL, out.Module, label, out.Surface, len(out.Result.Rows))
-	return nil
+	_, err := fmt.Fprintf(stdout, "Status: ok\nScope: running_app\nCommand: query\nTarget: %s\nModule: %s\n%s: %s\nRows: %d\n", out.TargetURL, out.Module, label, out.Surface, len(out.Result.Rows))
+	return err
 }
 
 func writeJSON(w io.Writer, value any) error {

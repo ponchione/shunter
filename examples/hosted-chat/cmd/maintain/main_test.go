@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -18,6 +19,53 @@ import (
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
+
+var errMaintenanceOutput = errors.New("injected maintenance output failure")
+
+type failingMaintenanceWriter struct{}
+
+func (failingMaintenanceWriter) Write([]byte) (int, error) {
+	return 0, errMaintenanceOutput
+}
+
+func TestMaintenanceResultWritersPropagateOutputErrors(t *testing.T) {
+	writers := []struct {
+		name  string
+		write func(string) error
+	}{
+		{name: "preflight", write: func(format string) error {
+			return writePreflightReport(failingMaintenanceWriter{}, shunter.DataDirCompatibilityReport{}, format)
+		}},
+		{name: "migration", write: func(format string) error {
+			return writeMigrationResult(failingMaintenanceWriter{}, shunter.MigrationRunResult{}, format)
+		}},
+		{name: "backup", write: func(format string) error {
+			return writeBackupPreparationResult(failingMaintenanceWriter{}, backupPreparationResult{}, format)
+		}},
+	}
+	for _, writer := range writers {
+		for _, format := range []string{formatText, formatJSON} {
+			t.Run(writer.name+"/"+format, func(t *testing.T) {
+				if err := writer.write(format); !errors.Is(err, errMaintenanceOutput) {
+					t.Fatalf("write error = %v, want %v", err, errMaintenanceOutput)
+				}
+			})
+		}
+	}
+}
+
+func TestPreflightOutputErrorReturnsFailure(t *testing.T) {
+	var stderr bytes.Buffer
+	code := run(context.Background(), failingMaintenanceWriter{}, &stderr, []string{
+		"preflight", "--data-dir", filepath.Join(t.TempDir(), "missing"),
+	})
+	if code != 1 {
+		t.Fatalf("preflight exit code = %d, stderr = %s, want 1", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), errMaintenanceOutput.Error()) {
+		t.Fatalf("preflight stderr = %q, want %q", stderr.String(), errMaintenanceOutput)
+	}
+}
 
 func TestPreflightReportsFreshMissingDataDir(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "missing")
