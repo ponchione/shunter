@@ -11,6 +11,8 @@ import (
 func (c *Conn) runKeepalive(ctx context.Context) {
 	pingTicker := time.NewTicker(c.opts.PingInterval)
 	defer pingTicker.Stop()
+	idleTimer := time.NewTimer(nonNegativeDuration(c.idleRemaining(time.Now())))
+	defer idleTimer.Stop()
 
 	for {
 		select {
@@ -18,15 +20,23 @@ func (c *Conn) runKeepalive(ctx context.Context) {
 			return
 		case <-c.closed:
 			return
+		case <-idleTimer.C:
+			remaining := c.idleRemaining(time.Now())
+			if remaining <= 0 {
+				c.requestDisconnect(ClosePolicy, CloseReasonIdleTimeout)
+				return
+			}
+			resetTimer(idleTimer, remaining)
 		case <-pingTicker.C:
-			last := c.lastActivity.Load()
-			if time.Now().UnixNano()-last >= int64(c.opts.IdleTimeout) {
+			remaining := c.idleRemaining(time.Now())
+			if remaining <= 0 {
 				c.requestDisconnect(ClosePolicy, CloseReasonIdleTimeout)
 				return
 			}
 
-			// Bound Ping so a stuck peer cannot delay the next idle check.
-			pingCtx, cancel := context.WithTimeout(ctx, c.opts.PingInterval)
+			// Bound Ping by both its cadence and the current idle deadline so a
+			// stuck peer cannot delay timeout enforcement.
+			pingCtx, cancel := context.WithTimeout(ctx, min(c.opts.PingInterval, remaining))
 			if err := c.ws.Ping(pingCtx); err == nil {
 				c.MarkActivity()
 			}
@@ -41,12 +51,36 @@ func (c *Conn) runKeepalive(ctx context.Context) {
 			default:
 			}
 
-			// Use a fresh clock sample because Ping may have blocked.
-			last = c.lastActivity.Load()
-			if time.Now().UnixNano()-last >= int64(c.opts.IdleTimeout) {
+			// Use a fresh deadline because Ping may have blocked or its Pong may
+			// have moved activity forward.
+			remaining = c.idleRemaining(time.Now())
+			if remaining <= 0 {
 				c.requestDisconnect(ClosePolicy, CloseReasonIdleTimeout)
 				return
 			}
+			resetTimer(idleTimer, remaining)
 		}
 	}
+}
+
+func (c *Conn) idleRemaining(now time.Time) time.Duration {
+	last := time.Unix(0, c.lastActivity.Load())
+	return last.Add(c.opts.IdleTimeout).Sub(now)
+}
+
+func nonNegativeDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+func resetTimer(timer *time.Timer, d time.Duration) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(nonNegativeDuration(d))
 }

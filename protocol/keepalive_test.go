@@ -121,8 +121,8 @@ func TestKeepaliveReturnsOnClosedChan(t *testing.T) {
 
 func TestKeepaliveMarksActivityOnPongFromResponsiveClient(t *testing.T) {
 	opts := DefaultProtocolOptions()
-	opts.PingInterval = 50 * time.Millisecond
-	opts.IdleTimeout = 1 * time.Second // generous; don't trip idle in this test
+	opts.PingInterval = 30 * time.Millisecond
+	opts.IdleTimeout = 150 * time.Millisecond
 	c, clientWS, cleanup := loopbackConn(t, opts)
 	defer cleanup()
 
@@ -151,12 +151,55 @@ func TestKeepaliveMarksActivityOnPongFromResponsiveClient(t *testing.T) {
 	kaDone := runKeepaliveAsync(c, ctx)
 
 	waitForActivityAfter(t, c, start, "Pong-driven activity")
+	select {
+	case <-kaDone:
+		t.Fatal("runKeepalive closed a responsive connection after its initial idle deadline")
+	case <-time.After(3 * opts.IdleTimeout):
+	}
 
 	cancel()
 	clientReadCancel()
 	<-kaDone
 	<-pumpDone
 	readerWG.Wait()
+}
+
+func TestKeepaliveIdleTimeoutIsIndependentOfPingInterval(t *testing.T) {
+	opts := DefaultProtocolOptions()
+	opts.PingInterval = 500 * time.Millisecond
+	opts.IdleTimeout = 50 * time.Millisecond
+	c, _, cleanup := loopbackConn(t, opts)
+	defer cleanup()
+
+	done := runKeepaliveAsync(c, context.Background())
+	select {
+	case <-done:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("idle timeout did not fire before the later ping tick")
+	}
+}
+
+func TestKeepaliveActivityBetweenPingTicksMovesIdleDeadline(t *testing.T) {
+	opts := DefaultProtocolOptions()
+	opts.PingInterval = time.Second
+	opts.IdleTimeout = 200 * time.Millisecond
+	c, _, cleanup := loopbackConn(t, opts)
+	defer cleanup()
+
+	done := runKeepaliveAsync(c, context.Background())
+	time.Sleep(75 * time.Millisecond)
+	c.MarkActivity()
+
+	select {
+	case <-done:
+		t.Fatal("idle timeout ignored activity observed between ping ticks")
+	case <-time.After(150 * time.Millisecond):
+	}
+	select {
+	case <-done:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("idle timeout did not fire at the activity-adjusted deadline")
+	}
 }
 
 func TestKeepaliveClosesIdleConnection(t *testing.T) {
