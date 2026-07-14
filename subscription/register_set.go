@@ -858,16 +858,12 @@ func (m *Manager) RegisterSet(
 	// Publish only after every predicate, aggregate budget, and response
 	// preparation has succeeded. No fallible operation follows this point.
 	for _, item := range pending {
-		qs := m.registry.getQuery(item.hash)
-		if qs == nil {
-			qs = m.registry.createQueryState(item.hash, item.predicate, item.projection, item.aggregate, item.orderBy, item.limit, item.offset)
-			// SQLText is set only when the admission path knows the original
-			// SQL string (Single subscribe). Multi leaves it empty.
-			qs.sqlText = req.SQLText
+		if m.registry.getQuery(item.hash) == nil {
+			m.registry.createQueryState(item.hash, item.predicate, item.projection, item.aggregate, item.orderBy, item.limit, item.offset)
 			placeSubscriptionForResolver(m.indexes, item.predicate, item.hash, m.resolver)
 			m.addDeltaIndexColumns(item.predicate)
 		}
-		m.registry.addSubscriber(item.hash, req.ConnID, item.subID, req.RequestID, req.QueryID)
+		m.registry.addSubscriber(item.hash, req.ConnID, item.subID, req.RequestID, req.QueryID, req.SQLText)
 	}
 	if m.querySets[req.ConnID] == nil {
 		m.querySets[req.ConnID] = make(map[uint32][]types.SubscriptionID)
@@ -919,13 +915,17 @@ func (m *Manager) UnregisterSetContext(
 		if qs == nil {
 			continue
 		}
+		delivery, found := qs.subscribers[connID][sid]
+		if !found {
+			continue
+		}
 		if view == nil || evalErr != nil {
 			continue
 		}
 		initial, err := m.initialUpdates(ctx, qs.predicate, qs.projection, qs.aggregate, qs.orderBy, qs.limit, qs.offset, view, sid, queryID, budget.remainingRowLimit())
 		if err != nil {
 			evalErr = fmt.Errorf("%w: %w", ErrFinalQuery, err)
-			evalSQL = qs.sqlText
+			evalSQL = delivery.SQLText
 			continue
 		}
 		for i := range initial {
@@ -934,7 +934,7 @@ func (m *Manager) UnregisterSetContext(
 		}
 		if err := budget.add(initial); err != nil {
 			evalErr = fmt.Errorf("%w: %w", ErrFinalQuery, err)
-			evalSQL = qs.sqlText
+			evalSQL = delivery.SQLText
 			continue
 		}
 		deletes = append(deletes, initial...)

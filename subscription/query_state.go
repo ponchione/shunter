@@ -12,8 +12,6 @@ type queryState struct {
 	orderBy    []OrderByColumn
 	limit      *uint64
 	offset     *uint64
-	// sqlText is the original Single-subscribe SQL used for final-eval errors.
-	sqlText string
 	// subscribers is keyed first by connection and then by subscription ID so
 	// one connection may hold multiple independent subscriptions to the same
 	// query hash.
@@ -27,6 +25,9 @@ type subscriptionDeliveryMeta struct {
 	// QueryID is the client-chosen subscription-set identifier to stamp on
 	// fanout updates for this internal SubscriptionID.
 	QueryID uint32
+	// SQLText is the original Single-subscribe SQL used for final-eval errors.
+	// It belongs to this delivery rather than the deduplicated executable query.
+	SQLText string
 }
 
 type subscriptionRef struct {
@@ -76,7 +77,7 @@ func (r *queryRegistry) removeQueryState(hash QueryHash) {
 }
 
 // addSubscriber attaches a client to an existing query state.
-func (r *queryRegistry) addSubscriber(hash QueryHash, connID types.ConnectionID, subID types.SubscriptionID, requestID uint32, queryID uint32) {
+func (r *queryRegistry) addSubscriber(hash QueryHash, connID types.ConnectionID, subID types.SubscriptionID, requestID uint32, queryID uint32, sqlText string) {
 	qs, ok := r.byHash[hash]
 	if !ok {
 		panic("subscription: addSubscriber on unknown hash")
@@ -90,7 +91,7 @@ func (r *queryRegistry) addSubscriber(hash QueryHash, connID types.ConnectionID,
 		perConn = make(map[types.SubscriptionID]subscriptionDeliveryMeta)
 		qs.subscribers[connID] = perConn
 	}
-	perConn[subID] = subscriptionDeliveryMeta{RequestID: requestID, QueryID: queryID}
+	perConn[subID] = subscriptionDeliveryMeta{RequestID: requestID, QueryID: queryID, SQLText: sqlText}
 	r.bySub[ref] = hash
 	r.byConn[connID] = append(r.byConn[connID], subID)
 	qs.refCount++

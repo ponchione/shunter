@@ -657,8 +657,90 @@ func TestUnregisterSetFinalEvalErrorWrapsErrFinalQueryAndDropsAll(t *testing.T) 
 	}
 }
 
+func requireFinalEvalSQLText(t *testing.T, mgr *Manager, connID types.ConnectionID, queryID uint32, view store.CommittedReadView, want string) {
+	t.Helper()
+	mgr.InitialRowLimit = 1
+	res, err := mgr.UnregisterSet(connID, queryID, view)
+	if !errors.Is(err, ErrFinalQuery) || !errors.Is(err, ErrInitialRowLimit) {
+		t.Fatalf("UnregisterSet error = %v, want ErrFinalQuery wrapping ErrInitialRowLimit", err)
+	}
+	if res.SQLText != want {
+		t.Fatalf("UnregisterSet SQLText = %q, want %q", res.SQLText, want)
+	}
+}
+
+func TestUnregisterSetFinalEvalErrorUsesSQLFromEquivalentSingleOnOtherConnection(t *testing.T) {
+	mgr, view := newRegisterSetTestManagerWithRows(t)
+	pred := AllRows{Table: 1}
+	registrations := []SubscriptionSetRegisterRequest{
+		{ConnID: types.ConnectionID{1}, QueryID: 1, Predicates: []Predicate{pred}, SQLText: "SELECT * FROM t1"},
+		{ConnID: types.ConnectionID{2}, QueryID: 1, Predicates: []Predicate{pred}, SQLText: "select * from t1"},
+	}
+	for _, req := range registrations {
+		if _, err := mgr.RegisterSet(req, view); err != nil {
+			t.Fatalf("RegisterSet(%q): %v", req.SQLText, err)
+		}
+	}
+
+	requireFinalEvalSQLText(t, mgr, types.ConnectionID{2}, 1, view, "select * from t1")
+}
+
+func TestUnregisterSetFinalEvalErrorUsesSQLFromEquivalentSingleQueryIDOnSameConnection(t *testing.T) {
+	mgr, view := newRegisterSetTestManagerWithRows(t)
+	connID := types.ConnectionID{1}
+	pred := AllRows{Table: 1}
+	registrations := []SubscriptionSetRegisterRequest{
+		{ConnID: connID, QueryID: 1, Predicates: []Predicate{pred}, SQLText: "SELECT * FROM t1"},
+		{ConnID: connID, QueryID: 2, Predicates: []Predicate{pred}, SQLText: "select * from t1"},
+	}
+	for _, req := range registrations {
+		if _, err := mgr.RegisterSet(req, view); err != nil {
+			t.Fatalf("RegisterSet(%d): %v", req.QueryID, err)
+		}
+	}
+
+	requireFinalEvalSQLText(t, mgr, connID, 2, view, "select * from t1")
+}
+
+func TestUnregisterSetFinalEvalErrorUsesSingleSQLAfterMultiCreatedSharedQuery(t *testing.T) {
+	mgr, view := newRegisterSetTestManagerWithRows(t)
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 1,
+		Predicates: []Predicate{AllRows{Table: 1}, AllRows{Table: 2}},
+	}, view); err != nil {
+		t.Fatalf("RegisterSet(Multi): %v", err)
+	}
+	const sqlText = "select * from t1"
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{2}, QueryID: 1,
+		Predicates: []Predicate{AllRows{Table: 1}}, SQLText: sqlText,
+	}, view); err != nil {
+		t.Fatalf("RegisterSet(Single): %v", err)
+	}
+
+	requireFinalEvalSQLText(t, mgr, types.ConnectionID{2}, 1, view, sqlText)
+}
+
+func TestUnregisterSetMultiFinalEvalErrorOmitsSingleSQLFromSharedQuery(t *testing.T) {
+	mgr, view := newRegisterSetTestManagerWithRows(t)
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 1,
+		Predicates: []Predicate{AllRows{Table: 1}}, SQLText: "SELECT * FROM t1",
+	}, view); err != nil {
+		t.Fatalf("RegisterSet(Single): %v", err)
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{2}, QueryID: 1,
+		Predicates: []Predicate{AllRows{Table: 1}, AllRows{Table: 2}},
+	}, view); err != nil {
+		t.Fatalf("RegisterSet(Multi): %v", err)
+	}
+
+	requireFinalEvalSQLText(t, mgr, types.ConnectionID{2}, 1, view, "")
+}
+
 // TestUnregisterSetMultiFinalEvalErrorEmptySQLText — Multi register does
-// not populate SQLText on any queryState (handleSubscribeMulti leaves
+// not populate SQLText on any delivery (handleSubscribeMulti leaves
 // `RegisterSubscriptionSetRequest.SQLText` empty because reference
 // `module_subscription_actor.rs:836` uses raw `return_on_err!` for the
 // UnsubscribeMulti eval — no `DBError::WithSql` suffix). The subscription
