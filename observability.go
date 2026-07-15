@@ -891,7 +891,7 @@ func protocolConnectionMetricResult(result string) string {
 
 func protocolMessageMetricKind(kind string) string {
 	switch kind {
-	case "subscribe_single", "subscribe_multi", "subscribe_declared_view", "unsubscribe_single", "unsubscribe_multi", "call_reducer", "one_off_query", "declared_query", "unknown":
+	case "subscribe_single", "subscribe_multi", "subscribe_declared_view", "unsubscribe_single", "unsubscribe_multi", "call_reducer", "call_procedure", "one_off_query", "declared_query", "unknown":
 		return kind
 	default:
 		return "unknown"
@@ -900,7 +900,7 @@ func protocolMessageMetricKind(kind string) string {
 
 func protocolMessageMetricResult(result string) string {
 	switch result {
-	case "ok", "malformed", "permission_denied", "validation_error", "executor_rejected", "internal_error", "connection_closed":
+	case "ok", "malformed", "permission_denied", "validation_error", "executor_rejected", "internal_error", "response_too_large", "send_failed", "connection_closed":
 		return result
 	default:
 		return "internal_error"

@@ -41,7 +41,6 @@ func handleCallReducer(
 		recordProtocolMessage(conn.Observer, "call_reducer", "executor_rejected")
 		return
 	}
-	recordProtocolMessage(conn.Observer, "call_reducer", "ok")
 	watchReducerResponse(conn, respCh)
 }
 

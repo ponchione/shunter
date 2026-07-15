@@ -18,6 +18,42 @@ var ErrConnNotFound = errors.New("protocol: connection not found")
 
 const directResponseTooLargeText = "response exceeds configured outbound message limit"
 
+// DirectResponseOutcome describes what SendDirectResponse delivered.
+type DirectResponseOutcome uint8
+
+const (
+	// DirectResponseSendFailed means no response was delivered and this helper
+	// did not request connection teardown.
+	DirectResponseSendFailed DirectResponseOutcome = iota
+	// DirectResponseDelivered means the original response was delivered.
+	DirectResponseDelivered
+	// DirectResponseTooLarge means a correlated response-size failure was
+	// delivered in place of the oversized successful response.
+	DirectResponseTooLarge
+	// DirectResponseDisconnectRequested means no response was delivered and
+	// connection teardown was requested.
+	DirectResponseDisconnectRequested
+)
+
+// MetricResult returns the bounded protocol-message result for this outcome.
+func (o DirectResponseOutcome) MetricResult() string {
+	switch o {
+	case DirectResponseDelivered:
+		return "ok"
+	case DirectResponseTooLarge:
+		return "response_too_large"
+	case DirectResponseSendFailed, DirectResponseDisconnectRequested:
+		return "send_failed"
+	default:
+		return "send_failed"
+	}
+}
+
+// Terminal reports whether response delivery requested connection teardown.
+func (o DirectResponseOutcome) Terminal() bool {
+	return o == DirectResponseDisconnectRequested
+}
+
 // ClientSender delivers server messages to connected clients.
 // Callers receive TransactionUpdate; non-callers receive TransactionUpdateLight.
 type ClientSender interface {
@@ -40,32 +76,38 @@ func NewClientSender(mgr *ConnManager, _ ExecutorInbox) ClientSender {
 	return &connManagerSender{mgr: mgr}
 }
 
-// SendDirectResponse sends a request-correlated response. If a successful
-// response exceeds the connection's outbound message limit, it sends a small
-// correlated failure instead. Failure to enqueue that fallback makes the
-// connection terminal so a caller cannot wait indefinitely.
-func SendDirectResponse(sender ClientSender, conn *Conn, msg any) error {
+// SendDirectResponse sends a request-correlated response and reports whether
+// the original response or a correlated response-size failure was delivered.
+// Failure to produce or enqueue the fallback makes the connection terminal so
+// a caller cannot wait indefinitely.
+func SendDirectResponse(sender ClientSender, conn *Conn, msg any) (DirectResponseOutcome, error) {
 	if conn == nil {
-		return ErrConnNotFound
+		return DirectResponseSendFailed, ErrConnNotFound
 	}
 	if sender == nil {
-		return fmt.Errorf("%w: client sender is nil", ErrConnNotFound)
+		return DirectResponseSendFailed, fmt.Errorf("%w: client sender is nil", ErrConnNotFound)
 	}
 	err := sender.Send(conn.ID, msg)
-	if err == nil || !errors.Is(err, ErrOutboundMessageLimit) {
-		return err
+	if err == nil {
+		return DirectResponseDelivered, nil
+	}
+	if !errors.Is(err, ErrOutboundMessageLimit) {
+		if errors.Is(err, ErrClientBufferFull) {
+			return DirectResponseDisconnectRequested, err
+		}
+		return DirectResponseSendFailed, err
 	}
 
 	fallback, ok := oversizedDirectResponse(msg)
 	if !ok {
 		conn.requestDisconnect(CloseInternal, CloseReasonResponseDeliveryFailed)
-		return err
+		return DirectResponseDisconnectRequested, err
 	}
 	if fallbackErr := sender.Send(conn.ID, fallback); fallbackErr != nil {
 		conn.requestDisconnect(CloseInternal, CloseReasonResponseDeliveryFailed)
-		return errors.Join(err, fmt.Errorf("send correlated response-size error: %w", fallbackErr))
+		return DirectResponseDisconnectRequested, errors.Join(err, fmt.Errorf("send correlated response-size error: %w", fallbackErr))
 	}
-	return err
+	return DirectResponseTooLarge, nil
 }
 
 func oversizedDirectResponse(msg any) (any, bool) {

@@ -16,12 +16,13 @@ import (
 )
 
 type protocolMetricObserver struct {
-	mu            sync.Mutex
-	active        []int
-	connResults   []string
-	messageEvents []protocolMessageMetric
-	backpressure  []string
-	authFailures  []string
+	mu             sync.Mutex
+	active         []int
+	connResults    []string
+	messageEvents  []protocolMessageMetric
+	protocolErrors []protocolErrorRecord
+	backpressure   []string
+	authFailures   []string
 }
 
 type protocolMessageMetric struct {
@@ -54,7 +55,12 @@ func (o *protocolMetricObserver) LogProtocolConnectionOpened(types.ConnectionID)
 }
 
 func (o *protocolMetricObserver) LogProtocolConnectionClosed(types.ConnectionID, string) {}
-func (o *protocolMetricObserver) LogProtocolProtocolError(string, string, error)         {}
+
+func (o *protocolMetricObserver) LogProtocolProtocolError(kind, reason string, err error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.protocolErrors = append(o.protocolErrors, protocolErrorRecord{kind: kind, reason: reason, err: err})
+}
 
 func (o *protocolMetricObserver) LogProtocolAuthFailed(reason string, err error) {
 	o.mu.Lock()
@@ -129,6 +135,27 @@ func (o *protocolMetricObserver) requireBackpressure(t *testing.T, direction str
 		}
 	}
 	t.Fatalf("missing backpressure direction %q in %v", direction, o.backpressure)
+}
+
+func (o *protocolMetricObserver) requireNoProtocolErrors(t *testing.T) {
+	t.Helper()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.protocolErrors) != 0 {
+		t.Fatalf("protocol errors = %+v, want none", o.protocolErrors)
+	}
+}
+
+func (o *protocolMetricObserver) requireProtocolError(t *testing.T, kind, reason string) {
+	t.Helper()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, record := range o.protocolErrors {
+		if record.kind == kind && record.reason == reason && record.err != nil {
+			return
+		}
+	}
+	t.Fatalf("missing protocol error kind=%q reason=%q in %+v", kind, reason, o.protocolErrors)
 }
 
 func TestProtocolMetricsConnectionGaugeAndAcceptedCounter(t *testing.T) {

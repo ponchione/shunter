@@ -1149,6 +1149,61 @@ func TestProtocolDeclaredQueryUsesRuntimeClientSender(t *testing.T) {
 	}
 }
 
+func TestProtocolDeclaredQueryRecordsDeliveredSizeFallbackWithoutSendFailure(t *testing.T) {
+	logs := &recordingLogState{}
+	metrics := &recordingMetricsRecorder{}
+	cfg := declaredReadProtocolConfig(t)
+	cfg.Observability = ObservabilityConfig{
+		Logger:  logs.logger(),
+		Metrics: MetricsConfig{Enabled: true, Recorder: metrics},
+	}
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message", insertMessageReducer).
+		Query(QueryDeclaration{
+			Name:        "recent_messages",
+			SQL:         "SELECT * FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}), cfg)
+	defer rt.Close()
+	insertMessage(t, rt, "hello")
+
+	sender := &declaredReadCapturingSender{
+		sendErrs: []error{protocol.ErrOutboundMessageLimit, nil},
+	}
+	rt.mu.Lock()
+	rt.protocolSender = sender
+	rt.mu.Unlock()
+
+	conn := newDeclaredReadProtocolTestConn(t, "messages:read")
+	rt.HandleDeclaredQuery(context.Background(), conn, &protocol.DeclaredQueryMsg{
+		MessageID: []byte("declared-query-size-fallback"),
+		Name:      "recent_messages",
+	})
+
+	messages := sender.messages()
+	if len(messages) != 2 {
+		t.Fatalf("sender messages = %d, want oversized response and fallback", len(messages))
+	}
+	fallback, ok := messages[1].(protocol.OneOffQueryResponse)
+	if !ok {
+		t.Fatalf("fallback = %T, want OneOffQueryResponse", messages[1])
+	}
+	if fallback.Error == nil || !strings.Contains(*fallback.Error, "outbound message limit") {
+		t.Fatalf("fallback error = %v, want outbound message limit", fallback.Error)
+	}
+	if !bytes.Equal(fallback.MessageID, []byte("declared-query-size-fallback")) {
+		t.Fatalf("fallback message ID = %x, want request message ID", fallback.MessageID)
+	}
+	metrics.requireCounter(t, MetricProtocolMessagesTotal, MetricLabels{
+		Module:  "chat",
+		Runtime: "default",
+		Kind:    "declared_query",
+		Result:  "response_too_large",
+	}, 1)
+	requireNoProtocolSendFailureLog(t, logs)
+	requireNoProtocolMessageResult(t, metrics, "connection_closed")
+}
+
 func TestProtocolDeclaredQueryReservesCompleteResponseEnvelope(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Reducer("insert_message", insertMessageReducer).
@@ -1245,6 +1300,8 @@ type declaredReadCapturingSender struct {
 	sendConn  types.ConnectionID
 	sendMsg   any
 	sendErr   error
+	sendErrs  []error
+	sendMsgs  []any
 
 	heavyCalls int
 	lightCalls int
@@ -1253,9 +1310,14 @@ type declaredReadCapturingSender struct {
 func (s *declaredReadCapturingSender) Send(connID types.ConnectionID, msg any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	callIndex := s.sendCalls
 	s.sendCalls++
 	s.sendConn = connID
 	s.sendMsg = msg
+	s.sendMsgs = append(s.sendMsgs, msg)
+	if callIndex < len(s.sendErrs) {
+		return s.sendErrs[callIndex]
+	}
 	return s.sendErr
 }
 
@@ -1277,6 +1339,30 @@ func (s *declaredReadCapturingSender) snapshot() (sendCalls int, sendConn types.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.sendCalls, s.sendConn, s.sendMsg, s.heavyCalls, s.lightCalls
+}
+
+func (s *declaredReadCapturingSender) messages() []any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]any(nil), s.sendMsgs...)
+}
+
+func requireNoProtocolSendFailureLog(t *testing.T, logs *recordingLogState) {
+	t.Helper()
+	for _, record := range logs.records() {
+		if record.message == "protocol.protocol_error" && record.attrs["reason"] == "send_failed" {
+			t.Fatalf("unexpected protocol send-failure log: %+v", record)
+		}
+	}
+}
+
+func requireNoProtocolMessageResult(t *testing.T, metrics *recordingMetricsRecorder, result string) {
+	t.Helper()
+	for _, observation := range metrics.snapshot() {
+		if observation.name == MetricProtocolMessagesTotal && observation.labels.Result == result {
+			t.Fatalf("unexpected protocol message result %q: %+v", result, observation)
+		}
+	}
 }
 
 func newDeclaredReadProtocolTestConn(t *testing.T, permissions ...string) *protocol.Conn {

@@ -35,6 +35,8 @@ func TestWatchReducerResponseExitsOnConnClose(t *testing.T) {
 func TestWatchReducerResponseDeliversOnRespCh(t *testing.T) {
 	conn := testConnDirect(nil)
 	conn.Compression = true
+	observer := &protocolMetricObserver{}
+	conn.Observer = observer
 	respCh := make(chan TransactionUpdate, 1)
 
 	done := make(chan struct{})
@@ -74,6 +76,13 @@ func TestWatchReducerResponseDeliversOnRespCh(t *testing.T) {
 	if tu.ReducerCall.RequestID != 77 {
 		t.Fatalf("ReducerCall.RequestID = %d, want 77", tu.ReducerCall.RequestID)
 	}
+	observer.requireMessage(t, "call_reducer", "ok")
+	observer.requireNoProtocolErrors(t)
+	select {
+	case <-conn.closed:
+		t.Fatal("successful response delivery closed the connection")
+	default:
+	}
 }
 
 func TestWatchReducerResponseConvertsOversizedSuccessToCorrelatedFailure(t *testing.T) {
@@ -100,6 +109,8 @@ func TestWatchReducerResponseConvertsOversizedSuccessToCorrelatedFailure(t *test
 	opts := DefaultProtocolOptions()
 	opts.MaxOutboundMessageSize = fallbackSize
 	conn := testConnDirect(&opts)
+	observer := &protocolMetricObserver{}
+	conn.Observer = observer
 	respCh := make(chan TransactionUpdate, 1)
 	respCh <- response
 
@@ -125,26 +136,39 @@ func TestWatchReducerResponseConvertsOversizedSuccessToCorrelatedFailure(t *test
 	default:
 		t.Fatal("oversized reducer response did not enqueue a correlated failure")
 	}
+	observer.requireMessage(t, "call_reducer", "response_too_large")
+	observer.requireNoProtocolErrors(t)
+	select {
+	case <-conn.closed:
+		t.Fatal("delivered response-size fallback closed the connection")
+	default:
+	}
 }
 
-func TestSendDirectResponseTerminatesWhenCorrelatedFailureCannotFit(t *testing.T) {
+func TestWatchReducerResponseTerminatesWhenCorrelatedFailureCannotFit(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	opts.MaxOutboundMessageSize = 1
 	opts.DisconnectTimeout = 500 * time.Millisecond
 	conn := testConnDirect(&opts)
+	observer := &protocolMetricObserver{}
+	conn.Observer = observer
 	inbox := &fakeInbox{}
 	mgr := NewConnManager()
 	mgr.Add(conn)
 	runRequestedDisconnectOwnerWithLifecycle(conn, inbox, mgr)
 
-	errText := "already too large"
-	err := SendDirectResponse(connOnlySender{conn: conn}, conn, OneOffQueryResponse{
-		MessageID: []byte{1},
-		Error:     &errText,
-	})
-	if !errors.Is(err, ErrOutboundMessageLimit) {
-		t.Fatalf("SendDirectResponse error = %v, want ErrOutboundMessageLimit", err)
+	respCh := make(chan TransactionUpdate, 1)
+	respCh <- TransactionUpdate{
+		Status: StatusCommitted{},
+		ReducerCall: ReducerCallInfo{
+			ReducerName: "too_large",
+			RequestID:   77,
+		},
 	}
+	runReducerResponseWatcher(conn, respCh)
+
+	observer.requireMessage(t, "call_reducer", "send_failed")
+	observer.requireProtocolError(t, "call_reducer", "send_failed")
 	waitForConnClosed(t, conn, "oversized correlated failure")
 	if got := mgr.Get(conn.ID); got != nil {
 		t.Fatalf("connection still registered after terminal response failure: %p", got)

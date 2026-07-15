@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- `protocol.SendDirectResponse` now returns an explicit delivery outcome.
+  Oversized direct responses report `response_too_large` when their correlated
+  fallback is delivered; `send_failed` and `connection_closed` are reserved
+  for actual delivery and teardown failures.
 - Declared-view Applied snapshots are now prepared before publication and
   enqueued synchronously before later deltas, with failed delivery rolling the
   new set back. Disconnect now stops inbound handler admission and drains

@@ -108,12 +108,13 @@ func handleOneOffQueryWithVisibilityAndLimits(
 		}},
 		TotalHostExecutionDuration: elapsedMicrosI64(receipt),
 	}
-	if err := SendDirectResponse(connOnlySender{conn: conn}, conn, response); err != nil {
+	outcome, err := SendDirectResponse(connOnlySender{conn: conn}, conn, response)
+	if err != nil {
 		logProtocolError(conn.Observer, "one_off_query", "send_failed", err)
-		recordProtocolMessage(conn.Observer, "one_off_query", "send_failed")
+		recordProtocolMessage(conn.Observer, "one_off_query", outcome.MetricResult())
 		return
 	}
-	recordProtocolMessage(conn.Observer, "one_off_query", "ok")
+	recordProtocolMessage(conn.Observer, "one_off_query", outcome.MetricResult())
 }
 
 // ExecuteCompiledSQLQuery evaluates a precompiled one-off SQL query against a
@@ -275,7 +276,7 @@ func sendOneOffError(conn *Conn, messageID []byte, errMsg string, receipt time.T
 		Error:                      &errMsg,
 		TotalHostExecutionDuration: elapsedMicrosI64(receipt),
 	}
-	err := SendDirectResponse(connOnlySender{conn: conn}, conn, response)
+	_, err := SendDirectResponse(connOnlySender{conn: conn}, conn, response)
 	if err != nil {
 		logProtocolError(conn.Observer, "one_off_query", "send_failed", err)
 	}

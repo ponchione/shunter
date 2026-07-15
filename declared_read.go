@@ -672,19 +672,24 @@ func (r *Runtime) handleProtocolDeclaredQuery(ctx context.Context, conn *protoco
 		r.observability.RecordProtocolMessage("declared_query", "internal_error")
 		return
 	}
-	if err := r.sendProtocolDeclaredQueryMessage(conn, protocol.OneOffQueryResponse{
+	outcome, err := r.sendProtocolDeclaredQueryMessageWithOutcome(conn, protocol.OneOffQueryResponse{
 		MessageID: messageID,
 		Tables: []protocol.OneOffTable{{
 			TableName: result.TableName,
 			Rows:      rows,
 		}},
 		TotalHostExecutionDuration: declaredReadElapsedMicrosI64(receipt),
-	}); err != nil {
+	})
+	if err != nil {
 		r.logProtocolDeclaredReadSendError("declared_query", err)
-		r.observability.RecordProtocolMessage("declared_query", "connection_closed")
+		metricResult := outcome.MetricResult()
+		if outcome.Terminal() {
+			metricResult = "connection_closed"
+		}
+		r.observability.RecordProtocolMessage("declared_query", metricResult)
 		return
 	}
-	r.observability.RecordProtocolMessage("declared_query", "ok")
+	r.observability.RecordProtocolMessage("declared_query", outcome.MetricResult())
 }
 
 // HandleSubscribeDeclaredView handles the protocol named-view subscription
@@ -875,12 +880,17 @@ func (r *Runtime) sendProtocolDeclaredQueryError(conn *protocol.Conn, messageID 
 }
 
 func (r *Runtime) sendProtocolDeclaredQueryMessage(conn *protocol.Conn, msg protocol.OneOffQueryResponse) error {
+	_, err := r.sendProtocolDeclaredQueryMessageWithOutcome(conn, msg)
+	return err
+}
+
+func (r *Runtime) sendProtocolDeclaredQueryMessageWithOutcome(conn *protocol.Conn, msg protocol.OneOffQueryResponse) (protocol.DirectResponseOutcome, error) {
 	if conn == nil {
-		return nil
+		return protocol.DirectResponseDelivered, nil
 	}
 	sender, err := r.readyProtocolSender()
 	if err != nil {
-		return err
+		return protocol.DirectResponseSendFailed, err
 	}
 	return protocol.SendDirectResponse(sender, conn, msg)
 }

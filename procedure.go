@@ -223,21 +223,28 @@ func (r *Runtime) HandleCallProcedure(ctx context.Context, conn *protocol.Conn, 
 		response.Error = &errText
 		response.Result = nil
 	}
-	if sendErr := r.sendProtocolProcedureMessage(conn, response); sendErr != nil {
+	outcome, sendErr := r.sendProtocolProcedureMessageWithOutcome(conn, response)
+	r.observability.RecordProtocolMessage("call_procedure", outcome.MetricResult())
+	if sendErr != nil {
 		r.logProtocolProcedureSendError(sendErr)
 	}
 }
 
 func (r *Runtime) sendProtocolProcedureMessage(conn *protocol.Conn, msg protocol.ProcedureResponse) error {
+	_, err := r.sendProtocolProcedureMessageWithOutcome(conn, msg)
+	return err
+}
+
+func (r *Runtime) sendProtocolProcedureMessageWithOutcome(conn *protocol.Conn, msg protocol.ProcedureResponse) (protocol.DirectResponseOutcome, error) {
 	if conn == nil {
-		return nil
+		return protocol.DirectResponseDelivered, nil
 	}
 	if r == nil {
-		return ErrRuntimeNotReady
+		return protocol.DirectResponseSendFailed, ErrRuntimeNotReady
 	}
 	sender, err := r.readyProtocolSender()
 	if err != nil {
-		return err
+		return protocol.DirectResponseSendFailed, err
 	}
 	return protocol.SendDirectResponse(sender, conn, msg)
 }

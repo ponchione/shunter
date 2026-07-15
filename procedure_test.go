@@ -583,9 +583,18 @@ func TestCallProcedureEnforcesConfiguredResultLimit(t *testing.T) {
 }
 
 func TestHandleCallProcedureConvertsOversizedWireResponseToCorrelatedError(t *testing.T) {
+	logs := &recordingLogState{}
+	metrics := &recordingMetricsRecorder{}
 	rt := buildStartedRuntimeWithProcedureAndConfig(t, "notify", func(_ *ProcedureContext, _ []byte) ([]byte, error) {
 		return make([]byte, 1024), nil
-	}, Config{DataDir: t.TempDir(), EnableProtocol: true})
+	}, Config{
+		DataDir:        t.TempDir(),
+		EnableProtocol: true,
+		Observability: ObservabilityConfig{
+			Logger:  logs.logger(),
+			Metrics: MetricsConfig{Enabled: true, Recorder: metrics},
+		},
+	})
 	defer rt.Close()
 
 	opts := protocol.DefaultProtocolOptions()
@@ -627,6 +636,14 @@ func TestHandleCallProcedureConvertsOversizedWireResponseToCorrelatedError(t *te
 	default:
 		t.Fatal("procedure response was not delivered")
 	}
+	metrics.requireCounter(t, MetricProtocolMessagesTotal, MetricLabels{
+		Module:  "chat",
+		Runtime: "default",
+		Kind:    "call_procedure",
+		Result:  "response_too_large",
+	}, 1)
+	requireNoProtocolSendFailureLog(t, logs)
+	requireNoProtocolMessageResult(t, metrics, "connection_closed")
 }
 
 func TestSendProtocolProcedureMessageNilConnNoops(t *testing.T) {
