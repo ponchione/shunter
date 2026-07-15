@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -401,10 +404,11 @@ func TestClientLateTypedResponsesDoNotPoisonNextOperation(t *testing.T) {
 			}()
 			select {
 			case <-firstReceived:
-				cancelFirst()
 			case <-ctx.Done():
 				t.Fatalf("server did not receive first request: %v", ctx.Err())
 			}
+			waitForSynchronousRequestSent(t, ctx, client)
+			cancelFirst()
 			if err := <-firstDone; !errors.Is(err, context.Canceled) {
 				t.Fatalf("first call error = %v, want context.Canceled", err)
 			}
@@ -422,6 +426,146 @@ func TestClientLateTypedResponsesDoNotPoisonNextOperation(t *testing.T) {
 			assertFirstTypedResponse(t, tag, late)
 		})
 	}
+}
+
+func TestClientCancellationDuringWriteTerminatesConnection(t *testing.T) {
+	serverDone := make(chan struct{})
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		defer close(serverDone)
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+		_, _, _ = ws.Read(context.Background())
+	})
+
+	wrappedConn := make(chan *blockingWriteConn, 1)
+	var dialer net.Dialer
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			conn, err := dialer.DialContext(ctx, network, address)
+			if err != nil {
+				return nil, err
+			}
+			wrapped := newBlockingWriteConn(conn)
+			wrappedConn <- wrapped
+			return wrapped, nil
+		},
+	}
+	t.Cleanup(transport.CloseIdleConnections)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ws, _, err := websocket.Dial(ctx, srv.wsURL(), &websocket.DialOptions{
+		HTTPClient:   &http.Client{Transport: transport},
+		Subprotocols: protocol.SupportedSubprotocols(),
+	})
+	if err != nil {
+		t.Fatalf("websocket.Dial: %v", err)
+	}
+	defer ws.CloseNow()
+	client := &Client{conn: ws}
+
+	var blocked *blockingWriteConn
+	select {
+	case blocked = <-wrappedConn:
+	case <-ctx.Done():
+		t.Fatalf("capture client connection: %v", ctx.Err())
+	}
+	blocked.blockWrites()
+
+	writeCtx, cancelWrite := context.WithCancel(ctx)
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- client.Send(writeCtx, protocol.CallReducerMsg{
+			ReducerName: "blocked_write",
+			RequestID:   1,
+		})
+	}()
+	select {
+	case <-blocked.writeStarted:
+		cancelWrite()
+	case <-ctx.Done():
+		t.Fatalf("client write did not start: %v", ctx.Err())
+	}
+	select {
+	case err := <-writeDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled write error = %v, want context.Canceled", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("canceled write did not return: %v", ctx.Err())
+	}
+
+	reuseCtx, cancelReuse := context.WithTimeout(context.Background(), time.Second)
+	defer cancelReuse()
+	if err := client.Send(reuseCtx, protocol.CallReducerMsg{ReducerName: "reuse", RequestID: 2}); err == nil {
+		t.Fatal("Send after canceled in-flight write succeeded; connection must be terminal")
+	}
+	select {
+	case <-serverDone:
+	case <-ctx.Done():
+		t.Fatalf("server connection remained open after canceled write: %v", ctx.Err())
+	}
+}
+
+func waitForSynchronousRequestSent(t *testing.T, ctx context.Context, client *Client) {
+	t.Helper()
+	for {
+		client.pendingMu.Lock()
+		sent := client.responseWaiter != nil && client.responseWaiter.sent
+		client.pendingMu.Unlock()
+		if sent {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("client did not finish sending synchronous request: %v", ctx.Err())
+		default:
+			runtime.Gosched()
+		}
+	}
+}
+
+type blockingWriteConn struct {
+	net.Conn
+
+	mu           sync.Mutex
+	block        bool
+	startedOnce  sync.Once
+	closedOnce   sync.Once
+	writeStarted chan struct{}
+	closed       chan struct{}
+}
+
+func newBlockingWriteConn(conn net.Conn) *blockingWriteConn {
+	return &blockingWriteConn{
+		Conn:         conn,
+		writeStarted: make(chan struct{}),
+		closed:       make(chan struct{}),
+	}
+}
+
+func (c *blockingWriteConn) blockWrites() {
+	c.mu.Lock()
+	c.block = true
+	c.mu.Unlock()
+}
+
+func (c *blockingWriteConn) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	block := c.block
+	c.mu.Unlock()
+	if !block {
+		return c.Conn.Write(p)
+	}
+	c.startedOnce.Do(func() { close(c.writeStarted) })
+	<-c.closed
+	return 0, net.ErrClosed
+}
+
+func (c *blockingWriteConn) Close() error {
+	c.closedOnce.Do(func() { close(c.closed) })
+	return c.Conn.Close()
 }
 
 func TestClientConcurrentProcedureAndReducerPreserveInterleavedLightUpdate(t *testing.T) {
