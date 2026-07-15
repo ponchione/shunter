@@ -151,7 +151,12 @@ func (a *ProtocolInboxAdapter) CallReducer(ctx context.Context, req protocol.Cal
 		return err
 	}
 	if req.ResponseCh != nil {
-		go a.forwardReducerResponse(ctx, req, respCh)
+		// Once admitted, keep the protocol handler in flight until the executor
+		// has completed the command. Conn disconnect drains these handlers before
+		// subscription cleanup and OnDisconnect, so an accepted reducer cannot
+		// commit after the client lifecycle has already been torn down.
+		resp, ok := <-respCh
+		a.deliverReducerResponse(ctx, req, resp, ok)
 	}
 	return nil
 }
@@ -439,34 +444,38 @@ func encodeProtocolProductRows(rows []types.ProductValue, columns []schema.Colum
 func (a *ProtocolInboxAdapter) forwardReducerResponse(ctx context.Context, req protocol.CallReducerRequest, respCh <-chan ProtocolCallReducerResponse) {
 	select {
 	case resp, ok := <-respCh:
-		if !ok {
-			sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(ReducerResponse{
-				Status: StatusFailedInternal,
-				Error:  errors.New("executor reducer response channel closed"),
-			})))
-			return
-		}
-		if resp.Committed != nil {
-			if resp.Committed.Outcome.Kind == subscription.CallerOutcomeCommitted &&
-				resp.Committed.Outcome.Flags == subscription.CallerOutcomeFlagNoSuccessNotify {
-				close(req.ResponseCh)
-				return
-			}
-			update, err := protocol.BuildTransactionUpdateHeavy(req.ConnID, resp.Committed.Outcome, resp.Committed.Updates, nil)
-			if err != nil {
-				sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(ReducerResponse{
-					Status: StatusFailedInternal,
-					Error:  fmt.Errorf("encode caller outcome: %w", err),
-				})))
-				return
-			}
-			sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, update)
-			return
-		}
-		sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(resp.Reducer)))
+		a.deliverReducerResponse(ctx, req, resp, ok)
 	case <-ctx.Done():
 	case <-req.Done:
 	}
+}
+
+func (a *ProtocolInboxAdapter) deliverReducerResponse(ctx context.Context, req protocol.CallReducerRequest, resp ProtocolCallReducerResponse, ok bool) {
+	if !ok {
+		sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(ReducerResponse{
+			Status: StatusFailedInternal,
+			Error:  errors.New("executor reducer response channel closed"),
+		})))
+		return
+	}
+	if resp.Committed != nil {
+		if resp.Committed.Outcome.Kind == subscription.CallerOutcomeCommitted &&
+			resp.Committed.Outcome.Flags == subscription.CallerOutcomeFlagNoSuccessNotify {
+			close(req.ResponseCh)
+			return
+		}
+		update, err := protocol.BuildTransactionUpdateHeavy(req.ConnID, resp.Committed.Outcome, resp.Committed.Updates, nil)
+		if err != nil {
+			sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(ReducerResponse{
+				Status: StatusFailedInternal,
+				Error:  fmt.Errorf("encode caller outcome: %w", err),
+			})))
+			return
+		}
+		sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, update)
+		return
+	}
+	sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(resp.Reducer)))
 }
 
 func sendTransactionUpdateWithContext(ctx context.Context, done <-chan struct{}, ch chan<- protocol.TransactionUpdate, update protocol.TransactionUpdate) bool {

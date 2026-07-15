@@ -46,6 +46,15 @@ type Conn struct {
 	readCtx    context.Context
 	cancelRead context.CancelFunc
 
+	// inboundMu protects the terminal inbound-admission barrier and its
+	// handler drain. Once inboundStopped is set, no later frame may start a
+	// handler. Existing handlers remain counted until they return.
+	inboundMu       sync.Mutex
+	inboundStopped  bool
+	inboundStopCh   chan struct{}
+	inboundHandlers int
+	inboundDrained  chan struct{}
+
 	closeOnce sync.Once
 	closed    chan struct{}
 
@@ -95,6 +104,7 @@ func NewConn(
 		opts:                &normalized,
 		readCtx:             readCtx,
 		cancelRead:          cancelRead,
+		inboundStopCh:       make(chan struct{}),
 		closed:              make(chan struct{}),
 		disconnectRequested: make(chan struct{}),
 	}
@@ -108,6 +118,7 @@ func (c *Conn) requestDisconnect(code websocket.StatusCode, reason string) bool 
 	}
 	requested := false
 	c.disconnectRequestOnce.Do(func() {
+		c.stopInbound()
 		c.outboundMu.Lock()
 		c.outboundStopped = true
 		c.outboundMu.Unlock()
@@ -119,6 +130,99 @@ func (c *Conn) requestDisconnect(code websocket.StatusCode, reason string) bool 
 		requested = true
 	})
 	return requested
+}
+
+func (c *Conn) inboundDone() <-chan struct{} {
+	if c == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+	c.inboundMu.Lock()
+	defer c.inboundMu.Unlock()
+	if c.inboundStopCh == nil {
+		c.inboundStopCh = make(chan struct{})
+		if c.inboundStopped {
+			close(c.inboundStopCh)
+		}
+	}
+	return c.inboundStopCh
+}
+
+// stopInbound establishes the once-only terminal admission barrier before
+// executor-facing disconnect cleanup begins. Handler contexts are canceled
+// immediately. A transport Read already in progress is allowed to unblock on
+// a peer frame or the later close handshake because canceling websocket.Read's
+// context would abort the socket before the close frame can be delivered.
+func (c *Conn) stopInbound() {
+	if c == nil {
+		return
+	}
+	c.inboundMu.Lock()
+	if c.inboundStopped {
+		c.inboundMu.Unlock()
+		return
+	}
+	c.inboundStopped = true
+	if c.inboundStopCh == nil {
+		c.inboundStopCh = make(chan struct{})
+	}
+	close(c.inboundStopCh)
+	c.inboundMu.Unlock()
+}
+
+func (c *Conn) beginInboundHandler() bool {
+	if c == nil {
+		return false
+	}
+	c.inboundMu.Lock()
+	defer c.inboundMu.Unlock()
+	if c.inboundStopped {
+		return false
+	}
+	if c.inboundHandlers == 0 {
+		c.inboundDrained = make(chan struct{})
+	}
+	c.inboundHandlers++
+	return true
+}
+
+func (c *Conn) finishInboundHandler() {
+	if c == nil {
+		return
+	}
+	c.inboundMu.Lock()
+	defer c.inboundMu.Unlock()
+	if c.inboundHandlers == 0 {
+		return
+	}
+	c.inboundHandlers--
+	if c.inboundHandlers == 0 && c.inboundDrained != nil {
+		close(c.inboundDrained)
+		c.inboundDrained = nil
+	}
+}
+
+func (c *Conn) waitInboundHandlers(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.inboundMu.Lock()
+	if c.inboundHandlers == 0 {
+		c.inboundMu.Unlock()
+		return nil
+	}
+	drained := c.inboundDrained
+	c.inboundMu.Unlock()
+	select {
+	case <-drained:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (c *Conn) disconnectTimeout() time.Duration {
@@ -316,6 +420,9 @@ func (m *ConnManager) CloseAll(ctx context.Context, inbox ExecutorInbox) {
 	}
 	admissionsDone := m.admissionsDone
 	m.mu.Unlock()
+	for _, c := range conns {
+		c.stopInbound()
+	}
 
 	for _, c := range reserved {
 		c.closeTransport(CloseNormal, CloseReasonServerShutdown)

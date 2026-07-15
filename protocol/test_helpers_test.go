@@ -24,6 +24,7 @@ func testConnDirect(opts *ProtocolOptions) *Conn {
 		opts:                opts,
 		readCtx:             readCtx,
 		cancelRead:          cancelRead,
+		inboundStopCh:       make(chan struct{}),
 		closed:              make(chan struct{}),
 		disconnectRequested: make(chan struct{}),
 	}

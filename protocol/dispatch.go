@@ -48,8 +48,8 @@ func closeProtocolError(conn *Conn, reason string) {
 }
 
 // runDispatchLoop reads frames, decodes messages, and dispatches handlers.
-// Handler contexts also cancel when the Conn closes so blocked executor sends
-// cannot leak past disconnect.
+// Handler contexts cancel at the inbound barrier, before executor cleanup,
+// while c.closed remains the later writer/socket shutdown signal.
 func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 	if handlers == nil {
 		handlers = &MessageHandlers{}
@@ -72,6 +72,8 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 	defer handlerCancel()
 	go func() {
 		select {
+		case <-c.inboundDone():
+			handlerCancel()
 		case <-c.closed:
 			handlerCancel()
 		case <-handlerCtx.Done():
@@ -82,6 +84,8 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-c.inboundDone():
+			return
 		case <-c.closed:
 			return
 		default:
@@ -90,6 +94,11 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		typ, frame, err := c.ws.Read(readCtx)
 		if err != nil {
 			return
+		}
+		select {
+		case <-c.inboundDone():
+			return
+		default:
 		}
 
 		// Reject text frames per SPEC-005 S3.2.
@@ -175,10 +184,16 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		// the client is flooding faster than we can process —
 		// close with 1008.
 		select {
+		case <-c.inboundDone():
+			return
 		case c.inflightSem <- struct{}{}:
 		default:
 			logProtocolBackpressure(c.Observer, "inbound", "buffer_full")
 			c.requestDisconnect(ClosePolicy, CloseReasonTooManyRequests)
+			return
+		}
+		if !c.beginInboundHandler() {
+			<-c.inflightSem
 			return
 		}
 
@@ -187,6 +202,7 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 }
 
 func (c *Conn) runMessageHandler(kind string, run func()) {
+	defer c.finishInboundHandler()
 	defer func() { <-c.inflightSem }()
 	defer func() {
 		if recovered := recover(); recovered != nil {

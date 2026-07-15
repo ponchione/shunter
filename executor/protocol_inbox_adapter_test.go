@@ -1116,6 +1116,53 @@ func TestProtocolInboxAdapter_CallReducer_UsesBufferedProtocolResponseChannel(t 
 	}
 }
 
+func TestProtocolInboxAdapter_CallReducerWaitsForAcceptedCommandAfterCancellation(t *testing.T) {
+	accepted := make(chan CallReducerCmd, 1)
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			accepted <- cmd.(CallReducerCmd)
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	response := make(chan protocol.TransactionUpdate, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- adapter.CallReducer(ctx, protocol.CallReducerRequest{
+			ConnID:      types.ConnectionID{0x31},
+			Identity:    types.Identity{0x32},
+			RequestID:   33,
+			ReducerName: "AcceptedBeforeDisconnect",
+			ResponseCh:  response,
+		})
+	}()
+
+	var cmd CallReducerCmd
+	select {
+	case cmd = <-accepted:
+	case <-time.After(time.Second):
+		t.Fatal("CallReducer command was not accepted")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		t.Fatalf("CallReducer returned before accepted command completed: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	cmd.ProtocolResponseCh <- ProtocolCallReducerResponse{
+		Reducer: ReducerResponse{Status: StatusCommitted},
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("CallReducer: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("CallReducer did not return after accepted command completed")
+	}
+}
+
 func TestProtocolInboxAdapter_CallReducer_ForwardsCommittedHeavyEnvelopeWithRealUpdates(t *testing.T) {
 	connID := types.ConnectionID{8}
 	identity := types.Identity{9}

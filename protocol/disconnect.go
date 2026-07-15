@@ -24,6 +24,12 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 		}
 		teardownCtx, cancelTeardown := context.WithTimeout(ctx, c.disconnectTimeout())
 		defer cancelTeardown()
+		c.stopInbound()
+		drainCtx, cancelDrain := disconnectInboundContext(teardownCtx)
+		if err := c.waitInboundHandlers(drainCtx); err != nil {
+			logProtocolError(c.Observer, "unknown", "disconnect_failed", err)
+		}
+		cancelDrain()
 		if inbox != nil {
 			// Reserve the second half of the bounded teardown window for
 			// OnDisconnect admission. Reusing one deadline for both phases lets
@@ -53,6 +59,18 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 			c.Observer.LogProtocolConnectionClosed(c.ID, closeReason(code, reason))
 		}
 	})
+}
+
+func disconnectInboundContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return context.WithCancel(ctx)
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, remaining/3)
 }
 
 func disconnectSubscriptionContext(ctx context.Context) (context.Context, context.CancelFunc) {

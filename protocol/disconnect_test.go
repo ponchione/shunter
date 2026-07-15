@@ -258,6 +258,11 @@ func TestSuperviseLifecycleInvokesDisconnectOnReadPumpExit(t *testing.T) {
 	if mgr.Get(c.ID) != nil {
 		t.Error("ConnManager still holds connection after supervisor exit")
 	}
+	select {
+	case <-c.inboundDone():
+	default:
+		t.Error("peer-close teardown left inbound admission open")
+	}
 }
 
 func TestSuperviseLifecycleInvokesDisconnectOnOutboundWriterExit(t *testing.T) {
