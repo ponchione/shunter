@@ -225,7 +225,7 @@ func initOffsetIndexForSegment(dir string, seg *SegmentWriter, opts CommitLogOpt
 }
 
 func openOrCreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
-	seg, err := OpenSegmentForAppend(dir, startTxID)
+	seg, err := openExistingSegmentForAppend(dir, startTxID)
 	if err == nil {
 		return seg, nil
 	}
@@ -233,6 +233,20 @@ func openOrCreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
 		return CreateSegment(dir, startTxID)
 	}
 	return nil, err
+}
+
+func openExistingSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) {
+	seg, err := OpenSegmentForAppend(dir, startTxID)
+	if err != nil {
+		return nil, err
+	}
+	if err := syncSegmentDirectory(dir); err != nil {
+		return nil, errors.Join(
+			fmt.Errorf("commitlog: sync existing segment directory %s: %w", dir, err),
+			seg.Close(),
+		)
+	}
+	return seg, nil
 }
 
 func openSegmentForResumePlan(dir string, plan RecoveryResumePlan) (*SegmentWriter, uint64, error) {
@@ -273,7 +287,7 @@ func openSegmentForAppendInPlaceResumePlan(dir string, plan RecoveryResumePlan) 
 		}
 		return seg, 0, nil
 	}
-	seg, err := OpenSegmentForAppend(dir, uint64(plan.SegmentStartTx))
+	seg, err := openExistingSegmentForAppend(dir, uint64(plan.SegmentStartTx))
 	if err != nil {
 		return nil, 0, err
 	}

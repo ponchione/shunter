@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,61 @@ func TestBuildBootstrapsCommittedStateForModuleTables(t *testing.T) {
 	}
 	if rt.resumePlan.NextTxID == 0 && rt.recoveredTxID != 0 {
 		t.Fatalf("recovered tx = %d with zero next tx", rt.recoveredTxID)
+	}
+}
+
+func TestBuildDurablyCreatesMissingDataDirHierarchy(t *testing.T) {
+	existing := t.TempDir()
+	dataDir := filepath.Join(existing, "new-a", "new-b", "data")
+	originalSyncDir := syncDataDirBootstrapDir
+	var synced []string
+	syncDataDirBootstrapDir = func(path string) error {
+		synced = append(synced, path)
+		return nil
+	}
+	defer func() { syncDataDirBootstrapDir = originalSyncDir }()
+
+	rt, err := Build(validChatModule(), Config{DataDir: dataDir})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	wantSynced := []string{
+		filepath.Dir(existing),
+		existing,
+		filepath.Join(existing, "new-a"),
+		filepath.Join(existing, "new-a", "new-b"),
+	}
+	if !slices.Equal(synced, wantSynced) {
+		t.Fatalf("bootstrap synced directories = %#v, want %#v", synced, wantSynced)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, dataDirMetadataFilename)); err != nil {
+		t.Fatalf("stat bootstrapped metadata: %v", err)
+	}
+}
+
+func TestBuildReturnsDataDirAncestorSyncFailure(t *testing.T) {
+	existing := t.TempDir()
+	newA := filepath.Join(existing, "new-a")
+	dataDir := filepath.Join(newA, "new-b", "data")
+	syncErr := errors.New("injected data-dir ancestor sync failure")
+	originalSyncDir := syncDataDirBootstrapDir
+	syncDataDirBootstrapDir = func(path string) error {
+		if path == newA {
+			return syncErr
+		}
+		return nil
+	}
+	defer func() { syncDataDirBootstrapDir = originalSyncDir }()
+
+	if rt, err := Build(validChatModule(), Config{DataDir: dataDir}); !errors.Is(err, syncErr) {
+		if rt != nil {
+			_ = rt.Close()
+		}
+		t.Fatalf("Build error = %v, want injected ancestor sync failure", err)
+	}
+	if _, err := os.Stat(dataDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("data dir stat after ancestor sync failure = %v, want not exist", err)
 	}
 }
 

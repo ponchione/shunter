@@ -1,9 +1,10 @@
-// Package atomicfile writes same-directory replacement files with durable
-// rename publication.
+// Package atomicfile provides durable filesystem publication helpers for
+// same-directory file replacement and recursive directory creation.
 package atomicfile
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -16,6 +17,83 @@ func SyncDir(path string) error {
 	}
 	defer dir.Close()
 	return dir.Sync()
+}
+
+// MkdirAllDurable creates each missing directory in path and synchronizes its
+// containing directory before creating the next component. syncDir may be
+// supplied by callers that need fault injection; nil uses SyncDir.
+//
+// When path is partially present, the containing directory of the deepest
+// existing component is synchronized first. When the complete path already
+// exists, its containing directory is synchronized. Those repairs cover the
+// only unsynced directory entry a prior failed ordered invocation can leave
+// behind before the path is accepted or extended.
+func MkdirAllDurable(path string, perm os.FileMode, syncDir func(string) error) error {
+	cleanPath := filepath.Clean(path)
+	missing := make([]string, 0)
+	existing := cleanPath
+	for {
+		info, err := os.Stat(existing)
+		if err == nil {
+			if !info.IsDir() {
+				return &os.PathError{Op: "mkdir", Path: existing, Err: fmt.Errorf("not a directory")}
+			}
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		missing = append(missing, existing)
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return err
+		}
+		existing = parent
+	}
+	if syncDir == nil {
+		syncDir = SyncDir
+	}
+	if len(missing) == 0 {
+		parent := filepath.Dir(cleanPath)
+		if parent == cleanPath {
+			return nil
+		}
+		if err := syncDir(parent); err != nil {
+			return fmt.Errorf("sync containing directory %s for existing directory %s: %w", parent, cleanPath, err)
+		}
+		return nil
+	}
+
+	// The deepest existing component can be residue from a prior invocation
+	// whose containing-directory sync failed. Repair its publication before
+	// placing another directory beneath it.
+	existingParent := filepath.Dir(existing)
+	if existingParent != existing {
+		if err := syncDir(existingParent); err != nil {
+			return fmt.Errorf("sync containing directory %s for existing directory %s: %w", existingParent, existing, err)
+		}
+	}
+
+	for i := len(missing) - 1; i >= 0; i-- {
+		component := missing[i]
+		if err := os.Mkdir(component, perm); err != nil {
+			if !errors.Is(err, os.ErrExist) {
+				return err
+			}
+			info, statErr := os.Stat(component)
+			if statErr != nil {
+				return statErr
+			}
+			if !info.IsDir() {
+				return &os.PathError{Op: "mkdir", Path: component, Err: fmt.Errorf("not a directory")}
+			}
+		}
+		parent := filepath.Dir(component)
+		if err := syncDir(parent); err != nil {
+			return fmt.Errorf("sync containing directory %s for new directory %s: %w", parent, component, err)
+		}
+	}
+	return nil
 }
 
 // Options controls WriteFile replacement behavior.

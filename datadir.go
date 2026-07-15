@@ -93,7 +93,7 @@ func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestinat
 	}
 
 	parent := filepath.Dir(dst)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
+	if err := atomicfile.MkdirAllDurable(parent, 0o755, syncOfflineCopyCreateDir); err != nil {
 		return fmt.Errorf("create destination parent directory %s: %w", parent, err)
 	}
 	staging, err := makeOfflineCopyStagingDir(parent, "."+filepath.Base(dst)+".staging-*")
@@ -170,6 +170,7 @@ var (
 	removeOfflineCopyEmpty    = os.Remove
 	removeOfflineCopyTree     = os.RemoveAll
 	renameOfflineCopy         = os.Rename
+	syncOfflineCopyCreateDir  = atomicfile.SyncDir
 	syncOfflineCopyDir        = atomicfile.SyncDir
 )
 

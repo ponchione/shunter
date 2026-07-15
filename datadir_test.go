@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -39,6 +40,91 @@ func TestBackupAndRestoreDataDirHelpersCopyCompleteDirectory(t *testing.T) {
 	}
 	assertDataDirFileBytes(t, filepath.Join(restoreDir, "00000000000000000001.log"), []byte("segment-1"))
 	assertDataDirFileBytes(t, filepath.Join(restoreDir, "snapshots", "7", "snapshot"), []byte("snapshot-7"))
+}
+
+func TestOfflineCopyDurablyCreatesMissingDestinationParentHierarchy(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(source, destination string) error
+	}{
+		{name: "backup", run: func(source, destination string) error {
+			return BackupDataDir(source, destination)
+		}},
+		{name: "restore", run: func(source, destination string) error {
+			return RestoreDataDir(source, destination)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			source := filepath.Join(root, "source")
+			if err := os.Mkdir(source, 0o755); err != nil {
+				t.Fatalf("create source: %v", err)
+			}
+			writeDataDirTestBytes(t, source, "segment", []byte("durable"))
+			existing := filepath.Join(root, "destination-root")
+			if err := os.Mkdir(existing, 0o755); err != nil {
+				t.Fatalf("create existing destination root: %v", err)
+			}
+			newA := filepath.Join(existing, "new-a")
+			newB := filepath.Join(newA, "new-b")
+			destination := filepath.Join(newB, "data")
+			previousCreate := syncOfflineCopyCreateDir
+			var createSynced []string
+			syncOfflineCopyCreateDir = func(path string) error {
+				createSynced = append(createSynced, path)
+				return nil
+			}
+			t.Cleanup(func() { syncOfflineCopyCreateDir = previousCreate })
+			previousPublication := syncOfflineCopyDir
+			var publicationSynced []string
+			syncOfflineCopyDir = func(path string) error {
+				publicationSynced = append(publicationSynced, path)
+				return nil
+			}
+			t.Cleanup(func() { syncOfflineCopyDir = previousPublication })
+
+			if err := tc.run(source, destination); err != nil {
+				t.Fatalf("offline copy: %v", err)
+			}
+			wantPrefix := []string{filepath.Dir(existing), existing, newA}
+			if !slices.Equal(createSynced, wantPrefix) {
+				t.Fatalf("offline copy creation syncs = %#v, want durable parent sequence %#v", createSynced, wantPrefix)
+			}
+			if publicationSynced[len(publicationSynced)-1] != newB {
+				t.Fatalf("last offline-copy publication sync = %q, want final publication parent %q", publicationSynced[len(publicationSynced)-1], newB)
+			}
+			assertDataDirFileBytes(t, filepath.Join(destination, "segment"), []byte("durable"))
+		})
+	}
+}
+
+func TestOfflineCopyReturnsDestinationAncestorSyncFailureBeforePublication(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	if err := os.Mkdir(source, 0o755); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	writeDataDirTestBytes(t, source, "segment", []byte("durable"))
+	existing := filepath.Join(root, "destination-root")
+	if err := os.Mkdir(existing, 0o755); err != nil {
+		t.Fatalf("create existing destination root: %v", err)
+	}
+	newA := filepath.Join(existing, "new-a")
+	destination := filepath.Join(newA, "new-b", "data")
+	syncErr := errors.New("injected destination ancestor sync failure")
+	previous := syncOfflineCopyCreateDir
+	syncOfflineCopyCreateDir = func(path string) error {
+		if path == newA {
+			return syncErr
+		}
+		return nil
+	}
+	t.Cleanup(func() { syncOfflineCopyCreateDir = previous })
+
+	if err := BackupDataDir(source, destination); !errors.Is(err, syncErr) {
+		t.Fatalf("BackupDataDir error = %v, want injected ancestor sync failure", err)
+	}
+	assertPathMissing(t, destination)
 }
 
 func TestBackupAndRestoreDataDirPreserveReadableReadOnlyDirectories(t *testing.T) {

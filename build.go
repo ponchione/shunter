@@ -9,6 +9,7 @@ import (
 
 	"github.com/ponchione/shunter/commitlog"
 	"github.com/ponchione/shunter/executor"
+	"github.com/ponchione/shunter/internal/atomicfile"
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
@@ -420,8 +421,10 @@ func blockedLogOnlySchemaReport(registeredVersion, persistedVersion uint32, deta
 	}
 }
 
+var syncDataDirBootstrapDir = atomicfile.SyncDir
+
 func openOrBootstrapState(dataDir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, commitlog.RecoveryResumePlan, commitlog.RecoveryReport, schema.SchemaRegistry, error) {
-	if err := os.MkdirAll(dataDir, dataDirMode); err != nil {
+	if err := atomicfile.MkdirAllDurable(dataDir, dataDirMode, syncDataDirBootstrapDir); err != nil {
 		return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, reg, fmt.Errorf("mkdir data dir: %w", err)
 	}
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -2012,6 +2013,78 @@ func TestCreateSnapshotUsesTempFileUntilRename(t *testing.T) {
 	}
 }
 
+func TestCreateSnapshotDurablyCreatesMissingBaseHierarchyBeforePublication(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	existing := t.TempDir()
+	newA := filepath.Join(existing, "new-a")
+	newB := filepath.Join(newA, "new-b")
+	baseDir := filepath.Join(newB, "data")
+	snapshotDir := filepath.Join(baseDir, "106")
+	writer := NewSnapshotWriter(baseDir, reg).(*FileSnapshotWriter)
+	var events []string
+	writer.syncDir = func(path string) error {
+		events = append(events, "sync:"+path)
+		return nil
+	}
+	originalRename := writer.rename
+	writer.rename = func(oldPath, newPath string) error {
+		events = append(events, "rename:"+newPath)
+		return originalRename(oldPath, newPath)
+	}
+
+	cs.SetCommittedTxID(106)
+	if err := writer.CreateSnapshot(cs, 106); err != nil {
+		t.Fatalf("CreateSnapshot: %v", err)
+	}
+	wantPrefix := []string{
+		"sync:" + filepath.Dir(existing),
+		"sync:" + existing,
+		"sync:" + newA,
+		"sync:" + newB,
+		"sync:" + baseDir,
+	}
+	if len(events) < len(wantPrefix) || !slices.Equal(events[:len(wantPrefix)], wantPrefix) {
+		t.Fatalf("snapshot setup events = %#v, want durable hierarchy prefix %#v", events, wantPrefix)
+	}
+	renameEvent := "rename:" + filepath.Join(snapshotDir, snapshotFileName)
+	renameIndex := slices.Index(events, renameEvent)
+	if renameIndex < 0 {
+		t.Fatalf("snapshot events = %#v, want final rename", events)
+	}
+	if syncIndex := slices.Index(events[renameIndex+1:], "sync:"+snapshotDir); syncIndex < 0 {
+		t.Fatalf("snapshot events after rename = %#v, want same-directory publication sync", events[renameIndex+1:])
+	}
+}
+
+func TestCreateSnapshotReturnsBaseAncestorSyncFailureBeforePublication(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	existing := t.TempDir()
+	newA := filepath.Join(existing, "new-a")
+	baseDir := filepath.Join(newA, "new-b", "data")
+	syncErr := errors.New("injected snapshot base ancestor sync failure")
+	writer := NewSnapshotWriter(baseDir, reg).(*FileSnapshotWriter)
+	writer.syncDir = func(path string) error {
+		if path == newA {
+			return syncErr
+		}
+		return nil
+	}
+	renameCalls := 0
+	writer.rename = func(string, string) error {
+		renameCalls++
+		return nil
+	}
+
+	cs.SetCommittedTxID(107)
+	err := writer.CreateSnapshot(cs, 107)
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("CreateSnapshot error = %v, want injected ancestor sync failure", err)
+	}
+	if renameCalls != 0 {
+		t.Fatalf("snapshot rename calls after ancestor sync failure = %d, want 0", renameCalls)
+	}
+}
+
 func TestCreateSnapshotMkdirFailureReturnsSnapshotCompletionError(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()
@@ -2464,8 +2537,8 @@ func TestCreateSnapshotSyncUnlockFailureReturnsSnapshotCompletionError(t *testin
 	syncErr := errors.New("sync unlock failed")
 	syncSnapshotCalls := 0
 	writer.syncDir = func(path string) error {
-		if path != snapshotBase && path != snapshotDir {
-			t.Fatalf("syncDir path = %q, want snapshot base or tx directory", path)
+		if path != filepath.Dir(baseDir) && path != baseDir && path != snapshotBase && path != snapshotDir {
+			t.Fatalf("syncDir path = %q, want durable base hierarchy, snapshot base, or tx directory", path)
 		}
 		if path == snapshotDir {
 			syncSnapshotCalls++

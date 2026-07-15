@@ -830,6 +830,130 @@ func TestDurabilityWorkerResumeSyncFailureLeavesRecoverableDurablePrefix(t *test
 	}
 }
 
+func TestDurabilityWorkerAppendInPlaceRetryRequiresSegmentDirectorySync(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		retryFails  bool
+		wantDurable uint64
+	}{
+		{name: "retry repairs publication before append", wantDurable: 1},
+		{name: "retry sync failure rejects worker", retryFails: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			plan := RecoveryResumePlan{
+				SegmentStartTx: 1,
+				NextTxID:       1,
+				AppendMode:     AppendInPlace,
+			}
+			firstSyncErr := errors.New("injected initial segment directory sync failure")
+			retrySyncErr := errors.New("injected retry segment directory sync failure")
+			syncCalls := 0
+			stubSegmentDirectorySync(t, func(path string) error {
+				if path != dir {
+					t.Fatalf("segment directory sync path = %q, want %q", path, dir)
+				}
+				syncCalls++
+				if syncCalls == 1 {
+					return firstSyncErr
+				}
+				if tc.retryFails {
+					return retrySyncErr
+				}
+				return nil
+			})
+
+			if worker, err := NewDurabilityWorkerWithResumePlan(dir, plan, DefaultCommitLogOptions()); !errors.Is(err, firstSyncErr) {
+				if worker != nil {
+					_, _ = worker.Close()
+				}
+				t.Fatalf("first worker creation error = %v, want initial directory sync failure", err)
+			}
+			if syncCalls != 1 {
+				t.Fatalf("directory sync calls after first failure = %d, want 1", syncCalls)
+			}
+
+			worker, err := NewDurabilityWorkerWithResumePlan(dir, plan, DefaultCommitLogOptions())
+			if tc.retryFails {
+				if worker != nil {
+					_, _ = worker.Close()
+					t.Fatal("retry returned a worker after directory sync failure")
+				}
+				if !errors.Is(err, retrySyncErr) {
+					t.Fatalf("retry worker creation error = %v, want retry directory sync failure", err)
+				}
+				if syncCalls != 2 {
+					t.Fatalf("directory sync calls after rejected retry = %d, want 2", syncCalls)
+				}
+				info, statErr := os.Stat(filepath.Join(dir, SegmentFileName(1)))
+				if statErr != nil {
+					t.Fatalf("stat rejected retry segment: %v", statErr)
+				}
+				if info.Size() != SegmentHeaderSize {
+					t.Fatalf("segment size after rejected retry = %d, want header-only size %d with no durable TxID", info.Size(), SegmentHeaderSize)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("retry worker creation: %v", err)
+			}
+			if syncCalls != 2 {
+				t.Fatalf("directory sync calls after repaired retry = %d, want 2", syncCalls)
+			}
+			worker.EnqueueCommitted(1, makeDurabilityTestChangeset(1))
+			finalTxID, fatalErr := worker.Close()
+			if fatalErr != nil {
+				t.Fatalf("close repaired worker: %v", fatalErr)
+			}
+			if finalTxID != tc.wantDurable || worker.DurableTxID() != tc.wantDurable {
+				t.Fatalf("durable TxID after repaired retry = (%d, %d), want %d", finalTxID, worker.DurableTxID(), tc.wantDurable)
+			}
+		})
+	}
+}
+
+func TestNewDurabilityWorkerRetryRequiresSegmentDirectorySync(t *testing.T) {
+	dir := t.TempDir()
+	firstSyncErr := errors.New("injected initial segment directory sync failure")
+	retrySyncErr := errors.New("injected retry segment directory sync failure")
+	syncCalls := 0
+	stubSegmentDirectorySync(t, func(path string) error {
+		if path != dir {
+			t.Fatalf("segment directory sync path = %q, want %q", path, dir)
+		}
+		syncCalls++
+		if syncCalls == 1 {
+			return firstSyncErr
+		}
+		return retrySyncErr
+	})
+
+	if worker, err := NewDurabilityWorker(dir, 1, DefaultCommitLogOptions()); !errors.Is(err, firstSyncErr) {
+		if worker != nil {
+			_, _ = worker.Close()
+		}
+		t.Fatalf("first worker creation error = %v, want initial directory sync failure", err)
+	}
+	worker, err := NewDurabilityWorker(dir, 1, DefaultCommitLogOptions())
+	if worker != nil {
+		_, _ = worker.Close()
+		t.Fatal("retry returned a worker after directory sync failure")
+	}
+	if !errors.Is(err, retrySyncErr) {
+		t.Fatalf("retry worker creation error = %v, want retry directory sync failure", err)
+	}
+	if syncCalls != 2 {
+		t.Fatalf("directory sync calls after rejected retry = %d, want 2", syncCalls)
+	}
+	info, statErr := os.Stat(filepath.Join(dir, SegmentFileName(1)))
+	if statErr != nil {
+		t.Fatalf("stat rejected retry segment: %v", statErr)
+	}
+	if info.Size() != SegmentHeaderSize {
+		t.Fatalf("segment size after rejected retry = %d, want header-only size %d with no durable TxID", info.Size(), SegmentHeaderSize)
+	}
+}
+
 func TestDurabilityWorkerResumeFreshSegmentReplacesRolloverArtifacts(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
