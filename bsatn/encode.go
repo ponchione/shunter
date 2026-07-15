@@ -86,7 +86,7 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 		if err := types.ValidateUTF8String(s); err != nil {
 			return dst[:start], fmt.Errorf("string: %w", err)
 		}
-		n, err := checkedUint32Len("string", len(s))
+		n, err := checkedValuePayloadLen("string", len(s))
 		if err != nil {
 			return dst[:start], err
 		}
@@ -95,7 +95,7 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 		dst = append(dst, s...)
 	case types.KindBytes:
 		b := v.BytesView()
-		n, err := checkedUint32Len("bytes", len(b))
+		n, err := checkedValuePayloadLen("bytes", len(b))
 		if err != nil {
 			return dst[:start], err
 		}
@@ -138,21 +138,20 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 		dst = append(dst, buf[:8]...)
 	case types.KindArrayString:
 		xs := v.ArrayStringView()
+		count, err := checkedArrayStringCount(len(xs))
+		if err != nil {
+			return dst[:start], err
+		}
 		if err := types.ValidateUTF8StringArray(xs); err != nil {
 			return dst[:start], fmt.Errorf("array string: %w", err)
 		}
-		count, err := checkedUint32Len("array string count", len(xs))
-		if err != nil {
+		if err := validateArrayStringPayloadSize(xs); err != nil {
 			return dst[:start], err
 		}
 		binary.LittleEndian.PutUint32(buf[:4], count)
 		dst = append(dst, buf[:4]...)
 		for _, s := range xs {
-			n, err := checkedUint32Len("array string item", len(s))
-			if err != nil {
-				return dst[:start], err
-			}
-			binary.LittleEndian.PutUint32(buf[:4], n)
+			binary.LittleEndian.PutUint32(buf[:4], uint32(len(s)))
 			dst = append(dst, buf[:4]...)
 			dst = append(dst, s...)
 		}
@@ -161,7 +160,7 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 		dst = append(dst, u[:]...)
 	case types.KindJSON:
 		b := v.JSONView()
-		n, err := checkedUint32Len("json", len(b))
+		n, err := checkedValuePayloadLen("json", len(b))
 		if err != nil {
 			return dst[:start], err
 		}
@@ -174,11 +173,31 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 	return dst, nil
 }
 
-func checkedUint32Len(label string, n int) (uint32, error) {
-	if n < 0 || uint64(n) > math.MaxUint32 {
-		return 0, fmt.Errorf("%w: %s length %d exceeds uint32", ErrValueTooLarge, label, n)
+func checkedValuePayloadLen(label string, n int) (uint32, error) {
+	if n < 0 || uint64(n) > maxValuePayloadBytes {
+		return 0, fmt.Errorf("%w: %s length %d exceeds max %d", ErrValueTooLarge, label, n, maxValuePayloadBytes)
 	}
 	return uint32(n), nil
+}
+
+func checkedArrayStringCount(n int) (uint32, error) {
+	if n < 0 || uint64(n) > maxArrayStringItems {
+		return 0, fmt.Errorf("%w: array string count %d exceeds max %d", ErrValueTooLarge, n, maxArrayStringItems)
+	}
+	return uint32(n), nil
+}
+
+func validateArrayStringPayloadSize(xs []string) error {
+	used := uint64(4) // item count prefix
+	max := uint64(maxValuePayloadBytes)
+	for _, s := range xs {
+		itemLen := uint64(len(s))
+		if used > max-4 || itemLen > max-used-4 {
+			return fmt.Errorf("%w: array string payload exceeds max %d", ErrValueTooLarge, maxValuePayloadBytes)
+		}
+		used += 4 + itemLen
+	}
+	return nil
 }
 
 // EncodeValue writes a Value in BSATN format: tag byte + LE payload.

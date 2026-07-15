@@ -14,11 +14,6 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-const (
-	maxDecodedValuePayloadBytes = 64 << 20
-	maxDecodedArrayStringItems  = 1 << 20
-)
-
 // DecodeValue reads a BSATN-encoded Value.
 func DecodeValue(r io.Reader) (types.Value, error) {
 	tag, err := readValueTag(r)
@@ -208,14 +203,14 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 			return types.Value{}, err
 		}
 		count := binary.LittleEndian.Uint32(buf[:4])
-		if count > maxDecodedArrayStringItems {
-			return types.Value{}, decodedValueTooLarge("array string count", uint64(count), maxDecodedArrayStringItems)
+		if count > maxArrayStringItems {
+			return types.Value{}, decodedValueTooLarge("array string count", uint64(count), maxArrayStringItems)
 		}
-		remaining := uint64(maxDecodedValuePayloadBytes - 4)
+		remaining := uint64(maxValuePayloadBytes - 4)
 		xs := make([]string, 0, initialArrayStringCap(count))
 		for range count {
 			if remaining < 4 {
-				return types.Value{}, decodedValueTooLarge("array string payload", uint64(maxDecodedValuePayloadBytes)+4-remaining, maxDecodedValuePayloadBytes)
+				return types.Value{}, decodedValueTooLarge("array string payload", uint64(maxValuePayloadBytes)+4-remaining, maxValuePayloadBytes)
 			}
 			if _, err := io.ReadFull(r, buf[:4]); err != nil {
 				return types.Value{}, err
@@ -223,7 +218,7 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 			remaining -= 4
 			n := binary.LittleEndian.Uint32(buf[:4])
 			if uint64(n) > remaining {
-				return types.Value{}, decodedValueTooLarge("array string payload", uint64(maxDecodedValuePayloadBytes)+uint64(n)-remaining, maxDecodedValuePayloadBytes)
+				return types.Value{}, decodedValueTooLarge("array string payload", uint64(maxValuePayloadBytes)+uint64(n)-remaining, maxValuePayloadBytes)
 			}
 			remaining -= uint64(n)
 			data, err := readLengthPrefixedPayload(r, n)
@@ -261,8 +256,8 @@ func readLengthPrefixedPayload(r io.Reader, n uint32) ([]byte, error) {
 	if n == 0 {
 		return []byte{}, nil
 	}
-	if n > maxDecodedValuePayloadBytes {
-		return nil, decodedValueTooLarge("payload", uint64(n), maxDecodedValuePayloadBytes)
+	if n > maxValuePayloadBytes {
+		return nil, decodedValueTooLarge("payload", uint64(n), maxValuePayloadBytes)
 	}
 	data := make([]byte, n)
 	if _, err := io.ReadFull(r, data); err != nil {

@@ -634,7 +634,7 @@ func TestDecodeValueRejectsHugeLengthBeforePayloadRead(t *testing.T) {
 
 func TestDecodeValueRejectsHugeArrayStringCountBeforePayloadRead(t *testing.T) {
 	var count [4]byte
-	binary.LittleEndian.PutUint32(count[:], maxDecodedArrayStringItems+1)
+	binary.LittleEndian.PutUint32(count[:], maxArrayStringItems+1)
 	raw := append([]byte{TagArrayString}, count[:]...)
 	_, err := DecodeValue(bytes.NewReader(raw))
 	if !errors.Is(err, ErrValueTooLarge) {
@@ -647,7 +647,7 @@ func TestDecodeValueRejectsArrayStringPayloadBudgetBeforePayloadRead(t *testing.
 	raw := []byte{TagArrayString}
 	binary.LittleEndian.PutUint32(u32[:], 1)
 	raw = append(raw, u32[:]...)
-	binary.LittleEndian.PutUint32(u32[:], maxDecodedValuePayloadBytes)
+	binary.LittleEndian.PutUint32(u32[:], maxValuePayloadBytes)
 	raw = append(raw, u32[:]...)
 
 	_, err := DecodeValue(bytes.NewReader(raw))

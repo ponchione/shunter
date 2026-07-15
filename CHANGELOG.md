@@ -4,6 +4,13 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Runtime snapshots now enter through an executor-serialized maintenance
+  barrier, wait for their selected transaction horizon to become durable, and
+  capture table state only after commit data, changeset IDs, and the committed
+  horizon are published atomically.
+- BSATN value encoding now enforces the decoder's 64 MiB payload and string
+  array item/aggregate limits, preserving encode/decode round trips and
+  rolling append destinations back on limit errors.
 - Composite-index range bounds now accept full key tuples and define shorter
   bounds as prefix endpoints, so exclusive lower prefixes and inclusive upper
   prefixes no longer return silently incorrect rows.
