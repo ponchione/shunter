@@ -364,10 +364,11 @@ func (e *Executor) submit(ctx context.Context, cmd ExecutorCommand, requireExter
 }
 
 func (e *Executor) validateSubmitAdmission(cmd ExecutorCommand, requireExternalReady bool) error {
-	if e.fatal.Load() {
+	fatalCleanup := isFatalCleanupCommand(cmd)
+	if e.fatal.Load() && !fatalCleanup {
 		return ErrExecutorFatal
 	}
-	if err := e.latchDurabilityFatal(0); err != nil {
+	if err := e.latchDurabilityFatal(0); err != nil && !fatalCleanup {
 		return ErrExecutorFatal
 	}
 	if e.shutdown.Load() {
@@ -491,8 +492,11 @@ func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) string {
 func (e *Executor) dispatch(cmd ExecutorCommand) string {
 	// Story 5.3: short-circuit write-affecting commands that were already in
 	// the inbox when the executor latched into the fatal state. Submit
-	// catches the common case; this catch covers the race window.
-	if e.fatal.Load() || e.latchDurabilityFatal(0) != nil {
+	// catches the common case; this catch covers the race window. Terminal
+	// disconnect maintenance remains admitted so fatal state cannot strand
+	// subscription ownership or sys_clients rows.
+	fatalCleanup := isFatalCleanupCommand(cmd)
+	if (e.fatal.Load() || e.latchDurabilityFatal(0) != nil) && !fatalCleanup {
 		e.rejectCommand(cmd, ErrExecutorFatal)
 		return "internal_error"
 	}
@@ -513,6 +517,15 @@ func (e *Executor) dispatch(cmd ExecutorCommand) string {
 		return e.handleCreateSnapshot(c)
 	default:
 		return "internal_error"
+	}
+}
+
+func isFatalCleanupCommand(cmd ExecutorCommand) bool {
+	switch cmd.(type) {
+	case DisconnectClientSubscriptionsCmd, OnDisconnectCmd:
+		return true
+	default:
+		return false
 	}
 }
 

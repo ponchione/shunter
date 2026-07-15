@@ -90,10 +90,13 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) string {
 		return "internal_error"
 	}
 
-	if err := e.latchDurabilityFatal(0); err != nil {
-		store.Rollback(tx)
-		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, err)
-		return "internal_error"
+	// Fatal state rejects ordinary writes, but disconnect cleanup is terminal
+	// maintenance: make the sys_clients delete visible in memory even when the
+	// durability pipeline is already unhealthy. Preserve the fatal condition
+	// so it can be reported after the cleanup commit is attempted.
+	fatalErr := e.latchDurabilityFatal(0)
+	if fatalErr == nil && e.fatal.Load() {
+		fatalErr = ErrExecutorFatal
 	}
 	txID, err := e.nextCommitTxID()
 	if err != nil {
@@ -111,8 +114,23 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) string {
 	e.consumeCommitTxID()
 
 	// Even when the reducer failed, the cleanup commit still runs the
-	// post-commit pipeline so subscribers see the sys_clients delete.
-	return executorCommandResultFromStatus(e.postCommit(txID, changeset, nil, CallReducerCmd{ResponseCh: cmd.ResponseCh}, postCommitOptions{source: CallSourceLifecycle}))
+	// post-commit pipeline so subscribers see the sys_clients delete. Lifecycle
+	// response delivery is deferred until afterward so a pre-existing fatal
+	// condition cannot be mistaken for a successful durable cleanup.
+	status := e.postCommit(txID, changeset, nil, CallReducerCmd{}, postCommitOptions{source: CallSourceLifecycle})
+	if status != StatusCommitted {
+		if fatalErr == nil {
+			fatalErr = fmt.Errorf("%w: OnDisconnect cleanup post-commit failed", ErrExecutorFatal)
+		}
+		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, txID, fatalErr)
+		return "internal_error"
+	}
+	if fatalErr != nil {
+		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, txID, fatalErr)
+		return "internal_error"
+	}
+	respondLifecycle(cmd.ResponseCh, StatusCommitted, txID, nil)
+	return "ok"
 }
 
 // sweepDanglingClients deletes recovered sys_clients rows without running

@@ -1130,7 +1130,20 @@ func TestPostCommitInFlightCommandGetsFatalResponse(t *testing.T) {
 	}
 	expectFatalError(t, "register", registerErr)
 	expectFatalError(t, "unregister", unregisterErr)
-	expectFatalError(t, "disconnect", disconnectErr)
+	select {
+	case err := <-disconnectErr:
+		if err != nil {
+			t.Fatalf("disconnect err=%v, want terminal cleanup admitted", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("disconnect timeout")
+	}
+	h.subs.mu.Lock()
+	disconns := slices.Clone(h.subs.disconns)
+	h.subs.mu.Unlock()
+	if len(disconns) != 1 || disconns[0] != (types.ConnectionID{1}) {
+		t.Fatalf("disconnect calls=%v, want connection 01 cleanup", disconns)
+	}
 }
 
 func expectFatalError(t *testing.T, label string, ch <-chan error) {
