@@ -1,6 +1,7 @@
 package shunter
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -563,6 +564,68 @@ func TestHandleCallProcedureReportsProcedureError(t *testing.T) {
 	}
 	if len(resp.Result) != 0 {
 		t.Fatalf("procedure response result = %x, want empty on error", resp.Result)
+	}
+}
+
+func TestCallProcedureEnforcesConfiguredResultLimit(t *testing.T) {
+	rt := buildStartedRuntimeWithProcedureAndConfig(t, "notify", func(_ *ProcedureContext, _ []byte) ([]byte, error) {
+		return []byte("too large"), nil
+	}, Config{DataDir: t.TempDir(), ProcedureResultMaxBytes: 4})
+	defer rt.Close()
+
+	result, err := rt.CallProcedure(context.Background(), "notify", nil)
+	if !errors.Is(err, ErrProcedureResultLimit) {
+		t.Fatalf("CallProcedure error = %v, want ErrProcedureResultLimit", err)
+	}
+	if len(result) != 0 {
+		t.Fatalf("CallProcedure result = %q, want empty on limit failure", result)
+	}
+}
+
+func TestHandleCallProcedureConvertsOversizedWireResponseToCorrelatedError(t *testing.T) {
+	rt := buildStartedRuntimeWithProcedureAndConfig(t, "notify", func(_ *ProcedureContext, _ []byte) ([]byte, error) {
+		return make([]byte, 1024), nil
+	}, Config{DataDir: t.TempDir(), EnableProtocol: true})
+	defer rt.Close()
+
+	opts := protocol.DefaultProtocolOptions()
+	opts.MaxOutboundMessageSize = 128
+	conn := protocol.NewConn(protocol.GenerateConnectionID(), types.Identity{1}, "", false, nil, &opts)
+	mgr := protocol.NewConnManager()
+	if err := mgr.Add(conn); err != nil {
+		t.Fatalf("ConnManager.Add: %v", err)
+	}
+	rt.mu.Lock()
+	rt.protocolSender = protocol.NewClientSender(mgr, nil)
+	rt.mu.Unlock()
+	messageID := []byte("procedure-size")
+
+	rt.HandleCallProcedure(context.Background(), conn, &protocol.CallProcedureMsg{
+		MessageID: messageID,
+		Name:      "notify",
+	})
+
+	select {
+	case frame := <-conn.OutboundCh:
+		tag, msg, err := protocol.DecodeServerMessage(frame)
+		if err != nil {
+			t.Fatalf("DecodeServerMessage: %v", err)
+		}
+		response, ok := msg.(protocol.ProcedureResponse)
+		if tag != protocol.TagProcedureResponse || !ok {
+			t.Fatalf("response = tag %d %T, want ProcedureResponse", tag, msg)
+		}
+		if !bytes.Equal(response.MessageID, messageID) {
+			t.Fatalf("response message ID = %x, want %x", response.MessageID, messageID)
+		}
+		if response.Error == nil || !strings.Contains(*response.Error, "outbound message limit") {
+			t.Fatalf("response error = %v, want outbound message limit", response.Error)
+		}
+		if len(response.Result) != 0 {
+			t.Fatalf("response result retained %d bytes", len(response.Result))
+		}
+	default:
+		t.Fatal("procedure response was not delivered")
 	}
 }
 

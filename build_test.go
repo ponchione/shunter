@@ -220,6 +220,9 @@ func TestBuildWithBlankDataDirNormalizesToRuntimeDefault(t *testing.T) {
 	if rt.buildConfig.OneOffQueryMaxWork != protocol.DefaultSQLQueryMaxWork {
 		t.Fatalf("OneOffQueryMaxWork = %d, want %d", rt.buildConfig.OneOffQueryMaxWork, protocol.DefaultSQLQueryMaxWork)
 	}
+	if rt.buildConfig.ProcedureResultMaxBytes != defaultProcedureResultBytes {
+		t.Fatalf("ProcedureResultMaxBytes = %d, want %d", rt.buildConfig.ProcedureResultMaxBytes, defaultProcedureResultBytes)
+	}
 	if rt.buildConfig.SubscriptionInitialRowLimit != defaultSubscriptionInitialRows {
 		t.Fatalf("SubscriptionInitialRowLimit = %d, want %d", rt.buildConfig.SubscriptionInitialRowLimit, defaultSubscriptionInitialRows)
 	}
@@ -254,6 +257,11 @@ func TestBuildRejectsNegativeResourceLimits(t *testing.T) {
 			name: "one-off work",
 			cfg:  Config{DataDir: t.TempDir(), OneOffQueryMaxWork: -1},
 			want: "one-off query max work must not be negative",
+		},
+		{
+			name: "procedure result bytes",
+			cfg:  Config{DataDir: t.TempDir(), ProcedureResultMaxBytes: -1},
+			want: "procedure result max bytes must not be negative",
 		},
 		{
 			name: "subscription initial rows",

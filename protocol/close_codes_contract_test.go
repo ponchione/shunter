@@ -39,6 +39,7 @@ func TestShunterCloseReasonConstants(t *testing.T) {
 		CloseReasonSendBufferFull,
 		CloseReasonIdleTimeout,
 		CloseReasonServerShutdown,
+		CloseReasonResponseDeliveryFailed,
 		CloseReasonAuthRejected,
 	}
 	seen := map[string]bool{}

@@ -18,17 +18,18 @@ const (
 // Wire close reason strings used by Shunter v1. Keep these short enough for
 // WebSocket close frames and stable enough for clients to classify failures.
 const (
-	CloseReasonTextFrameUnsupported = "text frames not supported"
-	CloseReasonBrotliUnsupported    = "brotli unsupported"
-	CloseReasonMalformedMessage     = "malformed message"
-	CloseReasonUnsupportedMessage   = "unsupported message type"
-	CloseReasonMessageTooLarge      = "message too large"
-	CloseReasonTooManyRequests      = "too many requests"
-	CloseReasonSendBufferFull       = "send buffer full"
-	CloseReasonIdleTimeout          = "idle timeout"
-	CloseReasonServerShutdown       = "server shutdown"
-	CloseReasonOnConnectRejected    = "onconnect rejected"
-	CloseReasonAuthRejected         = "auth-token rejected by admission"
+	CloseReasonTextFrameUnsupported   = "text frames not supported"
+	CloseReasonBrotliUnsupported      = "brotli unsupported"
+	CloseReasonMalformedMessage       = "malformed message"
+	CloseReasonUnsupportedMessage     = "unsupported message type"
+	CloseReasonMessageTooLarge        = "message too large"
+	CloseReasonTooManyRequests        = "too many requests"
+	CloseReasonSendBufferFull         = "send buffer full"
+	CloseReasonIdleTimeout            = "idle timeout"
+	CloseReasonServerShutdown         = "server shutdown"
+	CloseReasonResponseDeliveryFailed = "response delivery failed"
+	CloseReasonOnConnectRejected      = "onconnect rejected"
+	CloseReasonAuthRejected           = "auth-token rejected by admission"
 )
 
 // closeWithHandshake runs a bounded WebSocket close handshake.

@@ -74,6 +74,7 @@ func handleOneOffQueryWithVisibilityAndLimits(
 	receipt := time.Now()
 	readSL := authorizedSchemaLookupForConn(sl, conn)
 	caller := readCallerContext(conn)
+	limits = BindSQLQueryResponseLimit(limits, conn, msg.MessageID)
 	compiled, err := CompileSQLQueryStringWithVisibility(msg.QueryString, readSL, &caller.Identity, SQLQueryValidationOptions{
 		AllowLimit:      true,
 		AllowProjection: true,
@@ -99,14 +100,19 @@ func handleOneOffQueryWithVisibilityAndLimits(
 		recordProtocolMessage(conn.Observer, "one_off_query", "internal_error")
 		return
 	}
-	sendError(conn, OneOffQueryResponse{
+	response := OneOffQueryResponse{
 		MessageID: msg.MessageID,
 		Tables: []OneOffTable{{
 			TableName: result.TableName,
 			Rows:      encoded,
 		}},
 		TotalHostExecutionDuration: elapsedMicrosI64(receipt),
-	})
+	}
+	if err := SendDirectResponse(connOnlySender{conn: conn}, conn, response); err != nil {
+		logProtocolError(conn.Observer, "one_off_query", "send_failed", err)
+		recordProtocolMessage(conn.Observer, "one_off_query", "send_failed")
+		return
+	}
 	recordProtocolMessage(conn.Observer, "one_off_query", "ok")
 }
 
@@ -137,6 +143,10 @@ func executeCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 		return SQLQueryResult{}, fmt.Errorf("schema lookup must not be nil")
 	}
 	query := compiled.query
+	limits, err := applyOneOffResponseBudget(limits, query.TableName)
+	if err != nil {
+		return SQLQueryResult{}, err
+	}
 	tableID, tableSchema, ok := sl.TableByName(query.TableName)
 	if !ok {
 		//lint:ignore ST1005 protocol tests pin this sentence-form error text.
@@ -259,12 +269,17 @@ func oneOffResultColumns(query compiledSQLQuery, fallback *schema.TableSchema) [
 
 // sendOneOffError emits a failure OneOffQueryResponse matching reference
 // module_host.rs:2300 (`error: Some(msg), results: vec![]`).
-func sendOneOffError(conn *Conn, messageID []byte, errMsg string, receipt time.Time) {
-	sendError(conn, OneOffQueryResponse{
+func sendOneOffError(conn *Conn, messageID []byte, errMsg string, receipt time.Time) error {
+	response := OneOffQueryResponse{
 		MessageID:                  messageID,
 		Error:                      &errMsg,
 		TotalHostExecutionDuration: elapsedMicrosI64(receipt),
-	})
+	}
+	err := SendDirectResponse(connOnlySender{conn: conn}, conn, response)
+	if err != nil {
+		logProtocolError(conn.Observer, "one_off_query", "send_failed", err)
+	}
+	return err
 }
 
 // elapsedMicrosI64 reports the non-zero microsecond delta since receipt

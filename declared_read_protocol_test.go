@@ -1,6 +1,7 @@
 package shunter
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -1145,6 +1146,70 @@ func TestProtocolDeclaredQueryUsesRuntimeClientSender(t *testing.T) {
 	}
 	if len(rows) != 1 {
 		t.Fatalf("sender response rows = %d, want 1", len(rows))
+	}
+}
+
+func TestProtocolDeclaredQueryReservesCompleteResponseEnvelope(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message", insertMessageReducer).
+		Query(QueryDeclaration{
+			Name:        "recent_messages",
+			SQL:         "SELECT * FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+	insertMessage(t, rt, "fits the configured RowList budget")
+
+	result, err := rt.CallQuery(context.Background(), "recent_messages", WithDeclaredReadAllowAllPermissions())
+	if err != nil {
+		t.Fatalf("CallQuery: %v", err)
+	}
+	rows, err := encodeDeclaredReadRows(result.Rows, result.Columns)
+	if err != nil {
+		t.Fatalf("encodeDeclaredReadRows: %v", err)
+	}
+	messageID := []byte("declared-response-budget")
+	successSize, err := protocol.ValidateServerMessageSize(protocol.OneOffQueryResponse{
+		MessageID: messageID,
+		Tables: []protocol.OneOffTable{{
+			TableName: result.TableName,
+			Rows:      rows,
+		}},
+		TotalHostExecutionDuration: 1,
+	}, 0)
+	if err != nil {
+		t.Fatalf("ValidateServerMessageSize: %v", err)
+	}
+	opts := protocol.DefaultProtocolOptions()
+	opts.MaxOutboundMessageSize = successSize - 1
+	conn := protocol.NewConn(protocol.GenerateConnectionID(), types.Identity{1}, "", false, nil, &opts)
+	conn.Permissions = []string{"messages:read"}
+	sender := &declaredReadCapturingSender{}
+	rt.mu.Lock()
+	rt.protocolSender = sender
+	rt.mu.Unlock()
+
+	rt.HandleDeclaredQuery(context.Background(), conn, &protocol.DeclaredQueryMsg{
+		MessageID: messageID,
+		Name:      "recent_messages",
+	})
+
+	sendCalls, _, gotMsg, _, _ := sender.snapshot()
+	if sendCalls != 1 {
+		t.Fatalf("sender Send calls = %d, want 1", sendCalls)
+	}
+	response, ok := gotMsg.(protocol.OneOffQueryResponse)
+	if !ok {
+		t.Fatalf("sender message = %T, want OneOffQueryResponse", gotMsg)
+	}
+	if !bytes.Equal(response.MessageID, messageID) {
+		t.Fatalf("response message ID = %x, want %x", response.MessageID, messageID)
+	}
+	if response.Error == nil || !strings.Contains(*response.Error, protocol.ErrSQLQueryResultLimit.Error()) {
+		t.Fatalf("response error = %v, want envelope-aware result limit", response.Error)
+	}
+	if len(response.Tables) != 0 {
+		t.Fatalf("response tables = %+v, want correlated error without payload", response.Tables)
 	}
 }
 

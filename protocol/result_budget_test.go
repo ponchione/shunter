@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"iter"
@@ -198,6 +199,58 @@ func TestRawOneOffReportsHostedResultByteLimit(t *testing.T) {
 	result := drainOneOff(t, conn)
 	if result.Error == nil || !strings.Contains(*result.Error, ErrSQLQueryResultLimit.Error()) {
 		t.Fatalf("raw query error = %v, want %q classification", result.Error, ErrSQLQueryResultLimit)
+	}
+}
+
+func TestRawOneOffReservesCompleteResponseEnvelope(t *testing.T) {
+	columns := []schema.ColumnSchema{{Index: 0, Name: "payload", Type: schema.KindString}}
+	rows := []types.ProductValue{{types.NewString(strings.Repeat("x", 1024))}}
+	encoded, err := EncodeProductRowsForColumns(rows, columns)
+	if err != nil {
+		t.Fatalf("EncodeProductRowsForColumns: %v", err)
+	}
+	messageID := []byte("response-budget")
+	success := OneOffQueryResponse{
+		MessageID: messageID,
+		Tables: []OneOffTable{{
+			TableName: "items",
+			Rows:      encoded,
+		}},
+		TotalHostExecutionDuration: 1,
+	}
+	responseSize, err := ValidateServerMessageSize(success, 0)
+	if err != nil {
+		t.Fatalf("ValidateServerMessageSize: %v", err)
+	}
+	opts := DefaultProtocolOptions()
+	opts.MaxOutboundMessageSize = responseSize - 1
+	conn := testConnDirect(&opts)
+	observer := &protocolMetricObserver{}
+	conn.Observer = observer
+	sl := newMockSchema("items", 1, columns...)
+	state := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: rows}}}
+
+	handleOneOffQueryWithVisibilityAndLimits(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   messageID,
+		QueryString: "SELECT * FROM items",
+	}, state, sl, nil, SQLQueryLimits{MaxRows: 10, MaxBytes: len(encoded)})
+
+	result := drainOneOff(t, conn)
+	if !bytes.Equal(result.MessageID, messageID) {
+		t.Fatalf("response message ID = %x, want %x", result.MessageID, messageID)
+	}
+	if result.Error == nil || !strings.Contains(*result.Error, ErrSQLQueryResultLimit.Error()) {
+		t.Fatalf("response error = %v, want envelope-aware result limit", result.Error)
+	}
+	if len(result.Tables) != 0 {
+		t.Fatalf("response tables = %+v, want correlated error without payload", result.Tables)
+	}
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	for _, event := range observer.messageEvents {
+		if event.kind == "one_off_query" && event.result == "ok" {
+			t.Fatalf("oversized response recorded false success metric: %+v", observer.messageEvents)
+		}
 	}
 }
 

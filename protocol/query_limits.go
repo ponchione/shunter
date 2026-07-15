@@ -32,6 +32,21 @@ type SQLQueryLimits struct {
 	MaxRows  int
 	MaxBytes int
 	MaxWork  int
+
+	responseMaxBytes  int
+	responseMessageID string
+}
+
+// BindSQLQueryResponseLimit reserves the exact OneOffQueryResponse envelope
+// overhead from the query's RowList budget. It is used by protocol handlers;
+// local query callers retain the configured payload-only limit.
+func BindSQLQueryResponseLimit(limits SQLQueryLimits, conn *Conn, messageID []byte) SQLQueryLimits {
+	if conn == nil || conn.opts == nil || conn.opts.MaxOutboundMessageSize <= 0 {
+		return limits
+	}
+	limits.responseMaxBytes = conn.opts.MaxOutboundMessageSize
+	limits.responseMessageID = string(messageID)
+	return limits
 }
 
 // NormalizeSQLQueryLimits validates limits and fills zero values with hosted
@@ -54,6 +69,33 @@ func NormalizeSQLQueryLimits(limits SQLQueryLimits) (SQLQueryLimits, error) {
 	}
 	if limits.MaxWork == 0 {
 		limits.MaxWork = DefaultSQLQueryMaxWork
+	}
+	return limits, nil
+}
+
+func applyOneOffResponseBudget(limits SQLQueryLimits, tableName string) (SQLQueryLimits, error) {
+	if limits.responseMaxBytes <= 0 {
+		return limits, nil
+	}
+	base := OneOffQueryResponse{
+		MessageID: []byte(limits.responseMessageID),
+		Tables:    []OneOffTable{{TableName: tableName}},
+	}
+	baseSize, err := ValidateServerMessageSize(base, 0)
+	if err != nil {
+		return SQLQueryLimits{}, err
+	}
+	rowListBytes := limits.responseMaxBytes - baseSize
+	if rowListBytes < 4 {
+		return SQLQueryLimits{}, fmt.Errorf(
+			"%w: response_bytes=%d cap=%d",
+			ErrSQLQueryResultLimit,
+			baseSize+4,
+			limits.responseMaxBytes,
+		)
+	}
+	if limits.MaxBytes > rowListBytes {
+		limits.MaxBytes = rowListBytes
 	}
 	return limits, nil
 }

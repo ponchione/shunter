@@ -83,6 +83,9 @@ type Config struct {
 	// OneOffQueryMaxWork caps candidate rows and index probes examined by
 	// hosted raw and declared multi-way joins. Zero uses 1,000,000 work units.
 	OneOffQueryMaxWork int
+	// ProcedureResultMaxBytes caps the raw result returned by an application
+	// procedure. Zero uses 64 MiB.
+	ProcedureResultMaxBytes int
 	// SubscriptionInitialRowLimit caps rows across an initial or final
 	// subscription-set snapshot in aggregate. Zero uses 100,000 rows.
 	SubscriptionInitialRowLimit int

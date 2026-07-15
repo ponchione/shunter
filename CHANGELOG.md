@@ -4,6 +4,13 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- The Go protocol client now accepts server messages up to the configured
+  outbound envelope instead of inheriting a 32 KiB WebSocket limit, and late
+  canceled-request responses no longer poison the next typed call. Hosted
+  query, procedure, and heavy reducer responses now reserve complete envelope
+  bytes and return correlated size errors or terminate delivery instead of
+  leaving callers waiting; procedure results also have an explicit runtime
+  byte limit.
 - Disconnect teardown now reserves part of its bounded deadline for
   `OnDisconnect`, so delayed subscription cleanup cannot suppress lifecycle
   reducer execution or `sys_clients` cleanup. The Go protocol client now uses

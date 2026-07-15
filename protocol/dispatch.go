@@ -29,13 +29,15 @@ type MessageHandlers struct {
 // compression envelope, and pushes it to the outbound queue. On outbound
 // overflow it uses the same lifecycle-bound disconnect policy as the other
 // local response paths.
-func sendError(conn *Conn, msg any) {
+func sendError(conn *Conn, msg any) error {
 	if err := (connOnlySender{conn: conn}).Send(conn.ID, msg); err != nil {
 		if errors.Is(err, ErrClientBufferFull) || errors.Is(err, ErrConnNotFound) {
-			return
+			return err
 		}
 		logProtocolError(conn.Observer, "unknown", "encode_failed", err)
+		return err
 	}
+	return nil
 }
 
 // closeProtocolError requests a status-1002 teardown from the lifecycle

@@ -76,6 +76,81 @@ func TestWatchReducerResponseDeliversOnRespCh(t *testing.T) {
 	}
 }
 
+func TestWatchReducerResponseConvertsOversizedSuccessToCorrelatedFailure(t *testing.T) {
+	response := TransactionUpdate{
+		Status: StatusCommitted{Update: []SubscriptionUpdate{{
+			QueryID:   4,
+			TableName: "messages",
+			Inserts:   make([]byte, 1024),
+		}}},
+		ReducerCall: ReducerCallInfo{
+			ReducerName: "insert_message",
+			RequestID:   77,
+			Args:        make([]byte, 256),
+		},
+	}
+	fallback, ok := oversizedDirectResponse(response)
+	if !ok {
+		t.Fatal("oversizedDirectResponse did not support TransactionUpdate")
+	}
+	fallbackSize, err := ValidateServerMessageSize(fallback, 0)
+	if err != nil {
+		t.Fatalf("ValidateServerMessageSize fallback: %v", err)
+	}
+	opts := DefaultProtocolOptions()
+	opts.MaxOutboundMessageSize = fallbackSize
+	conn := testConnDirect(&opts)
+	respCh := make(chan TransactionUpdate, 1)
+	respCh <- response
+
+	runReducerResponseWatcher(conn, respCh)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		tag, decoded := decodeOutboundServerFrame(t, conn, frame)
+		if tag != TagTransactionUpdate {
+			t.Fatalf("tag = %d, want TransactionUpdate", tag)
+		}
+		update := decoded.(TransactionUpdate)
+		failed, ok := update.Status.(StatusFailed)
+		if !ok || failed.Error != directResponseTooLargeText {
+			t.Fatalf("status = %#v, want correlated size failure", update.Status)
+		}
+		if update.ReducerCall.RequestID != 77 || update.ReducerCall.ReducerName != "insert_message" {
+			t.Fatalf("correlation = %+v, want request 77 insert_message", update.ReducerCall)
+		}
+		if len(update.ReducerCall.Args) != 0 {
+			t.Fatalf("fallback retained %d argument bytes", len(update.ReducerCall.Args))
+		}
+	default:
+		t.Fatal("oversized reducer response did not enqueue a correlated failure")
+	}
+}
+
+func TestSendDirectResponseTerminatesWhenCorrelatedFailureCannotFit(t *testing.T) {
+	opts := DefaultProtocolOptions()
+	opts.MaxOutboundMessageSize = 1
+	opts.DisconnectTimeout = 500 * time.Millisecond
+	conn := testConnDirect(&opts)
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	mgr.Add(conn)
+	runRequestedDisconnectOwnerWithLifecycle(conn, inbox, mgr)
+
+	errText := "already too large"
+	err := SendDirectResponse(connOnlySender{conn: conn}, conn, OneOffQueryResponse{
+		MessageID: []byte{1},
+		Error:     &errText,
+	})
+	if !errors.Is(err, ErrOutboundMessageLimit) {
+		t.Fatalf("SendDirectResponse error = %v, want ErrOutboundMessageLimit", err)
+	}
+	waitForConnClosed(t, conn, "oversized correlated failure")
+	if got := mgr.Get(conn.ID); got != nil {
+		t.Fatalf("connection still registered after terminal response failure: %p", got)
+	}
+}
+
 // TestWatchReducerResponseExitsOnRespChClose pins that a closed (not
 // sent-on) respCh still exits the watcher cleanly and does not deliver
 // a zero-value TransactionUpdate. This case corresponds to an executor

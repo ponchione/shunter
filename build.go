@@ -21,6 +21,7 @@ const (
 	dataDirMode                            = 0o700
 	defaultExecutorQueueCapacity           = 256
 	defaultDurabilityQueueCapacity         = 256
+	defaultProcedureResultBytes            = 64 << 20
 	defaultSubscriptionInitialRows         = 100_000
 	defaultSubscriptionSnapshotBytes       = 64 << 20
 	defaultSubscriptionActiveSets          = 128
@@ -120,6 +121,9 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	if cfg.OneOffQueryMaxWork < 0 {
 		return Config{}, "", fmt.Errorf("one-off query max work must not be negative")
 	}
+	if cfg.ProcedureResultMaxBytes < 0 {
+		return Config{}, "", fmt.Errorf("procedure result max bytes must not be negative")
+	}
 	if cfg.SubscriptionInitialRowLimit < 0 {
 		return Config{}, "", fmt.Errorf("subscription initial row limit must not be negative")
 	}
@@ -175,6 +179,9 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	}
 	if normalized.OneOffQueryMaxWork == 0 {
 		normalized.OneOffQueryMaxWork = protocol.DefaultSQLQueryMaxWork
+	}
+	if normalized.ProcedureResultMaxBytes == 0 {
+		normalized.ProcedureResultMaxBytes = defaultProcedureResultBytes
 	}
 	if normalized.SubscriptionInitialRowLimit == 0 {
 		normalized.SubscriptionInitialRowLimit = defaultSubscriptionInitialRows

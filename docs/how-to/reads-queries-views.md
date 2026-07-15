@@ -238,7 +238,10 @@ and host-limit detection. An ordered query is rejected if that retained heap
 crosses the cap even when a later candidate might have replaced a larger row.
 The byte setting therefore bounds final response bytes and the encoded row
 payload portion of the result working set; it does not bound scan work,
-aggregate/distinct state, order keys, or all query memory. Initial and final
+aggregate/distinct state, order keys, or all query memory. For protocol calls,
+Shunter reserves the exact message-ID, result-table, and response-envelope
+overhead from this payload budget so a successful RowList cannot exceed
+`Protocol.MaxOutboundMessageSize`. Initial and final
 subscription snapshots are capped across the whole set by
 `Config.SubscriptionInitialRowLimit` (100,000 rows by default) and
 `Config.SubscriptionSnapshotMaxBytes` (64 MiB of encoded RowList data by

@@ -57,7 +57,7 @@ func runReducerResponseWatcher(conn *Conn, respCh <-chan TransactionUpdate) {
 			return
 		}
 		sender := connOnlySender{conn: conn}
-		if err := sender.SendTransactionUpdate(conn.ID, &resp); err != nil {
+		if err := SendDirectResponse(sender, conn, resp); err != nil {
 			logReducerDeliveryError(conn, resp.ReducerCall.RequestID, err)
 		}
 	case <-conn.closed:

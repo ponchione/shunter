@@ -178,6 +178,8 @@ type declaredReadOptions struct {
 	requestID      uint32
 	parameters     *types.ProductValue
 	permissionsSet bool
+	responseConn   *protocol.Conn
+	responseID     []byte
 }
 
 // WithDeclaredReadIdentity sets the local caller identity for named reads.
@@ -238,6 +240,13 @@ func WithDeclaredReadParameters(values types.ProductValue) DeclaredReadOption {
 	}
 }
 
+func withDeclaredQueryResponseLimit(conn *protocol.Conn, messageID []byte) DeclaredReadOption {
+	return func(opts *declaredReadOptions) {
+		opts.responseConn = conn
+		opts.responseID = append([]byte(nil), messageID...)
+	}
+}
+
 // CallQuery executes an executable QueryDeclaration by declaration name.
 func (r *Runtime) CallQuery(ctx context.Context, name string, opts ...DeclaredReadOption) (DeclaredQueryResult, error) {
 	if ctx == nil {
@@ -263,11 +272,15 @@ func (r *Runtime) CallQuery(ctx context.Context, name string, opts ...DeclaredRe
 	if err != nil {
 		return DeclaredQueryResult{}, err
 	}
-	result, err := protocol.ExecuteCompiledSQLQueryWithLimits(ctx, compiled, committedStateAccess{state: state}, r.registry, protocol.SQLQueryLimits{
+	limits := protocol.SQLQueryLimits{
 		MaxRows:  r.buildConfig.OneOffQueryMaxRows,
 		MaxBytes: r.buildConfig.OneOffQueryMaxBytes,
 		MaxWork:  r.buildConfig.OneOffQueryMaxWork,
-	})
+	}
+	if callOpts.responseConn != nil {
+		limits = protocol.BindSQLQueryResponseLimit(limits, callOpts.responseConn, callOpts.responseID)
+	}
+	result, err := protocol.ExecuteCompiledSQLQueryWithLimits(ctx, compiled, committedStateAccess{state: state}, r.registry, limits)
 	if err != nil {
 		return DeclaredQueryResult{}, err
 	}
@@ -625,7 +638,7 @@ func (r *Runtime) HandleDeclaredQueryWithParameters(ctx context.Context, conn *p
 
 func (r *Runtime) handleProtocolDeclaredQuery(ctx context.Context, conn *protocol.Conn, messageID []byte, name string, parameters *types.ProductValue) {
 	receipt := time.Now()
-	opts := protocolDeclaredReadOptions(conn, nil)
+	opts := append(protocolDeclaredReadOptions(conn, nil), withDeclaredQueryResponseLimit(conn, messageID))
 	if parameters != nil {
 		opts = append(opts, WithDeclaredReadParameters(*parameters))
 	}
@@ -641,7 +654,7 @@ func (r *Runtime) handleProtocolDeclaredQuery(ctx context.Context, conn *protoco
 		r.observability.RecordProtocolMessage("declared_query", "internal_error")
 		return
 	}
-	if err := r.sendProtocolDeclaredReadMessage(conn, protocol.OneOffQueryResponse{
+	if err := r.sendProtocolDeclaredQueryMessage(conn, protocol.OneOffQueryResponse{
 		MessageID: messageID,
 		Tables: []protocol.OneOffTable{{
 			TableName: result.TableName,
@@ -797,13 +810,24 @@ func protocolDeclaredReadOptions(conn *protocol.Conn, requestID *uint32) []Decla
 }
 
 func (r *Runtime) sendProtocolDeclaredQueryError(conn *protocol.Conn, messageID []byte, errText string, receipt time.Time) {
-	if err := r.sendProtocolDeclaredReadMessage(conn, protocol.OneOffQueryResponse{
+	if err := r.sendProtocolDeclaredQueryMessage(conn, protocol.OneOffQueryResponse{
 		MessageID:                  messageID,
 		Error:                      &errText,
 		TotalHostExecutionDuration: declaredReadElapsedMicrosI64(receipt),
 	}); err != nil {
 		r.logProtocolDeclaredReadSendError("declared_query", err)
 	}
+}
+
+func (r *Runtime) sendProtocolDeclaredQueryMessage(conn *protocol.Conn, msg protocol.OneOffQueryResponse) error {
+	if conn == nil {
+		return nil
+	}
+	sender, err := r.readyProtocolSender()
+	if err != nil {
+		return err
+	}
+	return protocol.SendDirectResponse(sender, conn, msg)
 }
 
 func (r *Runtime) sendProtocolDeclaredViewError(conn *protocol.Conn, requestID, queryID uint32, errText string, receipt time.Time) {

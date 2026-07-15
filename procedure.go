@@ -21,6 +21,9 @@ var (
 	// ErrProcedureContextExpired reports use of a ProcedureContext after its
 	// handler returned.
 	ErrProcedureContextExpired = errors.New("shunter: procedure context expired")
+	// ErrProcedureResultLimit reports a procedure result larger than the
+	// runtime's configured result boundary.
+	ErrProcedureResultLimit = errors.New("shunter: procedure result limit exceeded")
 )
 
 // ProcedureContext is the execution context passed to a procedure. It remains
@@ -180,6 +183,14 @@ func (r *Runtime) callProcedureWithCallerAndDelivery(
 	if err != nil {
 		return nil, err
 	}
+	if len(ret) > r.buildConfig.ProcedureResultMaxBytes {
+		return nil, fmt.Errorf(
+			"%w: bytes=%d cap=%d",
+			ErrProcedureResultLimit,
+			len(ret),
+			r.buildConfig.ProcedureResultMaxBytes,
+		)
+	}
 	return append([]byte(nil), ret...), nil
 }
 
@@ -228,7 +239,7 @@ func (r *Runtime) sendProtocolProcedureMessage(conn *protocol.Conn, msg protocol
 	if err != nil {
 		return err
 	}
-	return sender.Send(conn.ID, msg)
+	return protocol.SendDirectResponse(sender, conn, msg)
 }
 
 func (r *Runtime) logProtocolProcedureSendError(err error) {

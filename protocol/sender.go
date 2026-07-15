@@ -16,6 +16,8 @@ var ErrClientBufferFull = errors.New("protocol: client outbound buffer full")
 // the ConnManager (client disconnected between evaluation and delivery).
 var ErrConnNotFound = errors.New("protocol: connection not found")
 
+const directResponseTooLargeText = "response exceeds configured outbound message limit"
+
 // ClientSender delivers server messages to connected clients.
 // Callers receive TransactionUpdate; non-callers receive TransactionUpdateLight.
 type ClientSender interface {
@@ -36,6 +38,68 @@ type ClientSender interface {
 // supervisor.
 func NewClientSender(mgr *ConnManager, _ ExecutorInbox) ClientSender {
 	return &connManagerSender{mgr: mgr}
+}
+
+// SendDirectResponse sends a request-correlated response. If a successful
+// response exceeds the connection's outbound message limit, it sends a small
+// correlated failure instead. Failure to enqueue that fallback makes the
+// connection terminal so a caller cannot wait indefinitely.
+func SendDirectResponse(sender ClientSender, conn *Conn, msg any) error {
+	if conn == nil {
+		return ErrConnNotFound
+	}
+	if sender == nil {
+		return fmt.Errorf("%w: client sender is nil", ErrConnNotFound)
+	}
+	err := sender.Send(conn.ID, msg)
+	if err == nil || !errors.Is(err, ErrOutboundMessageLimit) {
+		return err
+	}
+
+	fallback, ok := oversizedDirectResponse(msg)
+	if !ok {
+		conn.requestDisconnect(CloseInternal, CloseReasonResponseDeliveryFailed)
+		return err
+	}
+	if fallbackErr := sender.Send(conn.ID, fallback); fallbackErr != nil {
+		conn.requestDisconnect(CloseInternal, CloseReasonResponseDeliveryFailed)
+		return errors.Join(err, fmt.Errorf("send correlated response-size error: %w", fallbackErr))
+	}
+	return err
+}
+
+func oversizedDirectResponse(msg any) (any, bool) {
+	switch response := msg.(type) {
+	case OneOffQueryResponse:
+		errText := directResponseTooLargeText
+		return OneOffQueryResponse{
+			MessageID:                  append([]byte(nil), response.MessageID...),
+			Error:                      &errText,
+			TotalHostExecutionDuration: response.TotalHostExecutionDuration,
+		}, true
+	case ProcedureResponse:
+		errText := directResponseTooLargeText
+		return ProcedureResponse{
+			MessageID:                  append([]byte(nil), response.MessageID...),
+			Error:                      &errText,
+			TotalHostExecutionDuration: response.TotalHostExecutionDuration,
+		}, true
+	case TransactionUpdate:
+		return TransactionUpdate{
+			Status:                     StatusFailed{Error: directResponseTooLargeText},
+			Timestamp:                  response.Timestamp,
+			CallerIdentity:             response.CallerIdentity,
+			CallerConnectionID:         response.CallerConnectionID,
+			TotalHostExecutionDuration: response.TotalHostExecutionDuration,
+			ReducerCall: ReducerCallInfo{
+				ReducerName: response.ReducerCall.ReducerName,
+				ReducerID:   response.ReducerCall.ReducerID,
+				RequestID:   response.ReducerCall.RequestID,
+			},
+		}, true
+	default:
+		return nil, false
+	}
 }
 
 type connManagerSender struct {

@@ -276,7 +276,10 @@ procedure permission and any reducer permission needed for that workflow.
 A procedure failure returns to the caller as a procedure response error. It does
 not roll back reducer transactions that the procedure already committed; design
 multi-step service workflows so each reducer call is an intentional durable
-state transition.
+state transition. `Config.ProcedureResultMaxBytes` caps raw handler result bytes
+at 64 MiB by default. Protocol delivery also applies the complete
+`Protocol.MaxOutboundMessageSize` envelope and returns a correlated size error
+when a result cannot fit.
 
 Typecheck the frontend-shaped client:
 

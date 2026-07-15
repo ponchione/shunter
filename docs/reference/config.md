@@ -15,6 +15,7 @@ intent for the root runtime config.
 | `AuthMode` | Development or strict auth behavior. | Use zero-value dev mode for local work, strict mode for public serving. |
 | `OneOffQueryMaxRows` | Hosted raw and declared query result-row limit. | Zero uses 100,000 rows. Set lower for public or memory-constrained services. |
 | `OneOffQueryMaxBytes` | Hosted raw and declared query encoded row-list limit. | Zero uses 64 MiB. Unordered rows are checked before retention; ordered queries apply it to retained top-window row payloads. It does not bound all query working memory. |
+| `ProcedureResultMaxBytes` | Raw application procedure result limit. | Zero uses 64 MiB. Results above the limit become procedure errors before protocol delivery. |
 | `SubscriptionInitialRowLimit` | Aggregate initial/final rows across one subscription set. | Zero uses 100,000 rows. Set from the largest measured legitimate whole-set snapshot. |
 | `SubscriptionSnapshotMaxBytes` | Aggregate encoded RowList bytes across one initial/final subscription set. | Zero uses 64 MiB. Checked before registry publication. |
 | `SubscriptionMaxQueriesPerSet` | Raw query strings admitted and compiled for one subscription set. | Zero uses 256. The decoder hard ceiling is 4,096. |
@@ -102,7 +103,10 @@ slow reader from blocking unrelated outbound delivery indefinitely.
 defaults to 65 MiB. Exceeding either queue ceiling disconnects the slow client
 before another encoded application frame is retained.
 `MaxOutboundMessageSize` defaults to 64 MiB and caps the uncompressed encoded
-server message before final-frame allocation or optional compression.
+server message before final-frame allocation or optional compression. Direct
+query, procedure, and reducer replies account for their complete response
+envelopes; an oversized success becomes a correlated error when that smaller
+reply fits, otherwise the connection is terminated.
 
 ## Observability Field
 
