@@ -3,6 +3,7 @@ package schema
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -80,6 +81,47 @@ func TestRegistryReducersPreserveRegistrationOrderAndFreshSlice(t *testing.T) {
 	mutated[0] = "Mutated"
 	if diff := cmp.Diff(mutated, reg.Reducers()); diff == "" {
 		t.Fatal("Reducers() should return a fresh slice")
+	}
+}
+
+func TestReducerValidationErrorsPreserveRegistrationOrder(t *testing.T) {
+	b := validBuilder()
+	h := types.ReducerHandler(func(_ *types.ReducerContext, _ []byte) ([]byte, error) { return nil, nil })
+	b.Reducer("FirstNil", nil)
+	b.Reducer("OnConnect", h)
+	b.Reducer("LastDuplicate", h).Reducer("LastDuplicate", h)
+
+	for _, build := range []struct {
+		name string
+		run  func() error
+	}{
+		{name: "Build", run: func() error {
+			_, err := b.Build(EngineOptions{})
+			return err
+		}},
+		{name: "BuildPreview", run: func() error {
+			_, err := b.BuildPreview(EngineOptions{})
+			return err
+		}},
+	} {
+		t.Run(build.name, func(t *testing.T) {
+			err := build.run()
+			if err == nil {
+				t.Fatal("expected reducer validation errors")
+			}
+			message := err.Error()
+			positions := []int{
+				strings.Index(message, "FirstNil"),
+				strings.Index(message, "OnConnect"),
+				strings.Index(message, "LastDuplicate"),
+			}
+			if positions[0] < 0 || positions[1] < 0 || positions[2] < 0 {
+				t.Fatalf("validation error missing reducer names: %q", message)
+			}
+			if !slices.IsSorted(positions) {
+				t.Fatalf("reducer errors do not follow registration order: positions=%v error=%q", positions, message)
+			}
+		})
 	}
 }
 

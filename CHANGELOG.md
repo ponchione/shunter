@@ -7,6 +7,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Composite-index range bounds now accept full key tuples and define shorter
   bounds as prefix endpoints, so exclusive lower prefixes and inclusive upper
   prefixes no longer return silently incorrect rows.
+- Reducer validation errors now follow reducer registration order in `Build`
+  and `BuildPreview` output.
 - `Runtime.WaitUntilDurable` now recognizes a transaction that reached the
   worker's durable horizon even when a later segment-rollover failure has made
   the runtime unavailable for subsequent transactions.

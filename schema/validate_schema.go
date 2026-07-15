@@ -24,7 +24,11 @@ func validateReducerAndSchemaRules(b *Builder) []error {
 	}
 
 	// Reducer name checks.
-	for name, entry := range b.reducers {
+	for _, name := range b.reducerOrder {
+		entry, ok := b.reducers[name]
+		if !ok {
+			continue
+		}
 		if name == "" {
 			errs = append(errs, fmt.Errorf("reducer name must not be empty"))
 		}
