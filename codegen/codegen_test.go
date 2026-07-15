@@ -1081,13 +1081,13 @@ func TestTypeScriptGeneratorConcurrentDeterminismShortSoak(t *testing.T) {
 			ready <- struct{}{}
 			<-start
 			for op := range iterations {
-				fixtureIndex := (int(seed) + worker*11 + op*7) % len(fixtures)
+				fixtureIndex := int((seed + uint64(worker)*11 + uint64(op)*7) % uint64(len(fixtures)))
 				fixture := fixtures[fixtureIndex]
 				var (
 					out []byte
 					err error
 				)
-				if (int(seed)+worker+op)%2 == 0 {
+				if (seed+uint64(worker)+uint64(op))%2 == 0 {
 					out, err = Generate(fixture.contract, Options{Language: LanguageTypeScript})
 				} else {
 					out, err = GenerateFromJSON(canonicalJSON[fixtureIndex], Options{Language: LanguageTypeScript})
@@ -1101,7 +1101,7 @@ func TestTypeScriptGeneratorConcurrentDeterminismShortSoak(t *testing.T) {
 					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d fixture=%s operation=GenerateDeterminism observed_len=%d expected_len=%d",
 						seed, worker, op, workers, iterations, fixture.name, len(out), len(expected[fixtureIndex]))
 				}
-				if (int(seed)+worker+op)%5 == 0 {
+				if (seed+uint64(worker)+uint64(op))%5 == 0 {
 					runtime.Gosched()
 				}
 			}

@@ -24,7 +24,7 @@ func TestModuleContractJSONConcurrentShortSoak(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for op := range iterations {
-				inputIndex := (int(seed) + worker*11 + op*7) % len(inputs)
+				inputIndex := int((seed + uint64(worker)*11 + uint64(op)*7) % uint64(len(inputs)))
 				input := inputs[inputIndex]
 				if err := checkModuleContractJSONInput(input); err != nil {
 					select {
@@ -34,7 +34,7 @@ func TestModuleContractJSONConcurrentShortSoak(t *testing.T) {
 					}
 					return
 				}
-				if (int(seed)+worker+op)%5 == 0 {
+				if (seed+uint64(worker)+uint64(op))%5 == 0 {
 					runtime.Gosched()
 				}
 			}

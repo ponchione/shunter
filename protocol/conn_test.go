@@ -117,7 +117,8 @@ func TestConnManagerConcurrentAddGetRemoveShortSoak(t *testing.T) {
 						seed, worker, op, workers, iterations, got, conn)
 					return
 				}
-				probeID := connManagerSoakID((worker+1)%workers, (op*17+int(seed))%iterations)
+				probeOp := int((uint64(op)*17 + seed) % uint64(iterations))
+				probeID := connManagerSoakID((worker+1)%workers, probeOp)
 				if got := m.Get(probeID); got != nil && got.ID != probeID {
 					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d operation=probe-Get observed_id=%x expected_id=%x",
 						seed, worker, op, workers, iterations, got.ID[:], probeID[:])
@@ -129,7 +130,7 @@ func TestConnManagerConcurrentAddGetRemoveShortSoak(t *testing.T) {
 						seed, worker, op, workers, iterations, got)
 					return
 				}
-				if (int(seed)+worker+op)%5 == 0 {
+				if (seed+uint64(worker)+uint64(op))%5 == 0 {
 					runtime.Gosched()
 				}
 			}

@@ -256,7 +256,7 @@ func TestCompressionEnvelopeConcurrentRoundTripShortSoak(t *testing.T) {
 	)
 	var varied [257]byte
 	for i := range varied {
-		varied[i] = byte((int(seed) + i*31) & 0xff)
+		varied[i] = byte((seed + uint64(i)*31) & 0xff)
 	}
 	bodies := [][]byte{
 		nil,
@@ -283,9 +283,9 @@ func TestCompressionEnvelopeConcurrentRoundTripShortSoak(t *testing.T) {
 			ready <- struct{}{}
 			<-start
 			for op := range iterations {
-				tag := tags[(int(seed)+worker*11+op*7)%len(tags)]
-				mode := modes[(int(seed)+worker*13+op*5)%len(modes)]
-				bodySeed := bodies[(int(seed)+worker*17+op*3)%len(bodies)]
+				tag := tags[int((seed+uint64(worker)*11+uint64(op)*7)%uint64(len(tags)))]
+				mode := modes[int((seed+uint64(worker)*13+uint64(op)*5)%uint64(len(modes)))]
+				bodySeed := bodies[int((seed+uint64(worker)*17+uint64(op)*3)%uint64(len(bodies)))]
 				body := append([]byte(nil), bodySeed...)
 				bodyBefore := append([]byte(nil), body...)
 
@@ -329,7 +329,7 @@ func TestCompressionEnvelopeConcurrentRoundTripShortSoak(t *testing.T) {
 					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d mode=%d operation=determinism observed=(tag=%d body=%x) expected=(tag=%d body=%x)",
 						seed, worker, op, workers, iterations, mode, againTag, againBody, tag, body)
 				}
-				if (int(seed)+worker+op)%7 == 0 {
+				if (seed+uint64(worker)+uint64(op))%7 == 0 {
 					runtime.Gosched()
 				}
 			}

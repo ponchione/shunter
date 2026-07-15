@@ -461,10 +461,10 @@ func TestRecorderGatherAndHandlerConcurrentShortSoak(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for op := range iterations {
-				familyIndex := (int(seed) + worker*11 + op*7) % len(expectedMetricFamilies)
+				familyIndex := int((seed + uint64(worker)*11 + uint64(op)*7) % uint64(len(expectedMetricFamilies)))
 				name := expectedMetricFamilies[familyIndex]
 				recordMetricFamily(recorder, name, worker+op+1)
-				if (int(seed)+worker+op)%5 == 0 {
+				if (seed+uint64(worker)+uint64(op))%5 == 0 {
 					runtime.Gosched()
 				}
 			}
@@ -484,7 +484,7 @@ func TestRecorderGatherAndHandlerConcurrentShortSoak(t *testing.T) {
 					}
 					return
 				}
-				if (int(seed)+scraper+op)%3 == 0 {
+				if (seed+uint64(scraper)+uint64(op))%3 == 0 {
 					runtime.Gosched()
 				}
 			}

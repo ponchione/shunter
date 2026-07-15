@@ -168,7 +168,7 @@ func TestCloseAllConcurrentCallersShortSoak(t *testing.T) {
 			defer wg.Done()
 			<-start
 			mgr.CloseAll(context.Background(), inbox)
-			if (int(seed)+closer)%2 == 0 {
+			if (seed+uint64(closer))%2 == 0 {
 				runtime.Gosched()
 			}
 		}(closer)

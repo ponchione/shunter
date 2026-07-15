@@ -114,7 +114,7 @@ func TestOutgoingBackpressureConcurrentSlowClientShortSoak(t *testing.T) {
 			ready <- struct{}{}
 			<-start
 			for op := range iterations {
-				conn := conns[(int(seed)+worker*13+op*17)%len(conns)]
+				conn := conns[int((seed+uint64(worker)*13+uint64(op)*17)%uint64(len(conns)))]
 				err := sender.Send(conn.ID, msg)
 				switch {
 				case err == nil:
@@ -131,7 +131,7 @@ func TestOutgoingBackpressureConcurrentSlowClientShortSoak(t *testing.T) {
 					}
 					return
 				}
-				if (int(seed)+worker+op)%5 == 0 {
+				if (seed+uint64(worker)+uint64(op))%5 == 0 {
 					runtime.Gosched()
 				}
 			}
@@ -303,7 +303,7 @@ func TestClientSenderConcurrentCloseAllShortSoak(t *testing.T) {
 			ready <- struct{}{}
 			<-start
 			for op := range iterations {
-				conn := conns[(int(seed)+worker*17+op*31)%len(conns)]
+				conn := conns[int((seed+uint64(worker)*17+uint64(op)*31)%uint64(len(conns)))]
 				err := sender.Send(conn.ID, msg)
 				switch {
 				case err == nil:
@@ -314,7 +314,7 @@ func TestClientSenderConcurrentCloseAllShortSoak(t *testing.T) {
 					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=connections=%d/workers=%d/iterations=%d operation=Send(%x) observed_error=%v expected=nil-or-ErrConnNotFound",
 						seed, worker, op, connections, workers, iterations, conn.ID[:], err)
 				}
-				if (int(seed)+worker+op)%5 == 0 {
+				if (seed+uint64(worker)+uint64(op))%5 == 0 {
 					runtime.Gosched()
 				}
 			}

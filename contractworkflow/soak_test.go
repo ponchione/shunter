@@ -38,7 +38,7 @@ func TestReadOnlyWorkflowConcurrentShortSoak(t *testing.T) {
 					}
 					return
 				}
-				if (int(seed)+worker+op)%5 == 0 {
+				if (seed+uint64(worker)+uint64(op))%5 == 0 {
 					runtime.Gosched()
 				}
 			}

@@ -29,7 +29,8 @@ func TestCanonicalEncoderRejectsOversizedLength(t *testing.T) {
 			t.Fatal("writeLen accepted a length larger than uint32")
 		}
 	}()
-	enc.writeLen(int(uint64(^uint32(0)) + 1))
+	oversized := uint64(math.MaxUint32) + 1
+	enc.writeLen(int(oversized))
 }
 
 func TestQueryHashValueDifferent(t *testing.T) {
