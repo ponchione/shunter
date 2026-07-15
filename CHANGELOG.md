@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- `Runtime.WaitUntilDurable` now recognizes a transaction that reached the
+  worker's durable horizon even when a later segment-rollover failure has made
+  the runtime unavailable for subsequent transactions.
 - Successful subscription and unsubscription acknowledgements no longer steal
   Go protocol-client typed responses. The TypeScript client now bounds pending
   operations and compact post-abort correlation tombstones, rejects excess

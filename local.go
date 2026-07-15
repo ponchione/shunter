@@ -240,6 +240,10 @@ func (r *Runtime) callReducerWithCallerAndRequest(
 	}
 }
 
+// waitUntilDurableAfterSubscribeHook is test-only instrumentation for pausing
+// after the worker waiter is registered but before its result is observed.
+var waitUntilDurableAfterSubscribeHook func()
+
 // WaitUntilDurable blocks until txID is confirmed durable on disk.
 func (r *Runtime) WaitUntilDurable(ctx context.Context, txID types.TxID) error {
 	if txID == 0 {
@@ -257,28 +261,35 @@ func (r *Runtime) WaitUntilDurable(ctx context.Context, txID types.TxID) error {
 		r.mu.Unlock()
 		return nil
 	}
+	durability := r.durability
+	if durability != nil && types.TxID(durability.DurableTxID()) >= txID {
+		r.mu.Unlock()
+		return nil
+	}
 	if err := r.readyLocked(); err != nil {
 		r.mu.Unlock()
 		return err
 	}
-	durability := r.durability
 	if durability == nil {
 		r.mu.Unlock()
 		return ErrRuntimeNotReady
 	}
 	wait := durability.WaitUntilDurable(txID)
 	r.mu.Unlock()
+	if waitUntilDurableAfterSubscribeHook != nil {
+		waitUntilDurableAfterSubscribeHook()
+	}
 
 	select {
 	case got, ok := <-wait:
-		if err := durability.FatalError(); err != nil {
-			return err
-		}
 		if ok && got >= txID {
 			return nil
 		}
 		if types.TxID(durability.DurableTxID()) >= txID {
 			return nil
+		}
+		if err := durability.FatalError(); err != nil {
+			return err
 		}
 		r.mu.Lock()
 		err := r.readyLocked()

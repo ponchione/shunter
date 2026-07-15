@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/ponchione/shunter/commitlog"
 	"github.com/ponchione/shunter/executor"
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -545,6 +548,97 @@ func TestWaitUntilDurableClosedWorkerDoesNotReportSuccess(t *testing.T) {
 	if !errors.Is(err, ErrRuntimeNotReady) {
 		t.Fatalf("WaitUntilDurable closed worker error = %v, want ErrRuntimeNotReady", err)
 	}
+}
+
+func TestWaitUntilDurableAcceptsDurablePrefixAfterRolloverFailure(t *testing.T) {
+	rt, dw := newRolloverFailureRuntime(t)
+	dw.EnqueueCommitted(1, &store.Changeset{TxID: 1})
+	finalTxID, fatalErr := dw.Close()
+	if fatalErr == nil {
+		t.Fatal("expected rollover create failure")
+	}
+	if finalTxID != 1 || dw.DurableTxID() != 1 {
+		t.Fatalf("durable tx after rollover failure = (%d, %d), want (1, 1)", finalTxID, dw.DurableTxID())
+	}
+
+	if err := rt.WaitUntilDurable(context.Background(), 1); err != nil {
+		t.Fatalf("WaitUntilDurable for durable prefix: %v", err)
+	}
+	if err := rt.WaitUntilDurable(context.Background(), 2); !errors.Is(err, ErrRuntimeNotReady) {
+		t.Fatalf("WaitUntilDurable beyond durable prefix error = %v, want ErrRuntimeNotReady", err)
+	}
+}
+
+func TestWaitUntilDurableReleasedWaiterWinsOverLaterRolloverFailure(t *testing.T) {
+	rt, dw := newRolloverFailureRuntime(t)
+	registered := make(chan struct{})
+	release := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	previousHook := waitUntilDurableAfterSubscribeHook
+	waitUntilDurableAfterSubscribeHook = func() {
+		close(registered)
+		<-release
+	}
+	t.Cleanup(func() { waitUntilDurableAfterSubscribeHook = previousHook })
+
+	result := make(chan error, 1)
+	go func() {
+		result <- rt.WaitUntilDurable(context.Background(), 1)
+	}()
+	select {
+	case <-registered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitUntilDurable did not register its worker waiter")
+	}
+
+	dw.EnqueueCommitted(1, &store.Changeset{TxID: 1})
+	finalTxID, fatalErr := dw.Close()
+	close(release)
+	released = true
+	if fatalErr == nil {
+		t.Fatal("expected rollover create failure")
+	}
+	if finalTxID != 1 || dw.DurableTxID() != 1 {
+		t.Fatalf("durable tx after rollover failure = (%d, %d), want (1, 1)", finalTxID, dw.DurableTxID())
+	}
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("WaitUntilDurable for released durable waiter: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitUntilDurable did not consume its released waiter")
+	}
+}
+
+func newRolloverFailureRuntime(t *testing.T) (*Runtime, *commitlog.DurabilityWorker) {
+	t.Helper()
+	dir := t.TempDir()
+	blockedNextSegment := filepath.Join(dir, commitlog.SegmentFileName(2))
+	if err := os.Mkdir(blockedNextSegment, 0o755); err != nil {
+		t.Fatalf("block successor segment: %v", err)
+	}
+	opts := commitlog.DefaultCommitLogOptions()
+	opts.ChannelCapacity = 1
+	opts.DrainBatchSize = 1
+	opts.MaxSegmentSize = 1
+	opts.OffsetIndexIntervalBytes = 0
+	opts.OffsetIndexCap = 0
+	dw, err := commitlog.NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatalf("NewDurabilityWorker: %v", err)
+	}
+	t.Cleanup(func() { _, _ = dw.Close() })
+
+	rt := &Runtime{stateName: RuntimeStateReady, durability: dw}
+	rt.ready.Store(true)
+	return rt, dw
 }
 
 func buildStartedRuntimeWithReducer(t *testing.T, name string, handler schema.ReducerHandler) *Runtime {
