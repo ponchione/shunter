@@ -69,6 +69,224 @@ func TestClientNextRequestIDSkipsZeroAfterWrap(t *testing.T) {
 	}
 }
 
+func TestClientNextRequestIDSkipsAbandonedResponseIDs(t *testing.T) {
+	client := &Client{}
+	abandoned := responseIdentity{tag: protocol.TagProcedureResponse, requestID: 1}
+	if !client.reserveAbandonedResponseLocked(abandoned) {
+		t.Fatal("reserveAbandonedResponseLocked rejected the first reservation")
+	}
+	client.nextID.Store(^uint32(0))
+
+	if got := client.NextRequestID(); got != 2 {
+		t.Fatalf("request ID with 1 reserved = %d, want 2", got)
+	}
+
+	client.pendingMu.Lock()
+	if cleared := client.clearAbandonedResponseLocked(abandoned); !cleared {
+		t.Fatal("abandoned response was not cleared")
+	}
+	client.pendingMu.Unlock()
+	client.nextID.Store(^uint32(0))
+	if got := client.NextRequestID(); got != 1 {
+		t.Fatalf("request ID after late response = %d, want 1", got)
+	}
+}
+
+func TestClientBoundsAbandonedResponseRegistry(t *testing.T) {
+	client := &Client{maxPendingMessages: 1}
+	if !client.reserveAbandonedResponseLocked(responseIdentity{tag: protocol.TagProcedureResponse, requestID: 1}) {
+		t.Fatal("first abandoned response reservation was rejected")
+	}
+	if client.reserveAbandonedResponseLocked(responseIdentity{tag: protocol.TagProcedureResponse, requestID: 2}) {
+		t.Fatal("second abandoned response reservation exceeded the configured bound")
+	}
+	if got := len(client.abandonedResponses); got != 1 {
+		t.Fatalf("abandoned response count = %d, want 1", got)
+	}
+}
+
+func TestClientServerMessageReadLimitBoundaries(t *testing.T) {
+	for _, path := range []string{"typed response", "asynchronous read"} {
+		for _, tc := range []struct {
+			name      string
+			limit     int64
+			frameSize int
+			wantLarge bool
+		}{
+			{name: "default accepts above 32 KiB", frameSize: 32769},
+			{name: "exact configured limit", limit: 4096, frameSize: 4096},
+			{name: "one byte over configured limit", limit: 4096, frameSize: 4097, wantLarge: true},
+		} {
+			t.Run(path+"/"+tc.name, func(t *testing.T) {
+				srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+					ws := acceptProtocolClientTestConn(t, w, r)
+					defer ws.CloseNow()
+					writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+
+					var frame []byte
+					if path == "typed response" {
+						msg, ok := readProtocolClientMessage(t, r, ws)
+						if !ok {
+							return
+						}
+						query, ok := msg.(protocol.DeclaredQueryMsg)
+						if !ok {
+							t.Errorf("client message = %T, want DeclaredQueryMsg", msg)
+							return
+						}
+						frame = sizedOneOffResponseFrame(t, tc.frameSize, query.MessageID)
+					} else {
+						frame = sizedLightUpdateFrame(t, tc.frameSize)
+					}
+					writeProtocolClientServerFrame(t, ws, frame)
+					<-r.Context().Done()
+				})
+
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				client, _, err := Dial(ctx, Options{
+					URL:                   srv.wsURL(),
+					Token:                 "operator-token",
+					MaxServerMessageBytes: tc.limit,
+				})
+				if err != nil {
+					t.Fatalf("Dial: %v", err)
+				}
+				defer closeProtocolClientTestClient(t, client)
+
+				if path == "typed response" {
+					_, err = client.DeclaredQuery(ctx, "large_result")
+				} else {
+					_, _, err = client.Read(ctx)
+				}
+				if tc.wantLarge {
+					if !errors.Is(err, websocket.ErrMessageTooBig) {
+						t.Fatalf("read error = %v, want websocket.ErrMessageTooBig", err)
+					}
+				} else if err != nil {
+					t.Fatalf("read error = %v, want nil", err)
+				}
+			})
+		}
+	}
+}
+
+func TestDialAppliesServerMessageLimitBeforeIdentityRead(t *testing.T) {
+	const limit = 256
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerFrame(t, ws, sizedIdentityFrame(t, limit+1))
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _, err := Dial(ctx, Options{
+		URL:                   srv.wsURL(),
+		Token:                 "operator-token",
+		MaxServerMessageBytes: limit,
+	})
+	if !errors.Is(err, websocket.ErrMessageTooBig) {
+		t.Fatalf("Dial error = %v, want websocket.ErrMessageTooBig", err)
+	}
+}
+
+func TestClientLateTypedResponsesDoNotPoisonNextOperation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call func(context.Context, *Client) (any, error)
+	}{
+		{
+			name: "reducer",
+			call: func(ctx context.Context, client *Client) (any, error) {
+				return client.CallReducer(ctx, "send_message", nil)
+			},
+		},
+		{
+			name: "declared query",
+			call: func(ctx context.Context, client *Client) (any, error) {
+				return client.DeclaredQuery(ctx, "recent_messages")
+			},
+		},
+		{
+			name: "parameterized declared query",
+			call: func(ctx context.Context, client *Client) (any, error) {
+				return client.DeclaredQueryWithParameters(ctx, "recent_messages", []byte{1})
+			},
+		},
+		{
+			name: "SQL query",
+			call: func(ctx context.Context, client *Client) (any, error) {
+				return client.SQLQuery(ctx, "SELECT * FROM messages")
+			},
+		},
+		{
+			name: "procedure",
+			call: func(ctx context.Context, client *Client) (any, error) {
+				return client.CallProcedure(ctx, "refresh", nil)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			firstReceived := make(chan struct{})
+			srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				ws := acceptProtocolClientTestConn(t, w, r)
+				defer ws.CloseNow()
+				writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+
+				first, ok := readProtocolClientMessage(t, r, ws)
+				if !ok {
+					return
+				}
+				close(firstReceived)
+				second, ok := readProtocolClientMessage(t, r, ws)
+				if !ok {
+					return
+				}
+				writeProtocolClientServerMessage(t, ws, responseForTypedRequest(t, first, "first"))
+				writeProtocolClientServerMessage(t, ws, responseForTypedRequest(t, second, "second"))
+				<-r.Context().Done()
+			})
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			client, _, err := Dial(ctx, Options{URL: srv.wsURL(), Token: "operator-token"})
+			if err != nil {
+				t.Fatalf("Dial: %v", err)
+			}
+			defer closeProtocolClientTestClient(t, client)
+
+			firstCtx, cancelFirst := context.WithCancel(ctx)
+			firstDone := make(chan error, 1)
+			go func() {
+				_, err := tc.call(firstCtx, client)
+				firstDone <- err
+			}()
+			select {
+			case <-firstReceived:
+				cancelFirst()
+			case <-ctx.Done():
+				t.Fatalf("server did not receive first request: %v", ctx.Err())
+			}
+			if err := <-firstDone; !errors.Is(err, context.Canceled) {
+				t.Fatalf("first call error = %v, want context.Canceled", err)
+			}
+
+			result, err := tc.call(ctx, client)
+			if err != nil {
+				t.Fatalf("second call: %v", err)
+			}
+			assertSecondTypedResponse(t, result)
+
+			tag, late, err := client.Read(ctx)
+			if err != nil {
+				t.Fatalf("Read late response: %v", err)
+			}
+			assertFirstTypedResponse(t, tag, late)
+		})
+	}
+}
+
 func TestClientConcurrentProcedureAndReducerPreserveInterleavedLightUpdate(t *testing.T) {
 	procedureReceived := make(chan struct{})
 	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -1739,6 +1957,158 @@ func writeProtocolClientServerMessage(t *testing.T, ws *websocket.Conn, msg any)
 	defer cancel()
 	if err := ws.Write(ctx, websocket.MessageBinary, frame); err != nil {
 		t.Fatalf("server write %T: %v", msg, err)
+	}
+}
+
+func writeProtocolClientServerFrame(t *testing.T, ws *websocket.Conn, frame []byte) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := ws.Write(ctx, websocket.MessageBinary, frame); err != nil {
+		t.Fatalf("server write %d-byte frame: %v", len(frame), err)
+	}
+}
+
+func sizedOneOffResponseFrame(t *testing.T, size int, messageID []byte) []byte {
+	t.Helper()
+	msg := protocol.OneOffQueryResponse{
+		MessageID: append([]byte(nil), messageID...),
+		Tables:    []protocol.OneOffTable{{TableName: "large_result"}},
+	}
+	base, err := protocol.EncodeServerMessage(msg)
+	if err != nil {
+		t.Fatalf("encode base one-off response: %v", err)
+	}
+	if size < len(base) {
+		t.Fatalf("one-off frame size %d is smaller than base encoding %d", size, len(base))
+	}
+	msg.Tables[0].Rows = make([]byte, size-len(base))
+	frame, err := protocol.EncodeServerMessage(msg)
+	if err != nil {
+		t.Fatalf("encode sized one-off response: %v", err)
+	}
+	if len(frame) != size {
+		t.Fatalf("one-off frame size = %d, want %d", len(frame), size)
+	}
+	return frame
+}
+
+func sizedLightUpdateFrame(t *testing.T, size int) []byte {
+	t.Helper()
+	msg := protocol.TransactionUpdateLight{
+		Update: []protocol.SubscriptionUpdate{{QueryID: 1, TableName: "large_result"}},
+	}
+	base, err := protocol.EncodeServerMessage(msg)
+	if err != nil {
+		t.Fatalf("encode base light update: %v", err)
+	}
+	if size < len(base) {
+		t.Fatalf("light-update frame size %d is smaller than base encoding %d", size, len(base))
+	}
+	msg.Update[0].Inserts = make([]byte, size-len(base))
+	frame, err := protocol.EncodeServerMessage(msg)
+	if err != nil {
+		t.Fatalf("encode sized light update: %v", err)
+	}
+	if len(frame) != size {
+		t.Fatalf("light-update frame size = %d, want %d", len(frame), size)
+	}
+	return frame
+}
+
+func sizedIdentityFrame(t *testing.T, size int) []byte {
+	t.Helper()
+	msg := protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}}
+	base, err := protocol.EncodeServerMessage(msg)
+	if err != nil {
+		t.Fatalf("encode base identity: %v", err)
+	}
+	if size < len(base) {
+		t.Fatalf("identity frame size %d is smaller than base encoding %d", size, len(base))
+	}
+	msg.Token = strings.Repeat("x", size-len(base))
+	frame, err := protocol.EncodeServerMessage(msg)
+	if err != nil {
+		t.Fatalf("encode sized identity: %v", err)
+	}
+	if len(frame) != size {
+		t.Fatalf("identity frame size = %d, want %d", len(frame), size)
+	}
+	return frame
+}
+
+func responseForTypedRequest(t *testing.T, request any, marker string) any {
+	t.Helper()
+	switch msg := request.(type) {
+	case protocol.CallReducerMsg:
+		return protocol.TransactionUpdate{
+			Status: protocol.StatusCommitted{},
+			ReducerCall: protocol.ReducerCallInfo{
+				ReducerName: msg.ReducerName,
+				RequestID:   msg.RequestID,
+			},
+		}
+	case protocol.DeclaredQueryMsg:
+		return markedOneOffResponse(msg.MessageID, marker)
+	case protocol.DeclaredQueryWithParametersMsg:
+		return markedOneOffResponse(msg.MessageID, marker)
+	case protocol.OneOffQueryMsg:
+		return markedOneOffResponse(msg.MessageID, marker)
+	case protocol.CallProcedureMsg:
+		return protocol.ProcedureResponse{MessageID: append([]byte(nil), msg.MessageID...), Result: []byte(marker)}
+	default:
+		t.Fatalf("typed request = %T, want a supported request", request)
+		return nil
+	}
+}
+
+func markedOneOffResponse(messageID []byte, marker string) protocol.OneOffQueryResponse {
+	return protocol.OneOffQueryResponse{
+		MessageID: append([]byte(nil), messageID...),
+		Tables: []protocol.OneOffTable{{
+			TableName: "result",
+			Rows:      []byte(marker),
+		}},
+	}
+}
+
+func assertSecondTypedResponse(t *testing.T, result any) {
+	t.Helper()
+	switch msg := result.(type) {
+	case protocol.TransactionUpdate:
+		if msg.ReducerCall.RequestID != 2 {
+			t.Fatalf("second reducer request ID = %d, want 2", msg.ReducerCall.RequestID)
+		}
+	case protocol.OneOffQueryResponse:
+		if !bytes.Equal(msg.MessageID, []byte{2, 0, 0, 0}) || len(msg.Tables) != 1 || string(msg.Tables[0].Rows) != "second" {
+			t.Fatalf("second query response = %+v", msg)
+		}
+	case protocol.ProcedureResponse:
+		if !bytes.Equal(msg.MessageID, []byte{2, 0, 0, 0}) || string(msg.Result) != "second" {
+			t.Fatalf("second procedure response = %+v", msg)
+		}
+	default:
+		t.Fatalf("second response = %T, want typed response", result)
+	}
+}
+
+func assertFirstTypedResponse(t *testing.T, tag uint8, result any) {
+	t.Helper()
+	switch msg := result.(type) {
+	case protocol.TransactionUpdate:
+		if tag != protocol.TagTransactionUpdate || msg.ReducerCall.RequestID != 1 {
+			t.Fatalf("late reducer response = tag %d %+v", tag, msg)
+		}
+	case protocol.OneOffQueryResponse:
+		if tag != protocol.TagOneOffQueryResponse || !bytes.Equal(msg.MessageID, []byte{1, 0, 0, 0}) || len(msg.Tables) != 1 || string(msg.Tables[0].Rows) != "first" {
+			t.Fatalf("late query response = tag %d %+v", tag, msg)
+		}
+	case protocol.ProcedureResponse:
+		if tag != protocol.TagProcedureResponse || !bytes.Equal(msg.MessageID, []byte{1, 0, 0, 0}) || string(msg.Result) != "first" {
+			t.Fatalf("late procedure response = tag %d %+v", tag, msg)
+		}
+	default:
+		t.Fatalf("late response = tag %d %T, want typed response", tag, result)
 	}
 }
 

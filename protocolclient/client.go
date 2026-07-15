@@ -39,6 +39,10 @@ type Options struct {
 	URL            string
 	Token          string
 	AllowAnonymous bool
+	// MaxServerMessageBytes bounds each encoded server message before it is
+	// decoded. Non-positive values select protocol.DefaultProtocolOptions().
+	// MaxOutboundMessageSize.
+	MaxServerMessageBytes int64
 	// MaxPendingMessages and MaxPendingBytes bound decoded server messages
 	// waiting for Read. Non-positive values select the safe defaults.
 	MaxPendingMessages int
@@ -65,7 +69,9 @@ type Client struct {
 	maxPendingBytes    int64
 	pendingNotify      chan struct{}
 	readerErr          error
-	responseCh         chan queuedServerMessage
+	responseWaiter     *synchronousResponseWaiter
+	abandonedResponses map[responseIdentity]struct{}
+	reservedRequestIDs map[uint32]int
 }
 
 type queuedServerMessage struct {
@@ -73,6 +79,19 @@ type queuedServerMessage struct {
 	msg  any
 	size int64
 	err  error
+}
+
+type responseIdentity struct {
+	tag         uint8
+	requestID   uint32
+	reducerName string
+}
+
+type synchronousResponseWaiter struct {
+	expected responseIdentity
+	response chan queuedServerMessage
+	sent     bool
+	matched  bool
 }
 
 // Dial connects to a Shunter protocol endpoint and reads the initial identity frame.
@@ -98,6 +117,11 @@ func Dial(ctx context.Context, opts Options) (*Client, protocol.IdentityToken, e
 	if err != nil {
 		return nil, protocol.IdentityToken{}, classifyContextError(ctx, fmt.Errorf("dial protocol %q: %w", target, err))
 	}
+	maxServerMessageBytes := opts.MaxServerMessageBytes
+	if maxServerMessageBytes <= 0 {
+		maxServerMessageBytes = int64(protocol.DefaultProtocolOptions().MaxOutboundMessageSize)
+	}
+	conn.SetReadLimit(maxServerMessageBytes)
 
 	maxPendingMessages := opts.MaxPendingMessages
 	if maxPendingMessages <= 0 {
@@ -158,13 +182,16 @@ func (c *Client) NextRequestID() uint32 {
 	if c == nil {
 		return 0
 	}
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
 	for {
 		current := c.nextID.Load()
 		next := current + 1
 		if next == 0 {
 			next = 1
 		}
-		if c.nextID.CompareAndSwap(current, next) {
+		c.nextID.Store(next)
+		if c.reservedRequestIDs[next] == 0 {
 			return next
 		}
 	}
@@ -257,9 +284,12 @@ func (c *Client) routeServerMessage(next queuedServerMessage) bool {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 
-	if !isAsynchronousServerMessage(next.tag) && c.responseCh != nil {
+	identity, identified := serverResponseIdentity(next)
+	isAbandoned := identified && c.clearAbandonedResponseLocked(identity)
+	if !isAbandoned && !isAsynchronousServerMessage(next.tag) && c.responseWaiter != nil {
+		c.responseWaiter.matched = identified && identity == c.responseWaiter.expected
 		select {
-		case c.responseCh <- next:
+		case c.responseWaiter.response <- next:
 			return true
 		default:
 			err := fmt.Errorf("%w: typed response queue is full", ErrPendingMessageLimit)
@@ -287,7 +317,26 @@ func isAsynchronousServerMessage(tag uint8) bool {
 	return tag == protocol.TagTransactionUpdateLight || tag == protocol.TagSubscriptionError
 }
 
-func (c *Client) beginSynchronousResponse() (chan queuedServerMessage, error) {
+func serverResponseIdentity(next queuedServerMessage) (responseIdentity, bool) {
+	switch msg := next.msg.(type) {
+	case protocol.TransactionUpdate:
+		return responseIdentity{
+			tag:         protocol.TagTransactionUpdate,
+			requestID:   msg.ReducerCall.RequestID,
+			reducerName: msg.ReducerCall.ReducerName,
+		}, next.tag == protocol.TagTransactionUpdate
+	case protocol.OneOffQueryResponse:
+		requestID, ok := requestIDFromMessageID(msg.MessageID)
+		return responseIdentity{tag: protocol.TagOneOffQueryResponse, requestID: requestID}, ok && next.tag == protocol.TagOneOffQueryResponse
+	case protocol.ProcedureResponse:
+		requestID, ok := requestIDFromMessageID(msg.MessageID)
+		return responseIdentity{tag: protocol.TagProcedureResponse, requestID: requestID}, ok && next.tag == protocol.TagProcedureResponse
+	default:
+		return responseIdentity{}, false
+	}
+}
+
+func (c *Client) beginSynchronousResponse(expected responseIdentity) (*synchronousResponseWaiter, error) {
 	if c == nil || c.conn == nil {
 		return nil, errors.New("protocol client is closed")
 	}
@@ -296,26 +345,89 @@ func (c *Client) beginSynchronousResponse() (chan queuedServerMessage, error) {
 	if c.readerErr != nil {
 		return nil, c.readerErr
 	}
-	if c.responseCh != nil {
+	if c.responseWaiter != nil {
 		return nil, errors.New("protocol client synchronous operation already active")
 	}
-	responseCh := make(chan queuedServerMessage, 1)
-	c.responseCh = responseCh
-	return responseCh, nil
+	waiter := &synchronousResponseWaiter{
+		expected: expected,
+		response: make(chan queuedServerMessage, 1),
+	}
+	c.responseWaiter = waiter
+	return waiter, nil
 }
 
-func (c *Client) endSynchronousResponse(responseCh chan queuedServerMessage) {
+func (c *Client) markSynchronousRequestSent(waiter *synchronousResponseWaiter) {
 	c.pendingMu.Lock()
-	if c.responseCh == responseCh {
-		c.responseCh = nil
+	if c.responseWaiter == waiter {
+		waiter.sent = true
 	}
 	c.pendingMu.Unlock()
 }
 
-func (c *Client) readSynchronousResponse(ctx context.Context, responseCh <-chan queuedServerMessage) (uint8, any, error) {
+func (c *Client) endSynchronousResponse(waiter *synchronousResponseWaiter) {
+	closeConn := false
+	c.pendingMu.Lock()
+	if c.responseWaiter == waiter {
+		c.responseWaiter = nil
+		if waiter.sent && !waiter.matched {
+			if !c.reserveAbandonedResponseLocked(waiter.expected) {
+				err := fmt.Errorf(
+					"%w: abandoned responses=%d limit=%d",
+					ErrPendingMessageLimit,
+					len(c.abandonedResponses)+1,
+					c.maxPendingMessages,
+				)
+				c.failReaderLocked(err, true)
+				closeConn = true
+			}
+		}
+	}
+	c.pendingMu.Unlock()
+	if closeConn {
+		_ = c.conn.CloseNow()
+	}
+}
+
+func (c *Client) reserveAbandonedResponseLocked(identity responseIdentity) bool {
+	if c.abandonedResponses == nil {
+		c.abandonedResponses = make(map[responseIdentity]struct{})
+	}
+	if _, exists := c.abandonedResponses[identity]; exists {
+		return true
+	}
+	limit := c.maxPendingMessages
+	if limit <= 0 {
+		limit = DefaultMaxPendingMessages
+	}
+	if len(c.abandonedResponses)+1 > limit {
+		return false
+	}
+	c.abandonedResponses[identity] = struct{}{}
+	if c.reservedRequestIDs == nil {
+		c.reservedRequestIDs = make(map[uint32]int)
+	}
+	c.reservedRequestIDs[identity.requestID]++
+	return true
+}
+
+func (c *Client) clearAbandonedResponseLocked(identity responseIdentity) bool {
+	if _, exists := c.abandonedResponses[identity]; !exists {
+		return false
+	}
+	delete(c.abandonedResponses, identity)
+	remaining := c.reservedRequestIDs[identity.requestID] - 1
+	if remaining <= 0 {
+		delete(c.reservedRequestIDs, identity.requestID)
+	} else {
+		c.reservedRequestIDs[identity.requestID] = remaining
+	}
+	return true
+}
+
+func (c *Client) readSynchronousResponse(ctx context.Context, waiter *synchronousResponseWaiter) (uint8, any, error) {
 	ctx = contextOrBackground(ctx)
 	select {
-	case response := <-responseCh:
+	case response := <-waiter.response:
 		if response.err != nil {
 			return 0, nil, classifyContextError(ctx, response.err)
 		}
@@ -356,9 +468,9 @@ func (c *Client) failReaderLocked(err error, discardPending bool) {
 		c.pendingBytes = 0
 	}
 	c.readerErr = err
-	if c.responseCh != nil {
+	if c.responseWaiter != nil {
 		select {
-		case c.responseCh <- queuedServerMessage{err: err}:
+		case c.responseWaiter.response <- queuedServerMessage{err: err}:
 		default:
 		}
 	}
