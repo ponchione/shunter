@@ -14,7 +14,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Segment constants.
+// SegmentMagic identifies a Shunter commit-log segment.
 var SegmentMagic = [4]byte{'S', 'H', 'N', 'T'}
 
 const (

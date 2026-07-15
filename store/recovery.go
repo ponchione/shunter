@@ -245,7 +245,8 @@ func advanceReplaySequenceForInsert(table *Table, row types.ProductValue) {
 	}
 }
 
-// ExportTableState returns the RowID counter and sequence values for snapshot persistence.
+// TableExportState contains a table's row-ID counter and sequence value for
+// snapshot persistence.
 type TableExportState struct {
 	TableID       schema.TableID
 	NextRowID     types.RowID

@@ -213,14 +213,14 @@ func buildSchemaFuzzEngine(spec schemaBuildFuzzSpec, freeze bool) (*Engine, erro
 		}
 	}
 	if spec.registerOnConnect {
-		var handler func(*ReducerContext) error = func(*ReducerContext) error { return nil }
+		handler := func(*ReducerContext) error { return nil }
 		if spec.nilOnConnect {
 			handler = nil
 		}
 		b.OnConnect(handler)
 	}
 	if spec.registerOnDisconnect {
-		var handler func(*ReducerContext) error = func(*ReducerContext) error { return nil }
+		handler := func(*ReducerContext) error { return nil }
 		if spec.nilOnDisconnect {
 			handler = nil
 		}
