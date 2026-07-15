@@ -27,6 +27,12 @@ Available operations:
 - `SeekIndexRange`
 - `RowCount`
 
+Construct range endpoints with `Inclusive(values...)`, `Exclusive(values...)`,
+`UnboundedLow`, and `UnboundedHigh`. Composite-index endpoints accept the full
+key tuple. A shorter tuple addresses a prefix group: an inclusive endpoint
+includes every key with that prefix, while an exclusive endpoint excludes the
+entire group.
+
 The view is valid only during the callback.
 
 ## Declared Query

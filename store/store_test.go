@@ -556,6 +556,16 @@ func TestBoundConstructors(t *testing.T) {
 	if excl.Value.Compare(exclValue) != 0 {
 		t.Fatal("Exclusive should preserve bound value")
 	}
+
+	first := types.NewString("account")
+	second := types.NewUint64(42)
+	tuple := Inclusive(first, second)
+	if !tuple.Inclusive || len(tuple.Values) != 2 {
+		t.Fatalf("tuple Inclusive = %+v, want two inclusive values", tuple)
+	}
+	if tuple.Values[0].Compare(first) != 0 || tuple.Values[1].Compare(second) != 0 {
+		t.Fatalf("tuple Inclusive values = %v, want [%v %v]", tuple.Values, first, second)
+	}
 }
 
 // --- BTreeIndex tests (E3 Stories 3.2-3.4) ---

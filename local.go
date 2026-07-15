@@ -73,14 +73,16 @@ func UnboundedHigh() IndexBound {
 	return store.UnboundedHigh()
 }
 
-// Inclusive constructs an inclusive index range endpoint.
-func Inclusive(value types.Value) IndexBound {
-	return store.Inclusive(value)
+// Inclusive constructs an inclusive index range endpoint from a complete
+// composite key or a shorter key prefix.
+func Inclusive(values ...types.Value) IndexBound {
+	return store.Inclusive(values...)
 }
 
-// Exclusive constructs an exclusive index range endpoint.
-func Exclusive(value types.Value) IndexBound {
-	return store.Exclusive(value)
+// Exclusive constructs an exclusive index range endpoint from a complete
+// composite key or a shorter key prefix.
+func Exclusive(values ...types.Value) IndexBound {
+	return store.Exclusive(values...)
 }
 
 var (

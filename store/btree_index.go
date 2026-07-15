@@ -205,10 +205,11 @@ func (b *BTreeIndex) SeekRange(low, high *IndexKey) iter.Seq[types.RowID] {
 
 // SeekBounds returns RowIDs for keys between low and high per Bound
 // semantics (SPEC-001 §4.4 / §4.6). Each endpoint is independently
-// inclusive, exclusive, or unbounded. SPEC-004 predicate scans on
-// string/bytes/float keys need "strictly greater than v" — expressible
-// through Bound but not through *IndexKey. Yields keys in comparator
-// order; within a key, RowIDs in ascending order.
+// inclusive, exclusive, or unbounded and may contain a composite-key tuple.
+// A shorter tuple addresses the complete matching prefix group. SPEC-004
+// predicate scans on string/bytes/float keys need "strictly greater than v" —
+// expressible through Bound but not through *IndexKey. Yields keys in
+// comparator order; within a key, RowIDs in ascending order.
 func (b *BTreeIndex) SeekBounds(low, high Bound) iter.Seq[types.RowID] {
 	return func(yield func(types.RowID) bool) {
 		b.seekBounds(low, high, yield)
@@ -236,21 +237,14 @@ func (b *BTreeIndex) Scan() iter.Seq[types.RowID] {
 
 func (b *BTreeIndex) seekBounds(low, high Bound, yield func(types.RowID) bool) {
 	startPage, startEntry := 0, 0
+	var lowKey IndexKey
 	var highKey IndexKey
 	if !high.Unbounded {
-		highKey = NewIndexKey(high.Value)
+		highKey = indexKeyForBound(high)
 	}
 	if !low.Unbounded {
-		lowKey := NewIndexKey(low.Value)
-		found := false
-		startPage, startEntry, found = b.lowerBound(lowKey)
-		if found && !low.Inclusive {
-			startEntry++
-		}
-		if startPage < len(b.pages) && startEntry >= len(b.pages[startPage].entries) {
-			startPage++
-			startEntry = 0
-		}
+		lowKey = indexKeyForBound(low)
+		startPage, startEntry, _ = b.lowerBound(lowKey)
 	}
 	for pageIdx := startPage; pageIdx < len(b.pages); pageIdx++ {
 		entries := b.pages[pageIdx].entries
@@ -260,8 +254,14 @@ func (b *BTreeIndex) seekBounds(low, high Bound, yield func(types.RowID) bool) {
 		}
 		for ; entryIdx < len(entries); entryIdx++ {
 			e := entries[entryIdx]
+			if !low.Unbounded {
+				cmp := e.key.comparePrefix(lowKey)
+				if cmp < 0 || (cmp == 0 && !low.Inclusive) {
+					continue
+				}
+			}
 			if !high.Unbounded {
-				cmp := e.key.Compare(highKey)
+				cmp := e.key.comparePrefix(highKey)
 				if high.Inclusive {
 					if cmp > 0 {
 						return

@@ -292,11 +292,23 @@ Additional requirements:
 ```go
 // Bound represents one endpoint of an index range scan.
 type Bound struct {
+    Values    ProductValue // tuple endpoint; takes precedence when non-empty
     Value     Value
     Inclusive bool   // true = closed (<=/>= ); false = open (</>)
-    Unbounded bool   // true = no limit on this side; Value is ignored
+    Unbounded bool   // true = no limit on this side; Values/Value are ignored
 }
 ```
+
+A bounded endpoint is an ordered tuple. `Inclusive(values ...Value)` and
+`Exclusive(values ...Value)` construct either a complete composite-index key
+or a shorter prefix. `Value` retains the single-column representation for
+existing callers; `Values` is used for multi-part endpoints.
+
+When the endpoint is shorter than the stored composite key, inclusive bounds
+include the complete matching prefix group and exclusive bounds exclude it.
+For example, on `(account_id, created_at)`, `Exclusive(1)` starts after every
+key whose `account_id` is `1`, while `Inclusive(1)` as an upper endpoint
+includes every such key.
 
 A nil `*IndexKey` in `SeekRange` (§4.6) maps to `Bound{Unbounded: true}`.
 
@@ -333,6 +345,7 @@ func (idx *Index) SeekRange(low, high *IndexKey) iter.Seq[RowID]
 // semantics (§4.4). Used by CommittedReadView.IndexRange (§7.2) and SPEC-004
 // predicate scans that require exclusive endpoints on string/bytes/float keys
 // where "strictly greater than v" cannot be expressed via *IndexKey alone.
+// Endpoints may be complete key tuples or shorter prefixes.
 func (idx *Index) SeekBounds(low, high Bound) iter.Seq[RowID]
 
 // Scan iterates all RowIDs in key order.

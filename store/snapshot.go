@@ -216,7 +216,7 @@ func matchesLowerBound(key IndexKey, bound Bound) bool {
 	if bound.Unbounded {
 		return true
 	}
-	cmp := key.Compare(NewIndexKey(bound.Value))
+	cmp := key.comparePrefix(indexKeyForBound(bound))
 	if bound.Inclusive {
 		return cmp >= 0
 	}
@@ -227,7 +227,7 @@ func matchesUpperBound(key IndexKey, bound Bound) bool {
 	if bound.Unbounded {
 		return true
 	}
-	cmp := key.Compare(NewIndexKey(bound.Value))
+	cmp := key.comparePrefix(indexKeyForBound(bound))
 	if bound.Inclusive {
 		return cmp <= 0
 	}

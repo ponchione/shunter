@@ -40,6 +40,22 @@ func (k IndexKey) Compare(other IndexKey) int {
 	return 0
 }
 
+// comparePrefix compares k with prefix and treats every key beginning with
+// prefix as equal. A bound shorter than a stored composite key therefore
+// addresses the complete prefix group.
+func (k IndexKey) comparePrefix(prefix IndexKey) int {
+	n := min(len(k.parts), len(prefix.parts))
+	for i := 0; i < n; i++ {
+		if c := k.parts[i].Compare(prefix.parts[i]); c != 0 {
+			return c
+		}
+	}
+	if len(k.parts) < len(prefix.parts) {
+		return -1
+	}
+	return 0
+}
+
 // Equal returns true if keys are equal.
 func (k IndexKey) Equal(other IndexKey) bool {
 	return k.Compare(other) == 0
@@ -62,14 +78,33 @@ func UnboundedHigh() Bound {
 	return Bound{Unbounded: true}
 }
 
-// Inclusive constructs a closed bound at v.
-func Inclusive(v types.Value) Bound {
-	return Bound{Value: v, Inclusive: true}
+// Inclusive constructs a closed bound at the supplied key tuple. A tuple may
+// be a complete composite key or a shorter prefix.
+func Inclusive(values ...types.Value) Bound {
+	return bounded(values, true)
 }
 
-// Exclusive constructs an open bound at v.
-func Exclusive(v types.Value) Bound {
-	return Bound{Value: v}
+// Exclusive constructs an open bound at the supplied key tuple. A tuple may
+// be a complete composite key or a shorter prefix.
+func Exclusive(values ...types.Value) Bound {
+	return bounded(values, false)
+}
+
+func bounded(values []types.Value, inclusive bool) Bound {
+	if len(values) == 0 {
+		panic("store: bounded index endpoint requires at least one value")
+	}
+	if len(values) == 1 {
+		return Bound{Value: values[0].Copy(), Inclusive: inclusive}
+	}
+	return Bound{Values: types.ProductValue(values).Copy(), Inclusive: inclusive}
+}
+
+func indexKeyForBound(bound Bound) IndexKey {
+	if len(bound.Values) != 0 {
+		return NewIndexKey(bound.Values...)
+	}
+	return NewIndexKey(bound.Value)
 }
 
 // ExtractKey builds an IndexKey from a row using the given column indices.
