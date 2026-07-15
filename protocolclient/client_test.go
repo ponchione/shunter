@@ -164,6 +164,160 @@ func TestClientConcurrentProcedureAndReducerPreserveInterleavedLightUpdate(t *te
 	}
 }
 
+func TestClientConcurrentReadCannotStealTypedReducerResponse(t *testing.T) {
+	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		ws := acceptProtocolClientTestConn(t, w, r)
+		defer ws.CloseNow()
+		writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+
+		msg, ok := readProtocolClientMessage(t, r, ws)
+		if !ok {
+			return
+		}
+		call, ok := msg.(protocol.CallReducerMsg)
+		if !ok {
+			t.Errorf("client message = %T, want CallReducerMsg", msg)
+			return
+		}
+		writeProtocolClientServerMessage(t, ws, protocol.TransactionUpdate{
+			Status: protocol.StatusCommitted{},
+			ReducerCall: protocol.ReducerCallInfo{
+				ReducerName: call.ReducerName,
+				RequestID:   call.RequestID,
+			},
+		})
+		writeProtocolClientServerMessage(t, ws, protocol.TransactionUpdateLight{
+			Update: []protocol.SubscriptionUpdate{{QueryID: 91, TableName: "messages"}},
+		})
+		<-r.Context().Done()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	client, _, err := Dial(ctx, Options{URL: srv.wsURL(), Token: "operator-token"})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer closeProtocolClientTestClient(t, client)
+
+	type readResult struct {
+		tag uint8
+		msg any
+		err error
+	}
+	readDone := make(chan readResult, 1)
+	go func() {
+		tag, msg, err := client.Read(ctx)
+		readDone <- readResult{tag: tag, msg: msg, err: err}
+	}()
+	select {
+	case result := <-readDone:
+		t.Fatalf("Read returned before a server message: %+v", result)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	type reducerResult struct {
+		update protocol.TransactionUpdate
+		err    error
+	}
+	reducerDone := make(chan reducerResult, 1)
+	go func() {
+		update, err := client.CallReducer(ctx, "send", nil)
+		reducerDone <- reducerResult{update: update, err: err}
+	}()
+
+	select {
+	case result := <-reducerDone:
+		if result.err != nil {
+			t.Fatalf("CallReducer: %v", result.err)
+		}
+		if result.update.ReducerCall.ReducerName != "send" {
+			t.Fatalf("CallReducer response = %+v, want send", result.update.ReducerCall)
+		}
+	case <-ctx.Done():
+		t.Fatalf("CallReducer timed out: %v", ctx.Err())
+	}
+
+	select {
+	case result := <-readDone:
+		if result.err != nil {
+			t.Fatalf("Read: %v", result.err)
+		}
+		light, ok := result.msg.(protocol.TransactionUpdateLight)
+		if result.tag != protocol.TagTransactionUpdateLight || !ok || len(light.Update) != 1 || light.Update[0].QueryID != 91 {
+			t.Fatalf("Read result = tag %d %T %+v, want light update 91", result.tag, result.msg, result.msg)
+		}
+	case <-ctx.Done():
+		t.Fatalf("Read timed out: %v", ctx.Err())
+	}
+}
+
+func TestClientBoundsPendingAsynchronousMessages(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		maxPendingMessages int
+		maxPendingBytes    int64
+		messageCount       int
+	}{
+		{name: "message count", maxPendingMessages: 3, messageCount: 4},
+		{name: "decoded bytes", maxPendingMessages: 10, maxPendingBytes: 1, messageCount: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				ws := acceptProtocolClientTestConn(t, w, r)
+				defer ws.CloseNow()
+				writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{Identity: [32]byte{1}, ConnectionID: [16]byte{2}})
+				if _, ok := readProtocolClientMessage(t, r, ws); !ok {
+					return
+				}
+				for i := 0; i < tc.messageCount; i++ {
+					writeProtocolClientServerMessage(t, ws, protocol.TransactionUpdateLight{
+						Update: []protocol.SubscriptionUpdate{{QueryID: uint32(i + 1), TableName: "messages"}},
+					})
+				}
+				<-r.Context().Done()
+			})
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			client, _, err := Dial(ctx, Options{
+				URL:                srv.wsURL(),
+				Token:              "operator-token",
+				MaxPendingMessages: tc.maxPendingMessages,
+				MaxPendingBytes:    tc.maxPendingBytes,
+			})
+			if err != nil {
+				t.Fatalf("Dial: %v", err)
+			}
+
+			_, err = client.CallReducer(ctx, "send", nil)
+			if !errors.Is(err, ErrPendingMessageLimit) {
+				t.Fatalf("CallReducer error = %v, want ErrPendingMessageLimit", err)
+			}
+		})
+	}
+}
+
+func TestClientPopPendingClearsConsumedPayloadSlot(t *testing.T) {
+	payload := &struct{ value string }{value: "retained"}
+	backing := []queuedServerMessage{{tag: protocol.TagTransactionUpdateLight, msg: payload, size: 17}}
+	client := &Client{pending: backing, pendingBytes: 17}
+
+	got := client.popPendingLocked()
+	if got.msg != payload {
+		t.Fatalf("popped payload = %v, want original payload", got.msg)
+	}
+	if backing[0].msg != nil {
+		t.Fatalf("consumed backing slot retained payload: %+v", backing[0])
+	}
+	if client.pending != nil {
+		t.Fatalf("pending = %#v, want nil after final dequeue", client.pending)
+	}
+	if client.pendingBytes != 0 {
+		t.Fatalf("pendingBytes = %d, want 0", client.pendingBytes)
+	}
+}
+
 func TestClientCloseDeadlineBoundsNonCooperatingPeer(t *testing.T) {
 	srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		ws := acceptProtocolClientTestConn(t, w, r)

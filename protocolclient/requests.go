@@ -124,6 +124,11 @@ func (c *Client) CallReducer(ctx context.Context, name string, args []byte) (pro
 	c.operationMu.Lock()
 	defer c.operationMu.Unlock()
 	requestID := c.NextRequestID()
+	responseCh, err := c.beginSynchronousResponse()
+	if err != nil {
+		return protocol.TransactionUpdate{}, err
+	}
+	defer c.endSynchronousResponse(responseCh)
 	if err := c.Send(ctx, protocol.CallReducerMsg{
 		ReducerName: name,
 		Args:        args,
@@ -133,7 +138,7 @@ func (c *Client) CallReducer(ctx context.Context, name string, args []byte) (pro
 		return protocol.TransactionUpdate{}, err
 	}
 
-	tag, msg, err := c.readSynchronousResponse(ctx)
+	tag, msg, err := c.readSynchronousResponse(ctx, responseCh)
 	if err != nil {
 		return protocol.TransactionUpdate{}, err
 	}
@@ -166,13 +171,18 @@ func (c *Client) DeclaredQuery(ctx context.Context, name string) (protocol.OneOf
 	defer c.operationMu.Unlock()
 	requestID := c.NextRequestID()
 	messageID := messageIDFromRequestID(requestID)
+	responseCh, err := c.beginSynchronousResponse()
+	if err != nil {
+		return protocol.OneOffQueryResponse{}, err
+	}
+	defer c.endSynchronousResponse(responseCh)
 	if err := c.Send(ctx, protocol.DeclaredQueryMsg{
 		MessageID: messageID,
 		Name:      name,
 	}); err != nil {
 		return protocol.OneOffQueryResponse{}, err
 	}
-	return c.readDeclaredQueryResponse(ctx, messageID)
+	return c.readDeclaredQueryResponse(ctx, messageID, responseCh)
 }
 
 // SQLQuery sends a raw one-off SQL read request.
@@ -181,13 +191,18 @@ func (c *Client) SQLQuery(ctx context.Context, queryString string) (protocol.One
 	defer c.operationMu.Unlock()
 	requestID := c.NextRequestID()
 	messageID := messageIDFromRequestID(requestID)
+	responseCh, err := c.beginSynchronousResponse()
+	if err != nil {
+		return protocol.OneOffQueryResponse{}, err
+	}
+	defer c.endSynchronousResponse(responseCh)
 	if err := c.Send(ctx, protocol.OneOffQueryMsg{
 		MessageID:   messageID,
 		QueryString: queryString,
 	}); err != nil {
 		return protocol.OneOffQueryResponse{}, err
 	}
-	return c.readOneOffQueryResponse(ctx, messageID, ErrSQLQueryFailed, "SQL query")
+	return c.readOneOffQueryResponse(ctx, messageID, ErrSQLQueryFailed, "SQL query", responseCh)
 }
 
 // ExecuteDeclaredQuery sends a declared query, using v2 parameters only when requested.
@@ -208,6 +223,11 @@ func (c *Client) DeclaredQueryWithParameters(ctx context.Context, name string, p
 
 	requestID := c.NextRequestID()
 	messageID := messageIDFromRequestID(requestID)
+	responseCh, err := c.beginSynchronousResponse()
+	if err != nil {
+		return protocol.OneOffQueryResponse{}, err
+	}
+	defer c.endSynchronousResponse(responseCh)
 	if err := c.Send(ctx, protocol.DeclaredQueryWithParametersMsg{
 		MessageID: messageID,
 		Name:      name,
@@ -215,15 +235,15 @@ func (c *Client) DeclaredQueryWithParameters(ctx context.Context, name string, p
 	}); err != nil {
 		return protocol.OneOffQueryResponse{}, err
 	}
-	return c.readDeclaredQueryResponse(ctx, messageID)
+	return c.readDeclaredQueryResponse(ctx, messageID, responseCh)
 }
 
-func (c *Client) readDeclaredQueryResponse(ctx context.Context, messageID []byte) (protocol.OneOffQueryResponse, error) {
-	return c.readOneOffQueryResponse(ctx, messageID, ErrDeclaredQueryFailed, "declared query")
+func (c *Client) readDeclaredQueryResponse(ctx context.Context, messageID []byte, responseCh <-chan queuedServerMessage) (protocol.OneOffQueryResponse, error) {
+	return c.readOneOffQueryResponse(ctx, messageID, ErrDeclaredQueryFailed, "declared query", responseCh)
 }
 
-func (c *Client) readOneOffQueryResponse(ctx context.Context, messageID []byte, failedErr error, label string) (protocol.OneOffQueryResponse, error) {
-	tag, msg, err := c.readSynchronousResponse(ctx)
+func (c *Client) readOneOffQueryResponse(ctx context.Context, messageID []byte, failedErr error, label string, responseCh <-chan queuedServerMessage) (protocol.OneOffQueryResponse, error) {
+	tag, msg, err := c.readSynchronousResponse(ctx, responseCh)
 	if err != nil {
 		return protocol.OneOffQueryResponse{}, err
 	}
@@ -252,6 +272,11 @@ func (c *Client) CallProcedure(ctx context.Context, name string, args []byte) (p
 	}
 	requestID := c.NextRequestID()
 	messageID := messageIDFromRequestID(requestID)
+	responseCh, err := c.beginSynchronousResponse()
+	if err != nil {
+		return protocol.ProcedureResponse{}, err
+	}
+	defer c.endSynchronousResponse(responseCh)
 	if err := c.Send(ctx, protocol.CallProcedureMsg{
 		MessageID: messageID,
 		Name:      name,
@@ -259,7 +284,7 @@ func (c *Client) CallProcedure(ctx context.Context, name string, args []byte) (p
 	}); err != nil {
 		return protocol.ProcedureResponse{}, err
 	}
-	tag, msg, err := c.readSynchronousResponse(ctx)
+	tag, msg, err := c.readSynchronousResponse(ctx, responseCh)
 	if err != nil {
 		return protocol.ProcedureResponse{}, err
 	}
