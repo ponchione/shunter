@@ -227,6 +227,10 @@ export interface RuntimeClientOptions<Protocol extends ProtocolMetadata = Protoc
     readonly webSocketFactory?: WebSocketFactory;
     readonly onStateChange?: ConnectionStateListener<Protocol>;
     readonly reconnect?: ReconnectOptions | false;
+    /** Maximum number of operations awaiting server responses. Defaults to 1024. */
+    readonly maxPendingOperations?: number;
+    /** Maximum number of compact correlation tombstones retained after abort. Defaults to 1024. */
+    readonly maxAbandonedOperations?: number;
 }
 export interface WebSocketLike {
     readonly protocol: string;
@@ -257,6 +261,8 @@ export interface ShunterClient<Protocol extends ProtocolMetadata = ProtocolMetad
     dispose(): Promise<void>;
     onStateChange(listener: ConnectionStateListener<Protocol>): () => void;
 }
+export declare const DEFAULT_MAX_PENDING_OPERATIONS = 1024;
+export declare const DEFAULT_MAX_ABANDONED_OPERATIONS = 1024;
 export declare function createShunterClient<Protocol extends ProtocolMetadata>(options: RuntimeClientOptions<Protocol>): ShunterClient<Protocol>;
 export declare function decodeIdentityTokenFrame(data: unknown): IdentityTokenMessage;
 export type TransactionUpdateStatus = {

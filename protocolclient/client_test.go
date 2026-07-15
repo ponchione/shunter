@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +103,142 @@ func TestClientBoundsAbandonedResponseRegistry(t *testing.T) {
 	}
 	if got := len(client.abandonedResponses); got != 1 {
 		t.Fatalf("abandoned response count = %d, want 1", got)
+	}
+}
+
+func TestClientSubscriptionAcknowledgementsDoNotStealTypedResponses(t *testing.T) {
+	acknowledgements := []struct {
+		name     string
+		request  any
+		response any
+		tag      uint8
+	}{
+		{
+			name:     "subscribe single",
+			request:  protocol.SubscribeSingleMsg{RequestID: 41, QueryID: 42, QueryString: "SELECT * FROM users"},
+			response: protocol.SubscribeSingleApplied{RequestID: 41, QueryID: 42, TableName: "users", Rows: []byte{}},
+			tag:      protocol.TagSubscribeSingleApplied,
+		},
+		{
+			name:     "unsubscribe single",
+			request:  protocol.UnsubscribeSingleMsg{RequestID: 41, QueryID: 42},
+			response: protocol.UnsubscribeSingleApplied{RequestID: 41, QueryID: 42},
+			tag:      protocol.TagUnsubscribeSingleApplied,
+		},
+		{
+			name:     "subscribe multi",
+			request:  protocol.SubscribeMultiMsg{RequestID: 41, QueryID: 42, QueryStrings: []string{"SELECT * FROM users"}},
+			response: protocol.SubscribeMultiApplied{RequestID: 41, QueryID: 42, Update: []protocol.SubscriptionUpdate{}},
+			tag:      protocol.TagSubscribeMultiApplied,
+		},
+		{
+			name:     "unsubscribe multi",
+			request:  protocol.UnsubscribeMultiMsg{RequestID: 41, QueryID: 42},
+			response: protocol.UnsubscribeMultiApplied{RequestID: 41, QueryID: 42, Update: []protocol.SubscriptionUpdate{}},
+			tag:      protocol.TagUnsubscribeMultiApplied,
+		},
+	}
+	typedOperations := []struct {
+		name    string
+		invoke  func(context.Context, *Client) error
+		respond func(any) any
+	}{
+		{
+			name: "reducer",
+			invoke: func(ctx context.Context, client *Client) error {
+				_, err := client.CallReducer(ctx, "send", nil)
+				return err
+			},
+			respond: func(request any) any {
+				call := request.(protocol.CallReducerMsg)
+				return protocol.TransactionUpdate{
+					Status:      protocol.StatusCommitted{},
+					ReducerCall: protocol.ReducerCallInfo{ReducerName: call.ReducerName, RequestID: call.RequestID},
+				}
+			},
+		},
+		{
+			name: "declared query",
+			invoke: func(ctx context.Context, client *Client) error {
+				_, err := client.ExecuteDeclaredQuery(ctx, DeclaredQueryRequest{Name: "recent_users"})
+				return err
+			},
+			respond: func(request any) any {
+				query := request.(protocol.DeclaredQueryMsg)
+				return protocol.OneOffQueryResponse{MessageID: query.MessageID}
+			},
+		},
+		{
+			name: "SQL query",
+			invoke: func(ctx context.Context, client *Client) error {
+				_, err := client.SQLQuery(ctx, "SELECT * FROM users")
+				return err
+			},
+			respond: func(request any) any {
+				query := request.(protocol.OneOffQueryMsg)
+				return protocol.OneOffQueryResponse{MessageID: query.MessageID}
+			},
+		},
+		{
+			name: "procedure",
+			invoke: func(ctx context.Context, client *Client) error {
+				_, err := client.CallProcedure(ctx, "refresh", nil)
+				return err
+			},
+			respond: func(request any) any {
+				call := request.(protocol.CallProcedureMsg)
+				return protocol.ProcedureResponse{MessageID: call.MessageID}
+			},
+		},
+	}
+
+	for _, acknowledgement := range acknowledgements {
+		for _, operation := range typedOperations {
+			t.Run(acknowledgement.name+"/"+operation.name, func(t *testing.T) {
+				srv := protocolClientTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+					ws := acceptProtocolClientTestConn(t, w, r)
+					defer ws.CloseNow()
+					writeProtocolClientServerMessage(t, ws, protocol.IdentityToken{
+						Identity: [32]byte{1}, ConnectionID: [16]byte{2},
+					})
+					if _, ok := readProtocolClientMessage(t, r, ws); !ok {
+						return
+					}
+					typedRequest, ok := readProtocolClientMessage(t, r, ws)
+					if !ok {
+						return
+					}
+					writeProtocolClientServerMessage(t, ws, acknowledgement.response)
+					writeProtocolClientServerMessage(t, ws, operation.respond(typedRequest))
+					<-r.Context().Done()
+				})
+
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				client, _, err := Dial(ctx, Options{URL: srv.wsURL(), Token: "operator-token"})
+				if err != nil {
+					t.Fatalf("Dial: %v", err)
+				}
+				defer closeProtocolClientTestClient(t, client)
+
+				if err := client.Send(ctx, acknowledgement.request); err != nil {
+					t.Fatalf("Send subscription request: %v", err)
+				}
+				if err := operation.invoke(ctx, client); err != nil {
+					t.Fatalf("typed operation: %v", err)
+				}
+				tag, message, err := client.Read(ctx)
+				if err != nil {
+					t.Fatalf("Read subscription acknowledgement: %v", err)
+				}
+				if tag != acknowledgement.tag {
+					t.Fatalf("subscription acknowledgement tag = %d, want %d", tag, acknowledgement.tag)
+				}
+				if !reflect.DeepEqual(message, acknowledgement.response) {
+					t.Fatalf("subscription acknowledgement = %#v, want %#v", message, acknowledgement.response)
+				}
+			})
+		}
 	}
 }
 

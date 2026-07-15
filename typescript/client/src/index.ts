@@ -576,6 +576,10 @@ export interface RuntimeClientOptions<Protocol extends ProtocolMetadata = Protoc
   readonly webSocketFactory?: WebSocketFactory;
   readonly onStateChange?: ConnectionStateListener<Protocol>;
   readonly reconnect?: ReconnectOptions | false;
+  /** Maximum number of operations awaiting server responses. Defaults to 1024. */
+  readonly maxPendingOperations?: number;
+  /** Maximum number of compact correlation tombstones retained after abort. Defaults to 1024. */
+  readonly maxAbandonedOperations?: number;
 }
 
 export interface WebSocketLike {
@@ -626,7 +630,6 @@ function authErrorFromCloseEvent(event: CloseEvent, message: string): ShunterAut
 interface PendingReducerCall {
   readonly name: string;
   readonly cleanup?: () => void;
-  abandoned: boolean;
   resolve(value: Uint8Array): void;
   reject(error: ShunterError): void;
 }
@@ -634,7 +637,6 @@ interface PendingReducerCall {
 interface PendingDeclaredQuery {
   readonly name: string;
   readonly cleanup?: () => void;
-  abandoned: boolean;
   resolve(value: Uint8Array): void;
   reject(error: ShunterError): void;
 }
@@ -643,7 +645,6 @@ interface PendingProcedureCall {
   readonly name: string;
   readonly messageId: Uint8Array;
   readonly cleanup?: () => void;
-  abandoned: boolean;
   resolve(value: Uint8Array): void;
   reject(error: ShunterError): void;
 }
@@ -671,9 +672,14 @@ interface PendingSubscription {
     reject(error: ShunterError): void;
   }>;
   readonly cleanup?: () => void;
-  abandoned: boolean;
   resolve(value: SubscriptionUnsubscribe | SubscriptionHandle<unknown>): void;
   reject(error: ShunterError): void;
+}
+
+interface AbandonedSubscription {
+  readonly kind: "declared_view" | "table";
+  readonly requestId: RequestID;
+  readonly queryId: QueryID;
 }
 
 interface ActiveSubscription {
@@ -700,7 +706,7 @@ interface PendingUnsubscribe {
   readonly kind: "declared_view" | "table";
   readonly requestId: RequestID;
   readonly queryId: QueryID;
-  readonly abandonedSubscription?: PendingSubscription;
+  readonly abandonedSubscription?: AbandonedSubscription;
   resolve(): void;
   reject(error: ShunterError): void;
 }
@@ -721,6 +727,8 @@ export interface ShunterClient<Protocol extends ProtocolMetadata = ProtocolMetad
 
 const closeNormalCode = 1000;
 const maxUint32 = 0xffffffff;
+export const DEFAULT_MAX_PENDING_OPERATIONS = 1024;
+export const DEFAULT_MAX_ABANDONED_OPERATIONS = 1024;
 
 interface NormalizedReconnectOptions {
   readonly enabled: boolean;
@@ -735,6 +743,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   options: RuntimeClientOptions<Protocol>,
 ): ShunterClient<Protocol> {
   const reconnectOptions = normalizeReconnectOptions(options.reconnect);
+  const maxPendingOperations = operationLimit(options.maxPendingOperations, DEFAULT_MAX_PENDING_OPERATIONS);
+  const maxAbandonedOperations = operationLimit(options.maxAbandonedOperations, DEFAULT_MAX_ABANDONED_OPERATIONS);
   let state: ConnectionState<Protocol> = { status: "idle" };
   let socket: WebSocketLike | undefined;
   let connectPromise: Promise<ConnectionMetadata<Protocol>> | undefined;
@@ -758,6 +768,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   const pendingSubscriptionsByQuery = new Map<QueryID, PendingSubscription>();
   const pendingUnsubscribesByRequest = new Map<RequestID, PendingUnsubscribe>();
   const pendingUnsubscribesByQuery = new Map<QueryID, PendingUnsubscribe>();
+  const abandonedReducerCalls = new Map<RequestID, string>();
+  const abandonedProcedureCalls = new Set<string>();
+  const abandonedDeclaredQueries = new Set<string>();
+  const abandonedSubscriptionsByRequest = new Map<RequestID, AbandonedSubscription>();
+  const abandonedSubscriptionsByQuery = new Map<QueryID, AbandonedSubscription>();
   const activeSubscriptionsByQuery = new Map<QueryID, ActiveSubscription>();
   const activeSubscriptionAliasesByRootQuery = new Map<QueryID, Set<QueryID>>();
   const pendingReplaySubscriptionsByEpoch = new Map<number, Set<QueryID>>();
@@ -769,6 +784,54 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   if (options.onStateChange !== undefined) {
     listeners.add(options.onStateChange);
   }
+
+  const pendingOperationCount = (): number =>
+    pendingReducerCalls.size +
+    pendingProcedureCalls.size +
+    pendingDeclaredQueries.size +
+    pendingSubscriptionsByRequest.size +
+    pendingUnsubscribesByRequest.size;
+
+  const abandonedOperationCount = (): number =>
+    abandonedReducerCalls.size +
+    abandonedProcedureCalls.size +
+    abandonedDeclaredQueries.size +
+    abandonedSubscriptionsByRequest.size;
+
+  const assertPendingOperationCapacity = (): void => {
+    const pendingOperations = pendingOperationCount();
+    if (pendingOperations >= maxPendingOperations) {
+      throw new ShunterValidationError("Pending operation limit exceeded.", {
+        code: "pending_operation_limit_exceeded",
+        details: { pendingOperations, maxPendingOperations },
+      });
+    }
+  };
+
+  const reserveAbandonedOperation = (reserve: () => void): boolean => {
+    if (abandonedOperationCount() >= maxAbandonedOperations) {
+      return false;
+    }
+    reserve();
+    return true;
+  };
+
+  const abandonedOperationLimitError = (): ShunterValidationError =>
+    new ShunterValidationError("Abandoned operation limit exceeded; the connection cannot safely reuse correlation IDs.", {
+      code: "abandoned_operation_limit_exceeded",
+      details: {
+        abandonedOperations: abandonedOperationCount() + 1,
+        maxAbandonedOperations,
+      },
+    });
+
+  const clearAbandonedOperations = (): void => {
+    abandonedReducerCalls.clear();
+    abandonedProcedureCalls.clear();
+    abandonedDeclaredQueries.clear();
+    abandonedSubscriptionsByRequest.clear();
+    abandonedSubscriptionsByQuery.clear();
+  };
 
   const setState = (current: ConnectionState<Protocol>): void => {
     const previous = state;
@@ -930,6 +993,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     finishReplaySubscription(pending);
   };
 
+  const cleanupAbandonedSubscription = (abandoned: AbandonedSubscription): void => {
+    abandonedSubscriptionsByRequest.delete(abandoned.requestId);
+    abandonedSubscriptionsByQuery.delete(abandoned.queryId);
+  };
+
   const rejectPendingSubscriptions = (error: ShunterError, preserveReplay: boolean): void => {
     for (const pending of [...pendingSubscriptionsByRequest.values()]) {
       cleanupPendingSubscription(pending);
@@ -964,6 +1032,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     rejectPendingDeclaredQueries(error);
     rejectPendingSubscriptions(error, options.preserveReplay === true);
     rejectPendingUnsubscribes(error);
+    clearAbandonedOperations();
   };
 
   const closeActiveSubscriptions = (error: ShunterError): void => {
@@ -1145,10 +1214,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   };
 
   const allocateReducerRequestId = (): RequestID => {
-    const attempts = Math.min(maxUint32, pendingReducerCalls.size + 1);
+    const attempts = Math.min(maxUint32, pendingReducerCalls.size + abandonedReducerCalls.size + 1);
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const requestId = allocateRequestId();
-      if (!pendingReducerCalls.has(requestId)) {
+      if (!pendingReducerCalls.has(requestId) && !abandonedReducerCalls.has(requestId)) {
         return requestId;
       }
     }
@@ -1158,10 +1227,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   };
 
   const allocateDeclaredQueryRequestId = (): RequestID => {
-    const attempts = Math.min(maxUint32, pendingDeclaredQueries.size + 1);
+    const attempts = Math.min(maxUint32, pendingDeclaredQueries.size + abandonedDeclaredQueries.size + 1);
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const requestId = allocateRequestId();
-      if (!pendingDeclaredQueries.has(bytesKey(requestIdMessageId(requestId)))) {
+      const messageKey = bytesKey(requestIdMessageId(requestId));
+      if (!pendingDeclaredQueries.has(messageKey) && !abandonedDeclaredQueries.has(messageKey)) {
         return requestId;
       }
     }
@@ -1171,10 +1241,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   };
 
   const allocateProcedureRequestId = (): RequestID => {
-    const attempts = Math.min(maxUint32, pendingProcedureCalls.size + 1);
+    const attempts = Math.min(maxUint32, pendingProcedureCalls.size + abandonedProcedureCalls.size + 1);
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const requestId = allocateRequestId();
-      if (!pendingProcedureCalls.has(bytesKey(requestIdMessageId(requestId)))) {
+      const messageKey = bytesKey(requestIdMessageId(requestId));
+      if (!pendingProcedureCalls.has(messageKey) && !abandonedProcedureCalls.has(messageKey)) {
         return requestId;
       }
     }
@@ -1187,6 +1258,23 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     const { requestId, name } = update.reducerCall;
     const pending = pendingReducerCalls.get(requestId);
     if (pending === undefined) {
+      const abandonedName = abandonedReducerCalls.get(requestId);
+      if (abandonedName === undefined) {
+        return;
+      }
+      abandonedReducerCalls.delete(requestId);
+      if (name !== abandonedName) {
+        failConnected(new ShunterProtocolError("Reducer response did not match the abandoned request.", {
+          details: { requestId, expectedName: abandonedName, receivedName: name },
+        }));
+        return;
+      }
+      if (update.status.status === "committed") {
+        const updateError = dispatchRawSubscriptionUpdates(update.status.updates, "TransactionUpdate");
+        if (updateError !== undefined) {
+          failConnected(updateError);
+        }
+      }
       return;
     }
     pending.cleanup?.();
@@ -1200,69 +1288,57 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       return;
     }
     if (update.status.status === "failed") {
-      if (!pending.abandoned) {
-        pending.reject(new ShunterValidationError(update.status.error || "Reducer call failed.", {
-          code: "reducer_failed",
-          details: update,
-        }));
-      }
+      pending.reject(new ShunterValidationError(update.status.error || "Reducer call failed.", {
+        code: "reducer_failed",
+        details: update,
+      }));
       return;
     }
     const updateError = dispatchRawSubscriptionUpdates(update.status.updates, "TransactionUpdate");
     if (updateError !== undefined) {
-      if (!pending.abandoned) {
-        pending.reject(updateError);
-      }
+      pending.reject(updateError);
       failConnected(updateError);
       return;
     }
-    if (!pending.abandoned) {
-      pending.resolve(update.rawFrame);
-    }
+    pending.resolve(update.rawFrame);
   };
 
   const settleDeclaredQueryResponse = (response: OneOffQueryResponseMessage): void => {
     const messageKey = bytesKey(response.messageId);
     const pending = pendingDeclaredQueries.get(messageKey);
     if (pending === undefined) {
+      abandonedDeclaredQueries.delete(messageKey);
       return;
     }
     pending.cleanup?.();
     pendingDeclaredQueries.delete(messageKey);
     if (response.error !== undefined) {
-      if (!pending.abandoned) {
-        pending.reject(new ShunterValidationError(response.error || "Declared query failed.", {
-          code: "declared_query_failed",
-          details: { name: pending.name, response },
-        }));
-      }
+      pending.reject(new ShunterValidationError(response.error || "Declared query failed.", {
+        code: "declared_query_failed",
+        details: { name: pending.name, response },
+      }));
       return;
     }
-    if (!pending.abandoned) {
-      pending.resolve(response.rawFrame);
-    }
+    pending.resolve(response.rawFrame);
   };
 
   const settleProcedureResponse = (response: ProcedureResponseMessage): void => {
     const messageKey = bytesKey(response.messageId);
     const pending = pendingProcedureCalls.get(messageKey);
     if (pending === undefined) {
+      abandonedProcedureCalls.delete(messageKey);
       return;
     }
     pending.cleanup?.();
     pendingProcedureCalls.delete(messageKey);
     if (response.error !== undefined) {
-      if (!pending.abandoned) {
-        pending.reject(new ShunterValidationError(response.error || "Procedure call failed.", {
-          code: "procedure_failed",
-          details: { name: pending.name, response },
-        }));
-      }
+      pending.reject(new ShunterValidationError(response.error || "Procedure call failed.", {
+        code: "procedure_failed",
+        details: { name: pending.name, response },
+      }));
       return;
     }
-    if (!pending.abandoned) {
-      pending.resolve(response.result);
-    }
+    pending.resolve(response.result);
   };
 
   const cloneRawSubscriptionUpdate = (update: RawSubscriptionUpdate): RawSubscriptionUpdate => ({
@@ -1548,6 +1624,46 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     return pending;
   };
 
+  const abandonedSubscriptionForResponse = (
+    requestId: RequestID | undefined,
+    queryId: QueryID | undefined,
+    label: string,
+  ): AbandonedSubscription | undefined => {
+    const requestAbandoned =
+      requestId === undefined ? undefined : abandonedSubscriptionsByRequest.get(requestId);
+    const queryAbandoned =
+      queryId === undefined ? undefined : abandonedSubscriptionsByQuery.get(queryId);
+    if (
+      requestAbandoned !== undefined &&
+      queryAbandoned !== undefined &&
+      requestAbandoned !== queryAbandoned
+    ) {
+      failConnected(new ShunterProtocolError(`${label} response matched multiple abandoned subscriptions.`, {
+        details: { requestId, queryId },
+      }));
+      return undefined;
+    }
+    const abandoned = requestAbandoned ?? queryAbandoned;
+    if (abandoned === undefined) {
+      return undefined;
+    }
+    if (
+      (requestId !== undefined && requestId !== abandoned.requestId) ||
+      (queryId !== undefined && queryId !== abandoned.queryId)
+    ) {
+      failConnected(new ShunterProtocolError(`${label} response did not match the abandoned subscription.`, {
+        details: {
+          expectedRequestId: abandoned.requestId,
+          expectedQueryId: abandoned.queryId,
+          receivedRequestId: requestId,
+          receivedQueryId: queryId,
+        },
+      }));
+      return undefined;
+    }
+    return abandoned;
+  };
+
   const pendingUnsubscribeForResponse = (
     requestId: RequestID | undefined,
     queryId: QueryID | undefined,
@@ -1586,11 +1702,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
 
   const subscriptionRequestIdInUse = (requestId: RequestID): boolean =>
     pendingSubscriptionsByRequest.has(requestId) ||
-    pendingUnsubscribesByRequest.has(requestId);
+    pendingUnsubscribesByRequest.has(requestId) ||
+    abandonedSubscriptionsByRequest.has(requestId);
 
   const subscriptionQueryIdInUse = (queryId: QueryID): boolean =>
     pendingSubscriptionsByQuery.has(queryId) ||
     pendingUnsubscribesByQuery.has(queryId) ||
+    abandonedSubscriptionsByQuery.has(queryId) ||
     activeSubscriptionsByQuery.has(queryId);
 
   const subscriptionIdInUse = (requestId: RequestID, queryId: QueryID): boolean =>
@@ -1608,7 +1726,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   });
 
   const allocateSubscriptionRequestId = (): RequestID => {
-    const attempts = Math.min(maxUint32, pendingSubscriptionsByRequest.size + pendingUnsubscribesByRequest.size + 1);
+    const attempts = Math.min(
+      maxUint32,
+      pendingSubscriptionsByRequest.size +
+      pendingUnsubscribesByRequest.size +
+      abandonedSubscriptionsByRequest.size +
+      1,
+    );
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const requestId = allocateRequestId();
       if (!subscriptionRequestIdInUse(requestId)) {
@@ -1623,7 +1747,11 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   const allocateSubscriptionQueryId = (): QueryID => {
     const attempts = Math.min(
       maxUint32,
-      pendingSubscriptionsByQuery.size + pendingUnsubscribesByQuery.size + activeSubscriptionsByQuery.size + 1,
+      pendingSubscriptionsByQuery.size +
+      pendingUnsubscribesByQuery.size +
+      abandonedSubscriptionsByQuery.size +
+      activeSubscriptionsByQuery.size +
+      1,
     );
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const queryId = allocateQueryId();
@@ -1637,12 +1765,12 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   };
 
   const beginAbandonedSubscriptionCleanup = (
-    pending: PendingSubscription,
+    abandoned: AbandonedSubscription,
     mode: "multi" | "single",
   ): void => {
-    if (pendingUnsubscribesByQuery.has(pending.queryId)) {
+    if (pendingUnsubscribesByQuery.has(abandoned.queryId)) {
       failConnected(new ShunterProtocolError("Abandoned subscription received more than one applied response.", {
-        details: { kind: pending.kind, requestId: pending.requestId, queryId: pending.queryId },
+        details: abandoned,
       }));
       return;
     }
@@ -1654,8 +1782,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
 
     let request: EncodedSubscriptionUnsubscribeRequest;
     try {
+      assertPendingOperationCapacity();
       request = (mode === "single" ? encodeUnsubscribeSingleRequest : encodeUnsubscribeMultiRequest)(
-        pending.queryId,
+        abandoned.queryId,
         { requestId: allocateSubscriptionRequestId() },
       );
     } catch (error) {
@@ -1666,10 +1795,10 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
 
     const pendingUnsubscribe: PendingUnsubscribe = {
-      kind: pending.kind,
+      kind: abandoned.kind,
       requestId: request.requestId,
       queryId: request.queryId,
-      abandonedSubscription: pending,
+      abandonedSubscription: abandoned,
       resolve: () => {},
       reject: () => {},
     };
@@ -1710,6 +1839,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         if (state.status !== "connected" || activeSocket === undefined) {
           throw new ShunterClosedClientError(closedMessage);
         }
+        assertPendingOperationCapacity();
         const request = encodeRequest(queryId, {
           requestId: allocateSubscriptionRequestId(),
         });
@@ -1814,6 +1944,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           },
         });
       }
+      try {
+        assertPendingOperationCapacity();
+      } catch (error) {
+        return isShunterError(error)
+          ? error
+          : toShunterError(error, "validation", "Reconnect pending operation limit check failed");
+      }
       const pending: PendingSubscription = {
         kind: active.kind,
         target: active.target,
@@ -1833,7 +1970,6 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         eventTable: active.eventTable,
         replayEpoch: connectionEpoch,
         replayWaiters: new Set(),
-        abandoned: false,
         resolve: () => {},
         reject: (error) => {
           removeActiveSubscription(active.queryId);
@@ -1854,6 +1990,15 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   };
 
   const settleTableSubscriptionApplied = (response: SubscribeSingleAppliedMessage): void => {
+    const abandoned = abandonedSubscriptionForResponse(
+      response.requestId,
+      response.queryId,
+      "SubscribeSingleApplied",
+    );
+    if (abandoned !== undefined) {
+      beginAbandonedSubscriptionCleanup(abandoned, "single");
+      return;
+    }
     const pending = pendingSubscriptionForResponse(
       response.requestId,
       response.queryId,
@@ -1874,10 +2019,6 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           response,
         },
       }));
-      return;
-    }
-    if (pending.abandoned) {
-      beginAbandonedSubscriptionCleanup(pending, "single");
       return;
     }
     const active: ActiveSubscription = {
@@ -1947,6 +2088,15 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
   };
 
   const settleDeclaredViewSubscriptionApplied = (response: SubscriptionSetAppliedMessage): void => {
+    const abandoned = abandonedSubscriptionForResponse(
+      response.requestId,
+      response.queryId,
+      "SubscribeMultiApplied",
+    );
+    if (abandoned !== undefined) {
+      beginAbandonedSubscriptionCleanup(abandoned, "multi");
+      return;
+    }
     const pending = pendingSubscriptionForResponse(
       response.requestId,
       response.queryId,
@@ -1959,10 +2109,6 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       failConnected(new ShunterProtocolError("SubscribeMultiApplied response did not match the pending declared view subscription.", {
         details: { expectedKind: pending.kind, response },
       }));
-      return;
-    }
-    if (pending.abandoned) {
-      beginAbandonedSubscriptionCleanup(pending, "multi");
       return;
     }
     registerActiveSubscription({
@@ -2007,6 +2153,14 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       "SubscriptionError",
     );
     if (pending === undefined) {
+      const abandoned = abandonedSubscriptionForResponse(
+        response.requestId,
+        response.queryId,
+        "SubscriptionError",
+      );
+      if (abandoned !== undefined) {
+        cleanupAbandonedSubscription(abandoned);
+      }
       return;
     }
     cleanupPendingSubscription(pending);
@@ -2015,10 +2169,8 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       details: { kind: pending.kind, target: pending.target, response },
     });
     settleReplayWaiters(pending, error);
-    if (!pending.abandoned) {
-      pending.handle?.close(error);
-      pending.reject(error);
-    }
+    pending.handle?.close(error);
+    pending.reject(error);
   };
 
   const settleUnsubscribeError = (response: SubscriptionErrorMessage): void => {
@@ -2074,7 +2226,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
     cleanupPendingUnsubscribe(pending);
     if (pending.abandonedSubscription !== undefined) {
-      cleanupPendingSubscription(pending.abandonedSubscription);
+      cleanupAbandonedSubscription(pending.abandonedSubscription);
     } else {
       removeActiveSubscription(response.queryId);
     }
@@ -2448,7 +2600,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         ...options,
         requestId: options.requestId ?? allocateReducerRequestId(),
       });
-      if (pendingReducerCalls.has(request.requestId)) {
+      if (pendingReducerCalls.has(request.requestId) || abandonedReducerCalls.has(request.requestId)) {
         throw new ShunterValidationError("Reducer request ID is already in flight.", {
           code: "reducer_request_id_in_use",
           details: { requestId: request.requestId },
@@ -2462,16 +2614,23 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         }
         return request.frame;
       }
+      assertPendingOperationCapacity();
       return new Promise<Uint8Array>((resolve, reject) => {
         let cleanup: (() => void) | undefined;
         if (options.signal !== undefined) {
           const abort = (): void => {
             const pending = pendingReducerCalls.get(request.requestId);
-            if (pending === undefined || pending.abandoned) {
+            if (pending === undefined) {
               return;
             }
-            pending.abandoned = true;
+            if (!reserveAbandonedOperation(() => {
+              abandonedReducerCalls.set(request.requestId, pending.name);
+            })) {
+              failConnected(abandonedOperationLimitError());
+              return;
+            }
             pending.cleanup?.();
+            pendingReducerCalls.delete(request.requestId);
             reject(new ShunterCallInterruptedError({
               operation: "reducer",
               name,
@@ -2487,7 +2646,6 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         pendingReducerCalls.set(request.requestId, {
           name,
           cleanup,
-          abandoned: false,
           resolve,
           reject,
         });
@@ -2519,22 +2677,29 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           : options.requestId,
       });
       const messageKey = bytesKey(request.messageId);
-      if (pendingProcedureCalls.has(messageKey)) {
+      if (pendingProcedureCalls.has(messageKey) || abandonedProcedureCalls.has(messageKey)) {
         throw new ShunterValidationError("Procedure message ID is already in flight.", {
           code: "procedure_message_id_in_use",
           details: { name, messageId: request.messageId },
         });
       }
+      assertPendingOperationCapacity();
       return new Promise<Uint8Array>((resolve, reject) => {
         let cleanup: (() => void) | undefined;
         if (options.signal !== undefined) {
           const abort = (): void => {
             const pending = pendingProcedureCalls.get(messageKey);
-            if (pending === undefined || pending.abandoned) {
+            if (pending === undefined) {
               return;
             }
-            pending.abandoned = true;
+            if (!reserveAbandonedOperation(() => {
+              abandonedProcedureCalls.add(messageKey);
+            })) {
+              failConnected(abandonedOperationLimitError());
+              return;
+            }
             pending.cleanup?.();
+            pendingProcedureCalls.delete(messageKey);
             reject(new ShunterCallInterruptedError({
               operation: "procedure",
               name,
@@ -2551,7 +2716,6 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           name,
           messageId: new Uint8Array(request.messageId),
           cleanup,
-          abandoned: false,
           resolve,
           reject,
         });
@@ -2585,22 +2749,29 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         assertDeclaredReadParametersSupported(state.metadata.subprotocol, state.metadata.protocol);
       }
       const messageKey = bytesKey(request.messageId);
-      if (pendingDeclaredQueries.has(messageKey)) {
+      if (pendingDeclaredQueries.has(messageKey) || abandonedDeclaredQueries.has(messageKey)) {
         throw new ShunterValidationError("Declared query message ID is already in flight.", {
           code: "declared_query_message_id_in_use",
           details: { name, messageId: request.messageId },
         });
       }
+      assertPendingOperationCapacity();
       return new Promise<Uint8Array>((resolve, reject) => {
         let cleanup: (() => void) | undefined;
         if (options.signal !== undefined) {
           const abort = (): void => {
             const pending = pendingDeclaredQueries.get(messageKey);
-            if (pending === undefined || pending.abandoned) {
+            if (pending === undefined) {
               return;
             }
-            pending.abandoned = true;
+            if (!reserveAbandonedOperation(() => {
+              abandonedDeclaredQueries.add(messageKey);
+            })) {
+              failConnected(abandonedOperationLimitError());
+              return;
+            }
             pending.cleanup?.();
+            pendingDeclaredQueries.delete(messageKey);
             reject(new ShunterClosedClientError("Declared query aborted before a response was received."));
           };
           options.signal.addEventListener("abort", abort, { once: true });
@@ -2611,7 +2782,6 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         pendingDeclaredQueries.set(messageKey, {
           name,
           cleanup,
-          abandoned: false,
           resolve,
           reject,
         });
@@ -2649,6 +2819,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       if (subscriptionIdInUse(request.requestId, request.queryId)) {
         throw subscriptionIdInUseError("declared_view", name, request.requestId, request.queryId);
       }
+      assertPendingOperationCapacity();
       const handle = options.returnHandle === true
         ? createSubscriptionHandle<unknown>({
           queryId: request.queryId,
@@ -2661,11 +2832,22 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         if (options.signal !== undefined) {
           const abort = (): void => {
             const pending = pendingSubscriptionsByRequest.get(request.requestId);
-            if (pending === undefined || pending.abandoned) {
+            if (pending === undefined) {
               return;
             }
-            pending.abandoned = true;
-            pending.cleanup?.();
+            const abandoned: AbandonedSubscription = {
+              kind: pending.kind,
+              requestId: pending.requestId,
+              queryId: pending.queryId,
+            };
+            if (!reserveAbandonedOperation(() => {
+              abandonedSubscriptionsByRequest.set(abandoned.requestId, abandoned);
+              abandonedSubscriptionsByQuery.set(abandoned.queryId, abandoned);
+            })) {
+              failConnected(abandonedOperationLimitError());
+              return;
+            }
+            cleanupPendingSubscription(pending);
             const abortError = new ShunterClosedClientError("Declared view subscription aborted before a response was received.");
             handle?.close(abortError);
             reject(abortError);
@@ -2689,7 +2871,6 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           decodeRow: options.decodeRow as RowDecoder<unknown> | undefined,
           handle,
           cleanup,
-          abandoned: false,
           resolve: resolve as (value: SubscriptionUnsubscribe | SubscriptionHandle<unknown>) => void,
           reject,
         };
@@ -2728,6 +2909,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       if (subscriptionIdInUse(request.requestId, request.queryId)) {
         throw subscriptionIdInUseError("table", table, request.requestId, request.queryId);
       }
+      assertPendingOperationCapacity();
       const handle = options.returnHandle === true
         ? createSubscriptionHandle<unknown>({
           queryId: request.queryId,
@@ -2740,11 +2922,22 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         if (options.signal !== undefined) {
           const abort = (): void => {
             const pending = pendingSubscriptionsByRequest.get(request.requestId);
-            if (pending === undefined || pending.abandoned) {
+            if (pending === undefined) {
               return;
             }
-            pending.abandoned = true;
-            pending.cleanup?.();
+            const abandoned: AbandonedSubscription = {
+              kind: pending.kind,
+              requestId: pending.requestId,
+              queryId: pending.queryId,
+            };
+            if (!reserveAbandonedOperation(() => {
+              abandonedSubscriptionsByRequest.set(abandoned.requestId, abandoned);
+              abandonedSubscriptionsByQuery.set(abandoned.queryId, abandoned);
+            })) {
+              failConnected(abandonedOperationLimitError());
+              return;
+            }
+            cleanupPendingSubscription(pending);
             const abortError = new ShunterClosedClientError("Table subscription aborted before a response was received.");
             handle?.close(abortError);
             reject(abortError);
@@ -2771,7 +2964,6 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
           handle,
           eventTable: options.eventTable,
           cleanup,
-          abandoned: false,
           resolve: resolve as (value: SubscriptionUnsubscribe | SubscriptionHandle<unknown>) => void,
           reject,
         };
@@ -2801,6 +2993,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
       };
     },
   };
+}
+
+function operationLimit(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.max(1, Math.trunc(value));
 }
 
 function normalizeReconnectOptions(options: ReconnectOptions | false | undefined): NormalizedReconnectOptions {

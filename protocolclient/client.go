@@ -314,7 +314,17 @@ func (c *Client) routeServerMessage(next queuedServerMessage) bool {
 }
 
 func isAsynchronousServerMessage(tag uint8) bool {
-	return tag == protocol.TagTransactionUpdateLight || tag == protocol.TagSubscriptionError
+	switch tag {
+	case protocol.TagSubscribeSingleApplied,
+		protocol.TagUnsubscribeSingleApplied,
+		protocol.TagTransactionUpdateLight,
+		protocol.TagSubscribeMultiApplied,
+		protocol.TagSubscriptionError,
+		protocol.TagUnsubscribeMultiApplied:
+		return true
+	default:
+		return false
+	}
 }
 
 func serverResponseIdentity(next queuedServerMessage) (responseIdentity, bool) {

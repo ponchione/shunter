@@ -3842,6 +3842,173 @@ assert.equal(reusedViewHandle.queryId, 0x61626364);
 assert.deepEqual(reusedViewHandle.state, { status: "active", rows: [] });
 await abortClient.close();
 
+const pendingLimitSockets = [];
+const pendingLimitClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  maxPendingOperations: 2,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    pendingLimitSockets.push(socket);
+    return socket;
+  },
+});
+const pendingLimitConnecting = pendingLimitClient.connect();
+await nextTurn();
+pendingLimitSockets[0].open();
+pendingLimitSockets[0].message(identityTokenFrame().buffer);
+await pendingLimitConnecting;
+const pendingLimitReducer = pendingLimitClient.callReducer("send", new Uint8Array([0x01]), {
+  requestId: 0x71727374,
+});
+const pendingLimitQuery = pendingLimitClient.runDeclaredQuery("recent_users", {
+  messageId: new Uint8Array([0x71, 0x72]),
+});
+assert.equal(pendingLimitSockets[0].sent.length, 2);
+const assertPendingLimit = (error) => {
+  assert(error instanceof ShunterValidationError);
+  assert.equal(error.code, "pending_operation_limit_exceeded");
+  assert.deepEqual(error.details, { pendingOperations: 2, maxPendingOperations: 2 });
+  return true;
+};
+await assert.rejects(
+  pendingLimitClient.callProcedure("refresh", new Uint8Array(), {
+    messageId: new Uint8Array([0x73, 0x74]),
+  }),
+  assertPendingLimit,
+);
+await assert.rejects(
+  pendingLimitClient.subscribeTable("users", undefined, {
+    requestId: 0x75767778,
+    queryId: 0x797a7b7c,
+  }),
+  assertPendingLimit,
+);
+await assert.rejects(
+  pendingLimitClient.subscribeDeclaredView("live_users", {
+    requestId: 0x81828384,
+    queryId: 0x85868788,
+  }),
+  assertPendingLimit,
+);
+assert.equal(pendingLimitSockets[0].sent.length, 2);
+const pendingLimitReducerRejected = assert.rejects(pendingLimitReducer, ShunterCallInterruptedError);
+const pendingLimitQueryRejected = assert.rejects(pendingLimitQuery, ShunterClosedClientError);
+await pendingLimitClient.close();
+await Promise.all([pendingLimitReducerRejected, pendingLimitQueryRejected]);
+
+const pendingLimitReconnecting = pendingLimitClient.connect();
+await nextTurn();
+pendingLimitSockets[1].open();
+pendingLimitSockets[1].message(identityTokenFrame().buffer);
+await pendingLimitReconnecting;
+const postClosePendingSubscription = pendingLimitClient.subscribeTable("users", undefined, {
+  requestId: 0x75767778,
+  queryId: 0x797a7b7c,
+});
+assert.equal(pendingLimitSockets[1].sent.length, 1);
+const postClosePendingSubscriptionRejected = assert.rejects(
+  postClosePendingSubscription,
+  ShunterClosedClientError,
+);
+await pendingLimitClient.close();
+await postClosePendingSubscriptionRejected;
+
+const unsubscribeLimitSockets = [];
+const unsubscribeLimitClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  maxPendingOperations: 1,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    unsubscribeLimitSockets.push(socket);
+    return socket;
+  },
+});
+const unsubscribeLimitConnecting = unsubscribeLimitClient.connect();
+await nextTurn();
+unsubscribeLimitSockets[0].open();
+unsubscribeLimitSockets[0].message(identityTokenFrame().buffer);
+await unsubscribeLimitConnecting;
+const unsubscribeLimitSubscription = unsubscribeLimitClient.subscribeTable("users", undefined, {
+  requestId: 0x91929394,
+  queryId: 0x95969798,
+});
+unsubscribeLimitSockets[0].message(subscribeSingleAppliedFrameFor({
+  requestId: 0x91929394,
+  queryId: 0x95969798,
+}));
+const unsubscribeAtLimit = (await unsubscribeLimitSubscription)();
+await assert.rejects(
+  unsubscribeLimitClient.callReducer("send", new Uint8Array(), { requestId: 0xa1a2a3a4 }),
+  (error) => {
+    assert(error instanceof ShunterValidationError);
+    assert.equal(error.code, "pending_operation_limit_exceeded");
+    assert.deepEqual(error.details, { pendingOperations: 1, maxPendingOperations: 1 });
+    return true;
+  },
+);
+const unsubscribeAtLimitRejected = assert.rejects(unsubscribeAtLimit, ShunterClosedClientError);
+await unsubscribeLimitClient.close();
+await unsubscribeAtLimitRejected;
+
+const abandonedLimitSockets = [];
+const abandonedLimitClient = createShunterClient({
+  url: "ws://127.0.0.1:3000/subscribe",
+  protocol: shunterProtocol,
+  maxPendingOperations: 1,
+  maxAbandonedOperations: 2,
+  webSocketFactory: (url, protocols) => {
+    const socket = new FakeWebSocket(url, protocols);
+    abandonedLimitSockets.push(socket);
+    return socket;
+  },
+});
+const abandonedLimitConnecting = abandonedLimitClient.connect();
+await nextTurn();
+abandonedLimitSockets[0].open();
+abandonedLimitSockets[0].message(identityTokenFrame().buffer);
+await abandonedLimitConnecting;
+for (const requestId of [0x21222324, 0x31323334]) {
+  const controller = new AbortController();
+  const call = abandonedLimitClient.callReducer("send", new Uint8Array(), {
+    requestId,
+    signal: controller.signal,
+  });
+  controller.abort();
+  await assert.rejects(call, ShunterCallInterruptedError);
+}
+assert.equal(abandonedLimitClient.state.status, "connected");
+assert.equal(abandonedLimitSockets[0].sent.length, 2);
+const overflowingAbandonedController = new AbortController();
+const overflowingAbandonedCall = abandonedLimitClient.callReducer("send", new Uint8Array(), {
+  requestId: 0x41424344,
+  signal: overflowingAbandonedController.signal,
+});
+overflowingAbandonedController.abort();
+await assert.rejects(overflowingAbandonedCall, (error) => {
+  assert(error instanceof ShunterCallInterruptedError);
+  assert(error.cause instanceof ShunterValidationError);
+  assert.equal(error.cause.code, "abandoned_operation_limit_exceeded");
+  return true;
+});
+assert.equal(abandonedLimitClient.state.status, "failed");
+assert(abandonedLimitClient.state.error instanceof ShunterValidationError);
+assert.equal(abandonedLimitClient.state.error.code, "abandoned_operation_limit_exceeded");
+assert.deepEqual(abandonedLimitSockets[0].closeCalls, [{ code: 1000, reason: "protocol failure" }]);
+
+const abandonedLimitReconnecting = abandonedLimitClient.connect();
+await nextTurn();
+abandonedLimitSockets[1].open();
+abandonedLimitSockets[1].message(identityTokenFrame().buffer);
+await abandonedLimitReconnecting;
+const reusedAfterAbandonedLimit = abandonedLimitClient.callReducer("send", new Uint8Array(), {
+  requestId: 0x21222324,
+});
+abandonedLimitSockets[1].message(committedUpdateFrame);
+assert.deepEqual(await reusedAfterAbandonedLimit, committedUpdateFrame);
+await abandonedLimitClient.close();
+
 const abortCleanupFailureSockets = [];
 const abortCleanupFailureClient = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe",

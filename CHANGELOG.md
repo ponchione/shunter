@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Successful subscription and unsubscription acknowledgements no longer steal
+  Go protocol-client typed responses. The TypeScript client now bounds pending
+  operations and compact post-abort correlation tombstones, rejects excess
+  admission, and closes the connection before tombstone exhaustion could make
+  request-ID reuse unsafe.
 - The Go protocol client now accepts server messages up to the configured
   outbound envelope instead of inheriting a 32 KiB WebSocket limit, and late
   canceled-request responses no longer poison the next typed call. Hosted

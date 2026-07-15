@@ -175,7 +175,9 @@ Aborting an in-flight reducer, procedure, query, or subscription rejects the
 local waiter but keeps its wire IDs reserved until the server response arrives.
 Late committed reducer responses still update active subscriptions, and a late
 successful subscription response is immediately paired with a tracked
-unsubscribe before its IDs are released.
+unsubscribe before its IDs are released. Aborted operations retain compact
+correlation tombstones rather than callback, decoder, handle, parameter, and
+promise state.
 Token providers must resolve to strings; invalid results fail before a
 WebSocket is created.
 Apps can pass generated `shunterContract` metadata into `createShunterClient()`;
@@ -274,6 +276,22 @@ generation profile, and runtime import target for stale binding, compatibility,
 and release traceability checks. They also export module-scoped aliases for
 reducer result and raw declared-query result envelopes so helper code can keep
 those surfaces tied to generated name unions.
+
+## Operation bounds
+
+`createShunterClient()` admits at most 1,024 operations awaiting server
+responses by default. Set `maxPendingOperations` to a positive integer to use a
+smaller or larger finite limit; a non-positive or non-finite value selects the
+default. Calls beyond the limit reject with
+`pending_operation_limit_exceeded` without sending a frame.
+
+Post-send cancellation moves correlation state into a separate bounded
+tombstone registry. Its default limit is 1,024 and can be configured with
+`maxAbandonedOperations`. If another cancellation would exceed that limit, the
+client fails and closes the connection with
+`abandoned_operation_limit_exceeded`; reconnecting establishes a fresh
+correlation namespace. Server responses and any connection teardown release
+the corresponding bounded state.
 
 ## Verification
 
