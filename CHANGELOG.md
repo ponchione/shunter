@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Declared-view Applied snapshots are now prepared before publication and
+  enqueued synchronously before later deltas, with failed delivery rolling the
+  new set back. Disconnect now stops inbound handler admission and drains
+  accepted reducers before subscription and lifecycle cleanup, while fatal
+  executors still remove client subscriptions and `sys_clients` rows.
 - Runtime snapshots now enter through an executor-serialized maintenance
   barrier, wait for their selected transaction horizon to become durable, and
   capture table state only after commit data, changeset IDs, and the committed
