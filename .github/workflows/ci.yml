@@ -74,6 +74,10 @@ jobs:
           cache-dependency-path: go.sum
       - name: Test all packages
         run: go test ./...
+      - name: Compile tests for 32-bit targets
+        env:
+          GOARCH: "386"
+        run: go test -run '^$' ./...
       - name: Race-test concurrency-heavy packages
         run: go test -race -count=1 . ./auth ./executor ./protocol ./protocolclient ./subscription
 
