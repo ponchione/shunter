@@ -1200,6 +1200,99 @@ await assert.rejects(invalidTokenClient.connect(), (error) => {
 assert.equal(invalidTokenClient.state.status, "failed");
 assert.equal(invalidTokenFactoryCalls, 0);
 
+let invalidUrlFactoryCalls = 0;
+const invalidUrlClient = createShunterClient({
+  url: "not a URL",
+  protocol: shunterProtocol,
+  token: "secret",
+  webSocketFactory: () => {
+    invalidUrlFactoryCalls += 1;
+    throw new Error("should not create socket");
+  },
+});
+await rejectByNextTurn(invalidUrlClient.connect(), (error) => {
+  assert(error instanceof ShunterValidationError);
+  assert(!(error instanceof ShunterAuthError));
+  assert.equal(error.kind, "validation");
+  assert.equal(error.code, "invalid_websocket_url");
+  assert.match(error.message, /URL is invalid/);
+  assert(error.cause instanceof TypeError);
+});
+assert.equal(invalidUrlClient.state.status, "failed");
+assert.equal(invalidUrlFactoryCalls, 0);
+
+for (const setupFailure of [
+  {
+    name: "binaryType setter",
+    message: "binary type setter failed",
+    createSocket() {
+      const socket = new FakeWebSocket("ws://unused", []);
+      Object.defineProperty(socket, "binaryType", {
+        configurable: true,
+        get() {
+          return "blob";
+        },
+        set() {
+          throw new Error("binary type setter failed");
+        },
+      });
+      return socket;
+    },
+  },
+  {
+    name: "second addEventListener call",
+    message: "listener installation failed",
+    createSocket() {
+      const socket = new FakeWebSocket("ws://unused", []);
+      const addEventListener = socket.addEventListener.bind(socket);
+      let addCalls = 0;
+      socket.addEventListener = (type, listener) => {
+        addCalls += 1;
+        if (addCalls === 2) {
+          throw new Error("listener installation failed");
+        }
+        addEventListener(type, listener);
+      };
+      return socket;
+    },
+  },
+]) {
+  const socket = setupFailure.createSocket();
+  const unhandledRejections = [];
+  const captureUnhandledRejection = (reason) => {
+    unhandledRejections.push(reason);
+  };
+  process.on("unhandledRejection", captureUnhandledRejection);
+  try {
+    const setupFailureClient = createShunterClient({
+      url: "ws://127.0.0.1:3000/subscribe",
+      protocol: shunterProtocol,
+      webSocketFactory: (url, protocols) => {
+        socket.url = url;
+        socket.protocols = protocols;
+        return socket;
+      },
+    });
+    await rejectByNextTurn(setupFailureClient.connect(), (error) => {
+      assert(error instanceof ShunterTransportError, setupFailure.name);
+      assert.equal(error.kind, "transport", setupFailure.name);
+      assert.match(error.message, /Configure WebSocket failed/, setupFailure.name);
+      assert.equal(error.cause?.message, setupFailure.message, setupFailure.name);
+    });
+    await nextTurn();
+    assert.deepEqual(unhandledRejections, [], setupFailure.name);
+    assert.equal(setupFailureClient.state.status, "failed", setupFailure.name);
+    assert.equal(socket.closeCalls.length, 1, setupFailure.name);
+    for (const listeners of socket.listeners.values()) {
+      assert.equal(listeners.size, 0, `${setupFailure.name} left an active listener`);
+    }
+    await setupFailureClient.close();
+    assert.equal(setupFailureClient.state.status, "closed", setupFailure.name);
+  } finally {
+    process.off("unhandledRejection", captureUnhandledRejection);
+  }
+}
+
 const preAbortedConnect = new AbortController();
 preAbortedConnect.abort();
 let preAbortedConnectFactoryCalls = 0;
