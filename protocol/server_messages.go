@@ -172,6 +172,16 @@ func ValidateServerMessageSize(m any, maxBytes int) (int, error) {
 	return size, nil
 }
 
+// ValidateServerMessageForConn validates m against conn's configured
+// uncompressed outbound message boundary without allocating the final frame.
+func ValidateServerMessageForConn(conn *Conn, m any) (int, error) {
+	maxBytes := 0
+	if conn != nil && conn.opts != nil {
+		maxBytes = conn.opts.MaxOutboundMessageSize
+	}
+	return ValidateServerMessageSize(m, maxBytes)
+}
+
 // EncodeServerMessageWithLimit encodes m after enforcing a positive
 // uncompressed message-size cap before bytes.Buffer.Grow.
 func EncodeServerMessageWithLimit(m any, maxBytes int) ([]byte, error) {

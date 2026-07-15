@@ -54,6 +54,11 @@ type ProtocolCallReducerResponse struct {
 type RegisterSubscriptionSetCmd struct {
 	Request subscription.SubscriptionSetRegisterRequest
 	Reply   func(subscription.SubscriptionSetRegisterResult, error)
+	// ReplyWithError is the delivery-aware form of Reply. When registration
+	// succeeds but this callback reports a delivery failure, the executor
+	// removes the newly published set before dequeuing another command. Only
+	// one of Reply or ReplyWithError should be set.
+	ReplyWithError func(subscription.SubscriptionSetRegisterResult, error) error
 	// Receipt is the protocol-handler receipt timestamp. When non-zero the
 	// executor computes `TotalHostExecutionDurationMicros` as
 	// `time.Since(Receipt)` at reply time so the wire duration reflects the

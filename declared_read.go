@@ -298,30 +298,13 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := ctx.Err(); err != nil {
-		return DeclaredViewSubscription{}, err
-	}
-	exec, err := r.readyExecutor()
+	registration, err := r.prepareDeclaredViewRegistration(ctx, name, opts...)
 	if err != nil {
 		return DeclaredViewSubscription{}, err
 	}
-	callOpts := r.applyDeclaredReadOptions(opts)
-	entry, err := r.authorizedDeclaredRead(name, declaredReadKindView, callOpts.caller)
-	if err != nil {
-		return DeclaredViewSubscription{}, err
-	}
-	compiled, err := r.executableDeclaredRead(entry, callOpts.caller, callOpts.parameters)
-	if err != nil {
-		return DeclaredViewSubscription{}, err
-	}
-	compiled, err = r.applyDeclaredReadVisibility(compiled, callOpts.caller)
-	if err != nil {
-		return DeclaredViewSubscription{}, err
-	}
-	plan := newDeclaredViewAdmissionPlan(entry, compiled, callOpts.caller, r.registry)
 	responseCh := make(chan declaredViewRegisterResponse, 1)
 	cmd := executor.RegisterSubscriptionSetCmd{
-		Request: plan.subscriptionSetRegisterRequest(ctx, callOpts.caller.ConnectionID, queryID, callOpts.requestID),
+		Request: registration.plan.subscriptionSetRegisterRequest(ctx, registration.callOpts.caller.ConnectionID, queryID, registration.callOpts.requestID),
 		Reply: func(result subscription.SubscriptionSetRegisterResult, err error) {
 			if declaredViewRegisterReplyHook != nil {
 				declaredViewRegisterReplyHook()
@@ -329,16 +312,51 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 			responseCh <- declaredViewRegisterResponse{result: result, err: err}
 		},
 	}
-	if err := exec.SubmitWithContext(ctx, cmd); err != nil {
+	if err := registration.exec.SubmitWithContext(ctx, cmd); err != nil {
 		return DeclaredViewSubscription{}, err
 	}
 	select {
 	case response := <-responseCh:
-		return r.declaredViewSubscriptionFromResponse(entry, plan, callOpts, queryID, response)
+		return r.declaredViewSubscriptionFromResponse(registration.entry, registration.plan, registration.callOpts, queryID, response)
 	case <-ctx.Done():
-		go r.reconcileCanceledDeclaredViewRegistration(responseCh, callOpts.caller.ConnectionID, queryID)
+		go r.reconcileCanceledDeclaredViewRegistration(responseCh, registration.callOpts.caller.ConnectionID, queryID)
 		return DeclaredViewSubscription{}, ctx.Err()
 	}
+}
+
+type declaredViewRegistration struct {
+	exec     *executor.Executor
+	entry    declaredReadEntry
+	plan     declaredViewAdmissionPlan
+	callOpts declaredReadOptions
+}
+
+func (r *Runtime) prepareDeclaredViewRegistration(ctx context.Context, name string, opts ...DeclaredReadOption) (declaredViewRegistration, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return declaredViewRegistration{}, err
+	}
+	exec, err := r.readyExecutor()
+	if err != nil {
+		return declaredViewRegistration{}, err
+	}
+	callOpts := r.applyDeclaredReadOptions(opts)
+	entry, err := r.authorizedDeclaredRead(name, declaredReadKindView, callOpts.caller)
+	if err != nil {
+		return declaredViewRegistration{}, err
+	}
+	compiled, err := r.executableDeclaredRead(entry, callOpts.caller, callOpts.parameters)
+	if err != nil {
+		return declaredViewRegistration{}, err
+	}
+	compiled, err = r.applyDeclaredReadVisibility(compiled, callOpts.caller)
+	if err != nil {
+		return declaredViewRegistration{}, err
+	}
+	plan := newDeclaredViewAdmissionPlan(entry, compiled, callOpts.caller, r.registry)
+	return declaredViewRegistration{exec: exec, entry: entry, plan: plan, callOpts: callOpts}, nil
 }
 
 func (r *Runtime) declaredViewSubscriptionFromResponse(entry declaredReadEntry, plan declaredViewAdmissionPlan, callOpts declaredReadOptions, queryID uint32, response declaredViewRegisterResponse) (DeclaredViewSubscription, error) {
@@ -694,32 +712,69 @@ func (r *Runtime) handleProtocolSubscribeDeclaredView(ctx context.Context, conn 
 	if parameters != nil {
 		opts = append(opts, WithDeclaredReadParameters(*parameters))
 	}
-	sub, err := r.SubscribeView(ctx, name, queryID, opts...)
+	registration, err := r.prepareDeclaredViewRegistration(ctx, name, opts...)
 	if err != nil {
 		r.sendProtocolDeclaredViewError(conn, requestID, queryID, err.Error(), receipt)
 		r.observability.RecordProtocolMessage("subscribe_declared_view", protocolDeclaredReadMetricResult(err))
 		return
 	}
-	rows, err := encodeDeclaredReadRows(sub.InitialRows, sub.Columns)
-	if err != nil {
-		_ = sub.Close()
-		r.sendProtocolDeclaredViewError(conn, requestID, queryID, "encode error: "+err.Error(), receipt)
-		r.observability.RecordProtocolMessage("subscribe_declared_view", "internal_error")
-		return
+	var prepared *protocol.SubscribeSingleApplied
+	request := registration.plan.subscriptionSetRegisterRequest(ctx, registration.callOpts.caller.ConnectionID, queryID, requestID)
+	request.PrepareSnapshot = func(updates []subscription.SubscriptionUpdate) error {
+		applied, err := r.prepareProtocolDeclaredViewApplied(conn, registration.plan, requestID, queryID, receipt, updates)
+		if err != nil {
+			return err
+		}
+		prepared = &applied
+		return nil
 	}
-	if err := r.sendProtocolDeclaredReadMessage(conn, protocol.SubscribeSingleApplied{
+	cmd := executor.RegisterSubscriptionSetCmd{
+		Request: request,
+		ReplyWithError: func(result subscription.SubscriptionSetRegisterResult, replyErr error) error {
+			if replyErr != nil {
+				sendErr := r.sendProtocolDeclaredViewError(conn, requestID, queryID, replyErr.Error(), receipt)
+				r.observability.RecordProtocolMessage("subscribe_declared_view", protocolDeclaredReadMetricResult(replyErr))
+				return sendErr
+			}
+			if prepared == nil {
+				err := errors.New("shunter: declared view snapshot response was not prepared")
+				sendErr := r.sendProtocolDeclaredViewError(conn, requestID, queryID, err.Error(), receipt)
+				r.observability.RecordProtocolMessage("subscribe_declared_view", "internal_error")
+				return errors.Join(err, sendErr)
+			}
+			prepared.TotalHostExecutionDurationMicros = result.TotalHostExecutionDurationMicros
+			if err := r.sendProtocolDeclaredReadMessage(conn, *prepared); err != nil {
+				r.logProtocolDeclaredReadSendError("subscribe_declared_view", err)
+				r.observability.RecordProtocolMessage("subscribe_declared_view", "connection_closed")
+				return err
+			}
+			r.observability.RecordProtocolMessage("subscribe_declared_view", "ok")
+			return nil
+		},
+	}
+	if err := registration.exec.SubmitWithContext(ctx, cmd); err != nil {
+		r.sendProtocolDeclaredViewError(conn, requestID, queryID, err.Error(), receipt)
+		r.observability.RecordProtocolMessage("subscribe_declared_view", protocolDeclaredReadMetricResult(err))
+	}
+}
+
+func (r *Runtime) prepareProtocolDeclaredViewApplied(conn *protocol.Conn, plan declaredViewAdmissionPlan, requestID, queryID uint32, receipt time.Time, updates []subscription.SubscriptionUpdate) (protocol.SubscribeSingleApplied, error) {
+	columns := declaredViewColumns(plan, updates, r.registry)
+	rows, err := encodeDeclaredReadRows(collectDeclaredInitialRows(updates), columns)
+	if err != nil {
+		return protocol.SubscribeSingleApplied{}, fmt.Errorf("encode error: %w", err)
+	}
+	applied := protocol.SubscribeSingleApplied{
 		RequestID:                        requestID,
 		TotalHostExecutionDurationMicros: declaredReadElapsedMicrosU64(receipt),
 		QueryID:                          queryID,
-		TableName:                        sub.TableName,
+		TableName:                        declaredViewTableName(plan, updates),
 		Rows:                             rows,
-	}); err != nil {
-		_ = sub.Close()
-		r.logProtocolDeclaredReadSendError("subscribe_declared_view", err)
-		r.observability.RecordProtocolMessage("subscribe_declared_view", "connection_closed")
-		return
 	}
-	r.observability.RecordProtocolMessage("subscribe_declared_view", "ok")
+	if _, err := protocol.ValidateServerMessageForConn(conn, applied); err != nil {
+		return protocol.SubscribeSingleApplied{}, err
+	}
+	return applied, nil
 }
 
 func (r *Runtime) decodeProtocolDeclaredReadParameters(name string, kind declaredReadKind, conn *protocol.Conn, data []byte) (types.ProductValue, error) {
@@ -830,7 +885,7 @@ func (r *Runtime) sendProtocolDeclaredQueryMessage(conn *protocol.Conn, msg prot
 	return protocol.SendDirectResponse(sender, conn, msg)
 }
 
-func (r *Runtime) sendProtocolDeclaredViewError(conn *protocol.Conn, requestID, queryID uint32, errText string, receipt time.Time) {
+func (r *Runtime) sendProtocolDeclaredViewError(conn *protocol.Conn, requestID, queryID uint32, errText string, receipt time.Time) error {
 	if err := r.sendProtocolDeclaredReadMessage(conn, protocol.SubscriptionError{
 		TotalHostExecutionDurationMicros: declaredReadElapsedMicrosU64(receipt),
 		RequestID:                        declaredReadOptionalUint32(requestID),
@@ -838,7 +893,9 @@ func (r *Runtime) sendProtocolDeclaredViewError(conn *protocol.Conn, requestID, 
 		Error:                            errText,
 	}); err != nil {
 		r.logProtocolDeclaredReadSendError("subscribe_declared_view", err)
+		return err
 	}
+	return nil
 }
 
 func (r *Runtime) sendProtocolDeclaredReadMessage(conn *protocol.Conn, msg any) error {

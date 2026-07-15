@@ -283,9 +283,7 @@ func (e *Executor) rejectCommand(cmd ExecutorCommand, err error) {
 	case CallReducerCmd:
 		e.sendCallReducerResponse(c, ReducerResponse{Status: StatusFailedInternal, Error: err}, nil)
 	case RegisterSubscriptionSetCmd:
-		if c.Reply != nil {
-			c.Reply(subscription.SubscriptionSetRegisterResult{}, err)
-		}
+		_ = replyRegisterSubscriptionSet(c, subscription.SubscriptionSetRegisterResult{}, err)
 	case UnregisterSubscriptionSetCmd:
 		if c.Reply != nil {
 			c.Reply(subscription.SubscriptionSetUnregisterResult{}, err)
@@ -468,9 +466,7 @@ func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) string {
 			Error:  err,
 		}, nil)
 	case RegisterSubscriptionSetCmd:
-		if c.Reply != nil {
-			c.Reply(subscription.SubscriptionSetRegisterResult{}, err)
-		}
+		_ = replyRegisterSubscriptionSet(c, subscription.SubscriptionSetRegisterResult{}, err)
 		e.traceSubscriptionRegister("internal_error", err)
 	case UnregisterSubscriptionSetCmd:
 		if c.Reply != nil {
@@ -597,9 +593,7 @@ func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
 		res := subscription.SubscriptionSetRegisterResult{
 			TotalHostExecutionDurationMicros: elapsedHostExecutionMicros(start),
 		}
-		if cmd.Reply != nil {
-			cmd.Reply(res, err)
-		}
+		_ = replyRegisterSubscriptionSet(cmd, res, err)
 		e.traceSubscriptionRegister("canceled", err)
 		return "canceled"
 	}
@@ -607,11 +601,17 @@ func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
 	defer view.Close()
 	res, err := e.subs.RegisterSet(req, view)
 	res.TotalHostExecutionDurationMicros = elapsedHostExecutionMicros(start)
-	if cmd.Reply != nil {
-		// Synchronous invocation on the executor goroutine so the
-		// caller's Applied/Error enqueue strictly precedes any
-		// subsequent fan-out for the same connection (ADR §9.4).
-		cmd.Reply(res, err)
+	// Synchronous invocation on the executor goroutine so the caller's
+	// Applied/Error enqueue strictly precedes any subsequent fan-out for the
+	// same connection (ADR §9.4).
+	deliveryErr := replyRegisterSubscriptionSet(cmd, res, err)
+	if err == nil && deliveryErr != nil {
+		_, cleanupErr := e.subs.UnregisterSet(req.ConnID, req.QueryID, nil)
+		if cleanupErr != nil {
+			deliveryErr = errors.Join(deliveryErr, fmt.Errorf("remove subscription after reply delivery failure: %w", cleanupErr))
+		}
+		e.traceSubscriptionRegister("internal_error", deliveryErr)
+		return "internal_error"
 	}
 	if err != nil {
 		if errors.Is(err, subscription.ErrSubscriptionQuota) {
@@ -623,6 +623,16 @@ func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
 	}
 	e.traceSubscriptionRegister("ok", nil)
 	return "ok"
+}
+
+func replyRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd, result subscription.SubscriptionSetRegisterResult, err error) error {
+	if cmd.ReplyWithError != nil {
+		return cmd.ReplyWithError(result, err)
+	}
+	if cmd.Reply != nil {
+		cmd.Reply(result, err)
+	}
+	return nil
 }
 
 func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSetCmd) string {

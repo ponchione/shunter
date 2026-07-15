@@ -162,6 +162,46 @@ func TestDispatchRegisterSubscriptionSet(t *testing.T) {
 	}
 }
 
+func TestDispatchRegisterSubscriptionSetDeliveryFailureRemovesPublishedSet(t *testing.T) {
+	exec, _ := setupExecutor()
+	fakeSubs := &registerDispatchSubs{
+		registerSetResult: subscription.SubscriptionSetRegisterResult{QueryID: 42},
+	}
+	exec.subs = fakeSubs
+	deliveryErr := errors.New("connection outbound queue full")
+	connID := types.ConnectionID{9}
+
+	result := exec.dispatch(RegisterSubscriptionSetCmd{
+		Request: subscription.SubscriptionSetRegisterRequest{
+			ConnID:     connID,
+			QueryID:    42,
+			Predicates: []subscription.Predicate{subscription.AllRows{Table: 1}},
+		},
+		ReplyWithError: func(got subscription.SubscriptionSetRegisterResult, err error) error {
+			if err != nil {
+				t.Fatalf("ReplyWithError registration error = %v", err)
+			}
+			if got.QueryID != 42 {
+				t.Fatalf("ReplyWithError QueryID = %d, want 42", got.QueryID)
+			}
+			return deliveryErr
+		},
+	})
+
+	if result != "internal_error" {
+		t.Fatalf("dispatch result = %q, want internal_error", result)
+	}
+	if !fakeSubs.unregisterSetCalled {
+		t.Fatal("delivery failure did not remove the published subscription set")
+	}
+	if fakeSubs.unregisterSetConn != connID || fakeSubs.unregisterSetQueryID != 42 {
+		t.Fatalf("cleanup key = (%x, %d), want (%x, 42)", fakeSubs.unregisterSetConn, fakeSubs.unregisterSetQueryID, connID)
+	}
+	if fakeSubs.unregisterSetView != nil {
+		t.Fatalf("delivery cleanup view = %T, want nil disconnect-style cleanup", fakeSubs.unregisterSetView)
+	}
+}
+
 func TestDispatchUnregisterSubscriptionSet(t *testing.T) {
 	exec, _ := setupExecutor()
 	fakeSubs := &registerDispatchSubs{}
