@@ -895,7 +895,21 @@ export function createShunterClient(options) {
             rowCache.delete(key);
         }
     };
-    const cachedRows = (rowCache) => [...rowCache.values()].flat();
+    const cachedRows = (rowCache) => {
+        const rows = [];
+        for (const bucket of rowCache.values()) {
+            for (const row of bucket) {
+                rows.push(row);
+            }
+        }
+        return rows;
+    };
+    const publishCachedRows = (active) => {
+        if (active.handle === undefined) {
+            return;
+        }
+        replaceManagedRowsFromCache(active.handle, active.eventTable || active.rowCache === undefined ? [] : cachedRows(active.rowCache), connectionEpoch);
+    };
     const replaceCachedRows = (active, rowBytes, rows) => {
         if (active.rowCache === undefined) {
             return;
@@ -904,24 +918,25 @@ export function createShunterClient(options) {
         for (let i = 0; i < rowBytes.length; i += 1) {
             cacheRow(active.rowCache, rowBytes[i], rows[i]);
         }
-        active.handle?.replaceRows(cachedRows(active.rowCache), connectionEpoch);
+        if (active.handle !== undefined) {
+            replaceManagedRowsFromCache(active.handle, cachedRows(active.rowCache), connectionEpoch);
+        }
     };
     const applyCachedUpdate = (active, update, inserts, label) => {
         if (active.rowCache === undefined || active.handle === undefined) {
-            return;
+            return false;
         }
         if (active.eventTable) {
-            active.handle.replaceRows([], connectionEpoch);
-            return;
+            return true;
         }
         if (update.insertRowBytes === undefined) {
             if (active.decodeRow !== undefined || active.onUpdate !== undefined) {
                 throw new ShunterProtocolError(`${label} insert rows were not encoded as a RowList.`);
             }
-            return;
+            return false;
         }
         if (update.deleteRowBytes === undefined && active.decodeRow === undefined) {
-            return;
+            return false;
         }
         for (const rowBytes of update.deleteRowBytes ?? []) {
             deleteCachedRow(active.rowCache, rowBytes);
@@ -937,7 +952,7 @@ export function createShunterClient(options) {
                 cacheRow(active.rowCache, update.insertRowBytes[i], decodedInserts[i]);
             }
         }
-        active.handle.replaceRows(cachedRows(active.rowCache), connectionEpoch);
+        return true;
     };
     const registerActiveSubscription = (active, aliases = [active.queryId]) => {
         const previousAliases = activeSubscriptionAliasesByRootQuery.get(active.queryId);
@@ -962,6 +977,7 @@ export function createShunterClient(options) {
         activeSubscriptionAliasesByRootQuery.delete(rootQueryId);
     };
     const dispatchRawSubscriptionUpdates = (updates, label) => {
+        const changedSubscriptions = new Set();
         for (const update of updates) {
             const active = activeSubscriptionsByQuery.get(update.queryId);
             if (active === undefined) {
@@ -1006,7 +1022,9 @@ export function createShunterClient(options) {
                             rowIndex,
                         });
                     }
-                    applyCachedUpdate(active, update, inserts, label);
+                    if (applyCachedUpdate(active, update, inserts, label)) {
+                        changedSubscriptions.add(active);
+                    }
                 }
                 catch (error) {
                     return toShunterError(error, "validation", `${label} subscription update callback failed`);
@@ -1014,12 +1032,17 @@ export function createShunterClient(options) {
             }
             else {
                 try {
-                    applyCachedUpdate(active, update, undefined, label);
+                    if (applyCachedUpdate(active, update, undefined, label)) {
+                        changedSubscriptions.add(active);
+                    }
                 }
                 catch (error) {
                     return toShunterError(error, "validation", `${label} subscription cache update failed`);
                 }
             }
+        }
+        for (const active of changedSubscriptions) {
+            publishCachedRows(active);
         }
         return undefined;
     };
@@ -3217,8 +3240,13 @@ function decodeSubscriptionSetAppliedFrame(data, expectedTag, label) {
         rawFrame: new Uint8Array(frame),
     };
 }
+const byteHex = Array.from({ length: 256 }, (_, byte) => byte.toString(16).padStart(2, "0"));
 function bytesKey(bytes) {
-    return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    let key = "";
+    for (let index = 0; index < bytes.length; index += 1) {
+        key += byteHex[bytes[index]];
+    }
+    return key;
 }
 export function encodeReducerArgs(args, encodeArgs) {
     if (encodeArgs === undefined) {
@@ -3520,6 +3548,14 @@ function assertProcedureCallsSupported(selectedSubprotocol, expected) {
         receivedSubprotocol: selectedSubprotocol,
     });
 }
+const replaceOwnedRows = Symbol("replaceOwnedRows");
+function replaceManagedRowsFromCache(handle, rows, epoch) {
+    if (replaceOwnedRows in handle) {
+        handle[replaceOwnedRows](rows, epoch);
+        return;
+    }
+    handle.replaceRows(rows, epoch);
+}
 export function createSubscriptionHandle(options = {}) {
     let epoch = options.epoch ?? 0;
     let state = options.initialRows === undefined
@@ -3549,7 +3585,17 @@ export function createSubscriptionHandle(options = {}) {
             : { status: "closed", error: closedState.error });
         resolveClosed(closedState);
     };
-    return {
+    const setRows = (rows, nextEpoch, copy) => {
+        if (state.status === "closed") {
+            throw new ShunterClosedClientError("Cannot replace rows on a closed subscription.");
+        }
+        epoch = nextEpoch;
+        setState({
+            status: state.status === "unsubscribing" ? "unsubscribing" : "active",
+            rows: copy ? [...rows] : rows,
+        });
+    };
+    const handle = {
         get queryId() {
             return options.queryId;
         },
@@ -3561,14 +3607,10 @@ export function createSubscriptionHandle(options = {}) {
         },
         closed,
         replaceRows(rows, nextEpoch = epoch) {
-            if (state.status === "closed") {
-                throw new ShunterClosedClientError("Cannot replace rows on a closed subscription.");
-            }
-            epoch = nextEpoch;
-            setState({
-                status: state.status === "unsubscribing" ? "unsubscribing" : "active",
-                rows: [...rows],
-            });
+            setRows(rows, nextEpoch, true);
+        },
+        [replaceOwnedRows](rows, nextEpoch = epoch) {
+            setRows(rows, nextEpoch, false);
         },
         markResynchronizing(targetEpoch) {
             if (state.status === "closed" || state.status === "unsubscribing") {
@@ -3611,6 +3653,7 @@ export function createSubscriptionHandle(options = {}) {
             return unsubscribePromise;
         },
     };
+    return handle;
 }
 export function encodeSubscribeSingleRequest(queryString, options = {}) {
     const requestId = options.requestId ?? 0;

@@ -1338,7 +1338,26 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     }
   };
 
-  const cachedRows = (rowCache: Map<string, unknown[]>): unknown[] => [...rowCache.values()].flat();
+  const cachedRows = (rowCache: Map<string, unknown[]>): unknown[] => {
+    const rows: unknown[] = [];
+    for (const bucket of rowCache.values()) {
+      for (const row of bucket) {
+        rows.push(row);
+      }
+    }
+    return rows;
+  };
+
+  const publishCachedRows = (active: ActiveSubscription): void => {
+    if (active.handle === undefined) {
+      return;
+    }
+    replaceManagedRowsFromCache(
+      active.handle,
+      active.eventTable || active.rowCache === undefined ? [] : cachedRows(active.rowCache),
+      connectionEpoch,
+    );
+  };
 
   const replaceCachedRows = (
     active: ActiveSubscription,
@@ -1352,7 +1371,9 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     for (let i = 0; i < rowBytes.length; i += 1) {
       cacheRow(active.rowCache, rowBytes[i], rows[i]);
     }
-    active.handle?.replaceRows(cachedRows(active.rowCache), connectionEpoch);
+    if (active.handle !== undefined) {
+      replaceManagedRowsFromCache(active.handle, cachedRows(active.rowCache), connectionEpoch);
+    }
   };
 
   const applyCachedUpdate = (
@@ -1360,22 +1381,21 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     update: RawSubscriptionUpdate,
     inserts: readonly unknown[] | undefined,
     label: string,
-  ): void => {
+  ): boolean => {
     if (active.rowCache === undefined || active.handle === undefined) {
-      return;
+      return false;
     }
     if (active.eventTable) {
-      active.handle.replaceRows([], connectionEpoch);
-      return;
+      return true;
     }
     if (update.insertRowBytes === undefined) {
       if (active.decodeRow !== undefined || active.onUpdate !== undefined) {
         throw new ShunterProtocolError(`${label} insert rows were not encoded as a RowList.`);
       }
-      return;
+      return false;
     }
     if (update.deleteRowBytes === undefined && active.decodeRow === undefined) {
-      return;
+      return false;
     }
     for (const rowBytes of update.deleteRowBytes ?? []) {
       deleteCachedRow(active.rowCache, rowBytes);
@@ -1390,7 +1410,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         cacheRow(active.rowCache, update.insertRowBytes[i], decodedInserts[i]);
       }
     }
-    active.handle.replaceRows(cachedRows(active.rowCache), connectionEpoch);
+    return true;
   };
 
   const registerActiveSubscription = (
@@ -1424,6 +1444,7 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     updates: readonly RawSubscriptionUpdate[],
     label: string,
   ): ShunterError | undefined => {
+    const changedSubscriptions = new Set<ActiveSubscription>();
     for (const update of updates) {
       const active = activeSubscriptionsByQuery.get(update.queryId);
       if (active === undefined) {
@@ -1469,17 +1490,24 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
               rowIndex,
             });
           }
-          applyCachedUpdate(active, update, inserts, label);
+          if (applyCachedUpdate(active, update, inserts, label)) {
+            changedSubscriptions.add(active);
+          }
         } catch (error) {
           return toShunterError(error, "validation", `${label} subscription update callback failed`);
         }
       } else {
         try {
-          applyCachedUpdate(active, update, undefined, label);
+          if (applyCachedUpdate(active, update, undefined, label)) {
+            changedSubscriptions.add(active);
+          }
         } catch (error) {
           return toShunterError(error, "validation", `${label} subscription cache update failed`);
         }
       }
+    }
+    for (const active of changedSubscriptions) {
+      publishCachedRows(active);
     }
     return undefined;
   };
@@ -4155,8 +4183,17 @@ function decodeSubscriptionSetAppliedFrame(
   };
 }
 
+const byteHex = Array.from(
+  { length: 256 },
+  (_, byte) => byte.toString(16).padStart(2, "0"),
+);
+
 function bytesKey(bytes: Uint8Array): string {
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  let key = "";
+  for (let index = 0; index < bytes.length; index += 1) {
+    key += byteHex[bytes[index]];
+  }
+  return key;
 }
 
 export type RequestID = number;
@@ -4724,6 +4761,24 @@ export interface SubscriptionHandleOptions<Row = unknown> {
   readonly onStateChange?: (state: SubscriptionState<Row>) => void;
 }
 
+const replaceOwnedRows = Symbol("replaceOwnedRows");
+
+type RuntimeManagedSubscriptionHandle<Row> = ManagedSubscriptionHandle<Row> & {
+  [replaceOwnedRows](rows: Row[], epoch?: number): void;
+};
+
+function replaceManagedRowsFromCache<Row>(
+  handle: ManagedSubscriptionHandle<Row>,
+  rows: Row[],
+  epoch: number,
+): void {
+  if (replaceOwnedRows in handle) {
+    (handle as RuntimeManagedSubscriptionHandle<Row>)[replaceOwnedRows](rows, epoch);
+    return;
+  }
+  handle.replaceRows(rows, epoch);
+}
+
 export type SubscriptionUnsubscribe = () => void | Promise<void>;
 
 export interface SubscriptionHandleReturnOptions {
@@ -4766,7 +4821,18 @@ export function createSubscriptionHandle<Row = unknown>(
     resolveClosed(closedState);
   };
 
-  return {
+  const setRows = (rows: readonly Row[], nextEpoch: number, copy: boolean): void => {
+    if (state.status === "closed") {
+      throw new ShunterClosedClientError("Cannot replace rows on a closed subscription.");
+    }
+    epoch = nextEpoch;
+    setState({
+      status: state.status === "unsubscribing" ? "unsubscribing" : "active",
+      rows: copy ? [...rows] : rows,
+    });
+  };
+
+  const handle: RuntimeManagedSubscriptionHandle<Row> = {
     get queryId() {
       return options.queryId;
     },
@@ -4778,14 +4844,10 @@ export function createSubscriptionHandle<Row = unknown>(
     },
     closed,
     replaceRows(rows: readonly Row[], nextEpoch = epoch): void {
-      if (state.status === "closed") {
-        throw new ShunterClosedClientError("Cannot replace rows on a closed subscription.");
-      }
-      epoch = nextEpoch;
-      setState({
-        status: state.status === "unsubscribing" ? "unsubscribing" : "active",
-        rows: [...rows],
-      });
+      setRows(rows, nextEpoch, true);
+    },
+    [replaceOwnedRows](rows: Row[], nextEpoch = epoch): void {
+      setRows(rows, nextEpoch, false);
     },
     markResynchronizing(targetEpoch: number): void {
       if (state.status === "closed" || state.status === "unsubscribing") {
@@ -4827,6 +4889,7 @@ export function createSubscriptionHandle<Row = unknown>(
       return unsubscribePromise;
     },
   };
+  return handle;
 }
 
 export interface DeclaredViewSubscriptionOptions<Row = unknown> {

@@ -4,6 +4,17 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Disconnect teardown now reserves part of its bounded deadline for
+  `OnDisconnect`, so delayed subscription cleanup cannot suppress lifecycle
+  reducer execution or `sys_clients` cleanup. The Go protocol client now uses
+  one response-routing reader and bounded asynchronous-message queues, allowing
+  concurrent `Read` calls without stealing typed responses or retaining drained
+  payload slots.
+- TypeScript managed subscriptions now batch cache publication once per active
+  subscription per server message, hand owned snapshots to internal handles
+  without a second full-array copy, and use a precomputed exact byte-key
+  encoder. A large-snapshot delta benchmark tracks elapsed time, snapshot
+  allocations, row-slot volume, and heap growth.
 - Reducer and migration changesets now pass commit-log row and record-payload
   limits before becoming visible, so oversized commits cannot poison the
   durability worker. Protocol shutdown now honors cancellation while waiting

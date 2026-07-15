@@ -167,7 +167,9 @@ const handle = createSubscriptionHandle({
 assert.equal(handle.queryId, 7);
 assert.deepEqual(handle.state, { status: "active", rows: [{ id: 1 }] });
 
-handle.replaceRows([{ id: 2 }]);
+const callerOwnedReplacementRows = [{ id: 2 }];
+handle.replaceRows(callerOwnedReplacementRows);
+callerOwnedReplacementRows.push({ id: 99 });
 assert.deepEqual(handle.state, { status: "active", rows: [{ id: 2 }] });
 
 await handle.unsubscribe();
@@ -2501,19 +2503,40 @@ decodedViewHandleSockets[0].message(subscribeAppliedFrame);
 const decodedViewHandle = await decodedViewHandleSubscription;
 assert.deepEqual(decodedViewHandleInitialRows, [["1-2", "3"]]);
 assert.deepEqual(decodedViewHandle.state, { status: "active", rows: ["1-2", "3"] });
+const replaceOwnedRowsSymbol = Object.getOwnPropertySymbols(decodedViewHandle).find(
+  (symbol) => symbol.description === "replaceOwnedRows",
+);
+assert.notEqual(replaceOwnedRowsSymbol, undefined);
+let decodedViewCachePublications = 0;
+const originalReplaceOwnedRows = decodedViewHandle[replaceOwnedRowsSymbol];
+decodedViewHandle[replaceOwnedRowsSymbol] = function replaceOwnedRowsForTest(rows, epoch) {
+  decodedViewCachePublications += 1;
+  return originalReplaceOwnedRows.call(this, rows, epoch);
+};
 decodedViewHandleSockets[0].message(transactionUpdateLightFrameFor({
   requestId: 0x22232425,
-  updates: [{
-    queryId: 0x01020304,
-    tableName: "users",
-    inserts: [new Uint8Array([4, 5])],
-    deletes: [new Uint8Array([1, 2])],
-  }],
+  updates: [
+    {
+      queryId: 0x01020304,
+      tableName: "users",
+      inserts: [new Uint8Array([4, 5])],
+      deletes: [new Uint8Array([1, 2])],
+    },
+    {
+      queryId: 0x01020304,
+      tableName: "users",
+      inserts: [new Uint8Array([6])],
+      deletes: [new Uint8Array([3])],
+    },
+  ],
 }));
-assert.deepEqual(decodedViewHandle.state, { status: "active", rows: ["3", "4-5"] });
-assert.equal(decodedViewHandleUpdates.length, 2);
+assert.deepEqual(decodedViewHandle.state, { status: "active", rows: ["4-5", "6"] });
+assert.equal(decodedViewCachePublications, 1);
+assert.equal(decodedViewHandleUpdates.length, 3);
 assert.deepEqual(decodedViewHandleUpdates[1].inserts, ["4-5"]);
 assert.deepEqual(decodedViewHandleUpdates[1].deletes, ["1-2"]);
+assert.deepEqual(decodedViewHandleUpdates[2].inserts, ["6"]);
+assert.deepEqual(decodedViewHandleUpdates[2].deletes, ["3"]);
 await decodedViewHandleClient.close();
 
 const declaredViewSingleAppliedSockets = [];

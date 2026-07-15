@@ -19,6 +19,7 @@
     "README.md"
   ],
   "scripts": {
+    "bench:subscription-cache": "npm run build && node --expose-gc bench/subscription-cache.bench.mjs",
     "build": "tsc -p tsconfig.build.json",
     "pack:dry-run": "npm pack --dry-run",
     "smoke:package": "node test/package-smoke.mjs",
