@@ -19,11 +19,22 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 		return
 	}
 	c.closeOnce.Do(func() {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		teardownCtx, cancelTeardown := context.WithTimeout(ctx, c.disconnectTimeout())
+		defer cancelTeardown()
 		if inbox != nil {
-			if err := inbox.DisconnectClientSubscriptions(ctx, c.ID); err != nil {
+			// Reserve the second half of the bounded teardown window for
+			// OnDisconnect admission. Reusing one deadline for both phases lets
+			// slow subscription cleanup consume the entire window and suppress the
+			// lifecycle command before it reaches a context-aware executor.
+			subscriptionCtx, cancelSubscriptions := disconnectSubscriptionContext(teardownCtx)
+			if err := inbox.DisconnectClientSubscriptions(subscriptionCtx, c.ID); err != nil {
 				logProtocolError(c.Observer, "unknown", "disconnect_failed", err)
 			}
-			if err := inbox.OnDisconnect(ctx, c.ID, c.Identity, c.Principal.Copy()); err != nil {
+			cancelSubscriptions()
+			if err := inbox.OnDisconnect(teardownCtx, c.ID, c.Identity, c.Principal.Copy()); err != nil {
 				logProtocolError(c.Observer, "unknown", "disconnect_failed", err)
 			}
 		}
@@ -42,6 +53,18 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 			c.Observer.LogProtocolConnectionClosed(c.ID, closeReason(code, reason))
 		}
 	})
+}
+
+func disconnectSubscriptionContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return context.WithCancel(ctx)
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, remaining/2)
 }
 
 func (c *Conn) closeTransport(code websocket.StatusCode, reason string) {

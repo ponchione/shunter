@@ -72,9 +72,6 @@ func TestSuperviseLifecycleBoundsDisconnectOnInboxHang(t *testing.T) {
 	}
 
 	elapsed := time.Since(start)
-	if elapsed < opts.DisconnectTimeout {
-		t.Fatalf("supervisor completed in %v, before DisconnectTimeout %v (ctx should have bounded, not tripped early)", elapsed, opts.DisconnectTimeout)
-	}
 	if elapsed > opts.DisconnectTimeout+1*time.Second {
 		t.Fatalf("supervisor took %v, more than DisconnectTimeout+1s slack", elapsed)
 	}
