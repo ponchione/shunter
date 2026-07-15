@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Commit-log worker startup now re-syncs existing segment directories,
+  and runtime bootstrap, snapshot bases, and offline backup/restore durably
+  publish every newly created directory component. TypeScript connection setup
+  now rejects adapter initialization faults without unhandled promises and
+  reports invalid tokenized URLs as validation errors rather than auth errors.
 - `protocol.SendDirectResponse` now returns an explicit delivery outcome.
   Oversized direct responses report `response_too_large` when their correlated
   fallback is delivered; `send_failed` and `connection_closed` are reserved
