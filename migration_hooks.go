@@ -249,7 +249,7 @@ func (e *migrationExecutor) runHook(ctx context.Context, hookIndex int, hook Mig
 		return result, fmt.Errorf("migration hook %d: %w", hookIndex+1, err)
 	}
 	tx.Seal()
-	changeset, err := store.CommitWithValidation(e.state, tx, e.durability.ValidateChangeset)
+	changeset, err := store.CommitWithValidationAtTxID(e.state, tx, txID, e.durability.ValidateChangeset)
 	if err != nil {
 		store.Rollback(tx)
 		return result, fmt.Errorf("migration hook %d commit: %w", hookIndex+1, err)
@@ -257,8 +257,6 @@ func (e *migrationExecutor) runHook(ctx context.Context, hookIndex int, hook Mig
 	if changeset.IsEmpty() {
 		return result, nil
 	}
-	changeset.TxID = txID
-	e.state.SetCommittedTxID(txID)
 	e.state.RecordMemoryUsage()
 	if migrationAfterCommitBeforeDurabilityHook != nil {
 		if err := migrationAfterCommitBeforeDurabilityHook(txID, changeset); err != nil {

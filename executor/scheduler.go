@@ -217,14 +217,12 @@ func (e *Executor) sweepInvalidSchedules(ctx context.Context) error {
 			return err
 		}
 		tx.Seal()
-		changeset, err := e.commitTransaction(tx)
+		changeset, err := e.commitTransaction(tx, txID)
 		if err != nil {
 			store.Rollback(tx)
 			return fmt.Errorf("sweep invalid schedule schedule_id=%d reducer=%q: %w", target.id, target.reducerName, err)
 		}
 		e.consumeCommitTxID()
-		changeset.TxID = txID
-		e.committed.SetCommittedTxID(txID)
 		e.postCommit(txID, changeset, nil, CallReducerCmd{}, postCommitOptions{source: CallSourceLifecycle})
 		if e.fatal.Load() {
 			return fmt.Errorf("sweep invalid schedule aborted: %w", ErrExecutorFatal)

@@ -52,15 +52,13 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) string {
 		return "internal_error"
 	}
 	tx.Seal()
-	changeset, err := e.commitTransaction(tx)
+	changeset, err := e.commitTransaction(tx, txID)
 	if err != nil {
 		store.Rollback(tx)
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, fmt.Errorf("commit: %w", err))
 		return "internal_error"
 	}
 	e.consumeCommitTxID()
-	changeset.TxID = txID
-	e.committed.SetCommittedTxID(txID)
 
 	return executorCommandResultFromStatus(e.postCommit(txID, changeset, nil, CallReducerCmd{ResponseCh: cmd.ResponseCh}, postCommitOptions{source: CallSourceLifecycle}))
 }
@@ -104,15 +102,13 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) string {
 		return "internal_error"
 	}
 	tx.Seal()
-	changeset, err := e.commitTransaction(tx)
+	changeset, err := e.commitTransaction(tx, txID)
 	if err != nil {
 		store.Rollback(tx)
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, fmt.Errorf("commit: %w", err))
 		return "internal_error"
 	}
 	e.consumeCommitTxID()
-	changeset.TxID = txID
-	e.committed.SetCommittedTxID(txID)
 
 	// Even when the reducer failed, the cleanup commit still runs the
 	// post-commit pipeline so subscribers see the sys_clients delete.
@@ -163,14 +159,12 @@ func (e *Executor) sweepDanglingClients(ctx context.Context) error {
 			return err
 		}
 		tx.Seal()
-		changeset, err := e.commitTransaction(tx)
+		changeset, err := e.commitTransaction(tx, txID)
 		if err != nil {
 			store.Rollback(tx)
 			return fmt.Errorf("sweep commit conn=%x: %w", t.conn[:], err)
 		}
 		e.consumeCommitTxID()
-		changeset.TxID = txID
-		e.committed.SetCommittedTxID(txID)
 		e.postCommit(txID, changeset, nil, CallReducerCmd{}, postCommitOptions{source: CallSourceLifecycle})
 		if e.fatal.Load() {
 			return fmt.Errorf("sweep aborted: %w", ErrExecutorFatal)

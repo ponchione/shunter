@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/ponchione/shunter/commitlog"
+	"github.com/ponchione/shunter/executor"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
@@ -21,23 +22,49 @@ type runtimeStorageHandles struct {
 	registry      schema.SchemaRegistry
 	state         *store.CommittedState
 	observability *runtimeObservability
+	executor      *executor.Executor
 }
 
 // CreateSnapshot writes a full snapshot for the runtime's current committed
-// state and returns the represented transaction ID. The call is synchronous;
-// callers own write quiescence when they need a graceful maintenance point.
+// state and returns the represented transaction ID. On a running runtime the
+// call is serialized with executor work and publishes only after the selected
+// transaction horizon is durable.
 func (r *Runtime) CreateSnapshot() (types.TxID, error) {
-	handles, err := r.storageHandles()
+	if r == nil {
+		return 0, ErrRuntimeNotReady
+	}
+
+	r.mu.Lock()
+	handles, err := r.storageHandlesLocked()
 	if err != nil {
+		r.mu.Unlock()
 		return 0, err
 	}
 
 	writer := commitlog.NewFileSnapshotWriterWithObserver(handles.dataDir, handles.registry, handles.observability)
-	txID, err := writer.CreateSnapshotAtCurrentHorizon(handles.state)
+	if r.stateName == RuntimeStateBuilt {
+		txID, err := writer.CreateSnapshotAtCurrentHorizon(handles.state)
+		r.mu.Unlock()
+		return txID, err
+	}
+	if handles.executor == nil || handles.executor.Fatal() {
+		r.mu.Unlock()
+		return 0, ErrRuntimeNotReady
+	}
+
+	responseCh := make(chan executor.CreateSnapshotResult, 1)
+	err = handles.executor.Submit(executor.CreateSnapshotCmd{
+		Capture: func(committed *store.CommittedState, txID types.TxID) error {
+			return writer.CreateSnapshot(committed, txID)
+		},
+		ResponseCh: responseCh,
+	})
+	r.mu.Unlock()
 	if err != nil {
 		return 0, err
 	}
-	return txID, nil
+	result := <-responseCh
+	return result.TxID, result.Err
 }
 
 // CompactCommitLog deletes sealed commit log segments fully covered by a
@@ -63,7 +90,10 @@ func (r *Runtime) storageHandles() (runtimeStorageHandles, error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.storageHandlesLocked()
+}
 
+func (r *Runtime) storageHandlesLocked() (runtimeStorageHandles, error) {
 	switch r.stateName {
 	case RuntimeStateBuilt, RuntimeStateReady:
 	case RuntimeStateStarting:
@@ -93,5 +123,6 @@ func (r *Runtime) storageHandles() (runtimeStorageHandles, error) {
 		registry:      r.registry,
 		state:         r.state,
 		observability: r.observability,
+		executor:      r.executor,
 	}, nil
 }

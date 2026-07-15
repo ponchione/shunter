@@ -19,6 +19,18 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 // committed-state write lock, after constraint revalidation and before any
 // visible state mutation.
 func CommitWithValidation(cs *CommittedState, tx *Transaction, validate func(*Changeset) error) (*Changeset, error) {
+	return commitWithValidation(cs, tx, 0, false, validate)
+}
+
+// CommitWithValidationAtTxID applies the transaction and records txID on both
+// the returned changeset and committed state under one write-lock envelope.
+// Validation sees the assigned transaction ID and still runs before any
+// visible state mutation.
+func CommitWithValidationAtTxID(cs *CommittedState, tx *Transaction, txID types.TxID, validate func(*Changeset) error) (*Changeset, error) {
+	return commitWithValidation(cs, tx, txID, true, validate)
+}
+
+func commitWithValidation(cs *CommittedState, tx *Transaction, txID types.TxID, advanceHorizon bool, validate func(*Changeset) error) (*Changeset, error) {
 	switch tx.state.Load() {
 	case transactionRolledBack:
 		return nil, ErrTransactionRolledBack
@@ -36,6 +48,9 @@ func CommitWithValidation(cs *CommittedState, tx *Transaction, validate func(*Ch
 	if err != nil {
 		return nil, err
 	}
+	if advanceHorizon {
+		changeset.TxID = txID
+	}
 	if validate != nil {
 		if err := validate(changeset); err != nil {
 			return nil, err
@@ -43,6 +58,9 @@ func CommitWithValidation(cs *CommittedState, tx *Transaction, validate func(*Ch
 	}
 	if err := applyCommit(cs, tx); err != nil {
 		return nil, err
+	}
+	if advanceHorizon {
+		cs.committedTxID = txID
 	}
 
 	tx.finishCommitted()

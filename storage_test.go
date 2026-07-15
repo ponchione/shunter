@@ -5,12 +5,30 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ponchione/shunter/commitlog"
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
+
+type snapshotBarrierMemoryObserver struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (*snapshotBarrierMemoryObserver) LogStoreSnapshotLeaked(string)      {}
+func (*snapshotBarrierMemoryObserver) RecordStoreReadRows(string, uint64) {}
+func (*snapshotBarrierMemoryObserver) StoreMemoryUsageEnabled() bool      { return true }
+func (o *snapshotBarrierMemoryObserver) RecordStoreMemoryUsage([]store.MemoryUsage) {
+	close(o.entered)
+	<-o.release
+}
 
 func TestRuntimeCreateSnapshotWritesCommittedHorizon(t *testing.T) {
 	rt := buildValidTestRuntime(t)
@@ -84,6 +102,122 @@ func TestRuntimeCreateSnapshotFaultKeepsRuntimeUsable(t *testing.T) {
 	}
 	if txID != 7 {
 		t.Fatalf("CreateSnapshot txID after clearing fault = %d, want 7", txID)
+	}
+}
+
+func TestRuntimeCreateSnapshotSerializesCommitDurabilityAndRecovery(t *testing.T) {
+	dir := t.TempDir()
+	rt, err := Build(dataDirBackupTestModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	first, err := rt.CallReducer(context.Background(), "insert_message", []byte("first"))
+	if err != nil || first.Status != StatusCommitted {
+		t.Fatalf("first reducer = %+v, %v; want committed", first, err)
+	}
+	if err := rt.WaitUntilDurable(context.Background(), first.TxID); err != nil {
+		t.Fatalf("WaitUntilDurable(%d): %v", first.TxID, err)
+	}
+
+	observer := &snapshotBarrierMemoryObserver{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	rt.state.SetObserver(observer)
+	type reducerCallResult struct {
+		result ReducerResult
+		err    error
+	}
+	reducerDone := make(chan reducerCallResult, 1)
+	go func() {
+		result, err := rt.CallReducer(context.Background(), "insert_message", []byte("second"))
+		reducerDone <- reducerCallResult{result: result, err: err}
+	}()
+	select {
+	case <-observer.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for commit memory observation")
+	}
+	if got := rt.state.CommittedTxID(); got != first.TxID+1 {
+		t.Fatalf("committed horizon while observation paused = %d, want %d", got, first.TxID+1)
+	}
+
+	type snapshotResult struct {
+		txID types.TxID
+		err  error
+	}
+	snapshotDone := make(chan snapshotResult, 1)
+	go func() {
+		txID, err := rt.CreateSnapshot()
+		snapshotDone <- snapshotResult{txID: txID, err: err}
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for rt.executor.InboxDepth() == 0 && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	if rt.executor.InboxDepth() == 0 {
+		t.Fatal("snapshot maintenance command was not queued behind paused commit")
+	}
+	select {
+	case result := <-snapshotDone:
+		t.Fatalf("snapshot completed before commit durability enqueue: %+v", result)
+	default:
+	}
+
+	close(observer.release)
+	second := <-reducerDone
+	if second.err != nil || second.result.Status != StatusCommitted {
+		t.Fatalf("second reducer = %+v, %v; want committed", second.result, second.err)
+	}
+	snapshot := <-snapshotDone
+	if snapshot.err != nil {
+		t.Fatalf("CreateSnapshot: %v", snapshot.err)
+	}
+	if snapshot.txID != second.result.TxID {
+		t.Fatalf("snapshot txID = %d, want committed tx %d", snapshot.txID, second.result.TxID)
+	}
+	if durable := types.TxID(rt.durability.DurableTxID()); durable < snapshot.txID {
+		t.Fatalf("snapshot txID = %d published ahead of durable horizon %d", snapshot.txID, durable)
+	}
+
+	data, err := commitlog.ReadSnapshot(filepath.Join(dir, strconv.FormatUint(uint64(snapshot.txID), 10)))
+	if err != nil {
+		t.Fatalf("ReadSnapshot(%d): %v", snapshot.txID, err)
+	}
+	if len(data.Tables) == 0 || data.Tables[0].TableID != 0 || len(data.Tables[0].Rows) != 2 {
+		t.Fatalf("snapshot tables = %#v, want two message rows", data.Tables)
+	}
+	rt.state.SetObserver(rt.observability)
+	tail, err := rt.CallReducer(context.Background(), "insert_message", []byte("tail"))
+	if err != nil || tail.Status != StatusCommitted {
+		t.Fatalf("tail reducer = %+v, %v; want committed", tail, err)
+	}
+	if err := rt.WaitUntilDurable(context.Background(), tail.TxID); err != nil {
+		t.Fatalf("WaitUntilDurable(%d): %v", tail.TxID, err)
+	}
+
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	rebuilt, err := Build(dataDirBackupTestModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build from snapshot and log tail: %v", err)
+	}
+	defer rebuilt.Close()
+	stateSnapshot := rebuilt.state.Snapshot()
+	defer stateSnapshot.Close()
+	var got []string
+	for _, row := range stateSnapshot.TableScan(0) {
+		got = append(got, row[1].AsString())
+	}
+	slices.Sort(got)
+	want := []string{"first", "second", "tail"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("rebuilt message bodies = %#v, want %#v", got, want)
 	}
 }
 

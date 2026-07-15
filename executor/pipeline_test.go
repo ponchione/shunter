@@ -41,6 +41,7 @@ type fakeDurability struct {
 	block       chan struct{}     // if set, EnqueueCommitted waits on it
 	entered     chan struct{}     // optional test signal before blocking
 	waitCh      <-chan types.TxID // optional readiness channel returned by WaitUntilDurable
+	waitCalled  chan<- types.TxID // optional signal for each durability wait request
 	fatalErr    error
 	validateErr error
 	panicOn     bool // panic when EnqueueCommitted is called
@@ -68,6 +69,9 @@ func (f *fakeDurability) EnqueueCommitted(txID types.TxID, cs *store.Changeset) 
 }
 
 func (f *fakeDurability) WaitUntilDurable(txID types.TxID) <-chan types.TxID {
+	if f.waitCalled != nil {
+		f.waitCalled <- txID
+	}
 	if f.waitCh != nil {
 		return f.waitCh
 	}
@@ -75,6 +79,63 @@ func (f *fakeDurability) WaitUntilDurable(txID types.TxID) <-chan types.TxID {
 	ch <- txID
 	close(ch)
 	return ch
+}
+
+func TestCreateSnapshotCommandWaitsForDurableHorizon(t *testing.T) {
+	h := newPipelineHarness(t)
+	durable := make(chan types.TxID, 1)
+	waitCalled := make(chan types.TxID, 2)
+	h.dur.waitCh = durable
+	h.dur.waitCalled = waitCalled
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.exec.Run(ctx)
+
+	resp := submit(t, h.exec, "InsertPlayer")
+	if resp.Status != StatusCommitted || resp.TxID != 1 {
+		t.Fatalf("reducer response = %+v, want committed tx 1", resp)
+	}
+	if got := <-waitCalled; got != 1 {
+		t.Fatalf("post-commit durability wait = %d, want 1", got)
+	}
+
+	captureCalled := make(chan struct{})
+	snapshotResponse := make(chan CreateSnapshotResult, 1)
+	if err := h.exec.Submit(CreateSnapshotCmd{
+		Capture: func(committed *store.CommittedState, txID types.TxID) error {
+			if txID != 1 || committed.CommittedTxID() != 1 {
+				t.Errorf("capture horizon = (%d, %d), want (1, 1)", txID, committed.CommittedTxID())
+			}
+			close(captureCalled)
+			return nil
+		},
+		ResponseCh: snapshotResponse,
+	}); err != nil {
+		t.Fatalf("Submit snapshot: %v", err)
+	}
+	if got := <-waitCalled; got != 1 {
+		t.Fatalf("snapshot durability wait = %d, want 1", got)
+	}
+	select {
+	case <-captureCalled:
+		t.Fatal("snapshot capture ran before durability readiness")
+	default:
+	}
+
+	durable <- 1
+	select {
+	case result := <-snapshotResponse:
+		if result.Err != nil || result.TxID != 1 {
+			t.Fatalf("snapshot result = %+v, want tx 1", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for snapshot result")
+	}
+	select {
+	case <-captureCalled:
+	default:
+		t.Fatal("snapshot response arrived before capture")
+	}
 }
 
 func (f *fakeDurability) FatalError() error { return f.fatalErr }

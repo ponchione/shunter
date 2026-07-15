@@ -296,6 +296,8 @@ func (e *Executor) rejectCommand(cmd ExecutorCommand, err error) {
 		respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, err)
 	case OnDisconnectCmd:
 		respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, err)
+	case CreateSnapshotCmd:
+		sendResponse(c.ResponseCh, CreateSnapshotResult{Err: err})
 	}
 }
 
@@ -411,6 +413,10 @@ func validateResponseChannels(cmd ExecutorCommand) error {
 		if isUnbufferedChannel(c.ResponseCh) {
 			return ErrExecutorUnbufferedResponseChannel
 		}
+	case CreateSnapshotCmd:
+		if isUnbufferedChannel(c.ResponseCh) {
+			return ErrExecutorUnbufferedResponseChannel
+		}
 	}
 	return nil
 }
@@ -476,6 +482,8 @@ func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) string {
 		respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, err)
 	case OnDisconnectCmd:
 		respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, err)
+	case CreateSnapshotCmd:
+		sendResponse(c.ResponseCh, CreateSnapshotResult{Err: err})
 	}
 	return "panic"
 }
@@ -501,9 +509,51 @@ func (e *Executor) dispatch(cmd ExecutorCommand) string {
 		return e.handleOnConnect(c)
 	case OnDisconnectCmd:
 		return e.handleOnDisconnect(c)
+	case CreateSnapshotCmd:
+		return e.handleCreateSnapshot(c)
 	default:
 		return "internal_error"
 	}
+}
+
+func (e *Executor) handleCreateSnapshot(cmd CreateSnapshotCmd) string {
+	txID := e.committed.CommittedTxID()
+	if txID != 0 {
+		durableTxID, ok := <-e.durability.WaitUntilDurable(txID)
+		if !ok || durableTxID < txID {
+			err := e.snapshotDurabilityError(txID)
+			sendResponse(cmd.ResponseCh, CreateSnapshotResult{Err: err})
+			return "internal_error"
+		}
+	}
+	if err := e.latchDurabilityFatal(txID); err != nil {
+		sendResponse(cmd.ResponseCh, CreateSnapshotResult{Err: err})
+		return "internal_error"
+	}
+	if cmd.Capture == nil {
+		err := errors.New("executor: snapshot capture is required")
+		sendResponse(cmd.ResponseCh, CreateSnapshotResult{Err: err})
+		return "internal_error"
+	}
+	if err := cmd.Capture(e.committed, txID); err != nil {
+		sendResponse(cmd.ResponseCh, CreateSnapshotResult{Err: err})
+		return "internal_error"
+	}
+	sendResponse(cmd.ResponseCh, CreateSnapshotResult{TxID: txID})
+	return "ok"
+}
+
+func (e *Executor) snapshotDurabilityError(txID types.TxID) error {
+	var err error
+	if cause := e.durability.FatalError(); cause != nil {
+		err = fmt.Errorf("%w: durability failed before tx_id %d became durable: %w", ErrExecutorFatal, txID, cause)
+	} else {
+		err = fmt.Errorf("%w: durability stopped before tx_id %d became durable", ErrExecutorFatal, txID)
+	}
+	if e.fatal.CompareAndSwap(false, true) {
+		e.recordExecutorFatal(err, "durability_failed", txID)
+	}
+	return err
 }
 
 func (e *Executor) latchDurabilityFatal(txID types.TxID) error {
@@ -962,7 +1012,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		return "internal_error"
 	}
 	tx.Seal()
-	changeset, err := e.commitTransaction(tx)
+	changeset, err := e.commitTransaction(tx, txID)
 	if err != nil {
 		store.Rollback(tx)
 		status := StatusFailedInternal
@@ -980,8 +1030,6 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		return executorCommandResultFromStatus(status)
 	}
 	e.consumeCommitTxID()
-	changeset.TxID = txID
-	e.committed.SetCommittedTxID(txID)
 	e.traceStoreCommit(txID, "ok", nil)
 	if e.schedulerNotify != nil {
 		if tc := changeset.TableChanges(e.schedTableID); tc != nil && (len(tc.Inserts) > 0 || len(tc.Deletes) > 0) {
@@ -1008,9 +1056,9 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 	return executorCommandResultFromStatus(status)
 }
 
-func (e *Executor) commitTransaction(tx *store.Transaction) (*store.Changeset, error) {
+func (e *Executor) commitTransaction(tx *store.Transaction, txID types.TxID) (*store.Changeset, error) {
 	start := time.Now()
-	changeset, err := store.CommitWithValidation(e.committed, tx, e.durability.ValidateChangeset)
+	changeset, err := store.CommitWithValidationAtTxID(e.committed, tx, txID, e.durability.ValidateChangeset)
 	result := "ok"
 	if err != nil {
 		result = "error"
@@ -1150,8 +1198,16 @@ type noopDurability struct{}
 
 func (noopDurability) ValidateChangeset(*store.Changeset) error      { return nil }
 func (noopDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
-func (noopDurability) WaitUntilDurable(types.TxID) <-chan types.TxID { return nil }
-func (noopDurability) FatalError() error                             { return nil }
+func (noopDurability) WaitUntilDurable(txID types.TxID) <-chan types.TxID {
+	if txID == 0 {
+		return nil
+	}
+	ready := make(chan types.TxID, 1)
+	ready <- txID
+	close(ready)
+	return ready
+}
+func (noopDurability) FatalError() error { return nil }
 
 type subscriptionPostCommitPlanner interface {
 	NeedsPostCommitBroadcast(*store.Changeset, subscription.PostCommitMeta) bool

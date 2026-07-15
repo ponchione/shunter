@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
@@ -116,3 +117,20 @@ type OnDisconnectCmd struct {
 }
 
 func (OnDisconnectCmd) isExecutorCommand() {}
+
+// CreateSnapshotCmd establishes a serialized maintenance point. The executor
+// waits for the current committed horizon to become durable before invoking
+// Capture and does not begin a later command until Capture returns.
+type CreateSnapshotCmd struct {
+	Capture    func(*store.CommittedState, types.TxID) error
+	ResponseCh chan<- CreateSnapshotResult
+}
+
+func (CreateSnapshotCmd) isExecutorCommand() {}
+
+// CreateSnapshotResult reports the durable transaction horizon represented by
+// a maintenance snapshot, or the error that prevented its publication.
+type CreateSnapshotResult struct {
+	TxID types.TxID
+	Err  error
+}

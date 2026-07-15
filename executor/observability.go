@@ -164,6 +164,8 @@ func executorCommandKind(cmd ExecutorCommand) string {
 		return "on_connect"
 	case OnDisconnectCmd:
 		return "on_disconnect"
+	case CreateSnapshotCmd:
+		return "create_snapshot"
 	default:
 		return "unknown"
 	}
