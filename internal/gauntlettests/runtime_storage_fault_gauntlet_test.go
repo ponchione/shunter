@@ -16,7 +16,7 @@ import (
 
 func TestRuntimeGauntletStorageFaultSafeZeroTailRecoversAndResumes(t *testing.T) {
 	dataDir := t.TempDir()
-	runRuntimeCrashChild(t, dataDir, "durable-protocol-commit")
+	runRuntimeCrashChild(t, dataDir, "explicit-durability-barrier")
 	appendRuntimeGauntletZeroTail(t, dataDir, 1)
 
 	rt := buildGauntletRuntime(t, dataDir)
@@ -34,7 +34,7 @@ func TestRuntimeGauntletStorageFaultSafeZeroTailRecoversAndResumes(t *testing.T)
 
 func TestRuntimeGauntletStorageFaultDamagedSnapshotFallsBackToCompleteLog(t *testing.T) {
 	dataDir := t.TempDir()
-	runRuntimeCrashChild(t, dataDir, "durable-protocol-commit")
+	runRuntimeCrashChild(t, dataDir, "explicit-durability-barrier")
 	corruptRuntimeGauntletSnapshot(t, dataDir, 0)
 
 	rt := buildGauntletRuntime(t, dataDir)
@@ -47,7 +47,7 @@ func TestRuntimeGauntletStorageFaultDamagedSnapshotFallsBackToCompleteLog(t *tes
 
 func TestRuntimeGauntletStorageFaultCorruptSegmentFailsLoudly(t *testing.T) {
 	dataDir := t.TempDir()
-	runRuntimeCrashChild(t, dataDir, "durable-protocol-commit")
+	runRuntimeCrashChild(t, dataDir, "explicit-durability-barrier")
 	corruptRuntimeGauntletSegmentHeader(t, dataDir, 1)
 
 	rt, err := buildRuntimeStorageFaultGauntletRuntime(dataDir)

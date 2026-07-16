@@ -816,8 +816,9 @@ func bigIntFromStr(t *testing.T, s string) *big.Int {
 
 // TestCoerceBigIntLiteralToUint256 pins the reference `u256 = 1e40` shape at
 // reference tree crates/expr/src/check.rs:330-332. A LitBigInt with
-// value 10^40 decomposes into four uint64 words matching the 256-bit
-// little-significant-word-first layout and binds to a KindUint256 column.
+// value 10^40 decomposes into four exact uint64 words and binds to a
+// KindUint256 column. The expected words below are independently derived from
+// 10^40 = 0x1d6329f1c35ca4bfabb9f5610000000000.
 func TestCoerceBigIntLiteralToUint256(t *testing.T) {
 	x := bigIntFromStr(t, "10000000000000000000000000000000000000000") // 10^40
 	v, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindUint256)
@@ -828,20 +829,9 @@ func TestCoerceBigIntLiteralToUint256(t *testing.T) {
 		t.Fatalf("Kind = %v, want KindUint256", v.Kind())
 	}
 	w0, w1, w2, w3 := v.AsUint256()
-	if w0 != 0 || w1 != 0x1d { // 10^40 = 0x1d...; top nonzero word is index 1
-		t.Fatalf("AsUint256 top words = (%x, %x, ...), want (0, 0x1d, ...) for 10^40", w0, w1)
-	}
-	// low words: confirm round-trip back to big.Int reconstructs 10^40.
-	var buf [32]byte
-	// reassemble big-endian bytes
-	for i, w := range [4]uint64{w0, w1, w2, w3} {
-		for j := range 8 {
-			buf[i*8+j] = byte(w >> (56 - 8*j))
-		}
-	}
-	got := new(big.Int).SetBytes(buf[:])
-	if got.Cmp(x) != 0 {
-		t.Fatalf("round-trip = %s, want %s", got.String(), x.String())
+	want := [4]uint64{0, 0x1d, 0x6329f1c35ca4bfab, 0xb9f5610000000000}
+	if got := [4]uint64{w0, w1, w2, w3}; got != want {
+		t.Fatalf("AsUint256 = (%x, %x, %x, %x), want (%x, %x, %x, %x)", w0, w1, w2, w3, want[0], want[1], want[2], want[3])
 	}
 }
 

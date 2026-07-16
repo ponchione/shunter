@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/ponchione/shunter/types"
@@ -118,60 +119,68 @@ func TestSubscriptionMetricsFanoutAndDroppedCounters(t *testing.T) {
 }
 
 func TestSubscriptionMetricsFanoutBlockedDuration(t *testing.T) {
-	observer := &subscriptionMetricObserver{}
-	s := testSchema()
-	inbox := make(chan FanOutMessage, 1)
-	mgr := NewManager(s, s, WithFanOutInbox(inbox), WithObserver(observer))
-	conn := cid(1)
-	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: conn, QueryID: 10, Predicates: []Predicate{AllRows{Table: 1}}}, nil); err != nil {
-		t.Fatalf("RegisterSet: %v", err)
-	}
-	inbox <- FanOutMessage{}
+	synctest.Test(t, func(t *testing.T) {
+		observer := &subscriptionMetricObserver{}
+		s := testSchema()
+		inbox := make(chan FanOutMessage, 1)
+		mgr := NewManager(s, s, WithFanOutInbox(inbox), WithObserver(observer))
+		conn := cid(1)
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: conn, QueryID: 10, Predicates: []Predicate{AllRows{Table: 1}}}, nil); err != nil {
+			t.Fatalf("RegisterSet: %v", err)
+		}
+		inbox <- FanOutMessage{}
 
-	done := make(chan struct{})
-	go func() {
-		mgr.EvalAndBroadcast(1, simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("a")}}, nil), nil, PostCommitMeta{})
-		close(done)
-	}()
+		done := make(chan struct{})
+		go func() {
+			mgr.EvalAndBroadcast(1, simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("a")}}, nil), nil, PostCommitMeta{})
+			close(done)
+		}()
 
-	time.Sleep(10 * time.Millisecond)
-	select {
-	case <-done:
-		t.Fatal("EvalAndBroadcast finished while fanout inbox was full")
-	default:
-	}
-	<-inbox
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("EvalAndBroadcast did not finish after fanout inbox was drained")
-	}
-	observer.requireBlockedDuration(t)
+		// Wait proves the worker reached a durable block on the full inbox;
+		// it cannot return merely because the goroutine was not scheduled.
+		synctest.Wait()
+		select {
+		case <-done:
+			t.Fatal("EvalAndBroadcast finished while fanout inbox was full")
+		default:
+		}
+		// Advance only the bubble's fake clock so the duration metric records
+		// a positive interval after the blocking state is already established.
+		time.Sleep(time.Nanosecond)
+		<-inbox
+		<-done
+		observer.requireBlockedDuration(t)
+	})
 }
 
 func TestEvalAndBroadcastFanoutContextCancellationUnblocksFullInbox(t *testing.T) {
-	s := testSchema()
-	inbox := make(chan FanOutMessage, 1)
-	mgr := NewManager(s, s, WithFanOutInbox(inbox))
-	conn := cid(1)
-	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: conn, QueryID: 10, Predicates: []Predicate{AllRows{Table: 1}}}, nil); err != nil {
-		t.Fatalf("RegisterSet: %v", err)
-	}
-	inbox <- FanOutMessage{}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		mgr.EvalAndBroadcast(1, simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("a")}}, nil), nil, PostCommitMeta{FanoutContext: ctx})
-		close(done)
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		s := testSchema()
+		inbox := make(chan FanOutMessage, 1)
+		mgr := NewManager(s, s, WithFanOutInbox(inbox))
+		conn := cid(1)
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: conn, QueryID: 10, Predicates: []Predicate{AllRows{Table: 1}}}, nil); err != nil {
+			t.Fatalf("RegisterSet: %v", err)
+		}
+		inbox <- FanOutMessage{}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			mgr.EvalAndBroadcast(1, simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("a")}}, nil), nil, PostCommitMeta{FanoutContext: ctx})
+			close(done)
+		}()
 
-	time.Sleep(10 * time.Millisecond)
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("EvalAndBroadcast did not unblock after fanout context cancellation")
-	}
+		// Establish the full-inbox block before cancellation; otherwise a
+		// passing result could mean the worker never attempted the send.
+		synctest.Wait()
+		select {
+		case <-done:
+			t.Fatal("EvalAndBroadcast finished while fanout inbox was full")
+		default:
+		}
+		cancel()
+		<-done
+	})
 }
 
 func (o *subscriptionMetricObserver) requireActive(t *testing.T, want int) {

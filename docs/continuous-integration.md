@@ -10,9 +10,9 @@ tags or releases, or deploy artifacts.
 | Workflow job | Enforced checks | Local commands |
 | --- | --- | --- |
 | Go quality | tracked Go formatting, module tidiness, vet, pinned Staticcheck, newly introduced whitespace | `rtk go fmt <touched files>`, `rtk go mod tidy -diff`, `rtk go vet ./...`, `rtk go tool staticcheck ./...`, `rtk bash scripts/check-whitespace.sh HEAD` for the working tree, or `rtk bash scripts/check-whitespace.sh <base> HEAD` for a committed range |
-| Go tests | all Go tests and an uncached race run over concurrency-heavy packages | `rtk go test ./...`; `rtk go test -race -count=1 . ./auth ./executor ./protocol ./protocolclient ./subscription` |
+| Go tests | all Go tests without cached results and uncached race runs over concurrency-heavy packages plus selected store/commit-log invariants | `rtk go test -count=1 ./...`; `rtk go test -race -count=1 . ./auth ./executor ./protocol ./protocolclient ./subscription`; then the focused store and commit-log commands below |
 | TypeScript client | locked install, typecheck/runtime tests, build, checked-in `dist`, package dry-run/smoke, high-or-critical npm audit | `rtk npm --prefix typescript/client ci`; then `run test`, `run build`, `run pack:dry-run`, `run smoke:package`, and `audit --audit-level=high` with the same prefix |
-| Browser integration | locked client/browser installs, pinned Chromium, strict-auth browser test, high-or-critical npm audit | `rtk npm --prefix typescript/browser-integration ci`, `rtk npm --prefix typescript/browser-integration run install:browsers`, `rtk npm --prefix typescript/browser-integration test`, and the prefixed audit command |
+| Browser integration | locked client/browser installs, pinned Chromium, strict-auth and successful reconnect-lifecycle browser tests, high-or-critical npm audit | `rtk npm --prefix typescript/browser-integration ci`, `rtk npm --prefix typescript/browser-integration run install:browsers`, `rtk npm --prefix typescript/browser-integration test`, and the prefixed audit command |
 | Vulnerability checks | pinned `govulncheck` against all packages | `rtk govulncheck ./...` using govulncheck v1.1.4 |
 | Hosted/static | static hosted-binary gauntlet, hosted-chat gate, generated contract/client sync, hosted frontend audit | `rtk bash scripts/static-hosted-binary-gate.sh`, followed by `rtk git diff` on the generated files and the prefixed frontend audit |
 
@@ -20,6 +20,28 @@ The workflow uses SHA-pinned official checkout/setup actions, the Go toolchain
 directive in `go.mod`, locked npm dependencies, and separate jobs/caches so one
 surface cannot silently mask another. npm audits fail on high or critical
 findings. `govulncheck` fails on reachable Go vulnerabilities.
+
+## Cached Iteration And Fresh Confidence
+
+Use Go's test cache for fast local iteration:
+
+```bash
+rtk go test ./...
+```
+
+Use a fresh execution when recording audit, qualification, or release evidence:
+
+```bash
+rtk go test -count=1 ./...
+```
+
+A cached result is valid feedback for unchanged inputs, but it is not evidence
+that each test body executed during that invocation. Pull-request and `main`
+CI therefore use `-count=1` for the main repository run. A representative local
+measurement with warm build artifacts took about 0.6 seconds from the test
+cache and 3 minutes 10 seconds without cached test results; the fresh run stays
+well within the Go test job's 30-minute timeout. Focused and full race commands
+also retain `-count=1`.
 
 Whitespace enforcement is range-based. Pull requests compare their complete
 change against the pull-request base, pushes compare against the pre-push
@@ -36,6 +58,19 @@ than the focused PR race job:
 ```bash
 rtk go test -race -count=1 ./...
 ```
+
+Pull-request CI also runs a small package-specific subset that actually
+coordinates concurrent store registration, writer-preference lock behavior,
+snapshot leases and commits,
+durability enqueue/close/waiter paths, and snapshot publication:
+
+```bash
+rtk go test -race -count=1 ./store -run 'TestCommittedStateRegisterAndLookupAreRaceFree|TestCommittedStateLockedAccessDoesNotReenterRWMutexBehindPendingWriter|TestCommitWithValidationAtTxIDPublishesRowsAndHorizonAtomically|TestCommittedSnapshotConcurrentCloseRetainsLockFor(TableScan|IndexRange|IndexSeekIterator|PointReadLease)|TestCommittedSnapshotConcurrentCommitShortSoak'
+rtk go test -race -count=1 ./commitlog -run 'TestDurabilityWorkerConcurrentCloseReturnsOneStableResult|TestDurabilityWorkerCloseWhileEnqueueBlockedReturnsControlledClosePanic|TestDurabilityWorkerCloseAfterSingleQueuedItemDoesNotSpinOnClosedDrain|TestDurabilityWorkerWaitUntilDurableLaterBatch|TestConcurrentSnapshotReturnsInProgress|TestCreateSnapshotUsesTempFileUntilRename'
+```
+
+The explicit subset keeps pull-request feedback bounded while the scheduled or
+manual full race job remains the backstop for every package and scenario.
 
 Gate scripts retain their local RTK commands. CI installs the checked-in
 `scripts/ci-rtk-shim.sh`, which only forwards commands because Actions logs do

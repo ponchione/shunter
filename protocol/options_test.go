@@ -50,6 +50,9 @@ func TestNormalizeProtocolOptionsFillsDefaults(t *testing.T) {
 }
 
 func TestNormalizeProtocolOptionsRejectsNegativeValues(t *testing.T) {
+	if _, err := NormalizeProtocolOptions(ProtocolOptions{MaxMessageSize: -1}); err == nil {
+		t.Fatal("expected negative MaxMessageSize to be rejected")
+	}
 	if _, err := NormalizeProtocolOptions(ProtocolOptions{IncomingQueueMessages: -1}); err == nil {
 		t.Fatal("expected negative IncomingQueueMessages to be rejected")
 	}

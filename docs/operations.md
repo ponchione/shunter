@@ -69,6 +69,17 @@ For a planned stop:
 errors from startup, readiness, and shutdown as service failures that need
 operator attention.
 
+Reducer acknowledgement levels are intentionally distinct:
+
+- `Runtime.CallReducer` returning `StatusCommitted`, and the equivalent
+  WebSocket `StatusCommitted`, mean the transaction is visible to the running
+  runtime and queued for durability. Immediate process loss may still omit it
+  from recovered state.
+- `Runtime.WaitUntilDurable(ctx, result.TxID)` returning nil is the supported
+  fsync-durability acknowledgement. Use that exact barrier before reporting a
+  local operation as durable. The WebSocket protocol has no durable response in
+  this version.
+
 ### Crash Recovery
 
 For an unclean process exit:

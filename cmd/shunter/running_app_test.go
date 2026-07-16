@@ -92,6 +92,43 @@ func TestCallCommandInvokesRunningAppReducerJSON(t *testing.T) {
 	}
 }
 
+func TestProcedureCommandRejectsContractArgumentMismatchBeforeDial(t *testing.T) {
+	dir := t.TempDir()
+	contract := runningAppContractFixture()
+	contract.Procedures = []shunter.ProcedureDescription{{
+		Name: "archive_message",
+		Args: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+			{Name: "message_id", Type: "uint64"},
+			{Name: "archive", Type: "bool"},
+		}},
+		Result: &schema.ProductSchemaExport{Columns: []schema.ProductColumnExport{
+			{Name: "archived", Type: "bool"},
+		}},
+	}}
+	contractPath := writeCLIContract(t, dir, "contract.json", contract)
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"procedure",
+		"--url", "http://127.0.0.1:1",
+		"--contract", contractPath,
+		"--token", "unused-token",
+		"--format", "json",
+		"archive_message",
+		`{"message_id":"wrong","archive":true}`,
+	})
+	if code != 2 {
+		t.Fatalf("procedure exit code = %d, want usage error 2; stderr=%s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("procedure stdout = %q, want empty", stdout.String())
+	}
+	assertRunningAppJSONErrorCode(t, stderr.Bytes(), "invalid_arguments")
+	if !strings.Contains(stderr.String(), "message_id") {
+		t.Fatalf("procedure error = %s, want mismatched field context", stderr.String())
+	}
+}
+
 func TestQueryCommandInvokesRunningAppDeclaredQueryAndDecodesRows(t *testing.T) {
 	dir := t.TempDir()
 	contractPath := writeCLIContract(t, dir, "contract.json", runningAppContractFixture())

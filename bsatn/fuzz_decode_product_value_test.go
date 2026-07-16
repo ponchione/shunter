@@ -81,6 +81,11 @@ func decodeProductValueFuzzSeeds(tb testing.TB) [][]byte {
 		withTrailing := append(append([]byte(nil), encoded...), 0xff)
 		seeds = append(seeds, withTrailing)
 	}
+	wide := handAuthoredWideProductFuzzSeed(tb)
+	seeds = append(seeds, wide)
+	for _, n := range []int{0, 1, 9, 42, len(wide) - 1} {
+		seeds = append(seeds, append([]byte(nil), wide[:n]...))
+	}
 
 	seeds = append(seeds,
 		[]byte{},
@@ -99,6 +104,8 @@ func assertDecodeProductValueFuzzInput(tb testing.TB, data []byte) {
 }
 
 func checkDecodeProductValueFuzzInput(data []byte) error {
+	// This successful path checks canonical self-consistency. Independent wire
+	// correctness is pinned by TestWideProductValueFixedWireVectors.
 	original := append([]byte(nil), data...)
 	fromBytes, fromBytesErr := DecodeProductValueFromBytes(data, fuzzProductValueSchema)
 	if !bytes.Equal(data, original) {

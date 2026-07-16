@@ -179,7 +179,18 @@ if err != nil {
 if res.Status != shunter.StatusCommitted {
 	return fmt.Errorf("send_message failed: %v", res.Error)
 }
+
+// StatusCommitted is visible in this runtime but is not an fsync
+// acknowledgement. Wait explicitly when immediate process-loss survival is
+// required.
+if err := rt.WaitUntilDurable(ctx, res.TxID); err != nil {
+	return err
+}
 ```
+
+Omit `WaitUntilDurable` when committed-but-not-yet-fsynced acknowledgement is
+acceptable. The WebSocket protocol's committed reducer response has the same
+non-durable meaning and does not expose a remote durability barrier.
 
 Strict permission checks use caller options:
 

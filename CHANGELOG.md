@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Reducer acknowledgement documentation now distinguishes ordinary committed
+  success from explicit fsync confirmation through `Runtime.WaitUntilDurable`;
+  the WebSocket protocol continues to expose committed, non-durable success.
 - Commit-log worker startup now re-syncs existing segment directories,
   and runtime bootstrap, snapshot bases, and offline backup/restore durably
   publish every newly created directory component. TypeScript connection setup

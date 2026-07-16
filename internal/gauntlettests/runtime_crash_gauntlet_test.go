@@ -1,6 +1,7 @@
 package shunter_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -19,19 +20,29 @@ const (
 	runtimeCrashDataDirEnv = "SHUNTER_RUNTIME_GAUNTLET_DATA_DIR"
 )
 
-func TestRuntimeGauntletUncleanProcessCrashDurableProtocolCommitRecovers(t *testing.T) {
+func TestRuntimeGauntletUncleanProcessCrashAfterExplicitDurabilityBarrierRecovers(t *testing.T) {
 	dataDir := t.TempDir()
-	runRuntimeCrashChild(t, dataDir, "durable-protocol-commit")
+	runRuntimeCrashChild(t, dataDir, "explicit-durability-barrier")
 
 	rt := buildGauntletRuntime(t, dataDir)
 	defer rt.Close()
 
 	model := gauntletModel{players: map[uint64]string{1: "crash_durable"}}
-	assertGauntletReadMatchesModel(t, rt, model, "unclean durable crash after restart")
-	assertRuntimeCrashCanCommitQueryAndFanout(t, rt, &model, 2, "unclean durable crash after restart")
+	const durableTxID = shunter.TxID(1)
+	health := shunter.InspectRuntimeHealth(rt)
+	if health.Runtime.Durability.DurableTxID < durableTxID || health.Runtime.Recovery.DurableLogHorizon < durableTxID {
+		t.Fatalf(
+			"explicit durability barrier recovery horizons = worker %d/log %d, want at least %d",
+			health.Runtime.Durability.DurableTxID,
+			health.Runtime.Recovery.DurableLogHorizon,
+			durableTxID,
+		)
+	}
+	assertGauntletReadMatchesModel(t, rt, model, "explicit durability barrier crash after restart")
+	assertRuntimeCrashCanCommitQueryAndFanout(t, rt, &model, 2, "explicit durability barrier crash after restart")
 }
 
-func TestRuntimeGauntletUncleanProcessCrashAfterProtocolAckRecoversConsistentState(t *testing.T) {
+func TestRuntimeGauntletUncleanProcessCrashAfterOrdinaryProtocolAckRecoversConsistentState(t *testing.T) {
 	dataDir := t.TempDir()
 	runRuntimeCrashChild(t, dataDir, "protocol-ack-before-confirmed-durable")
 
@@ -43,7 +54,7 @@ func TestRuntimeGauntletUncleanProcessCrashAfterProtocolAckRecoversConsistentSta
 	nextID := uint64(1)
 	switch {
 	case len(recovered) == 0:
-		// SPEC-003 allows caller-visible success to beat durable fsync.
+		// Ordinary protocol success is committed but does not wait for fsync.
 	case len(recovered) == 1 && recovered[1] == "crash_ack":
 		model.players[1] = "crash_ack"
 		nextID = 2
@@ -103,8 +114,8 @@ func TestRuntimeGauntletCrashSubprocessDriver(t *testing.T) {
 	}
 
 	switch scenario {
-	case "durable-protocol-commit":
-		runRuntimeCrashDurableProtocolCommitChild(t, dataDir)
+	case "explicit-durability-barrier":
+		runRuntimeCrashExplicitDurabilityBarrierChild(t, dataDir)
 	case "protocol-ack-before-confirmed-durable":
 		runRuntimeCrashProtocolAckChild(t, dataDir)
 	case "scheduled-wakeup":
@@ -128,27 +139,25 @@ func runRuntimeCrashChild(t *testing.T, dataDir, scenario string) {
 	}
 }
 
-func runRuntimeCrashDurableProtocolCommitChild(t *testing.T, dataDir string) {
+func runRuntimeCrashExplicitDurabilityBarrierChild(t *testing.T, dataDir string) {
 	t.Helper()
 	rt := buildGauntletRuntime(t, dataDir)
-	url := runtimeCrashProtocolURL(t, rt)
-
-	model := gauntletModel{players: map[uint64]string{}}
-	subscriber := dialGauntletProtocolURL(t, url, "unclean durable child subscriber")
-	caller := dialGauntletProtocolURL(t, url, "unclean durable child caller")
-	const queryID = uint32(13102)
-	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 13101, queryID)
-	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
-		t.Fatalf("unclean durable child initial rows mismatch:\n%s", diff)
-	}
 
 	nextID := uint64(1)
 	op := insertPlayerOp(&nextID, "crash_durable")
-	wantDelta := gauntletAllRowsDeltaForOp(t, model, op)
-	outcome := callGauntletProtocolReducer(t, caller, op, 13103, "unclean durable child protocol commit")
-	advanceGauntletModel(t, &model, op, outcome, "unclean durable child protocol commit")
-	gotDelta := readGauntletTransactionUpdateLight(t, subscriber, queryID, "unclean durable child confirmed fanout")
-	assertGauntletDeltaEqual(t, gotDelta, wantDelta, "unclean durable child confirmed fanout")
+	result, err := rt.CallReducer(context.Background(), op.reducer, []byte(op.args))
+	if err != nil {
+		t.Fatalf("explicit durability child CallReducer: %v", err)
+	}
+	if result.Status != op.wantStatus || result.TxID == 0 {
+		t.Fatalf("explicit durability child reducer result = status %v tx_id %d, want status %v and nonzero tx_id", result.Status, result.TxID, op.wantStatus)
+	}
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), 5*time.Second)
+	err = rt.WaitUntilDurable(waitCtx, result.TxID)
+	cancelWait()
+	if err != nil {
+		t.Fatalf("explicit durability child WaitUntilDurable(%d): %v", result.TxID, err)
+	}
 	os.Exit(0)
 }
 

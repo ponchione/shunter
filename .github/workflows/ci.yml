@@ -72,14 +72,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-      - name: Test all packages
-        run: go test ./...
+      - name: Test all packages without cached results
+        run: go test -count=1 ./...
       - name: Compile tests for 32-bit targets
         env:
           GOARCH: "386"
         run: go test -run '^$' ./...
       - name: Race-test concurrency-heavy packages
         run: go test -race -count=1 . ./auth ./executor ./protocol ./protocolclient ./subscription
+      - name: Race-test store and commit-log concurrent invariants
+        run: |
+          go test -race -count=1 ./store -run 'TestCommittedStateRegisterAndLookupAreRaceFree|TestCommittedStateLockedAccessDoesNotReenterRWMutexBehindPendingWriter|TestCommitWithValidationAtTxIDPublishesRowsAndHorizonAtomically|TestCommittedSnapshotConcurrentCloseRetainsLockFor(TableScan|IndexRange|IndexSeekIterator|PointReadLease)|TestCommittedSnapshotConcurrentCommitShortSoak'
+          go test -race -count=1 ./commitlog -run 'TestDurabilityWorkerConcurrentCloseReturnsOneStableResult|TestDurabilityWorkerCloseWhileEnqueueBlockedReturnsControlledClosePanic|TestDurabilityWorkerCloseAfterSingleQueuedItemDoesNotSpinOnClosedDrain|TestDurabilityWorkerWaitUntilDurableLaterBatch|TestConcurrentSnapshotReturnsInProgress|TestCreateSnapshotUsesTempFileUntilRename'
 
   typescript-client:
     name: TypeScript client
@@ -140,7 +144,7 @@ jobs:
       - name: Install Chromium
         working-directory: typescript/browser-integration
         run: npx playwright install --with-deps chromium
-      - name: Run strict-auth browser integration
+      - name: Run browser integration scenarios
         run: npm --prefix typescript/browser-integration test
       - name: Audit browser dependency graph
         run: npm --prefix typescript/browser-integration audit --audit-level=high

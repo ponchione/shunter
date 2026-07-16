@@ -1,30 +1,27 @@
 package protocol
 
+// SQL test ownership: query/sql owns tokenization, parsing, and literal
+// coercion matrices. This file exercises behavior added by the one-off
+// boundary: schema-bound compilation, visibility, execution plans, result
+// shaping and limits, correlated response mapping, and exact admission errors.
+// Historical reference-tree locations document clean-room capability research;
+// every assertion here is a Shunter-owned contract, not a compatibility claim.
+
 import (
 	"bytes"
 	"context"
 	"iter"
 	"math"
-	"math/big"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/bsatn"
-	"github.com/ponchione/shunter/query/sql"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
-
-// buildUint256From1e40 materializes the 10^40 Uint256 value via the same
-// coerce path the parser + admission use, so test expectations and the
-// stored row stay in lockstep if the word layout ever changes.
-func buildUint256From1e40() (types.Value, error) {
-	big1e40, _ := new(big.Int).SetString("10000000000000000000000000000000000000000", 10)
-	return sql.Coerce(sql.Literal{Kind: sql.LitBigInt, Big: big1e40}, schema.KindUint256)
-}
 
 // --- Mocks ---
 
@@ -4998,27 +4995,6 @@ func TestHandleOneOffQuery_UnknownColumn(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ShunterUnknownTableRejected pins the reference type-
-// check rejection at reference tree crates/expr/src/check.rs lines
-// 483-485 (`select * from r` / "Table r does not exist") onto the OneOff
-// admission surface. Enforced incidentally via SchemaLookup.TableByName
-// returning !ok inside compileSQLQueryString; the pin names the contract.
-func TestHandleOneOffQuery_ShunterUnknownTableRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x82},
-		QueryString: "SELECT * FROM r",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-	requireAnyOneOffError(t, conn)
-}
-
 // TestHandleOneOffQuery_ShunterUnknownColumnRejected pins the reference type-
 // check rejection at reference tree crates/expr/src/check.rs lines
 // 491-493 (`select * from t where t.a = 1` / "Field a does not exist on
@@ -5059,27 +5035,6 @@ func TestHandleOneOffQuery_ShunterAliasedUnknownColumnRejected(t *testing.T) {
 	msg := &OneOffQueryMsg{
 		MessageID:   []byte{0x84},
 		QueryString: "SELECT * FROM t AS r WHERE r.a = 1",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterBaseTableQualifierAfterAliasRejected pins the
-// reference type-check rejection at reference tree crates/expr/src/
-// check.rs lines 506-509 (`select * from t as r where t.u32 = 5` / "t is not
-// in scope after alias") onto the OneOff admission surface. Enforced
-// incidentally at parser level via resolveQualifier in parseComparison.
-func TestHandleOneOffQuery_ShunterBaseTableQualifierAfterAliasRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x85},
-		QueryString: "SELECT * FROM t AS r WHERE t.u32 = 5",
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 	requireAnyOneOffError(t, conn)
@@ -5620,28 +5575,6 @@ func TestHandleOneOffQuery_ShunterSelfJoinColumnProjectionProjectsRight(t *testi
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-// TestHandleOneOffQuery_ShunterJoinWithoutQualifiedProjectionRejected pins the
-// reference type-check rejection at reference tree crates/expr/src/
-// check.rs lines 515-517 (`select * from t join s` / "Subscriptions must be
-// typed to a single table") onto the OneOff admission surface. Enforced
-// incidentally at parseStatement requiring a qualified projection for joins.
-func TestHandleOneOffQuery_ShunterJoinWithoutQualifiedProjectionRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x87},
-		QueryString: "SELECT * FROM t JOIN s",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
 // TestHandleOneOffQuery_ShunterJoinStarProjectionRejectText pins the
 // reference type-check rejection text at
 // reference tree crates/expr/src/errors.rs:41
@@ -5674,28 +5607,6 @@ func TestHandleOneOffQuery_ShunterJoinStarProjectionRejectText(t *testing.T) {
 		QueryString: "SELECT * FROM t JOIN s",
 	}
 	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "SELECT * is not supported for joins")
-}
-
-// TestHandleOneOffQuery_ShunterSelfJoinWithoutAliasesRejected pins the
-// reference type-check rejection at reference tree crates/expr/src/
-// check.rs lines 519-521 (`select t.* from t join t` / "Self join requires
-// aliases") onto the OneOff admission surface. Enforced incidentally at
-// parseJoinClause when both sides share the same table and alias.
-func TestHandleOneOffQuery_ShunterSelfJoinWithoutAliasesRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x88},
-		QueryString: "SELECT t.* FROM t JOIN t",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
 }
 
 // TestHandleOneOffQuery_ShunterForwardAliasReferenceRejected pins the reference
@@ -5973,52 +5884,6 @@ func TestHandleOneOffQuery_ShunterScientificNotationOverflowInfinity(t *testing.
 	}
 }
 
-// TestHandleOneOffQuery_ShunterInvalidLiteralNegativeIntOnUnsignedRejected pins
-// reference tree crates/expr/src/check.rs:382-385 (`select * from t
-// where u8 = -1` / "Negative integer for unsigned column") onto the
-// OneOffQuery admission surface. `-1` is LitInt(-1); coerceUnsigned
-// (query/sql/coerce.go:119) rejects negative literals against unsigned
-// columns during SQL predicate compilation, producing Status=1 with a
-// non-empty Error message.
-func TestHandleOneOffQuery_ShunterInvalidLiteralNegativeIntOnUnsignedRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint8(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x91},
-		QueryString: "SELECT * FROM t WHERE u8 = -1",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterInvalidLiteralScientificOverflowRejected pins
-// reference tree crates/expr/src/check.rs:386-389 (`select * from t
-// where u8 = 1e3` / "Out of bounds") onto the OneOffQuery admission surface.
-// `1e3` collapses to LitInt(1000) via parseNumericLiteral; coerceUnsigned
-// (query/sql/coerce.go:123) rejects the value as out of range for u8.
-func TestHandleOneOffQuery_ShunterInvalidLiteralScientificOverflowRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint8(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x92},
-		QueryString: "SELECT * FROM t WHERE u8 = 1e3",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
 // TestHandleOneOffQuery_ShunterInvalidLiteralFloatOnUnsignedRejected pins
 // reference tree crates/expr/src/check.rs:390-393 (`select * from t
 // where u8 = 0.1` / "Float as integer") onto the OneOffQuery admission
@@ -6154,19 +6019,17 @@ func TestHandleOneOffQuery_ShunterValidLiteralOnEachIntegerWidth(t *testing.T) {
 // (`select * from t where u256 = 1e40` / "u256") at the OneOffQuery
 // admission surface. Shunter's parser promotes `1e40` to LitBigInt and
 // coerce decomposes 10^40 into four uint64 words for the 256-bit Uint256
-// layout. The snapshot holds one matching row so the query should return
-// Status == 0.
+// layout. The snapshot holds the independently derived fixed value so the
+// query should return Status == 0.
 func TestHandleOneOffQuery_ShunterValidLiteralU256Scientific(t *testing.T) {
 	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u256", Type: schema.KindUint256},
-	)
-	// 10^40 decomposed via the same coerce path the query admission uses,
-	// so the stored row is guaranteed to equal the admission-time value.
-	row, err := buildUint256From1e40()
-	if err != nil {
-		t.Fatalf("build row: %v", err)
+	ts := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "u256", Type: schema.KindUint256}},
 	}
+	sl := newMockSchema("t", 1, ts.Columns...)
+	row := uint256TenToFortieth()
 	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{row}}}}
 	stateAccess := &mockStateAccess{snap: snap}
 
@@ -6174,32 +6037,10 @@ func TestHandleOneOffQuery_ShunterValidLiteralU256Scientific(t *testing.T) {
 		MessageID:   []byte{0xC5},
 		QueryString: "SELECT * FROM t WHERE u256 = 1e40",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	rows := requireOneOffRows(t, conn, stateAccess, sl, msg, ts)
+	if len(rows) != 1 || len(rows[0]) != 1 || !rows[0][0].Equal(row) {
+		t.Fatalf("rows = %v, want one row containing Uint256(10^40)", rows)
 	}
-}
-
-// TestHandleOneOffQuery_ShunterUint256NegativeRejected extends the
-// reference invalid_literals bundle at check.rs:382-385 to the Uint256
-// column kind. Mirrors the subscribe-side pin.
-func TestHandleOneOffQuery_ShunterUint256NegativeRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u256", Type: schema.KindUint256},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint256(0, 0, 0, 1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xC2},
-		QueryString: "SELECT * FROM t WHERE u256 = -1",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
 }
 
 // TestHandleOneOffQuery_ShunterTimestampLiteralAccepted pins the reference
@@ -6323,26 +6164,6 @@ func TestHandleOneOffQuery_ShunterBoolLiteralOnArrayStringRejectText(t *testing.
 		QueryString: "SELECT * FROM t WHERE arr = TRUE",
 	}
 	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Unexpected type: (expected) Bool != Array<String> (inferred)")
-}
-
-// TestHandleOneOffQuery_ShunterUint128NegativeRejected extends the
-// reference invalid_literals bundle at check.rs:382-385 to the Uint128
-// column kind. Mirrors the subscribe-side pin.
-func TestHandleOneOffQuery_ShunterUint128NegativeRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u128", Type: schema.KindUint128},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint128(0, 1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xC1},
-		QueryString: "SELECT * FROM t WHERE u128 = -1",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
 }
 
 // TestHandleOneOffQuery_ShunterDMLStatementRejected pins mutation rejection on
@@ -7738,40 +7559,6 @@ func TestHandleOneOffQuery_ShunterArraySenderRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ShunterArrayJoinOnRejected pins reference
-// check.rs:523-525 (`select t.* from t join s on t.arr = s.arr` / "Product
-// values are not comparable") onto the OneOffQuery admission surface. The
-// join compile path rejects when either ON side names an array column.
-func TestHandleOneOffQuery_ShunterArrayJoinOnRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := &mockSchemaLookup{
-		tables: map[string]struct {
-			id     schema.TableID
-			schema *schema.TableSchema
-		}{
-			"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
-				{Index: 0, Name: "arr", Type: schema.KindArrayString},
-			}}},
-			"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
-				{Index: 0, Name: "arr", Type: schema.KindArrayString},
-			}}},
-		},
-	}
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xD1},
-		QueryString: "SELECT t.* FROM t JOIN s ON t.arr = s.arr",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := requireAnyOneOffError(t, conn)
-	if result.Error == nil || *result.Error == "" {
-		t.Error("expected non-empty error message for array-on-array join ON")
-	}
-}
-
 func TestHandleOneOffQuery_ShunterJoinOnStrictEqualityRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -7973,7 +7760,7 @@ func TestHandleOneOffQuery_ShunterIntOverflowOnUint8RejectText(t *testing.T) {
 // negative inputs; the outer anyhow error is folded into InvalidLiteral by
 // the `.map_err` at lib.rs:99. Shunter emits via the negative branch of
 // `coerceUnsigned` rather than a dedicated typecheck pass; the text must
-// still match the reference literal.
+// still remain the stable Shunter admission diagnostic.
 func TestHandleOneOffQuery_ShunterNegativeIntOnUint8RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
@@ -7994,7 +7781,7 @@ func TestHandleOneOffQuery_ShunterNegativeIntOnUint8RejectText(t *testing.T) {
 // `parse_int` → `BigDecimal::to_i8` returns None for 200 (>127); the outer
 // anyhow error is folded into InvalidLiteral by `.map_err` at lib.rs:99.
 // Shunter emits via the range-check branch of `coerceSigned`; the text
-// must match reference.
+// is part of Shunter's stable admission diagnostic.
 func TestHandleOneOffQuery_ShunterIntOverflowOnInt8RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,

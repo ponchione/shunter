@@ -1,6 +1,7 @@
 package store
 
 import (
+	"runtime"
 	"testing"
 	"time"
 
@@ -81,6 +82,9 @@ func TestCommittedStateTableRetainedPointerIsStaleAfterReRegister(t *testing.T) 
 }
 
 func TestCommittedStateTableSnapshotEnvelopeHoldsRLockUntilClose(t *testing.T) {
+	previousProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previousProcs)
+
 	ts := &schema.TableSchema{
 		ID:   0,
 		Name: "rows",
@@ -101,17 +105,37 @@ func TestCommittedStateTableSnapshotEnvelopeHoldsRLockUntilClose(t *testing.T) {
 	// While the snapshot is open, *Table access via snap.cs.Table is
 	// covered by the snapshot's RLock. A concurrent writer attempting
 	// cs.Lock() must block until snap.Close() releases the RLock.
+	lockAttempted := make(chan struct{})
 	gotLock := make(chan struct{})
 	go func() {
+		close(lockAttempted)
 		cs.Lock()
-		close(gotLock)
+		_ = cs.committedTxID
 		cs.Unlock()
+		close(gotLock)
+	}()
+	defer func() {
+		if snap != nil {
+			snap.Close()
+			snap = nil
+		}
+		select {
+		case <-gotLock:
+		case <-time.After(2 * time.Second):
+			t.Error("writer goroutine did not finish during cleanup")
+		}
 	}()
 
 	select {
+	case <-lockAttempted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writer goroutine did not attempt cs.Lock")
+	}
+	runtime.Gosched()
+	select {
 	case <-gotLock:
 		t.Fatal("writer acquired cs.Lock() while CommittedSnapshot was open — snapshot envelope did not hold RLock")
-	case <-time.After(100 * time.Millisecond):
+	default:
 	}
 
 	snap.Close()
@@ -125,6 +149,9 @@ func TestCommittedStateTableSnapshotEnvelopeHoldsRLockUntilClose(t *testing.T) {
 }
 
 func TestCommittedStateLockedAccessDoesNotReenterRWMutexBehindPendingWriter(t *testing.T) {
+	previousProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previousProcs)
+
 	ts := &schema.TableSchema{
 		ID:   0,
 		Name: "rows",
@@ -137,20 +164,45 @@ func TestCommittedStateLockedAccessDoesNotReenterRWMutexBehindPendingWriter(t *t
 	cs.RegisterTable(0, table)
 
 	cs.RLock()
-	writerStarted := make(chan struct{})
+	readLocked := true
+	writerAttempted := make(chan struct{})
 	writerDone := make(chan struct{})
 	go func() {
-		close(writerStarted)
+		close(writerAttempted)
 		cs.Lock()
 		_ = cs.committedTxID
 		cs.Unlock()
 		close(writerDone)
 	}()
-	<-writerStarted
-	time.Sleep(25 * time.Millisecond)
+	defer func() {
+		if readLocked {
+			cs.RUnlock()
+		}
+		select {
+		case <-writerDone:
+		case <-time.After(2 * time.Second):
+			t.Error("writer goroutine did not finish during cleanup")
+		}
+	}()
+	select {
+	case <-writerAttempted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writer goroutine never attempted the lock")
+	}
+	// With one runnable P, yielding here runs the writer until its Lock call
+	// blocks on the held read lock. This establishes writer preference without
+	// guessing how long the scheduler needs.
+	runtime.Gosched()
+	select {
+	case <-writerDone:
+		t.Fatal("writer completed while the read lock was still held")
+	default:
+	}
 
 	accessDone := make(chan string, 1)
+	accessExited := make(chan struct{})
 	go func() {
+		defer close(accessExited)
 		ids := cs.TableIDsLocked()
 		if len(ids) != 1 || ids[0] != 0 {
 			accessDone <- "locked table IDs did not return registered table"
@@ -163,15 +215,24 @@ func TestCommittedStateLockedAccessDoesNotReenterRWMutexBehindPendingWriter(t *t
 		}
 		accessDone <- ""
 	}()
+	defer func() {
+		select {
+		case <-accessExited:
+		case <-time.After(2 * time.Second):
+			t.Error("locked-access goroutine did not finish during cleanup")
+		}
+	}()
 
 	select {
 	case msg := <-accessDone:
 		cs.RUnlock()
+		readLocked = false
 		if msg != "" {
 			t.Fatal(msg)
 		}
 	case <-time.After(250 * time.Millisecond):
 		cs.RUnlock()
+		readLocked = false
 		t.Fatal("locked committed-state access blocked behind pending writer")
 	}
 

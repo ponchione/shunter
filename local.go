@@ -162,7 +162,11 @@ func WithAllowAllPermissions(allow bool) ReducerCallOption {
 	}
 }
 
-// CallReducer invokes a reducer through the runtime-owned executor and waits for its result.
+// CallReducer invokes a reducer through the runtime-owned executor and waits
+// for its result. A StatusCommitted result is visible in committed state and
+// queued for durability, but does not by itself confirm an fsync. Applications
+// that must survive immediate process loss should pass the result's TxID to
+// [Runtime.WaitUntilDurable] and wait for nil.
 func (r *Runtime) CallReducer(ctx context.Context, reducerName string, args []byte, opts ...ReducerCallOption) (ReducerResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -246,7 +250,9 @@ func (r *Runtime) callReducerWithCallerAndRequest(
 // after the worker waiter is registered but before its result is observed.
 var waitUntilDurableAfterSubscribeHook func()
 
-// WaitUntilDurable blocks until txID is confirmed durable on disk.
+// WaitUntilDurable blocks until txID is confirmed durable on disk. A nil return
+// is the runtime's explicit durability acknowledgement for a committed reducer
+// result; ordinary reducer success does not provide this guarantee.
 func (r *Runtime) WaitUntilDurable(ctx context.Context, txID types.TxID) error {
 	if txID == 0 {
 		return nil

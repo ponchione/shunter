@@ -12,6 +12,7 @@ assert_json="$(mktemp)"
 call_json="$(mktemp)"
 procedure_json="$(mktemp)"
 query_json="$(mktemp)"
+initial_query_json="$(mktemp)"
 sql_query_json="$(mktemp)"
 running_describe_json="$(mktemp)"
 running_health_json="$(mktemp)"
@@ -28,7 +29,7 @@ cleanup() {
     kill "$server_pid" >/dev/null 2>&1 || true
     wait "$server_pid" >/dev/null 2>&1 || true
   fi
-  rm -f "$build_bin" "$describe_json" "$health_json" "$validate_json" "$assert_json" "$call_json" "$procedure_json" "$query_json" "$sql_query_json" "$running_describe_json" "$running_health_json" "$preflight_json" "$prepare_backup_json" "$migrate_json" "$server_log"
+  rm -f "$build_bin" "$describe_json" "$health_json" "$validate_json" "$assert_json" "$call_json" "$procedure_json" "$query_json" "$initial_query_json" "$sql_query_json" "$running_describe_json" "$running_health_json" "$preflight_json" "$prepare_backup_json" "$migrate_json" "$server_log"
   rm -rf "$run_data" "$backup_data" "$restored_data"
 }
 trap cleanup EXIT
@@ -142,40 +143,46 @@ rtk go run ./cmd/shunter call \
   --allow-dev-anonymous \
   --format json \
   send_message '{"author":"Ada","body":"hello from hosted-chat gate"}' > "$call_json"
-rtk grep '"status": "ok"' "$call_json"
-rtk grep '"command": "call"' "$call_json"
-rtk grep '"surface": "send_message"' "$call_json"
+rtk go run ./scripts/hosted-chat-json-assert command \
+  --file "$call_json" \
+  --command call \
+  --surface send_message
 rtk go run ./cmd/shunter procedure \
   --url "$server_url" \
   --contract examples/hosted-chat/shunter.contract.json \
   --allow-dev-anonymous \
   --format json \
   send_system_message '{"body":"hello from hosted-chat procedure"}' > "$procedure_json"
-rtk grep '"status": "ok"' "$procedure_json"
-rtk grep '"command": "procedure"' "$procedure_json"
-rtk grep '"surface": "send_system_message"' "$procedure_json"
+rtk go run ./scripts/hosted-chat-json-assert command \
+  --file "$procedure_json" \
+  --command procedure \
+  --surface send_system_message
 rtk go run ./cmd/shunter query \
   --url "$server_url" \
   --contract examples/hosted-chat/shunter.contract.json \
   --allow-dev-anonymous \
   --format json \
-  recent_messages > "$query_json"
-rtk grep '"status": "ok"' "$query_json"
-rtk grep '"command": "query"' "$query_json"
-rtk grep '"surface": "recent_messages"' "$query_json"
-rtk grep '"body": "hello from hosted-chat gate"' "$query_json"
-rtk grep '"body": "hello from hosted-chat procedure"' "$query_json"
+  recent_messages > "$initial_query_json"
+rtk go run ./scripts/hosted-chat-json-assert query \
+  --file "$initial_query_json" \
+  --surface recent_messages \
+  --result-name recent_messages \
+  --table messages \
+  --row '2|System|hello from hosted-chat procedure' \
+  --row '1|Ada|hello from hosted-chat gate'
 rtk go run ./cmd/shunter query \
   --url "$server_url" \
   --contract examples/hosted-chat/shunter.contract.json \
   --allow-dev-anonymous \
   --format json \
   --sql "SELECT * FROM messages ORDER BY id DESC LIMIT 10" > "$sql_query_json"
-rtk grep '"status": "ok"' "$sql_query_json"
-rtk grep '"command": "query"' "$sql_query_json"
-rtk grep '"surface": "SELECT \* FROM messages ORDER BY id DESC LIMIT 10"' "$sql_query_json"
-rtk grep '"body": "hello from hosted-chat gate"' "$sql_query_json"
-rtk grep '"body": "hello from hosted-chat procedure"' "$sql_query_json"
+rtk go run ./scripts/hosted-chat-json-assert query \
+  --file "$sql_query_json" \
+  --surface "SELECT * FROM messages ORDER BY id DESC LIMIT 10" \
+  --result-name "SELECT * FROM messages ORDER BY id DESC LIMIT 10" \
+  --table messages \
+  --row '2|System|hello from hosted-chat procedure' \
+  --row '1|Ada|hello from hosted-chat gate'
 
 stop_server_cleanly
 
@@ -211,9 +218,16 @@ listen_port="$(free_port)"
 server_url="http://127.0.0.1:${listen_port}"
 start_server "$restored_data" "$listen_port"
 wait_for_query_ready "$server_url"
-rtk grep '"status": "ok"' "$query_json"
-rtk grep '"body": "hello from hosted-chat gate"' "$query_json"
-rtk grep '"body": "hello from hosted-chat procedure"' "$query_json"
+rtk go run ./scripts/hosted-chat-json-assert query \
+  --file "$query_json" \
+  --surface recent_messages \
+  --result-name recent_messages \
+  --table messages \
+  --row '2|System|hello from hosted-chat procedure' \
+  --row '1|Ada|hello from hosted-chat gate'
+rtk go run ./scripts/hosted-chat-json-assert equivalent \
+  --before "$initial_query_json" \
+  --after "$query_json"
 stop_server_cleanly
 rtk go run ./cmd/shunter contract codegen \
   --contract examples/hosted-chat/shunter.contract.json \

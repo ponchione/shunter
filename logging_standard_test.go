@@ -18,6 +18,7 @@ func TestProductionLoggingStaysRuntimeScoped(t *testing.T) {
 	allowedGlobalOutputFiles := map[string]struct{}{
 		"cmd/shunter/main.go":                                              {},
 		"examples/hosted-chat/cmd/maintain/main.go":                        {},
+		"scripts/hosted-chat-json-assert/main.go":                          {},
 		"typescript/client/test/fixtures/hosted_type_index_canary/main.go": {},
 	}
 	processGlobalLogCalls := map[string]struct{}{

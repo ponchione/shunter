@@ -96,6 +96,8 @@ type UpdateStatus interface {
 }
 
 // StatusCommitted signals reducer success and carries the caller-visible delta.
+// It confirms an in-runtime commit, not fsync durability; the protocol does not
+// expose a durable-acknowledgement response.
 type StatusCommitted struct {
 	Update []SubscriptionUpdate
 }

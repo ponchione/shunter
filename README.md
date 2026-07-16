@@ -138,6 +138,7 @@ Important public APIs include:
 - `Runtime.Start`
 - `Runtime.Close`
 - `Runtime.CallReducer`
+- `Runtime.WaitUntilDurable`
 - `Runtime.CallProcedure`
 - `Runtime.CallQuery`
 - `Runtime.SubscribeView`

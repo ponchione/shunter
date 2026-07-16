@@ -1,15 +1,20 @@
 package protocol
 
+// SQL test ownership: query/sql owns tokenization, parsing, and literal
+// coercion matrices. This file exercises behavior added by subscription
+// admission: schema binding, authorization, query-policy restrictions,
+// predicate construction, executor registration, and correlated errors.
+// Historical reference-tree locations document clean-room capability research;
+// every assertion here is a Shunter-owned contract, not a compatibility claim.
+
 import (
 	"context"
 	"errors"
 	"math"
-	"math/big"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/ponchione/shunter/query/sql"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
@@ -3650,31 +3655,6 @@ func TestHandleSubscribeSingle_ShunterHexLiteralWidensOntoStringColumn(t *testin
 	}
 }
 
-// TestHandleSubscribeSingle_ShunterUnknownTableRejected pins the reference
-// type-check rejection at reference tree crates/expr/src/check.rs
-// lines 483-485 (`select * from r` / "Table r does not exist") onto the
-// SubscribeSingle admission surface. Shunter enforces this incidentally via
-// SchemaLookup.TableByName returning !ok inside compileSQLQueryString
-// (protocol/handle_subscribe.go:152-154); this pin promotes the rejection
-// from incidental to named Shunter contract.
-func TestHandleSubscribeSingle_ShunterUnknownTableRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   84,
-		QueryID:     85,
-		QueryString: "SELECT * FROM r",
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	requireSubscribeError(t, conn, 85)
-	requireNoSubscribeRegistration(t, executor)
-}
-
 // TestHandleSubscribeSingle_ShunterUnknownColumnRejected pins the reference
 // type-check rejection at reference tree crates/expr/src/check.rs
 // lines 491-493 (`select * from t where t.a = 1` / "Field a does not exist
@@ -3724,33 +3704,6 @@ func TestHandleSubscribeSingle_ShunterAliasedUnknownColumnRejected(t *testing.T)
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	requireSubscribeError(t, conn, 89)
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterBaseTableQualifierAfterAliasRejected pins the
-// reference type-check rejection at reference tree crates/expr/src/
-// check.rs lines 506-509 (`select * from t as r where t.u32 = 5` / "t is not
-// in scope after alias") onto the SubscribeSingle admission surface. Once an
-// AS alias is introduced in the FROM, the base table name is out of scope;
-// Shunter's parser enforces this incidentally at parseComparison via
-// resolveQualifier returning !ok against relationBindings.byQualifier
-// (query/sql/parser.go:750-753). The pin promotes the rejection from
-// incidental to named Shunter contract.
-func TestHandleSubscribeSingle_ShunterBaseTableQualifierAfterAliasRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   90,
-		QueryID:     91,
-		QueryString: "SELECT * FROM t AS r WHERE t.u32 = 5",
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	requireSubscribeError(t, conn, 91)
 	requireNoSubscribeRegistration(t, executor)
 }
 
@@ -3854,31 +3807,6 @@ func TestHandleSubscribeSingle_ShunterJoinStarProjectionRejectText(t *testing.T)
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterSelfJoinWithoutAliasesRejected pins the
-// reference type-check rejection at reference tree crates/expr/src/
-// check.rs lines 519-521 (`select t.* from t join t` / "Self join requires
-// aliases") onto the SubscribeSingle admission surface. Shunter's parser
-// rejects the same-alias self-join shape in parseJoinClause
-// (query/sql/parser.go:577-579). The pin promotes the rejection from
-// incidental to named Shunter contract.
-func TestHandleSubscribeSingle_ShunterSelfJoinWithoutAliasesRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   96,
-		QueryID:     97,
-		QueryString: "SELECT t.* FROM t JOIN t",
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	requireSubscribeError(t, conn, 97)
 	requireNoSubscribeRegistration(t, executor)
 }
 
@@ -4322,27 +4250,6 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeIntOnUnsignedRejecte
 	requireSubscribeSingleError(t, conn, executor, sl, msg, 119)
 }
 
-// TestHandleSubscribeSingle_ShunterInvalidLiteralScientificOverflowRejected
-// pins reference tree crates/expr/src/check.rs:386-389 (`select * from
-// t where u8 = 1e3` / "Out of bounds") onto the SubscribeSingle admission
-// surface. `1e3` parses via parseNumericLiteral as an integer-valued literal
-// that collapses to LitInt(1000); coerceUnsigned (query/sql/coerce.go:123)
-// rejects it as out of range for u8 (max 255).
-func TestHandleSubscribeSingle_ShunterInvalidLiteralScientificOverflowRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   120,
-		QueryID:     121,
-		QueryString: "SELECT * FROM t WHERE u8 = 1e3",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 121)
-}
-
 // TestHandleSubscribeSingle_ShunterInvalidLiteralFloatOnUnsignedRejected pins
 // reference tree crates/expr/src/check.rs:390-393 (`select * from t
 // where u8 = 0.1` / "Float as integer") onto the SubscribeSingle admission
@@ -4520,11 +4427,7 @@ func TestHandleSubscribeSingle_ShunterValidLiteralU256Scientific(t *testing.T) {
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
 	}
-	wantBig, _ := new(big.Int).SetString("10000000000000000000000000000000000000000", 10)
-	want, err := sql.Coerce(sql.Literal{Kind: sql.LitBigInt, Big: wantBig}, schema.KindUint256)
-	if err != nil {
-		t.Fatalf("build expected: %v", err)
-	}
+	want := uint256TenToFortieth()
 	if !colEq.Value.Equal(want) {
 		t.Fatalf("filter value = %v, want Uint256(10^40)", colEq.Value)
 	}
@@ -5456,36 +5359,6 @@ func TestHandleSubscribeSingle_ShunterArraySenderRejected(t *testing.T) {
 	requireSubscribeSingleError(t, conn, executor, sl, msg, 401)
 }
 
-// TestHandleSubscribeSingle_ShunterArrayJoinOnRejected pins reference
-// check.rs:523-525 (`select t.* from t join s on t.arr = s.arr` / "Product
-// values are not comparable"). The join compile path refuses to build a
-// subscription.Join when either side of the ON clause names an array
-// column.
-func TestHandleSubscribeSingle_ShunterArrayJoinOnRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := &mockSchemaLookup{
-		tables: map[string]struct {
-			id     schema.TableID
-			schema *schema.TableSchema
-		}{
-			"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
-				{Index: 0, Name: "arr", Type: schema.KindArrayString},
-			}}},
-			"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
-				{Index: 0, Name: "arr", Type: schema.KindArrayString},
-			}}},
-		},
-	}
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   402,
-		QueryID:     403,
-		QueryString: "SELECT t.* FROM t JOIN s ON t.arr = s.arr",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 403)
-}
-
 // TestHandleSubscribeSingle_ShunterJoinOnStrictEqualityRejectText pins the
 // reference subscription parser's `JoinType` rejection for any JOIN ON shape
 // other than a pure qualified-column equality. SubscribeSingle wraps the raw
@@ -5681,13 +5554,10 @@ func TestHandleSubscribeMulti_ShunterJoinStarProjectionRejectText(t *testing.T) 
 	requireNoSubscribeRegistration(t, exec)
 }
 
-// TestHandleSubscribeSingle_ShunterUnknownTableRejectText pins the reference
-// type-check rejection literal at
-// reference tree crates/expr/src/errors.rs:14
-// (`Unresolved::Table` = "no such table: `{0}`. If the table exists, it may
-// be marked private."). SubscribeSingle compile-origin wraps the inner text
-// with `DBError::WithSql` (reference error.rs:140) → `"{error}, executing:
-// `{sql}`"`. Exact-text companion to TestHandleSubscribeSingle_ShunterUnknownTableRejected.
+// TestHandleSubscribeSingle_ShunterUnknownTableRejectText asserts the stable
+// Shunter boundary contract for unknown-table admission: a correlated
+// SubscriptionError includes the visibility-safe diagnostic, the offending
+// SQL suffix, and no executor registration.
 func TestHandleSubscribeSingle_ShunterUnknownTableRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}

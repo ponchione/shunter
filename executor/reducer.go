@@ -35,7 +35,9 @@ type ReducerRequest struct {
 	IntendedFireAt int64
 }
 
-// ReducerResponse is the result of a reducer execution.
+// ReducerResponse is the result of a reducer execution. StatusCommitted means
+// the transaction is visible and enqueued for durability; it is not an fsync
+// acknowledgement. Root Runtime callers can use TxID with WaitUntilDurable.
 type ReducerResponse struct {
 	Status      ReducerStatus
 	Error       error

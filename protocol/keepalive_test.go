@@ -15,8 +15,9 @@ import (
 )
 
 // loopbackConn pairs a server-side *Conn with a client-side
-// *websocket.Conn via an httptest.Server. The returned cleanup closes
-// both ends.
+// *websocket.Conn via an httptest.Server. The returned cleanup immediately
+// closes both ends; tests whose oracle includes a graceful close handshake
+// perform that handshake explicitly before cleanup.
 func loopbackConn(t testing.TB, opts ProtocolOptions) (*Conn, *websocket.Conn, func()) {
 	t.Helper()
 	serverReady := make(chan *websocket.Conn, 1)
@@ -48,9 +49,12 @@ func loopbackConn(t testing.TB, opts ProtocolOptions) (*Conn, *websocket.Conn, f
 
 	id := GenerateConnectionID()
 	conn := NewConn(id, types.Identity{}, "", false, serverWS, &opts)
+	var cleanupOnce sync.Once
 	cleanup := func() {
-		_ = clientWS.Close(websocket.StatusNormalClosure, "")
-		_ = serverWS.Close(websocket.StatusNormalClosure, "")
+		cleanupOnce.Do(func() {
+			_ = clientWS.CloseNow()
+			_ = serverWS.CloseNow()
+		})
 	}
 	return conn, clientWS, cleanup
 }

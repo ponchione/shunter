@@ -40,7 +40,7 @@ type ProtocolOptions struct {
 	// Overflow triggers a 1008 close per SPEC-005 §10.2.
 	IncomingQueueMessages int
 	// MaxMessageSize is the largest frame payload the read layer
-	// accepts; larger frames cause a 1008 close.
+	// accepts; larger frames cause a 1009 (message too big) close.
 	MaxMessageSize int64
 	// MaxOutboundMessageSize caps an uncompressed encoded server message before
 	// allocation. Compression is applied only after this boundary passes.

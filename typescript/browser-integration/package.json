@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "install:browsers": "playwright install chromium",
-    "test": "npm --prefix ../client run build && node test/strict-auth-browser.mjs"
+    "test": "npm --prefix ../client run build && node test/strict-auth-browser.mjs && node test/successful-lifecycle-browser.mjs"
   },
   "devDependencies": {
     "playwright": "1.60.0"

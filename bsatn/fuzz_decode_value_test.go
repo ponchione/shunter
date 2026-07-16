@@ -49,10 +49,15 @@ func decodeValueFuzzSeeds(tb testing.TB) [][]byte {
 			seeds = append(seeds, append([]byte(nil), encoded[:n]...))
 		}
 	}
+	// These valid wide seeds are fixed wire vectors, independent of the
+	// production encoder used to build the general seed corpus above.
+	seeds = append(seeds, handAuthoredWideValueFuzzSeeds(tb)...)
 
 	seeds = append(seeds,
 		[]byte{},
 		[]byte{0xff},
+		[]byte{TagInt128},
+		append([]byte{TagUint256}, make([]byte, 31)...),
 		[]byte{TagString, 0x01, 0, 0, 0, 0xff},
 		[]byte{TagArrayString, 0x01, 0, 0, 0, 0x01, 0, 0, 0, 0xff},
 	)
@@ -67,6 +72,8 @@ func assertDecodeValueFuzzInput(tb testing.TB, data []byte) {
 }
 
 func checkDecodeValueFuzzInput(data []byte) error {
+	// This successful path checks canonical self-consistency. Independent wire
+	// correctness is pinned by TestWideValueFixedWireVectors.
 	got, err := DecodeValue(bytes.NewReader(data))
 	if err != nil {
 		if err := checkClassifiedFuzzBSATNError("DecodeValue", data, err); err != nil {

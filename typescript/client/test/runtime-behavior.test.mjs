@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
+import test from "node:test";
 import {
   SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY,
   SHUNTER_CLIENT_MESSAGE_CALL_REDUCER,
@@ -39,7 +41,7 @@ import {
   callReducerWithResult,
   checkGeneratedContractCompatibility,
   checkProtocolCompatibility,
-  createShunterClient,
+  createShunterClient as createUntrackedShunterClient,
   createSubscriptionHandle,
   decodeBsatnProduct,
   decodeDeclaredQueryResult,
@@ -69,6 +71,33 @@ import {
   selectShunterSubprotocol,
   shunterProtocol,
 } from "../.tmp_runtime_test/src/index.js";
+
+const runtimeClientScope = new AsyncLocalStorage();
+
+function createShunterClient(options) {
+  const client = createUntrackedShunterClient(options);
+  runtimeClientScope.getStore()?.add(client);
+  return client;
+}
+
+function isolatedRuntimeTest(name, body) {
+  test(name, async (t) => {
+    const clients = new Set();
+    t.after(async () => {
+      for (const client of [...clients].reverse()) {
+        await client.close();
+        assert.equal(client.state.status, "closed", `${name}: client teardown did not close`);
+      }
+      await new Promise((resolve) => setImmediate(resolve));
+      for (const client of clients) {
+        assert.equal(client.state.status, "closed", `${name}: client produced post-teardown activity`);
+      }
+    });
+    await runtimeClientScope.run(clients, () => body(t));
+  });
+}
+
+isolatedRuntimeTest("protocol contracts and standalone subscription handles", async () => {
 
 assert.equal(selectShunterSubprotocol(shunterProtocol), SHUNTER_SUBPROTOCOL_V2);
 assert.equal(assertProtocolCompatible(shunterProtocol), SHUNTER_SUBPROTOCOL_V2);
@@ -219,6 +248,7 @@ assert.deepEqual(throwingObserverHandle.state, { status: "closed" });
 assert.deepEqual(await throwingObserverHandle.closed, { reason: "unsubscribed" });
 await throwingObserverHandle.unsubscribe();
 assert.equal(throwingObserverUnsubscribeCalls, 1);
+});
 
 class FakeWebSocket {
   constructor(url, protocols) {
@@ -304,6 +334,29 @@ function assertSingleTokenUrl(rawUrl, expectedToken) {
   assert.equal(parsed.searchParams.get("existing"), "1");
 }
 
+function assertInterruptedCall(cause, operation, name, expectedIds) {
+  return (error) => {
+    assert(error instanceof ShunterCallInterruptedError);
+    assert.equal(error.kind, "interrupted");
+    assert.equal(error.code, "call_outcome_unknown");
+    assert.equal(error.outcome, "unknown");
+    assert.equal(error.operation, operation);
+    assert.equal(error.operationName, name);
+    if (cause !== undefined) {
+      assert.strictEqual(error.cause, cause);
+    } else {
+      assert(error.cause instanceof ShunterClosedClientError);
+    }
+    if (expectedIds.requestId !== undefined) {
+      assert.equal(error.requestId, expectedIds.requestId);
+    }
+    if (expectedIds.messageId !== undefined) {
+      assert.deepEqual(error.messageId, expectedIds.messageId);
+    }
+    return true;
+  };
+}
+
 function identityTokenFrame({ identityStart = 1, token = "server-token", connectionStart = 0xa0 } = {}) {
   const tokenBytes = new TextEncoder().encode(token);
   const frame = new Uint8Array(1 + 32 + 4 + tokenBytes.length + 16);
@@ -324,6 +377,7 @@ function identityTokenFrame({ identityStart = 1, token = "server-token", connect
   return frame;
 }
 
+isolatedRuntimeTest("connection state observers are isolated from lifecycle transitions", async () => {
 const isolatedObserverSockets = [];
 const isolatedObserverStates = [];
 const isolatedObserverClient = createShunterClient({
@@ -379,7 +433,9 @@ assert.equal(failingObserverClient.state.status, "failed");
 assert.deepEqual(failingObserverStates, ["connecting", "connected", "failed"]);
 await failingObserverClient.close();
 assert.equal(failingObserverClient.state.status, "closed");
+});
 
+isolatedRuntimeTest("identity token wire decoding", async () => {
 const decodedIdentity = decodeIdentityTokenFrame(identityTokenFrame());
 assert.equal(decodedIdentity.token, "server-token");
 assert.deepEqual([...decodedIdentity.identity.slice(0, 3)], [1, 2, 3]);
@@ -388,6 +444,7 @@ assert.throws(
   () => decodeIdentityTokenFrame(new Uint8Array([2])),
   ShunterProtocolError,
 );
+});
 
 function bytesFromHex(hex) {
   return Uint8Array.from(hex.match(/../g).map((byte) => Number.parseInt(byte, 16)));
@@ -537,6 +594,60 @@ function unsubscribeSingleAppliedFrameFor({ requestId, queryId }) {
   frame[offset] = 0;
   return frame;
 }
+
+// Shared immutable wire fixtures let every named group run by itself. The
+// codec group below reconstructs and validates the same bytes independently.
+const encodedReducer = encodeReducerCallRequest("send", new Uint8Array([0xaa, 0xbb]), {
+  requestId: 0x31323334,
+  noSuccessNotify: true,
+});
+const committedUpdateFrame = bytesFromHex(
+  "050001000000040302010500000075736572730f0000000200000002000000010201000000030200000004050807060504030201202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf0400000073656e641413121102000000aabb242322213837363534333231",
+);
+const failedUpdateFrame = bytesFromHex(
+  "050104000000626f6f6d18171615141312110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000073656e640000000000000000242322210000000000000000",
+);
+const lightUpdateFrame = bytesFromHex(
+  "083433323101000000040302010500000075736572730f000000020000000200000001020100000003020000000405",
+);
+const oneOffSuccessFrame = bytesFromHex(
+  "0602000000010200010000000500000075736572730f0000000200000002000000010201000000031817161514131211",
+);
+const oneOffErrorFrame = bytesFromHex(
+  "060200000003040109000000626164207175657279000000002827262524232221",
+);
+const procedureSuccessFrame = procedureResponseFrameFor({
+  messageId: new Uint8Array([0x03, 0x04]),
+  result: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
+});
+const subscribeSingleAppliedFrame = bytesFromHex(
+  "02040302010807060504030201141312110500000075736572730f000000020000000200000001020100000003",
+);
+const subscribeAppliedFrame = bytesFromHex(
+  "094443424158575655545352516463626101000000040302010500000075736572730f000000020000000200000001020100000003020000000405",
+);
+const unsubscribeDeclaredViewAppliedFrame = bytesFromHex(
+  "0a0100000000000000000000006463626100000000",
+);
+const subscriptionErrorFrame = bytesFromHex(
+  "0408070605040302010144434241015453525101646362610600000064656e696564",
+);
+const reconnectSubscriptionErrorFrame = bytesFromHex(
+  "04000000000000000001010000000114131211000d0000007265706c61792064656e696564",
+);
+const subscriptionEvaluationErrorFrame = bytesFromHex(
+  "049210000000000000000000180000007072656469636174652072657772697465206661696c6564",
+);
+const activeSubscriptionErrorFrame = bytesFromHex(
+  "0400000000000000000001141312110018000000737562736372697074696f6e206576616c2064656e696564",
+);
+const reconnectSubscribeSingleAppliedFrame = bytesFromHex(
+  "02010000000000000000000000141312110500000075736572730a00000001000000020000000405",
+);
+const secondReconnectSubscribeSingleAppliedFrame = new Uint8Array(reconnectSubscribeSingleAppliedFrame);
+secondReconnectSubscribeSingleAppliedFrame[1] = 2;
+
+isolatedRuntimeTest("codec and wire decoding", async () => {
 
 const decodedBsatnMessage = decodeBsatnProduct(
   bytesFromHex("0801000000000000000b05000000616c6963650b000b0500000068656c6c6f110200000000000000"),
@@ -1070,8 +1181,9 @@ assert.equal(activeSubscriptionError.requestId, undefined);
 assert.equal(activeSubscriptionError.queryId, 0x11121314);
 assert.equal(activeSubscriptionError.tableId, undefined);
 assert.equal(activeSubscriptionError.error, "subscription eval denied");
+});
 
-const clientStates = [];
+isolatedRuntimeTest("connection and authentication lifecycle", async () => {
 const encodedToken = "space token&equals=value/slash?";
 const tokenQuerySockets = [];
 const tokenQueryContract = {
@@ -1709,7 +1821,10 @@ assert.deepEqual(staleSocketCloseStates, [
   "connected",
 ]);
 await staleSocketCloseClient.close();
+});
 
+isolatedRuntimeTest("request correlation and subscription handle caches", async () => {
+const clientStates = [];
 const client = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe?existing=1",
   protocol: shunterProtocol,
@@ -3037,7 +3152,9 @@ await assert.rejects(
   client.subscribeTable("users", undefined, { returnHandle: true }),
   assertClosedClientError,
 );
+});
 
+isolatedRuntimeTest("pending limits interruptions and send failures", async () => {
 const tokenFailureClient = createShunterClient({
   url: "ws://127.0.0.1:3000/subscribe",
   protocol: shunterProtocol,
@@ -4356,7 +4473,9 @@ const recoveredPreAbortedOperationReducer = preAbortedOperationClient.callReduce
 preAbortedOperationSockets[0].message(committedUpdateFrame);
 assert.deepEqual(await recoveredPreAbortedOperationReducer, committedUpdateFrame);
 await preAbortedOperationClient.close();
+});
 
+isolatedRuntimeTest("reconnect replay synchronization epochs and stale events", async () => {
 const reconnectSockets = [];
 const reconnectFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);
@@ -4393,15 +4512,24 @@ assert.deepEqual(reconnectClient.state.synchronization, {
   synchronized: true,
   pendingSubscriptions: 0,
 });
+const reconnectInitialRowsEvents = [];
+const reconnectUpdateEvents = [];
 const reconnectHandleSubscription = reconnectClient.subscribeTable("users", undefined, {
   requestId: 0x01020304,
   queryId: 0x11121314,
   returnHandle: true,
   decodeRow: (row) => [...row].join("-"),
+  onInitialRows: (rows) => reconnectInitialRowsEvents.push([...rows]),
+  onUpdate: (update) => reconnectUpdateEvents.push({
+    inserts: [...update.inserts],
+    deletes: [...update.deletes],
+  }),
 });
 reconnectSockets[0].message(subscribeSingleAppliedFrame);
 const reconnectHandle = await reconnectHandleSubscription;
 assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["1-2", "3"] });
+const reconnectOldSocketMessageHandler = [...(reconnectSockets[0].listeners.get("message") ?? [])][0];
+assert.equal(typeof reconnectOldSocketMessageHandler, "function");
 reconnectSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
 assert.equal(reconnectClient.state.status, "reconnecting");
 assert.deepEqual(reconnectHandle.state, {
@@ -4439,6 +4567,31 @@ reconnectSockets[1].message(reconnectSubscribeSingleAppliedFrame);
 assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["4-5"] });
 assert.equal(reconnectHandle.epoch, 2);
 assert.deepEqual(await firstReplaySynchronization, {
+  epoch: 2,
+  synchronized: true,
+  pendingSubscriptions: 0,
+});
+const staleOldSocketUpdate = transactionUpdateLightFrameFor({
+  requestId: 0x51525354,
+  updates: [{
+    queryId: 0x11121314,
+    tableName: "users",
+    inserts: [new Uint8Array([9])],
+  }],
+});
+const reconnectCallbacksBeforeStale = {
+  initial: reconnectInitialRowsEvents.length,
+  updates: reconnectUpdateEvents.length,
+};
+reconnectOldSocketMessageHandler({ data: staleOldSocketUpdate });
+await nextTurn();
+assert.equal(reconnectHandle.epoch, 2);
+assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["4-5"] });
+assert.deepEqual({
+  initial: reconnectInitialRowsEvents.length,
+  updates: reconnectUpdateEvents.length,
+}, reconnectCallbacksBeforeStale);
+assert.deepEqual(reconnectClient.state.synchronization, {
   epoch: 2,
   synchronized: true,
   pendingSubscriptions: 0,
@@ -6222,3 +6375,4 @@ assert.deepEqual(reconnectFactoryFailureStates, [
   "failed",
   "closed",
 ]);
+});

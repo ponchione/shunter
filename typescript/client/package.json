@@ -23,7 +23,9 @@
     "build": "tsc -p tsconfig.build.json",
     "pack:dry-run": "npm pack --dry-run",
     "smoke:package": "node test/package-smoke.mjs",
-    "test": "npm run typecheck && tsc -p tsconfig.runtime-test.json && node test/runtime-behavior.test.mjs && node .tmp_runtime_test/test/generated-type-index-decoding.test.js && node test/hosted-type-index-canary.test.mjs",
+    "test": "npm run typecheck && tsc -p tsconfig.runtime-test.json && npm run test:runtime && npm run test:runtime:alternate && node .tmp_runtime_test/test/generated-type-index-decoding.test.js && node test/hosted-type-index-canary.test.mjs",
+    "test:runtime": "node --test --test-concurrency=1 test/runtime-behavior.test.mjs",
+    "test:runtime:alternate": "node test/runtime-behavior-alternate-order.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

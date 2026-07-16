@@ -2,6 +2,8 @@ package store
 
 import (
 	"fmt"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -129,15 +131,39 @@ func TestCommittedSnapshotRowsFromRowIDsPanicsOnMidIterClose(t *testing.T) {
 
 func assertCloseDefersWriterUntilIteratorExits(t *testing.T, cs *CommittedState, snap *CommittedSnapshot, it RowIterator) {
 	t.Helper()
+	previousProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previousProcs)
 
 	yielded := make(chan struct{})
 	continueRead := make(chan struct{})
+	var continueReadOnce sync.Once
 	iterResult := make(chan any, 1)
+	iterExited := make(chan struct{})
 	go func() {
+		defer close(iterExited)
 		defer func() { iterResult <- recover() }()
 		for range it {
 			close(yielded)
 			<-continueRead
+		}
+	}()
+	writerAttempted := make(chan struct{})
+	writerDone := make(chan struct{})
+	writerStarted := false
+	defer func() {
+		snap.Close()
+		continueReadOnce.Do(func() { close(continueRead) })
+		select {
+		case <-iterExited:
+		case <-time.After(2 * time.Second):
+			t.Error("iterator goroutine did not finish during cleanup")
+		}
+		if writerStarted {
+			select {
+			case <-writerDone:
+			case <-time.After(2 * time.Second):
+				t.Error("writer goroutine did not finish during cleanup")
+			}
 		}
 	}()
 
@@ -148,19 +174,27 @@ func assertCloseDefersWriterUntilIteratorExits(t *testing.T, cs *CommittedState,
 	}
 	snap.Close()
 
-	writerDone := make(chan struct{})
+	writerStarted = true
 	go func() {
+		close(writerAttempted)
 		cs.Lock()
-		close(writerDone)
+		_ = cs.committedTxID
 		cs.Unlock()
+		close(writerDone)
 	}()
+	select {
+	case <-writerAttempted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writer goroutine did not attempt state lock")
+	}
+	runtime.Gosched()
 	select {
 	case <-writerDone:
 		t.Fatal("writer acquired state lock while snapshot iterator was active")
-	case <-time.After(100 * time.Millisecond):
+	default:
 	}
 
-	close(continueRead)
+	continueReadOnce.Do(func() { close(continueRead) })
 	select {
 	case got := <-iterResult:
 		if got != "store: CommittedSnapshot used after Close" {
@@ -204,6 +238,9 @@ func TestCommittedSnapshotConcurrentCloseRetainsLockForIndexSeekIterator(t *test
 }
 
 func TestCommittedSnapshotConcurrentCloseRetainsLockForPointReadLease(t *testing.T) {
+	previousProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previousProcs)
+
 	cs, _ := seedMultiRowTestState(t)
 	snap := cs.Snapshot()
 
@@ -211,19 +248,40 @@ func TestCommittedSnapshotConcurrentCloseRetainsLockForPointReadLease(t *testing
 	// explicitly so the writer-blocking guarantee can be coordinated without a
 	// timing-dependent race against a very short GetRow call.
 	snap.beginRead()
+	readActive := true
 	snap.Close()
+	writerAttempted := make(chan struct{})
 	writerDone := make(chan struct{})
 	go func() {
+		close(writerAttempted)
 		cs.Lock()
-		close(writerDone)
+		_ = cs.committedTxID
 		cs.Unlock()
+		close(writerDone)
 	}()
+	defer func() {
+		if readActive {
+			snap.endRead()
+		}
+		select {
+		case <-writerDone:
+		case <-time.After(2 * time.Second):
+			t.Error("writer goroutine did not finish during cleanup")
+		}
+	}()
+	select {
+	case <-writerAttempted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writer goroutine did not attempt state lock")
+	}
+	runtime.Gosched()
 	select {
 	case <-writerDone:
 		t.Fatal("writer acquired state lock while point-read lease was active")
-	case <-time.After(100 * time.Millisecond):
+	default:
 	}
 	snap.endRead()
+	readActive = false
 	select {
 	case <-writerDone:
 	case <-time.After(2 * time.Second):

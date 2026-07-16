@@ -298,8 +298,15 @@ the corresponding bounded state.
 These commands validate local package shape and packed install behavior. They
 are not a public npm publish workflow.
 
+The runtime behavior suite uses independently named `node:test` groups with
+automatic client teardown. `test:runtime:alternate` runs those groups one at a
+time in reverse order, in fresh processes, to catch shared-state and cleanup
+dependencies. Generated-type decoding and the hosted canary remain separate
+process boundaries.
+
 ```bash
 rtk npm --prefix typescript/client run test
+rtk npm --prefix typescript/client run test:runtime:alternate
 rtk npm --prefix typescript/client run build
 rtk npm --prefix typescript/client run bench:subscription-cache
 rtk npm --prefix typescript/client run pack:dry-run

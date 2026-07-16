@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ponchione/shunter/types"
 )
 
 // testConnDirect builds a *Conn without a real WebSocket, suitable for
@@ -109,6 +111,13 @@ func overlongSQLQuery() string {
 		b.WriteString(suffix)
 	}
 	return b.String()
+}
+
+// uint256TenToFortieth is a fixed independent oracle for the scientific SQL
+// literal 1e40. In hexadecimal, 10^40 is
+// 0x1d6329f1c35ca4bfabb9f5610000000000.
+func uint256TenToFortieth() types.Value {
+	return types.NewUint256(0, 0x1d, 0x6329f1c35ca4bfab, 0xb9f5610000000000)
 }
 
 // runRequestedDisconnectOwner supplies the lifecycle coordinator for loop-level

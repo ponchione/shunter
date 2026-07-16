@@ -120,3 +120,68 @@ func TestMkdirAllDurableRetryRepairsCompletedPathPublication(t *testing.T) {
 		t.Fatalf("retry synced directories = %#v, want final publication repair %#v", retrySynced, wantSynced)
 	}
 }
+
+func TestWriteFileDirectorySyncFailureIsReportedAfterAtomicReplacement(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(target, []byte("old"), 0o640); err != nil {
+		t.Fatalf("write original target: %v", err)
+	}
+
+	syncErr := errors.New("injected directory sync failure")
+	err := WriteFile(target, []byte("new"), Options{
+		PreserveMode: true,
+		SyncDir: func(path string) error {
+			if path != dir {
+				t.Fatalf("SyncDir path = %q, want %q", path, dir)
+			}
+			got, readErr := os.ReadFile(target)
+			if readErr != nil {
+				t.Fatalf("read replacement during SyncDir: %v", readErr)
+			}
+			if string(got) != "new" {
+				t.Fatalf("target during SyncDir = %q, want atomically renamed replacement", got)
+			}
+			return syncErr
+		},
+	})
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("WriteFile error = %v, want injected directory sync failure", err)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat replacement: %v", err)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Fatalf("replacement mode = %o, want preserved 0640", info.Mode().Perm())
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, ".state.json.tmp-*"))
+	if err != nil {
+		t.Fatalf("glob temp files: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary files leaked after directory sync failure: %v", matches)
+	}
+}
+
+func TestWriteFileTempCreationFailurePreservesExistingTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(target, []byte("old"), 0o600); err != nil {
+		t.Fatalf("write original target: %v", err)
+	}
+
+	err := WriteFile(target, []byte("new"), Options{
+		TempPattern: filepath.Join("missing-temp-directory", "state-*"),
+	})
+	if err == nil {
+		t.Fatal("WriteFile returned nil error when temporary file could not be created")
+	}
+	got, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("read target after failed temporary creation: %v", readErr)
+	}
+	if string(got) != "old" {
+		t.Fatalf("target after failed temporary creation = %q, want original content", got)
+	}
+}
