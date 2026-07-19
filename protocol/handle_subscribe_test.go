@@ -3407,48 +3407,229 @@ func TestHandleSubscribeSingle_ShunterSenderInJoinFilterResolvesOnStringColumn(t
 	}
 }
 
-// TestHandleSubscribeSingle_StringLiteralOnIntegerColumnRejected pins the
-// reference type-check rejection at reference tree crates/expr/src/
-// check.rs lines 498-501 (`select * from t where u32 = 'str'` /
-// "Field u32 is not a string") onto the SubscribeSingle admission surface.
-// Shunter enforces the rejection at the coerce boundary inside
-// compileSQLQueryString; this pin keeps the externally visible behavior
-// tied to the reference shape rather than leaving it incidental.
-func TestHandleSubscribeSingle_StringLiteralOnIntegerColumnRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   80,
-		QueryID:     81,
-		QueryString: "SELECT * FROM t WHERE u32 = 'str'",
+// TestHandleSubscribeSingle_SQLAdmissionRejections pins the single-table
+// SQL shapes that must fail admission before executor registration.
+func TestHandleSubscribeSingle_SQLAdmissionRejections(t *testing.T) {
+	cases := []struct {
+		name      string
+		column    schema.ColumnSchema
+		requestID uint32
+		queryID   uint32
+		sql       string
+	}{
+		// TestHandleSubscribeSingle_StringLiteralOnIntegerColumnRejected pins the
+		// reference type-check rejection at reference tree crates/expr/src/
+		// check.rs lines 498-501 (`select * from t where u32 = 'str'` /
+		// "Field u32 is not a string") onto the SubscribeSingle admission surface.
+		// Shunter enforces the rejection at the coerce boundary inside
+		// compileSQLQueryString; this pin keeps the externally visible behavior
+		// tied to the reference shape rather than leaving it incidental.
+		{name: "TestHandleSubscribeSingle_StringLiteralOnIntegerColumnRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 80, queryID: 81, sql: "SELECT * FROM t WHERE u32 = 'str'"},
+		// TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected pins the
+		// reference type-check rejection at reference tree crates/expr/src/
+		// check.rs lines 502-504 (`select * from t where t.u32 = 1.3` /
+		// "Field u32 is not a float") onto the SubscribeSingle admission surface.
+		// Float literals now parse end-to-end (LitFloat) after the 2026-04-21
+		// follow-through, so the rejection must fire at the coerce boundary rather
+		// than at the parser.
+		{name: "TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 82, queryID: 83, sql: "SELECT * FROM t WHERE t.u32 = 1.3"},
+		// TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeIntOnUnsignedRejected
+		// pins reference tree crates/expr/src/check.rs:382-385 (`select * from
+		// t where u8 = -1` / "Negative integer for unsigned column") onto the
+		// SubscribeSingle admission surface. `-1` parses to LitInt(-1) and
+		// coerceUnsigned (query/sql/coerce.go:119) rejects negative ints before they
+		// reach an unsigned column; the pin names the rejection as a Shunter contract.
+		{name: "TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeIntOnUnsignedRejected", column: schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8}, requestID: 118, queryID: 119, sql: "SELECT * FROM t WHERE u8 = -1"},
+		// TestHandleSubscribeSingle_ShunterInvalidLiteralFloatOnUnsignedRejected pins
+		// reference tree crates/expr/src/check.rs:390-393 (`select * from t
+		// where u8 = 0.1` / "Float as integer") onto the SubscribeSingle admission
+		// surface. A non-integral decimal stays LitFloat and coerceUnsigned
+		// (query/sql/coerce.go:116) rejects non-LitInt against an integer column.
+		// Complements the existing u32 = 1.3 pin by naming the u8 column variant.
+		{name: "TestHandleSubscribeSingle_ShunterInvalidLiteralFloatOnUnsignedRejected", column: schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8}, requestID: 122, queryID: 123, sql: "SELECT * FROM t WHERE u8 = 0.1"},
+		// TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected
+		// pins reference tree crates/expr/src/check.rs:394-397 (`select * from
+		// t where u32 = 1e-3` / "Float as integer") onto the SubscribeSingle
+		// admission surface. `1e-3` parses to 0.001, fails the integer-valued collapse
+		// in parseNumericLiteral (non-integral), stays LitFloat, and coerceUnsigned
+		// rejects LitFloat against a KindUint32 column.
+		{name: "TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 124, queryID: 125, sql: "SELECT * FROM t WHERE u32 = 1e-3"},
+		// TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnSignedRejected
+		// pins reference tree crates/expr/src/check.rs:398-401 (`select * from
+		// t where i32 = 1e-3` / "Float as integer") onto the SubscribeSingle
+		// admission surface. Mirrors the unsigned case on a signed column:
+		// parseNumericLiteral leaves 0.001 as LitFloat, and coerceSigned
+		// (query/sql/coerce.go:106) rejects non-LitInt against a KindInt32 column.
+		{name: "TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnSignedRejected", column: schema.ColumnSchema{Index: 0, Name: "i32", Type: schema.KindInt32}, requestID: 126, queryID: 127, sql: "SELECT * FROM t WHERE i32 = 1e-3"},
+		// TestHandleSubscribeSingle_ShunterUint256NegativeRejected extends the
+		// reference invalid_literals bundle at check.rs:382-385 to the Uint256
+		// column kind. `-1` parses to LitInt(-1) and coerce's KindUint256 branch
+		// rejects negative ints just like the u8 / u128 rows do.
+		{name: "TestHandleSubscribeSingle_ShunterUint256NegativeRejected", column: schema.ColumnSchema{Index: 0, Name: "u256", Type: schema.KindUint256}, requestID: 242, queryID: 243, sql: "SELECT * FROM t WHERE u256 = -1"},
+		// TestHandleSubscribeSingle_ShunterUint128NegativeRejected extends the
+		// reference invalid_literals bundle at check.rs:382-385 to the Uint128
+		// column kind (landed 2026-04-21 alongside the 128-bit column-kind
+		// widening). `-1` parses to LitInt(-1) and coerce's KindUint128 branch
+		// rejects negative ints just like the u8 row does.
+		{name: "TestHandleSubscribeSingle_ShunterUint128NegativeRejected", column: schema.ColumnSchema{Index: 0, Name: "u128", Type: schema.KindUint128}, requestID: 240, queryID: 241, sql: "SELECT * FROM t WHERE u128 = -1"},
+		// TestHandleSubscribeSingle_ShunterEmptyStatementRejected pins the reference
+		// subscription-parser rejection at
+		// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
+		// (empty string / "Empty") onto the SubscribeSingle admission surface.
+		// Shunter's parser rejects via expectKeyword("SELECT") returning "expected
+		// SELECT, got end of input" on a token stream that tokenizes to only EOF.
+		{name: "TestHandleSubscribeSingle_ShunterEmptyStatementRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 132, queryID: 133, sql: ""},
+		// TestHandleSubscribeSingle_ShunterWhitespaceOnlyStatementRejected pins the
+		// reference subscription-parser rejection at
+		// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
+		// (single space / "Empty after whitespace skip") onto the SubscribeSingle
+		// admission surface. Shunter's tokenizer drops whitespace so the parser sees
+		// only EOF and fails at expectKeyword("SELECT").
+		{name: "TestHandleSubscribeSingle_ShunterWhitespaceOnlyStatementRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 134, queryID: 135, sql: "   "},
+		// TestHandleSubscribeSingle_ShunterSubqueryInFromRejected pins the reference
+		// subscription-parser rejection at
+		// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
+		// (`select * from (select * from t) join (select * from s) on a = b` /
+		// "Subqueries in FROM not supported") onto the SubscribeSingle admission
+		// surface. Shunter's parseStatement requires an identifier token after FROM
+		// (query/sql/parser.go:485-488); the `(` token is tokLParen, not an identifier,
+		// so the parser rejects with "expected table name".
+		{name: "TestHandleSubscribeSingle_ShunterSubqueryInFromRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 138, queryID: 139, sql: "SELECT * FROM (SELECT * FROM t) JOIN (SELECT * FROM s) ON a = b"},
+		// TestHandleSubscribeSingle_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected
+		// pins the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select 1` / "FROM is required") onto the SubscribeSingle admission surface.
+		// Shunter's parseProjection only accepts `*` or `table.*`
+		// (query/sql/parser.go:553-572); the integer literal `1` matches neither and
+		// the parser rejects with "projection must be '*' or 'table.*'".
+		{name: "TestHandleSubscribeSingle_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 140, queryID: 141, sql: "SELECT 1"},
+		// TestHandleSubscribeSingle_ShunterSqlUnsupportedMultiPartTableNameRejected pins
+		// the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select a from s.t` / "Multi-part table names") onto the SubscribeSingle
+		// admission surface. Shunter's parseProjection rejects the bare identifier `a`
+		// (non-`*` / non-`table.*`) before FROM parsing begins, so the rejection fires
+		// at the projection surface with "projection must be '*' or 'table.*'".
+		{name: "TestHandleSubscribeSingle_ShunterSqlUnsupportedMultiPartTableNameRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 142, queryID: 143, sql: "SELECT a FROM s.t"},
+		// TestHandleSubscribeSingle_ShunterSqlUnsupportedBitStringLiteralRejected pins
+		// the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select * from t where a = B'1010'` / "Bit-string literals") onto the
+		// SubscribeSingle admission surface. Shunter's lexer tokenizes `B` as an
+		// identifier and `'1010'` as a separate string literal; parseLiteral then
+		// rejects the identifier RHS with "expected literal, got identifier "B"".
+		{name: "TestHandleSubscribeSingle_ShunterSqlUnsupportedBitStringLiteralRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 144, queryID: 145, sql: "SELECT * FROM t WHERE u32 = B'1010'"},
+		// TestHandleSubscribeSingle_ShunterSqlUnsupportedWildcardWithBareColumnsRejected
+		// pins the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select a.*, b, c from t` / "Wildcard with non-wildcard projections") onto
+		// the SubscribeSingle admission surface. Shunter's parseProjection accepts one
+		// projection item; after consuming `a.*` the parser expects FROM but finds `,`
+		// and rejects with "expected FROM, got \",\"".
+		{name: "TestHandleSubscribeSingle_ShunterSqlUnsupportedWildcardWithBareColumnsRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 146, queryID: 147, sql: "SELECT t.*, b, c FROM t"},
+		// TestHandleSubscribeSingle_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected
+		// pins the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select * from t order by a limit b` / "Limit expression") onto the
+		// SubscribeSingle admission surface. ORDER BY now parses for one-off reads,
+		// but the subscription compile gate still rejects the statement before
+		// executor registration.
+		{name: "TestHandleSubscribeSingle_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 148, queryID: 149, sql: "SELECT * FROM t ORDER BY u32 LIMIT u32"},
+		// TestHandleSubscribeSingle_ShunterSqlUnsupportedAggregateWithGroupByRejected
+		// pins the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select a, count(*) from t group by a` / "GROUP BY") onto the SubscribeSingle
+		// admission surface. parseProjection rejects the leading bare column `a` with
+		// "projection must be '*' or 'table.*'" before the aggregate or GROUP BY
+		// keyword is ever seen.
+		{name: "TestHandleSubscribeSingle_ShunterSqlUnsupportedAggregateWithGroupByRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 150, queryID: 151, sql: "SELECT u32, COUNT(*) FROM t GROUP BY u32"},
+		// TestHandleSubscribeSingle_ShunterSqlUnsupportedImplicitCommaJoinRejected pins
+		// the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select a.* from t as a, s as b where a.id = b.id and b.c = 1` /
+		// "Implicit joins") onto the SubscribeSingle admission surface. After
+		// consuming `t AS a`, parseStatement's EOF/keyword guard hits `,` and rejects
+		// with "unexpected token \",\"".
+		{name: "TestHandleSubscribeSingle_ShunterSqlUnsupportedImplicitCommaJoinRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 152, queryID: 153, sql: "SELECT a.* FROM t AS a, s AS b WHERE a.u32 = b.u32"},
+		// TestHandleSubscribeSingle_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected
+		// pins the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select t.* from t join s on int = u32` / "Joins require qualified vars")
+		// onto the SubscribeSingle admission surface. parseJoinClause calls
+		// parseQualifiedColumnRef for the left side of ON (query/sql/parser.go:629),
+		// which requires `ident.ident`; the bare identifier `int` fails there.
+		{name: "TestHandleSubscribeSingle_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 154, queryID: 155, sql: "SELECT t.* FROM t JOIN s ON int = u32"},
+		// TestHandleSubscribeSingle_ShunterSqlInvalidEmptySelectRejected pins the
+		// reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
+		// (`select from t` / "Empty SELECT") onto the SubscribeSingle admission
+		// surface. parseProjection rejects because the next token after SELECT is the
+		// identifier `from`, which is then followed by `t` (not a dot), so the
+		// projection fails with "projection must be '*' or 'table.*'".
+		{name: "TestHandleSubscribeSingle_ShunterSqlInvalidEmptySelectRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 156, queryID: 157, sql: "SELECT FROM t"},
+		// TestHandleSubscribeSingle_ShunterSqlInvalidEmptyFromRejected pins the
+		// reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
+		// (`select a from where b = 1` / "Empty FROM") onto the SubscribeSingle
+		// admission surface. parseProjection rejects the bare column `a` with
+		// "projection must be '*' or 'table.*'" before the empty FROM is examined.
+		{name: "TestHandleSubscribeSingle_ShunterSqlInvalidEmptyFromRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 158, queryID: 159, sql: "SELECT a FROM WHERE b = 1"},
+		// TestHandleSubscribeSingle_ShunterSqlInvalidEmptyWhereRejected pins the
+		// reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
+		// (`select a from t where` / "Empty WHERE") onto the SubscribeSingle admission
+		// surface. parseProjection rejects the bare column `a` with "projection must
+		// be '*' or 'table.*'" before the empty WHERE is examined.
+		{name: "TestHandleSubscribeSingle_ShunterSqlInvalidEmptyWhereRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 160, queryID: 161, sql: "SELECT a FROM t WHERE"},
+		// TestHandleSubscribeSingle_ShunterSqlInvalidEmptyGroupByRejected pins the
+		// reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
+		// (`select a, count(*) from t group by` / "Empty GROUP BY") onto the
+		// SubscribeSingle admission surface. parseProjection rejects the leading bare
+		// column `a` with "projection must be '*' or 'table.*'" before the aggregate
+		// or empty GROUP BY is examined.
+		{name: "TestHandleSubscribeSingle_ShunterSqlInvalidEmptyGroupByRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 162, queryID: 163, sql: "SELECT a, COUNT(*) FROM t GROUP BY"},
+		// TestHandleSubscribeSingle_ShunterCountAliasRejected pins the deliberate
+		// subscribe-side policy rejection for parsed aggregate projections. Query SQL
+		// may widen to accept `COUNT(*) [AS] alias`, but subscriptions must still return
+		// SubscriptionError and skip executor registration.
+		{name: "TestHandleSubscribeSingle_ShunterCountAliasRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 164, queryID: 165, sql: "SELECT COUNT(*) AS n FROM t"},
+		{name: "TestHandleSubscribeSingle_ShunterCountColumnAliasRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 166, queryID: 167, sql: "SELECT COUNT(u32) AS n FROM t"},
+		{name: "TestHandleSubscribeSingle_ShunterCountDistinctColumnAliasRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 172, queryID: 173, sql: "SELECT COUNT(DISTINCT u32) AS n FROM t"},
+		{name: "TestHandleSubscribeSingle_ShunterSumColumnAliasRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 170, queryID: 171, sql: "SELECT SUM(u32) AS total FROM t"},
+		{name: "TestHandleSubscribeSingle_ShunterCountBareAliasRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 174, queryID: 175, sql: "SELECT COUNT(*) n FROM t"},
+		{name: "TestHandleSubscribeSingle_ShunterAliasedBareColumnProjectionRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 166, queryID: 167, sql: "SELECT u32 AS n FROM t"},
+		// TestHandleSubscribeSingle_ShunterSqlInvalidAggregateWithoutAliasRejected pins
+		// the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
+		// (`select count(*) from t` / "Aggregate without alias") onto the
+		// SubscribeSingle admission surface. parseProjection reads `count` as an
+		// identifier qualifier, then finds `(` where it expects a dot, rejecting with
+		// "projection must be '*' or 'table.*'".
+		{name: "TestHandleSubscribeSingle_ShunterSqlInvalidAggregateWithoutAliasRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 164, queryID: 165, sql: "SELECT COUNT(*) FROM t"},
+		// TestHandleSubscribeSingle_ShunterArraySenderRejected pins reference
+		// check.rs:487-489 (`select * from t where arr = :sender` / "The :sender
+		// param is an identity"). With KindArrayString realized, the coerce layer
+		// rejects :sender against the array column because :sender only resolves
+		// to the 32-byte identity (KindBytes) representation. The rejection is
+		// now a positive Shunter contract instead of falling through the default
+		// "column kind not supported" branch.
+		{name: "TestHandleSubscribeSingle_ShunterArraySenderRejected", column: schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString}, requestID: 400, queryID: 401, sql: "SELECT * FROM t WHERE arr = :sender"},
 	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 81)
-}
 
-// TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected pins the
-// reference type-check rejection at reference tree crates/expr/src/
-// check.rs lines 502-504 (`select * from t where t.u32 = 1.3` /
-// "Field u32 is not a float") onto the SubscribeSingle admission surface.
-// Float literals now parse end-to-end (LitFloat) after the 2026-04-21
-// follow-through, so the rejection must fire at the coerce boundary rather
-// than at the parser.
-func TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   82,
-		QueryID:     83,
-		QueryString: "SELECT * FROM t WHERE t.u32 = 1.3",
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			executor := &mockSubExecutor{}
+			sl := newMockSchema("t", 1, tc.column)
+			msg := &SubscribeSingleMsg{
+				RequestID:   tc.requestID,
+				QueryID:     tc.queryID,
+				QueryString: tc.sql,
+			}
+			requireSubscribeSingleError(t, conn, executor, sl, msg, tc.queryID)
+		})
 	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 83)
 }
 
 // TestHandleSubscribeSingle_ShunterStringDigitsOnIntegerColumnWidens pins
@@ -4229,90 +4410,6 @@ func TestHandleSubscribeSingle_ShunterScientificNotationOverflowInfinity(t *test
 	}
 }
 
-// TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeIntOnUnsignedRejected
-// pins reference tree crates/expr/src/check.rs:382-385 (`select * from
-// t where u8 = -1` / "Negative integer for unsigned column") onto the
-// SubscribeSingle admission surface. `-1` parses to LitInt(-1) and
-// coerceUnsigned (query/sql/coerce.go:119) rejects negative ints before they
-// reach an unsigned column; the pin names the rejection as a Shunter contract.
-func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeIntOnUnsignedRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   118,
-		QueryID:     119,
-		QueryString: "SELECT * FROM t WHERE u8 = -1",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 119)
-}
-
-// TestHandleSubscribeSingle_ShunterInvalidLiteralFloatOnUnsignedRejected pins
-// reference tree crates/expr/src/check.rs:390-393 (`select * from t
-// where u8 = 0.1` / "Float as integer") onto the SubscribeSingle admission
-// surface. A non-integral decimal stays LitFloat and coerceUnsigned
-// (query/sql/coerce.go:116) rejects non-LitInt against an integer column.
-// Complements the existing u32 = 1.3 pin by naming the u8 column variant.
-func TestHandleSubscribeSingle_ShunterInvalidLiteralFloatOnUnsignedRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   122,
-		QueryID:     123,
-		QueryString: "SELECT * FROM t WHERE u8 = 0.1",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 123)
-}
-
-// TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected
-// pins reference tree crates/expr/src/check.rs:394-397 (`select * from
-// t where u32 = 1e-3` / "Float as integer") onto the SubscribeSingle
-// admission surface. `1e-3` parses to 0.001, fails the integer-valued collapse
-// in parseNumericLiteral (non-integral), stays LitFloat, and coerceUnsigned
-// rejects LitFloat against a KindUint32 column.
-func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   124,
-		QueryID:     125,
-		QueryString: "SELECT * FROM t WHERE u32 = 1e-3",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 125)
-}
-
-// TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnSignedRejected
-// pins reference tree crates/expr/src/check.rs:398-401 (`select * from
-// t where i32 = 1e-3` / "Float as integer") onto the SubscribeSingle
-// admission surface. Mirrors the unsigned case on a signed column:
-// parseNumericLiteral leaves 0.001 as LitFloat, and coerceSigned
-// (query/sql/coerce.go:106) rejects non-LitInt against a KindInt32 column.
-func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnSignedRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "i32", Type: schema.KindInt32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   126,
-		QueryID:     127,
-		QueryString: "SELECT * FROM t WHERE i32 = 1e-3",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 127)
-}
-
 // TestHandleSubscribeSingle_ShunterValidLiteralOnEachIntegerWidth pins integer
 // literal coercion across numeric column widths.
 func TestHandleSubscribeSingle_ShunterValidLiteralOnEachIntegerWidth(t *testing.T) {
@@ -4433,25 +4530,6 @@ func TestHandleSubscribeSingle_ShunterValidLiteralU256Scientific(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ShunterUint256NegativeRejected extends the
-// reference invalid_literals bundle at check.rs:382-385 to the Uint256
-// column kind. `-1` parses to LitInt(-1) and coerce's KindUint256 branch
-// rejects negative ints just like the u8 / u128 rows do.
-func TestHandleSubscribeSingle_ShunterUint256NegativeRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u256", Type: schema.KindUint256},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   242,
-		QueryID:     243,
-		QueryString: "SELECT * FROM t WHERE u256 = -1",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 243)
-}
-
 // TestHandleSubscribeSingle_ShunterTimestampLiteralAccepted pins the reference
 // valid_literals rows at check.rs:334-352 onto the SubscribeSingle admission
 // surface: RFC3339-shaped string literals bind to a KindTimestamp column. The
@@ -4552,123 +4630,215 @@ func TestHandleSubscribeSingle_ShunterTimestampMalformedRejected(t *testing.T) {
 	requireNoSubscribeRegistration(t, executor)
 }
 
-// TestHandleSubscribeSingle_ShunterBoolLiteralOnTimestampRejectText pins
-// reference `UnexpectedType` text for a bool literal on a Timestamp column.
-// Reference lib.rs:94 routes the bool arm directly to UnexpectedType
-// (errors.rs:100) ahead of the lib.rs:99 InvalidLiteral fallback. Timestamp
-// inferred name is the SATS Product fmt. SubscribeSingle wraps with
-// DBError::WithSql.
-func TestHandleSubscribeSingle_ShunterBoolLiteralOnTimestampRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "ts", Type: schema.KindTimestamp},
-	)
-
-	const sqlText = "SELECT * FROM t WHERE ts = TRUE"
-	msg := &SubscribeSingleMsg{
-		RequestID:   272,
-		QueryID:     273,
-		QueryString: sqlText,
+// TestHandleSubscribeSingle_ExactSQLAdmissionErrors pins exact
+// single-table diagnostics, including resolution and precedence rules.
+func TestHandleSubscribeSingle_ExactSQLAdmissionErrors(t *testing.T) {
+	cases := []struct {
+		name      string
+		table     string
+		column    schema.ColumnSchema
+		requestID uint32
+		queryID   uint32
+		sql       string
+		want      func(string) string
+	}{
+		// TestHandleSubscribeSingle_ShunterBoolLiteralOnTimestampRejectText pins
+		// reference `UnexpectedType` text for a bool literal on a Timestamp column.
+		// Reference lib.rs:94 routes the bool arm directly to UnexpectedType
+		// (errors.rs:100) ahead of the lib.rs:99 InvalidLiteral fallback. Timestamp
+		// inferred name is the SATS Product fmt. SubscribeSingle wraps with
+		// DBError::WithSql.
+		{name: "TestHandleSubscribeSingle_ShunterBoolLiteralOnTimestampRejectText", column: schema.ColumnSchema{Index: 0, Name: "ts", Type: schema.KindTimestamp}, requestID: 272, queryID: 273, sql: "SELECT * FROM t WHERE ts = TRUE", want: func(sqlText string) string {
+			return "Unexpected type: (expected) Bool != (__timestamp_micros_since_unix_epoch__: I64) (inferred), executing: `" + sqlText + "`"
+		}},
+		// TestHandleSubscribeSingle_ShunterStringLiteralOnArrayStringRejectText pins
+		// reference `InvalidLiteral` text for a scalar string literal targeting an
+		// Array<String> column. Reference `parse(value, Array<String>)` at
+		// lib.rs:359 hits the array-kind catch-all `bail!`, folded by lib.rs:99
+		// into `InvalidLiteral::new(v.into_string(), ty)`. Array<String> renders
+		// through the parameterized array fmt. SubscribeSingle wraps with
+		// DBError::WithSql.
+		{name: "TestHandleSubscribeSingle_ShunterStringLiteralOnArrayStringRejectText", column: schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString}, requestID: 274, queryID: 275, sql: "SELECT * FROM t WHERE arr = 'x'", want: func(sqlText string) string {
+			return "The literal expression `x` cannot be parsed as type `Array<String>`, executing: `" + sqlText + "`"
+		}},
+		// TestHandleSubscribeSingle_ShunterBoolLiteralOnArrayStringRejectText pins
+		// reference `UnexpectedType` text for a bool literal on an Array<String>
+		// column. Reference lib.rs:94 routes the bool arm to UnexpectedType ahead
+		// of the lib.rs:99 InvalidLiteral fallback. SubscribeSingle wraps with
+		// DBError::WithSql.
+		{name: "TestHandleSubscribeSingle_ShunterBoolLiteralOnArrayStringRejectText", column: schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString}, requestID: 276, queryID: 277, sql: "SELECT * FROM t WHERE arr = TRUE", want: func(sqlText string) string {
+			return "Unexpected type: (expected) Bool != Array<String> (inferred), executing: `" + sqlText + "`"
+		}},
+		// TestHandleSubscribeSingle_ShunterAllModifierRejected pins the reference
+		// subscription-parser rejection at sub.rs:120-149 (and the inner SQL
+		// parser at sql.rs:362-394). The set quantifier `ALL` produces a non-None
+		// `distinct` field which the subscribe `parse_select` arm rejects through
+		// `SubscriptionUnsupported::Select(select)` rendered as
+		// `Unsupported SELECT: {select}`, then wrapped via `DBError::WithSql`.
+		// The test schema deliberately includes a column named `ALL` to confirm
+		// the parser detects the modifier rather than reinterpreting the keyword
+		// as a column reference with output alias `u32`.
+		{name: "TestHandleSubscribeSingle_ShunterAllModifierRejected", column: schema.ColumnSchema{Index: 0, Name: "ALL", Type: schema.KindUint32}, requestID: 422, queryID: 423, sql: "SELECT ALL u32 FROM t", want: func(sqlText string) string {
+			return "Unsupported SELECT: " + sqlText + ", executing: `" + sqlText + "`"
+		}},
+		// TestHandleSubscribeSingle_ShunterUnknownTableRejectText asserts the stable
+		// Shunter boundary contract for unknown-table admission: a correlated
+		// SubscriptionError includes the visibility-safe diagnostic, the offending
+		// SQL suffix, and no executor registration.
+		{name: "TestHandleSubscribeSingle_ShunterUnknownTableRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 230, queryID: 231, sql: "SELECT * FROM r", want: func(sqlText string) string {
+			return "no such table: `r`. If the table exists, it may be marked private., executing: `" + sqlText + "`"
+		}},
+		// TestHandleSubscribeSingle_ShunterUnknownFieldRejectText pins the reference
+		// type-check rejection literal at
+		// reference tree crates/expr/src/errors.rs:11-13
+		// (`Unresolved::Var` = "`{0}` is not in scope"). Reference emit site
+		// `_type_expr` lib.rs:107: a missing column inside an existing relvar
+		// surfaces as `Unresolved::var(&field)`. SubscribeSingle compile-origin
+		// wraps with `DBError::WithSql` (error.rs:140).
+		{name: "TestHandleSubscribeSingle_ShunterUnknownFieldRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 240, queryID: 241, sql: "SELECT * FROM t WHERE t.missing_col = 1", want: func(sqlText string) string { return "`missing_col` is not in scope, executing: `" + sqlText + "`" }},
+		// TestHandleSubscribeSingle_ShunterAggregateReturnTypeRejectText pins the
+		// reference `Unsupported::ReturnType` literal at
+		// reference tree crates/expr/src/errors.rs:47 ("Column projections
+		// are not supported in subscriptions; Subscriptions must return a table
+		// type"). Reference emit site expr/src/check.rs:174 via
+		// `expect_table_type` on the `parse_and_type_sub` path: aggregate
+		// (ProjectList::Agg) and column-list (ProjectList::List) projections both
+		// fall through to the unified literal on the v1 subscribe surface.
+		// SubscribeSingle wraps the inner text with `DBError::WithSql`.
+		{name: "TestHandleSubscribeSingle_ShunterAggregateReturnTypeRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 250, queryID: 251, sql: "SELECT COUNT(*) AS n FROM t", want: func(sqlText string) string {
+			return "Column projections are not supported in subscriptions; Subscriptions must return a table type, executing: `" + sqlText + "`"
+		}},
+		// TestHandleSubscribeSingle_ShunterColumnListReturnTypeRejectText pins the
+		// same reference `Unsupported::ReturnType` literal onto the column-list
+		// projection path: `ProjectList::List` in reference expr/src/check.rs:174
+		// likewise fails `expect_table_type` and emits the unified subscription
+		// literal.
+		{name: "TestHandleSubscribeSingle_ShunterColumnListReturnTypeRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 252, queryID: 253, sql: "SELECT u32 AS n FROM t", want: func(sqlText string) string {
+			return "Column projections are not supported in subscriptions; Subscriptions must return a table type, executing: `" + sqlText + "`"
+		}},
+		// TestHandleSubscribeSingle_ShunterUnresolvedVarProjectionColumnRejectText pins
+		// reference `Unresolved::Var` (errors.rs:11-13, "`{name}` is not in scope")
+		// for a SubscribeSingle column-list projection where the named column does
+		// not exist on the FROM-clause table. Reference path: `type_proj::Exprs`
+		// (check.rs:67-80) walks each projection element through `type_expr` BEFORE
+		// `expect_table_type` runs the `Unsupported::ReturnType` check at
+		// check.rs:174 — so a missing-column projection emits `Unresolved::Var`,
+		// not the column-projection-not-supported literal. SubscribeSingle wraps
+		// compile errors with `DBError::WithSql`.
+		{name: "TestHandleSubscribeSingle_ShunterUnresolvedVarProjectionColumnRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 256, queryID: 257, sql: "SELECT missing FROM t", want: func(sqlText string) string { return "`missing` is not in scope, executing: `" + sqlText + "`" }},
+		// TestHandleSubscribeSingle_ShunterBoolLiteralOnIntegerColumnRejectText pins
+		// the reference `UnexpectedType` literal from
+		// reference tree crates/expr/src/errors.rs:100 (via the emit site at
+		// lib.rs:94 for a bool literal in a non-bool column) onto the
+		// SubscribeSingle admission surface. SubscribeSingle wraps compile errors
+		// with `DBError::WithSql` (module_subscription_actor.rs:643 via
+		// `return_on_err_with_sql_bool!`), so the client sees the
+		// `, executing: `{sql}“ suffix.
+		{name: "TestHandleSubscribeSingle_ShunterBoolLiteralOnIntegerColumnRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 254, queryID: 255, sql: "SELECT * FROM t WHERE u32 = TRUE", want: func(sqlText string) string {
+			return "Unexpected type: (expected) Bool != U32 (inferred), executing: `" + sqlText + "`"
+		}},
+		// TestHandleSubscribeSingle_ShunterIntOverflowOnUint8RejectText pins the
+		// reference `InvalidLiteral` literal from
+		// reference tree crates/expr/src/errors.rs:108 (emitted at lib.rs:99
+		// when `parse(v, ty)` fails) onto the SubscribeSingle admission surface.
+		// SubscribeSingle wraps compile errors with `DBError::WithSql`
+		// (module_subscription_actor.rs:643 via `return_on_err_with_sql_bool!`).
+		// Scope: plain integer literal; scientific-notation source-text preservation is
+		// covered separately.
+		{name: "TestHandleSubscribeSingle_ShunterIntOverflowOnUint8RejectText", column: schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8}, requestID: 256, queryID: 257, sql: "SELECT * FROM t WHERE u8 = 1000", want: func(sqlText string) string {
+			return "The literal expression `1000` cannot be parsed as type `U8`, executing: `" + sqlText + "`"
+		}},
+		// TestHandleSubscribeSingle_ShunterFloatLiteralOnUint32RejectText pins
+		// InvalidLiteral text for float literals on integer columns.
+		{name: "TestHandleSubscribeSingle_ShunterFloatLiteralOnUint32RejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 258, queryID: 259, sql: "SELECT * FROM t WHERE u32 = 1.3", want: func(sqlText string) string {
+			return "The literal expression `1.3` cannot be parsed as type `U32`, executing: `" + sqlText + "`"
+		}},
+		// TestHandleSubscribeSingle_ShunterUnresolvedVarUnqualifiedWhereRejectText
+		// pins the reference `Unresolved::Var` literal for an unqualified
+		// single-table WHERE column whose name does not exist on the relvar.
+		// SubscribeSingle wraps with DBError::WithSql.
+		{name: "TestHandleSubscribeSingle_ShunterUnresolvedVarUnqualifiedWhereRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 408, queryID: 409, sql: "SELECT * FROM t WHERE missing = 1", want: func(sqlText string) string { return "`missing` is not in scope, executing: `" + sqlText + "`" }},
+		// TestHandleSubscribeSingle_ShunterUnresolvedVarBaseTableAfterAliasRejectText
+		// pins the reference `Unresolved::Var` literal for a WHERE column
+		// qualified by the base table name AFTER an `AS` alias has been declared
+		// on the FROM relvar. Reference `_type_expr` (lib.rs:103) emits
+		// `Unresolved::var(&table)` when the qualifier name is absent from
+		// `Relvars`. SubscribeSingle wraps compile errors with `DBError::WithSql`.
+		{name: "TestHandleSubscribeSingle_ShunterUnresolvedVarBaseTableAfterAliasRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 414, queryID: 415, sql: "SELECT * FROM t AS r WHERE t.u32 = 5", want: func(sqlText string) string { return "`t` is not in scope, executing: `" + sqlText + "`" }},
+		// TestHandleSubscribeSingle_ShunterUnresolvedVarWherePrecedesProjectionRejectText
+		// pins the reference type-checker order: `type_select` (WHERE) runs
+		// before `type_proj` (projection columns). Reference path:
+		// `SubChecker::type_set` (check.rs:139-146) computes
+		// `type_proj(type_select(input, expr, vars)?, project, vars)`.
+		// SubscribeSingle wraps with DBError::WithSql.
+		{name: "TestHandleSubscribeSingle_ShunterUnresolvedVarWherePrecedesProjectionRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 416, queryID: 417, sql: "SELECT missing FROM t WHERE other_missing = 1", want: func(sqlText string) string { return "`other_missing` is not in scope, executing: `" + sqlText + "`" }},
+		// TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedProjectionQualifierRejectText
+		// pins reference `type_proj::Exprs` `Unresolved::var(&table)` emit on
+		// the SubscribeSingle WithSql-wrapped surface.
+		{name: "TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedProjectionQualifierRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 422, queryID: 423, sql: "SELECT x.u32 FROM t", want: func(sqlText string) string { return "`x` is not in scope, executing: `" + sqlText + "`" }},
+		// TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText
+		// pins reference `type_proj` `Project::Star(Some(var))`
+		// `Unresolved::var(&var)` emit on the SubscribeSingle WithSql-wrapped
+		// surface.
+		{name: "TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 424, queryID: 425, sql: "SELECT x.* FROM t", want: func(sqlText string) string { return "`x` is not in scope, executing: `" + sqlText + "`" }},
+		// TestHandleSubscribeSingle_ShunterSenderParameterCaseSensitiveRejectText
+		// pins reference `parse_expr` (sql-parser/src/parser/mod.rs:223)
+		// byte-equal `":sender"` admission. Any other casing (e.g. `:SENDER`)
+		// falls through to `SqlUnsupported::Expr` rendered as
+		// `Unsupported expression: {expr}`. SubscribeSingle wraps with
+		// DBError::WithSql.
+		{name: "TestHandleSubscribeSingle_ShunterSenderParameterCaseSensitiveRejectText", table: "s", column: schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32}, requestID: 434, queryID: 435, sql: "SELECT * FROM s WHERE id = :SENDER", want: func(sqlText string) string { return "Unsupported expression: :SENDER, executing: `" + sqlText + "`" }},
+		// TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToTableNotFound pins
+		// reference `SubChecker::type_set` (check.rs:137-156) ordering: `type_from`
+		// runs BEFORE `expect_table_type` (check.rs:168-176), so a missing FROM
+		// table emits the no-such-table text instead of the
+		// `Unsupported::ReturnType` projection-return guard.
+		{name: "TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToTableNotFound", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 436, queryID: 437, sql: "SELECT u32 FROM missing_table", want: func(sqlText string) string {
+			return "no such table: `missing_table`. If the table exists, it may be marked private., executing: `" + sqlText + "`"
+		}},
+		// TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToWhereResolution
+		// pins reference `SubChecker::type_set` (check.rs:137-156) ordering:
+		// `type_select` runs BEFORE `expect_table_type` (check.rs:168-176), so a
+		// missing WHERE column emits `Unresolved::Var` instead of the
+		// `Unsupported::ReturnType` projection-return guard.
+		{name: "TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToWhereResolution", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 438, queryID: 439, sql: "SELECT u32 FROM t WHERE missing = 1", want: func(sqlText string) string { return "`missing` is not in scope, executing: `" + sqlText + "`" }},
+		// TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToTableNotFound pins
+		// the same `SubChecker::type_set` ordering on the aggregate path:
+		// `type_from` precedes the `Unsupported::ReturnType` guard for
+		// `ProjectList::Agg`. Locks the prior early-aggregate guard reorder so
+		// `SELECT COUNT(*) FROM missing_table` emits the no-such-table text.
+		{name: "TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToTableNotFound", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 440, queryID: 441, sql: "SELECT COUNT(*) AS n FROM missing_table", want: func(sqlText string) string {
+			return "no such table: `missing_table`. If the table exists, it may be marked private., executing: `" + sqlText + "`"
+		}},
+		// TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToWhereResolution
+		// pins the aggregate-path WHERE-precedes-return-guard ordering.
+		{name: "TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToWhereResolution", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, requestID: 442, queryID: 443, sql: "SELECT COUNT(*) AS n FROM t WHERE missing = 1", want: func(sqlText string) string { return "`missing` is not in scope, executing: `" + sqlText + "`" }},
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "Unexpected type: (expected) Bool != (__timestamp_micros_since_unix_epoch__: I64) (inferred), executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			executor := &mockSubExecutor{}
+			table := tc.table
+			if table == "" {
+				table = "t"
+			}
+			sl := newMockSchema(table, 1, tc.column)
+			msg := &SubscribeSingleMsg{RequestID: tc.requestID, QueryID: tc.queryID, QueryString: tc.sql}
+			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-// TestHandleSubscribeSingle_ShunterStringLiteralOnArrayStringRejectText pins
-// reference `InvalidLiteral` text for a scalar string literal targeting an
-// Array<String> column. Reference `parse(value, Array<String>)` at
-// lib.rs:359 hits the array-kind catch-all `bail!`, folded by lib.rs:99
-// into `InvalidLiteral::new(v.into_string(), ty)`. Array<String> renders
-// through the parameterized array fmt. SubscribeSingle wraps with
-// DBError::WithSql.
-func TestHandleSubscribeSingle_ShunterStringLiteralOnArrayStringRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString},
-	)
-
-	const sqlText = "SELECT * FROM t WHERE arr = 'x'"
-	msg := &SubscribeSingleMsg{
-		RequestID:   274,
-		QueryID:     275,
-		QueryString: sqlText,
+			tag, decoded := drainServerMsgEventually(t, conn)
+			if tag != TagSubscriptionError {
+				t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+			}
+			se := decoded.(SubscriptionError)
+			requireOptionalUint32(t, se.QueryID, tc.queryID, "QueryID")
+			if want := tc.want(tc.sql); se.Error != want {
+				t.Fatalf("Error = %q, want %q", se.Error, want)
+			}
+			requireNoSubscribeRegistration(t, executor)
+		})
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "The literal expression `x` cannot be parsed as type `Array<String>`, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterBoolLiteralOnArrayStringRejectText pins
-// reference `UnexpectedType` text for a bool literal on an Array<String>
-// column. Reference lib.rs:94 routes the bool arm to UnexpectedType ahead
-// of the lib.rs:99 InvalidLiteral fallback. SubscribeSingle wraps with
-// DBError::WithSql.
-func TestHandleSubscribeSingle_ShunterBoolLiteralOnArrayStringRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString},
-	)
-
-	const sqlText = "SELECT * FROM t WHERE arr = TRUE"
-	msg := &SubscribeSingleMsg{
-		RequestID:   276,
-		QueryID:     277,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "Unexpected type: (expected) Bool != Array<String> (inferred), executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterUint128NegativeRejected extends the
-// reference invalid_literals bundle at check.rs:382-385 to the Uint128
-// column kind (landed 2026-04-21 alongside the 128-bit column-kind
-// widening). `-1` parses to LitInt(-1) and coerce's KindUint128 branch
-// rejects negative ints just like the u8 row does.
-func TestHandleSubscribeSingle_ShunterUint128NegativeRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u128", Type: schema.KindUint128},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   240,
-		QueryID:     241,
-		QueryString: "SELECT * FROM t WHERE u128 = -1",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 241)
 }
 
 // TestHandleSubscribeSingle_ShunterDMLStatementRejected pins the reference
@@ -4707,48 +4877,6 @@ func TestHandleSubscribeSingle_ShunterDMLStatementRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ShunterEmptyStatementRejected pins the reference
-// subscription-parser rejection at
-// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
-// (empty string / "Empty") onto the SubscribeSingle admission surface.
-// Shunter's parser rejects via expectKeyword("SELECT") returning "expected
-// SELECT, got end of input" on a token stream that tokenizes to only EOF.
-func TestHandleSubscribeSingle_ShunterEmptyStatementRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   132,
-		QueryID:     133,
-		QueryString: "",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 133)
-}
-
-// TestHandleSubscribeSingle_ShunterWhitespaceOnlyStatementRejected pins the
-// reference subscription-parser rejection at
-// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
-// (single space / "Empty after whitespace skip") onto the SubscribeSingle
-// admission surface. Shunter's tokenizer drops whitespace so the parser sees
-// only EOF and fails at expectKeyword("SELECT").
-func TestHandleSubscribeSingle_ShunterWhitespaceOnlyStatementRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   134,
-		QueryID:     135,
-		QueryString: "   ",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 135)
-}
-
 // TestHandleSubscribeSingle_ShunterDistinctProjectionRejected pins the reference
 // subscription-parser rejection at
 // reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
@@ -4783,406 +4911,6 @@ func TestHandleSubscribeSingle_ShunterDistinctProjectionRejected(t *testing.T) {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
 	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterAllModifierRejected pins the reference
-// subscription-parser rejection at sub.rs:120-149 (and the inner SQL
-// parser at sql.rs:362-394). The set quantifier `ALL` produces a non-None
-// `distinct` field which the subscribe `parse_select` arm rejects through
-// `SubscriptionUnsupported::Select(select)` rendered as
-// `Unsupported SELECT: {select}`, then wrapped via `DBError::WithSql`.
-// The test schema deliberately includes a column named `ALL` to confirm
-// the parser detects the modifier rather than reinterpreting the keyword
-// as a column reference with output alias `u32`.
-func TestHandleSubscribeSingle_ShunterAllModifierRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "ALL", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT ALL u32 FROM t"
-	msg := &SubscribeSingleMsg{
-		RequestID:   422,
-		QueryID:     423,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "Unsupported SELECT: " + sqlText + ", executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterSubqueryInFromRejected pins the reference
-// subscription-parser rejection at
-// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
-// (`select * from (select * from t) join (select * from s) on a = b` /
-// "Subqueries in FROM not supported") onto the SubscribeSingle admission
-// surface. Shunter's parseStatement requires an identifier token after FROM
-// (query/sql/parser.go:485-488); the `(` token is tokLParen, not an identifier,
-// so the parser rejects with "expected table name".
-func TestHandleSubscribeSingle_ShunterSubqueryInFromRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   138,
-		QueryID:     139,
-		QueryString: "SELECT * FROM (SELECT * FROM t) JOIN (SELECT * FROM s) ON a = b",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 139)
-}
-
-// TestHandleSubscribeSingle_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected
-// pins the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select 1` / "FROM is required") onto the SubscribeSingle admission surface.
-// Shunter's parseProjection only accepts `*` or `table.*`
-// (query/sql/parser.go:553-572); the integer literal `1` matches neither and
-// the parser rejects with "projection must be '*' or 'table.*'".
-func TestHandleSubscribeSingle_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   140,
-		QueryID:     141,
-		QueryString: "SELECT 1",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 141)
-}
-
-// TestHandleSubscribeSingle_ShunterSqlUnsupportedMultiPartTableNameRejected pins
-// the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select a from s.t` / "Multi-part table names") onto the SubscribeSingle
-// admission surface. Shunter's parseProjection rejects the bare identifier `a`
-// (non-`*` / non-`table.*`) before FROM parsing begins, so the rejection fires
-// at the projection surface with "projection must be '*' or 'table.*'".
-func TestHandleSubscribeSingle_ShunterSqlUnsupportedMultiPartTableNameRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   142,
-		QueryID:     143,
-		QueryString: "SELECT a FROM s.t",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 143)
-}
-
-// TestHandleSubscribeSingle_ShunterSqlUnsupportedBitStringLiteralRejected pins
-// the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select * from t where a = B'1010'` / "Bit-string literals") onto the
-// SubscribeSingle admission surface. Shunter's lexer tokenizes `B` as an
-// identifier and `'1010'` as a separate string literal; parseLiteral then
-// rejects the identifier RHS with "expected literal, got identifier "B"".
-func TestHandleSubscribeSingle_ShunterSqlUnsupportedBitStringLiteralRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   144,
-		QueryID:     145,
-		QueryString: "SELECT * FROM t WHERE u32 = B'1010'",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 145)
-}
-
-// TestHandleSubscribeSingle_ShunterSqlUnsupportedWildcardWithBareColumnsRejected
-// pins the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select a.*, b, c from t` / "Wildcard with non-wildcard projections") onto
-// the SubscribeSingle admission surface. Shunter's parseProjection accepts one
-// projection item; after consuming `a.*` the parser expects FROM but finds `,`
-// and rejects with "expected FROM, got \",\"".
-func TestHandleSubscribeSingle_ShunterSqlUnsupportedWildcardWithBareColumnsRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   146,
-		QueryID:     147,
-		QueryString: "SELECT t.*, b, c FROM t",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 147)
-}
-
-// TestHandleSubscribeSingle_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected
-// pins the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select * from t order by a limit b` / "Limit expression") onto the
-// SubscribeSingle admission surface. ORDER BY now parses for one-off reads,
-// but the subscription compile gate still rejects the statement before
-// executor registration.
-func TestHandleSubscribeSingle_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   148,
-		QueryID:     149,
-		QueryString: "SELECT * FROM t ORDER BY u32 LIMIT u32",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 149)
-}
-
-// TestHandleSubscribeSingle_ShunterSqlUnsupportedAggregateWithGroupByRejected
-// pins the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select a, count(*) from t group by a` / "GROUP BY") onto the SubscribeSingle
-// admission surface. parseProjection rejects the leading bare column `a` with
-// "projection must be '*' or 'table.*'" before the aggregate or GROUP BY
-// keyword is ever seen.
-func TestHandleSubscribeSingle_ShunterSqlUnsupportedAggregateWithGroupByRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   150,
-		QueryID:     151,
-		QueryString: "SELECT u32, COUNT(*) FROM t GROUP BY u32",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 151)
-}
-
-// TestHandleSubscribeSingle_ShunterSqlUnsupportedImplicitCommaJoinRejected pins
-// the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select a.* from t as a, s as b where a.id = b.id and b.c = 1` /
-// "Implicit joins") onto the SubscribeSingle admission surface. After
-// consuming `t AS a`, parseStatement's EOF/keyword guard hits `,` and rejects
-// with "unexpected token \",\"".
-func TestHandleSubscribeSingle_ShunterSqlUnsupportedImplicitCommaJoinRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   152,
-		QueryID:     153,
-		QueryString: "SELECT a.* FROM t AS a, s AS b WHERE a.u32 = b.u32",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 153)
-}
-
-// TestHandleSubscribeSingle_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected
-// pins the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select t.* from t join s on int = u32` / "Joins require qualified vars")
-// onto the SubscribeSingle admission surface. parseJoinClause calls
-// parseQualifiedColumnRef for the left side of ON (query/sql/parser.go:629),
-// which requires `ident.ident`; the bare identifier `int` fails there.
-func TestHandleSubscribeSingle_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   154,
-		QueryID:     155,
-		QueryString: "SELECT t.* FROM t JOIN s ON int = u32",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 155)
-}
-
-// TestHandleSubscribeSingle_ShunterSqlInvalidEmptySelectRejected pins the
-// reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
-// (`select from t` / "Empty SELECT") onto the SubscribeSingle admission
-// surface. parseProjection rejects because the next token after SELECT is the
-// identifier `from`, which is then followed by `t` (not a dot), so the
-// projection fails with "projection must be '*' or 'table.*'".
-func TestHandleSubscribeSingle_ShunterSqlInvalidEmptySelectRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   156,
-		QueryID:     157,
-		QueryString: "SELECT FROM t",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 157)
-}
-
-// TestHandleSubscribeSingle_ShunterSqlInvalidEmptyFromRejected pins the
-// reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
-// (`select a from where b = 1` / "Empty FROM") onto the SubscribeSingle
-// admission surface. parseProjection rejects the bare column `a` with
-// "projection must be '*' or 'table.*'" before the empty FROM is examined.
-func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyFromRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   158,
-		QueryID:     159,
-		QueryString: "SELECT a FROM WHERE b = 1",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 159)
-}
-
-// TestHandleSubscribeSingle_ShunterSqlInvalidEmptyWhereRejected pins the
-// reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
-// (`select a from t where` / "Empty WHERE") onto the SubscribeSingle admission
-// surface. parseProjection rejects the bare column `a` with "projection must
-// be '*' or 'table.*'" before the empty WHERE is examined.
-func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyWhereRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   160,
-		QueryID:     161,
-		QueryString: "SELECT a FROM t WHERE",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 161)
-}
-
-// TestHandleSubscribeSingle_ShunterSqlInvalidEmptyGroupByRejected pins the
-// reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
-// (`select a, count(*) from t group by` / "Empty GROUP BY") onto the
-// SubscribeSingle admission surface. parseProjection rejects the leading bare
-// column `a` with "projection must be '*' or 'table.*'" before the aggregate
-// or empty GROUP BY is examined.
-func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyGroupByRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   162,
-		QueryID:     163,
-		QueryString: "SELECT a, COUNT(*) FROM t GROUP BY",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 163)
-}
-
-// TestHandleSubscribeSingle_ShunterCountAliasRejected pins the deliberate
-// subscribe-side policy rejection for parsed aggregate projections. Query SQL
-// may widen to accept `COUNT(*) [AS] alias`, but subscriptions must still return
-// SubscriptionError and skip executor registration.
-func TestHandleSubscribeSingle_ShunterCountAliasRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   164,
-		QueryID:     165,
-		QueryString: "SELECT COUNT(*) AS n FROM t",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 165)
-}
-
-func TestHandleSubscribeSingle_ShunterCountColumnAliasRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   166,
-		QueryID:     167,
-		QueryString: "SELECT COUNT(u32) AS n FROM t",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 167)
-}
-
-func TestHandleSubscribeSingle_ShunterCountDistinctColumnAliasRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   172,
-		QueryID:     173,
-		QueryString: "SELECT COUNT(DISTINCT u32) AS n FROM t",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 173)
-}
-
-func TestHandleSubscribeSingle_ShunterSumColumnAliasRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   170,
-		QueryID:     171,
-		QueryString: "SELECT SUM(u32) AS total FROM t",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 171)
-}
-
-func TestHandleSubscribeSingle_ShunterCountBareAliasRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   174,
-		QueryID:     175,
-		QueryString: "SELECT COUNT(*) n FROM t",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 175)
 }
 
 // TestHandleSubscribeSingle_ShunterCountAliasWithLimitRejected pins the
@@ -5256,21 +4984,6 @@ func TestHandleSubscribeSingle_JoinCountAggregateStillRejected(t *testing.T) {
 	requireNoSubscribeRegistration(t, executor)
 }
 
-func TestHandleSubscribeSingle_ShunterAliasedBareColumnProjectionRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   166,
-		QueryID:     167,
-		QueryString: "SELECT u32 AS n FROM t",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 167)
-}
-
 func TestHandleSubscribeSingle_ShunterJoinColumnProjectionRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
@@ -5313,50 +5026,6 @@ func TestHandleSubscribeSingle_ShunterJoinColumnProjectionRejected(t *testing.T)
 		t.Fatalf("Error = %q, want deliberate subscription projection rejection", se.Error)
 	}
 	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterSqlInvalidAggregateWithoutAliasRejected pins
-// the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
-// (`select count(*) from t` / "Aggregate without alias") onto the
-// SubscribeSingle admission surface. parseProjection reads `count` as an
-// identifier qualifier, then finds `(` where it expects a dot, rejecting with
-// "projection must be '*' or 'table.*'".
-func TestHandleSubscribeSingle_ShunterSqlInvalidAggregateWithoutAliasRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   164,
-		QueryID:     165,
-		QueryString: "SELECT COUNT(*) FROM t",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 165)
-}
-
-// TestHandleSubscribeSingle_ShunterArraySenderRejected pins reference
-// check.rs:487-489 (`select * from t where arr = :sender` / "The :sender
-// param is an identity"). With KindArrayString realized, the coerce layer
-// rejects :sender against the array column because :sender only resolves
-// to the 32-byte identity (KindBytes) representation. The rejection is
-// now a positive Shunter contract instead of falling through the default
-// "column kind not supported" branch.
-func TestHandleSubscribeSingle_ShunterArraySenderRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString},
-	)
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   400,
-		QueryID:     401,
-		QueryString: "SELECT * FROM t WHERE arr = :sender",
-	}
-	requireSubscribeSingleError(t, conn, executor, sl, msg, 401)
 }
 
 // TestHandleSubscribeSingle_ShunterJoinOnStrictEqualityRejectText pins the
@@ -5554,37 +5223,6 @@ func TestHandleSubscribeMulti_ShunterJoinStarProjectionRejectText(t *testing.T) 
 	requireNoSubscribeRegistration(t, exec)
 }
 
-// TestHandleSubscribeSingle_ShunterUnknownTableRejectText asserts the stable
-// Shunter boundary contract for unknown-table admission: a correlated
-// SubscriptionError includes the visibility-safe diagnostic, the offending
-// SQL suffix, and no executor registration.
-func TestHandleSubscribeSingle_ShunterUnknownTableRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT * FROM r"
-	msg := &SubscribeSingleMsg{
-		RequestID:   230,
-		QueryID:     231,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "no such table: `r`. If the table exists, it may be marked private., executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
 // TestHandleSubscribeMulti_ShunterUnknownTableRejectText pins the same
 // `Unresolved::Table` literal on the SubscribeMulti admission surface.
 // Reference SubscribeMulti wraps each per-item compile error with
@@ -5617,40 +5255,6 @@ func TestHandleSubscribeMulti_ShunterUnknownTableRejectText(t *testing.T) {
 	requireNoSubscribeRegistration(t, exec)
 }
 
-// TestHandleSubscribeSingle_ShunterUnknownFieldRejectText pins the reference
-// type-check rejection literal at
-// reference tree crates/expr/src/errors.rs:11-13
-// (`Unresolved::Var` = "`{0}` is not in scope"). Reference emit site
-// `_type_expr` lib.rs:107: a missing column inside an existing relvar
-// surfaces as `Unresolved::var(&field)`. SubscribeSingle compile-origin
-// wraps with `DBError::WithSql` (error.rs:140).
-func TestHandleSubscribeSingle_ShunterUnknownFieldRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT * FROM t WHERE t.missing_col = 1"
-	msg := &SubscribeSingleMsg{
-		RequestID:   240,
-		QueryID:     241,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "`missing_col` is not in scope, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
 // TestHandleSubscribeMulti_ShunterUnknownFieldRejectText pins the same
 // `Unresolved::Var` literal on the SubscribeMulti admission surface.
 func TestHandleSubscribeMulti_ShunterUnknownFieldRejectText(t *testing.T) {
@@ -5678,110 +5282,6 @@ func TestHandleSubscribeMulti_ShunterUnknownFieldRejectText(t *testing.T) {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
 	requireNoSubscribeRegistration(t, exec)
-}
-
-// TestHandleSubscribeSingle_ShunterAggregateReturnTypeRejectText pins the
-// reference `Unsupported::ReturnType` literal at
-// reference tree crates/expr/src/errors.rs:47 ("Column projections
-// are not supported in subscriptions; Subscriptions must return a table
-// type"). Reference emit site expr/src/check.rs:174 via
-// `expect_table_type` on the `parse_and_type_sub` path: aggregate
-// (ProjectList::Agg) and column-list (ProjectList::List) projections both
-// fall through to the unified literal on the v1 subscribe surface.
-// SubscribeSingle wraps the inner text with `DBError::WithSql`.
-func TestHandleSubscribeSingle_ShunterAggregateReturnTypeRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT COUNT(*) AS n FROM t"
-	msg := &SubscribeSingleMsg{
-		RequestID:   250,
-		QueryID:     251,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "Column projections are not supported in subscriptions; Subscriptions must return a table type, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterColumnListReturnTypeRejectText pins the
-// same reference `Unsupported::ReturnType` literal onto the column-list
-// projection path: `ProjectList::List` in reference expr/src/check.rs:174
-// likewise fails `expect_table_type` and emits the unified subscription
-// literal.
-func TestHandleSubscribeSingle_ShunterColumnListReturnTypeRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT u32 AS n FROM t"
-	msg := &SubscribeSingleMsg{
-		RequestID:   252,
-		QueryID:     253,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "Column projections are not supported in subscriptions; Subscriptions must return a table type, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterUnresolvedVarProjectionColumnRejectText pins
-// reference `Unresolved::Var` (errors.rs:11-13, "`{name}` is not in scope")
-// for a SubscribeSingle column-list projection where the named column does
-// not exist on the FROM-clause table. Reference path: `type_proj::Exprs`
-// (check.rs:67-80) walks each projection element through `type_expr` BEFORE
-// `expect_table_type` runs the `Unsupported::ReturnType` check at
-// check.rs:174 — so a missing-column projection emits `Unresolved::Var`,
-// not the column-projection-not-supported literal. SubscribeSingle wraps
-// compile errors with `DBError::WithSql`.
-func TestHandleSubscribeSingle_ShunterUnresolvedVarProjectionColumnRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT missing FROM t"
-	msg := &SubscribeSingleMsg{
-		RequestID:   256,
-		QueryID:     257,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "`missing` is not in scope, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeMulti_ShunterUnresolvedVarProjectionColumnRejectText
@@ -5812,105 +5312,6 @@ func TestHandleSubscribeMulti_ShunterUnresolvedVarProjectionColumnRejectText(t *
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
 	requireNoSubscribeRegistration(t, exec)
-}
-
-// TestHandleSubscribeSingle_ShunterBoolLiteralOnIntegerColumnRejectText pins
-// the reference `UnexpectedType` literal from
-// reference tree crates/expr/src/errors.rs:100 (via the emit site at
-// lib.rs:94 for a bool literal in a non-bool column) onto the
-// SubscribeSingle admission surface. SubscribeSingle wraps compile errors
-// with `DBError::WithSql` (module_subscription_actor.rs:643 via
-// `return_on_err_with_sql_bool!`), so the client sees the
-// `, executing: `{sql}“ suffix.
-func TestHandleSubscribeSingle_ShunterBoolLiteralOnIntegerColumnRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT * FROM t WHERE u32 = TRUE"
-	msg := &SubscribeSingleMsg{
-		RequestID:   254,
-		QueryID:     255,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "Unexpected type: (expected) Bool != U32 (inferred), executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterIntOverflowOnUint8RejectText pins the
-// reference `InvalidLiteral` literal from
-// reference tree crates/expr/src/errors.rs:108 (emitted at lib.rs:99
-// when `parse(v, ty)` fails) onto the SubscribeSingle admission surface.
-// SubscribeSingle wraps compile errors with `DBError::WithSql`
-// (module_subscription_actor.rs:643 via `return_on_err_with_sql_bool!`).
-// Scope: plain integer literal; scientific-notation source-text preservation is
-// covered separately.
-func TestHandleSubscribeSingle_ShunterIntOverflowOnUint8RejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
-	)
-
-	const sqlText = "SELECT * FROM t WHERE u8 = 1000"
-	msg := &SubscribeSingleMsg{
-		RequestID:   256,
-		QueryID:     257,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "The literal expression `1000` cannot be parsed as type `U8`, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterFloatLiteralOnUint32RejectText pins
-// InvalidLiteral text for float literals on integer columns.
-func TestHandleSubscribeSingle_ShunterFloatLiteralOnUint32RejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT * FROM t WHERE u32 = 1.3"
-	msg := &SubscribeSingleMsg{
-		RequestID:   258,
-		QueryID:     259,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "The literal expression `1.3` cannot be parsed as type `U32`, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterNonBoolLiteralOnBoolRejectText pins the
@@ -6120,37 +5521,6 @@ func TestHandleSubscribeSingle_ShunterJoinArrayColumnInvalidOpRejectText(t *test
 	requireNoSubscribeRegistration(t, executor)
 }
 
-// TestHandleSubscribeSingle_ShunterUnresolvedVarUnqualifiedWhereRejectText
-// pins the reference `Unresolved::Var` literal for an unqualified
-// single-table WHERE column whose name does not exist on the relvar.
-// SubscribeSingle wraps with DBError::WithSql.
-func TestHandleSubscribeSingle_ShunterUnresolvedVarUnqualifiedWhereRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT * FROM t WHERE missing = 1"
-	msg := &SubscribeSingleMsg{
-		RequestID:   408,
-		QueryID:     409,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "`missing` is not in scope, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
 // TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingRejectText
 // pins the reference `Unresolved::Var` literal for an unknown JOIN ON
 // equality operand. SubscribeSingle wraps with DBError::WithSql.
@@ -6232,39 +5602,6 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarJoinWhereQualifiedMissingReje
 	}
 	se := decoded.(SubscriptionError)
 	want := "`missing` is not in scope, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterUnresolvedVarBaseTableAfterAliasRejectText
-// pins the reference `Unresolved::Var` literal for a WHERE column
-// qualified by the base table name AFTER an `AS` alias has been declared
-// on the FROM relvar. Reference `_type_expr` (lib.rs:103) emits
-// `Unresolved::var(&table)` when the qualifier name is absent from
-// `Relvars`. SubscribeSingle wraps compile errors with `DBError::WithSql`.
-func TestHandleSubscribeSingle_ShunterUnresolvedVarBaseTableAfterAliasRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT * FROM t AS r WHERE t.u32 = 5"
-	msg := &SubscribeSingleMsg{
-		RequestID:   414,
-		QueryID:     415,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "`t` is not in scope, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
@@ -6355,39 +5692,6 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingNotHiddenByWhere
 	requireNoSubscribeRegistration(t, executor)
 }
 
-// TestHandleSubscribeSingle_ShunterUnresolvedVarWherePrecedesProjectionRejectText
-// pins the reference type-checker order: `type_select` (WHERE) runs
-// before `type_proj` (projection columns). Reference path:
-// `SubChecker::type_set` (check.rs:139-146) computes
-// `type_proj(type_select(input, expr, vars)?, project, vars)`.
-// SubscribeSingle wraps with DBError::WithSql.
-func TestHandleSubscribeSingle_ShunterUnresolvedVarWherePrecedesProjectionRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT missing FROM t WHERE other_missing = 1"
-	msg := &SubscribeSingleMsg{
-		RequestID:   416,
-		QueryID:     417,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "`other_missing` is not in scope, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
 // TestHandleSubscribeSingle_ShunterBooleanConstantWhereDoesNotMaskBranchErrors
 // pins reference `_type_expr` order for logical WHERE expressions on the
 // SubscribeSingle WithSql-wrapped surface: both operands are typed before
@@ -6429,67 +5733,6 @@ func TestHandleSubscribeSingle_ShunterBooleanConstantWhereDoesNotMaskBranchError
 			requireNoSubscribeRegistration(t, executor)
 		})
 	}
-}
-
-// TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedProjectionQualifierRejectText
-// pins reference `type_proj::Exprs` `Unresolved::var(&table)` emit on
-// the SubscribeSingle WithSql-wrapped surface.
-func TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedProjectionQualifierRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT x.u32 FROM t"
-	msg := &SubscribeSingleMsg{
-		RequestID:   422,
-		QueryID:     423,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "`x` is not in scope, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText
-// pins reference `type_proj` `Project::Star(Some(var))`
-// `Unresolved::var(&var)` emit on the SubscribeSingle WithSql-wrapped
-// surface.
-func TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT x.* FROM t"
-	msg := &SubscribeSingleMsg{
-		RequestID:   424,
-		QueryID:     425,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "`x` is not in scope, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterMissingLeftTablePrecedesDuplicateJoinAliasRejectText
@@ -6650,164 +5893,6 @@ func TestHandleSubscribeSingle_ShunterUnqualifiedNamesJoinOnRejectText(t *testin
 	want := "Names must be qualified when using joins, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterSenderParameterCaseSensitiveRejectText
-// pins reference `parse_expr` (sql-parser/src/parser/mod.rs:223)
-// byte-equal `":sender"` admission. Any other casing (e.g. `:SENDER`)
-// falls through to `SqlUnsupported::Expr` rendered as
-// `Unsupported expression: {expr}`. SubscribeSingle wraps with
-// DBError::WithSql.
-func TestHandleSubscribeSingle_ShunterSenderParameterCaseSensitiveRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("s", 1,
-		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT * FROM s WHERE id = :SENDER"
-	msg := &SubscribeSingleMsg{
-		RequestID:   434,
-		QueryID:     435,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	want := "Unsupported expression: :SENDER, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToTableNotFound pins
-// reference `SubChecker::type_set` (check.rs:137-156) ordering: `type_from`
-// runs BEFORE `expect_table_type` (check.rs:168-176), so a missing FROM
-// table emits the no-such-table text instead of the
-// `Unsupported::ReturnType` projection-return guard.
-func TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToTableNotFound(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT u32 FROM missing_table"
-	msg := &SubscribeSingleMsg{
-		RequestID:   436,
-		QueryID:     437,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want TagSubscriptionError", tag)
-	}
-	se := decoded.(SubscriptionError)
-	want := "no such table: `missing_table`. If the table exists, it may be marked private., executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q (table-not-found must precede table-type return guard)", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToWhereResolution
-// pins reference `SubChecker::type_set` (check.rs:137-156) ordering:
-// `type_select` runs BEFORE `expect_table_type` (check.rs:168-176), so a
-// missing WHERE column emits `Unresolved::Var` instead of the
-// `Unsupported::ReturnType` projection-return guard.
-func TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToWhereResolution(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT u32 FROM t WHERE missing = 1"
-	msg := &SubscribeSingleMsg{
-		RequestID:   438,
-		QueryID:     439,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want TagSubscriptionError", tag)
-	}
-	se := decoded.(SubscriptionError)
-	want := "`missing` is not in scope, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q (WHERE resolution must precede table-type return guard)", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToTableNotFound pins
-// the same `SubChecker::type_set` ordering on the aggregate path:
-// `type_from` precedes the `Unsupported::ReturnType` guard for
-// `ProjectList::Agg`. Locks the prior early-aggregate guard reorder so
-// `SELECT COUNT(*) FROM missing_table` emits the no-such-table text.
-func TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToTableNotFound(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT COUNT(*) AS n FROM missing_table"
-	msg := &SubscribeSingleMsg{
-		RequestID:   440,
-		QueryID:     441,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want TagSubscriptionError", tag)
-	}
-	se := decoded.(SubscriptionError)
-	want := "no such table: `missing_table`. If the table exists, it may be marked private., executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q (aggregate path: table-not-found must precede table-type return guard)", se.Error, want)
-	}
-	requireNoSubscribeRegistration(t, executor)
-}
-
-// TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToWhereResolution
-// pins the aggregate-path WHERE-precedes-return-guard ordering.
-func TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToWhereResolution(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-
-	const sqlText = "SELECT COUNT(*) AS n FROM t WHERE missing = 1"
-	msg := &SubscribeSingleMsg{
-		RequestID:   442,
-		QueryID:     443,
-		QueryString: sqlText,
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want TagSubscriptionError", tag)
-	}
-	se := decoded.(SubscriptionError)
-	want := "`missing` is not in scope, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q (aggregate path: WHERE resolution must precede table-type return guard)", se.Error, want)
 	}
 	requireNoSubscribeRegistration(t, executor)
 }

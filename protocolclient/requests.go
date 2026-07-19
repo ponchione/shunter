@@ -35,78 +35,49 @@ type ProcedureCallRequest struct {
 
 // DialAndCallReducer connects, calls one reducer, and closes the connection.
 func DialAndCallReducer(ctx context.Context, opts Options, request ReducerCallRequest) (protocol.IdentityToken, protocol.TransactionUpdate, error) {
-	client, identity, err := Dial(ctx, opts)
-	if err != nil {
-		return protocol.IdentityToken{}, protocol.TransactionUpdate{}, err
-	}
-
-	update, callErr := client.CallReducer(ctx, request.Name, request.Arguments)
-	runDialAndBeforeCloseHook()
-	closeErr := client.Close(ctx)
-	if callErr != nil {
-		return identity, update, callErr
-	}
-	if closeErr != nil {
-		return identity, update, closeErr
-	}
-	return identity, update, nil
+	return dialAndRun(ctx, opts, func(client *Client) (protocol.TransactionUpdate, error) {
+		return client.CallReducer(ctx, request.Name, request.Arguments)
+	})
 }
 
 // DialAndExecuteDeclaredQuery connects, executes one declared query, and closes the connection.
 func DialAndExecuteDeclaredQuery(ctx context.Context, opts Options, request DeclaredQueryRequest) (protocol.IdentityToken, protocol.OneOffQueryResponse, error) {
-	client, identity, err := Dial(ctx, opts)
-	if err != nil {
-		return protocol.IdentityToken{}, protocol.OneOffQueryResponse{}, err
-	}
-
-	response, execErr := client.ExecuteDeclaredQuery(ctx, request)
-	runDialAndBeforeCloseHook()
-	closeErr := client.Close(ctx)
-	if execErr != nil {
-		return identity, response, execErr
-	}
-	if closeErr != nil {
-		return identity, response, closeErr
-	}
-	return identity, response, nil
+	return dialAndRun(ctx, opts, func(client *Client) (protocol.OneOffQueryResponse, error) {
+		return client.ExecuteDeclaredQuery(ctx, request)
+	})
 }
 
 // DialAndExecuteSQLQuery connects, executes one raw SQL read, and closes the connection.
 func DialAndExecuteSQLQuery(ctx context.Context, opts Options, request SQLQueryRequest) (protocol.IdentityToken, protocol.OneOffQueryResponse, error) {
-	client, identity, err := Dial(ctx, opts)
-	if err != nil {
-		return protocol.IdentityToken{}, protocol.OneOffQueryResponse{}, err
-	}
-
-	response, execErr := client.SQLQuery(ctx, request.QueryString)
-	runDialAndBeforeCloseHook()
-	closeErr := client.Close(ctx)
-	if execErr != nil {
-		return identity, response, execErr
-	}
-	if closeErr != nil {
-		return identity, response, closeErr
-	}
-	return identity, response, nil
+	return dialAndRun(ctx, opts, func(client *Client) (protocol.OneOffQueryResponse, error) {
+		return client.SQLQuery(ctx, request.QueryString)
+	})
 }
 
 // DialAndCallProcedure connects, calls one procedure, and closes the connection.
 func DialAndCallProcedure(ctx context.Context, opts Options, request ProcedureCallRequest) (protocol.IdentityToken, protocol.ProcedureResponse, error) {
+	return dialAndRun(ctx, opts, func(client *Client) (protocol.ProcedureResponse, error) {
+		return client.CallProcedure(ctx, request.Name, request.Arguments)
+	})
+}
+
+func dialAndRun[T any](ctx context.Context, opts Options, run func(*Client) (T, error)) (protocol.IdentityToken, T, error) {
 	client, identity, err := Dial(ctx, opts)
 	if err != nil {
-		return protocol.IdentityToken{}, protocol.ProcedureResponse{}, err
+		var zero T
+		return protocol.IdentityToken{}, zero, err
 	}
 
-	response, callErr := client.CallProcedure(ctx, request.Name, request.Arguments)
+	result, runErr := run(client)
 	runDialAndBeforeCloseHook()
 	closeErr := client.Close(ctx)
-	if callErr != nil {
-		return identity, response, callErr
+	if runErr != nil {
+		return identity, result, runErr
 	}
 	if closeErr != nil {
-		return identity, response, closeErr
+		return identity, result, closeErr
 	}
-	return identity, response, nil
+	return identity, result, nil
 }
 
 // dialAndBeforeCloseHook is test-only instrumentation for contexts that expire

@@ -228,73 +228,47 @@ func FindQuery(contract shunter.ModuleContract, name string) (shunter.QueryDescr
 // ReducerArgumentSchema returns the exported argument schema for reducer name.
 func ReducerArgumentSchema(contract shunter.ModuleContract, name string) (schema.ProductSchemaExport, error) {
 	reducer, ok := FindReducer(contract, name)
-	if !ok {
-		return schema.ProductSchemaExport{}, fmt.Errorf("%w: reducer %q", ErrSurfaceNotFound, strings.TrimSpace(name))
-	}
-	if reducer.Args == nil {
-		return schema.ProductSchemaExport{}, fmt.Errorf("%w: reducer %q", ErrArgumentSchemaMissing, reducer.Name)
-	}
-	return *reducer.Args, nil
+	return selectSurfaceSchema("reducer", name, reducer.Name, ok, reducer.Args, ErrArgumentSchemaMissing)
 }
 
 // ProcedureArgumentSchema returns the exported argument schema for procedure name.
 func ProcedureArgumentSchema(contract shunter.ModuleContract, name string) (schema.ProductSchemaExport, error) {
 	procedure, ok := FindProcedure(contract, name)
-	if !ok {
-		return schema.ProductSchemaExport{}, fmt.Errorf("%w: procedure %q", ErrSurfaceNotFound, strings.TrimSpace(name))
-	}
-	if procedure.Args == nil {
-		return schema.ProductSchemaExport{}, fmt.Errorf("%w: procedure %q", ErrArgumentSchemaMissing, procedure.Name)
-	}
-	return *procedure.Args, nil
+	return selectSurfaceSchema("procedure", name, procedure.Name, ok, procedure.Args, ErrArgumentSchemaMissing)
 }
 
 // ProcedureResultSchema returns the exported result schema for procedure name.
 func ProcedureResultSchema(contract shunter.ModuleContract, name string) (schema.ProductSchemaExport, error) {
 	procedure, ok := FindProcedure(contract, name)
-	if !ok {
-		return schema.ProductSchemaExport{}, fmt.Errorf("%w: procedure %q", ErrSurfaceNotFound, strings.TrimSpace(name))
-	}
-	if procedure.Result == nil {
-		return schema.ProductSchemaExport{}, fmt.Errorf("%w: procedure %q", ErrResultSchemaMissing, procedure.Name)
-	}
-	return *procedure.Result, nil
+	return selectSurfaceSchema("procedure", name, procedure.Name, ok, procedure.Result, ErrResultSchemaMissing)
 }
 
 // ReducerResultSchema returns the exported result schema for reducer name.
 func ReducerResultSchema(contract shunter.ModuleContract, name string) (schema.ProductSchemaExport, error) {
 	reducer, ok := FindReducer(contract, name)
-	if !ok {
-		return schema.ProductSchemaExport{}, fmt.Errorf("%w: reducer %q", ErrSurfaceNotFound, strings.TrimSpace(name))
-	}
-	if reducer.Result == nil {
-		return schema.ProductSchemaExport{}, fmt.Errorf("%w: reducer %q", ErrResultSchemaMissing, reducer.Name)
-	}
-	return *reducer.Result, nil
+	return selectSurfaceSchema("reducer", name, reducer.Name, ok, reducer.Result, ErrResultSchemaMissing)
 }
 
 // QueryArgumentSchema returns the exported parameter schema for declared query name.
 func QueryArgumentSchema(contract shunter.ModuleContract, name string) (schema.ProductSchemaExport, error) {
 	query, ok := FindQuery(contract, name)
-	if !ok {
-		return schema.ProductSchemaExport{}, fmt.Errorf("%w: query %q", ErrSurfaceNotFound, strings.TrimSpace(name))
-	}
-	if query.Parameters == nil {
-		return schema.ProductSchemaExport{}, fmt.Errorf("%w: query %q", ErrArgumentSchemaMissing, query.Name)
-	}
-	return *query.Parameters, nil
+	return selectSurfaceSchema("query", name, query.Name, ok, query.Parameters, ErrArgumentSchemaMissing)
 }
 
 // QueryRowSchema returns the exported result row schema for declared query name.
 func QueryRowSchema(contract shunter.ModuleContract, name string) (schema.ProductSchemaExport, error) {
 	query, ok := FindQuery(contract, name)
-	if !ok {
-		return schema.ProductSchemaExport{}, fmt.Errorf("%w: query %q", ErrSurfaceNotFound, strings.TrimSpace(name))
+	return selectSurfaceSchema("query", name, query.Name, ok, query.RowSchema, ErrResultSchemaMissing)
+}
+
+func selectSurfaceSchema(kind, lookupName, canonicalName string, found bool, selected *schema.ProductSchemaExport, missingErr error) (schema.ProductSchemaExport, error) {
+	if !found {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: %s %q", ErrSurfaceNotFound, kind, strings.TrimSpace(lookupName))
 	}
-	if query.RowSchema == nil {
-		return schema.ProductSchemaExport{}, fmt.Errorf("%w: query %q", ErrResultSchemaMissing, query.Name)
+	if selected == nil {
+		return schema.ProductSchemaExport{}, fmt.Errorf("%w: %s %q", missingErr, kind, canonicalName)
 	}
-	return *query.RowSchema, nil
+	return *selected, nil
 }
 
 // FormatDiff renders a contract diff report in text or JSON form.

@@ -4720,49 +4720,205 @@ func TestHandleOneOffQuery_SenderParameterInJoinFilter(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_StringLiteralOnIntegerColumnRejected pins the
-// reference type-check rejection at reference tree crates/expr/src/
-// check.rs lines 498-501 (`select * from t where u32 = 'str'` /
-// "Field u32 is not a string") onto the OneOffQuery admission surface. The
-// rejection fires while coercing the parsed SQL literal against the resolved
-// column type, so the one-off reply must arrive with Status=1 and a non-empty
-// Error.
-func TestHandleOneOffQuery_StringLiteralOnIntegerColumnRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x80},
-		QueryString: "SELECT * FROM t WHERE u32 = 'str'",
+// TestHandleOneOffQuery_SQLAdmissionRejections pins single-table SQL
+// shapes that must return a one-off error before producing rows.
+func TestHandleOneOffQuery_SQLAdmissionRejections(t *testing.T) {
+	cases := []struct {
+		name      string
+		column    schema.ColumnSchema
+		rowValue  types.Value
+		messageID []byte
+		sql       string
+	}{
+		// TestHandleOneOffQuery_StringLiteralOnIntegerColumnRejected pins the
+		// reference type-check rejection at reference tree crates/expr/src/
+		// check.rs lines 498-501 (`select * from t where u32 = 'str'` /
+		// "Field u32 is not a string") onto the OneOffQuery admission surface. The
+		// rejection fires while coercing the parsed SQL literal against the resolved
+		// column type, so the one-off reply must arrive with Status=1 and a non-empty
+		// Error.
+		{name: "TestHandleOneOffQuery_StringLiteralOnIntegerColumnRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0x80}, sql: "SELECT * FROM t WHERE u32 = 'str'"},
+		// TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected pins the
+		// reference type-check rejection at reference tree crates/expr/src/
+		// check.rs lines 502-504 (`select * from t where t.u32 = 1.3` /
+		// "Field u32 is not a float") onto the OneOffQuery admission surface. Float
+		// literals parse to LitFloat end-to-end (2026-04-21 follow-through), so the
+		// rejection must surface at the coerce boundary rather than at the parser.
+		{name: "TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0x81}, sql: "SELECT * FROM t WHERE t.u32 = 1.3"},
+		// TestHandleOneOffQuery_ShunterUnknownColumnRejected pins the reference type-
+		// check rejection at reference tree crates/expr/src/check.rs lines
+		// 491-493 (`select * from t where t.a = 1` / "Field a does not exist on
+		// table t") onto the OneOff admission surface. Enforced incidentally via
+		// rel.ts.Column returning !ok inside normalizeSQLFilterForRelations.
+		{name: "TestHandleOneOffQuery_ShunterUnknownColumnRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0x83}, sql: "SELECT * FROM t WHERE t.a = 1"},
+		// TestHandleOneOffQuery_ShunterAliasedUnknownColumnRejected pins the
+		// reference type-check rejection at reference tree crates/expr/src/
+		// check.rs lines 495-497 (`select * from t as r where r.a = 1` / "Field a
+		// does not exist on table t") onto the OneOff admission surface. The
+		// aliased single-table shape resolves `r` to base table `t` in the parser's
+		// relationBindings; normalizeSQLFilterForRelations then fails the
+		// rel.ts.Column lookup. Keeps the rejection named on the alias-qualified
+		// surface.
+		{name: "TestHandleOneOffQuery_ShunterAliasedUnknownColumnRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0x84}, sql: "SELECT * FROM t AS r WHERE r.a = 1"},
+		// TestHandleOneOffQuery_ShunterForwardAliasReferenceRejected pins the reference
+		// type-check rejection at reference tree crates/expr/src/check.rs lines
+		// 526-528 (`select t.* from t join s on t.u32 = r.u32 join s as r` / "Alias
+		// r is not in scope when it is referenced") onto the OneOff admission surface.
+		// Enforced incidentally in parseQualifiedColumnRef when the forward alias
+		// reference fails resolveQualifier against the first join's lookup.
+		{name: "TestHandleOneOffQuery_ShunterForwardAliasReferenceRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0x89}, sql: "SELECT t.* FROM t JOIN s ON t.u32 = r.u32 JOIN s AS r"},
+		// TestHandleOneOffQuery_ShunterInvalidLiteralFloatOnUnsignedRejected pins
+		// reference tree crates/expr/src/check.rs:390-393 (`select * from t
+		// where u8 = 0.1` / "Float as integer") onto the OneOffQuery admission
+		// surface. Complements the existing u32 = 1.3 pin by naming the u8 column
+		// variant; coerceUnsigned rejects LitFloat against an integer column.
+		{name: "TestHandleOneOffQuery_ShunterInvalidLiteralFloatOnUnsignedRejected", column: schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8}, rowValue: types.NewUint8(1), messageID: []byte{0x93}, sql: "SELECT * FROM t WHERE u8 = 0.1"},
+		// TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected
+		// pins reference tree crates/expr/src/check.rs:394-397 (`select * from
+		// t where u32 = 1e-3` / "Float as integer") onto the OneOffQuery admission
+		// surface. `1e-3` stays LitFloat (non-integral) and coerceUnsigned rejects
+		// it against an unsigned column.
+		{name: "TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0x94}, sql: "SELECT * FROM t WHERE u32 = 1e-3"},
+		// TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnSignedRejected
+		// pins reference tree crates/expr/src/check.rs:398-401 (`select * from
+		// t where i32 = 1e-3` / "Float as integer") onto the OneOffQuery admission
+		// surface. Mirrors the unsigned case on a signed column: coerceSigned rejects
+		// the LitFloat against KindInt32.
+		{name: "TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnSignedRejected", column: schema.ColumnSchema{Index: 0, Name: "i32", Type: schema.KindInt32}, rowValue: types.NewInt32(1), messageID: []byte{0x95}, sql: "SELECT * FROM t WHERE i32 = 1e-3"},
+		// TestHandleOneOffQuery_ShunterEmptyStatementRejected pins the reference
+		// subscription-parser rejection at
+		// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
+		// (empty string / "Empty") onto the OneOff admission surface. Enforced
+		// incidentally at expectKeyword("SELECT") on an EOF-only token stream.
+		{name: "TestHandleOneOffQuery_ShunterEmptyStatementRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xB1}, sql: ""},
+		// TestHandleOneOffQuery_ShunterWhitespaceOnlyStatementRejected pins the
+		// reference subscription-parser rejection at
+		// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
+		// (single space / "Empty after whitespace skip") onto the OneOff admission
+		// surface. Enforced incidentally once the tokenizer drops whitespace.
+		{name: "TestHandleOneOffQuery_ShunterWhitespaceOnlyStatementRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xB2}, sql: "   "},
+		// TestHandleOneOffQuery_ShunterSubqueryInFromRejected pins the reference
+		// subscription-parser rejection at
+		// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
+		// (`select * from (select * from t) join (select * from s) on a = b` /
+		// "Subqueries in FROM not supported") onto the OneOff admission surface.
+		// Enforced incidentally at parseStatement which requires an identifier token
+		// after FROM.
+		{name: "TestHandleOneOffQuery_ShunterSubqueryInFromRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xB4}, sql: "SELECT * FROM (SELECT * FROM t) JOIN (SELECT * FROM s) ON a = b"},
+		// TestHandleOneOffQuery_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected
+		// pins the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select 1` / "FROM is required") onto the OneOff admission surface.
+		// parseProjection rejects the integer literal `1` with "projection must be
+		// '*' or 'table.*'".
+		{name: "TestHandleOneOffQuery_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xB5}, sql: "SELECT 1"},
+		// TestHandleOneOffQuery_ShunterSqlUnsupportedMultiPartTableNameRejected pins
+		// the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select a from s.t` / "Multi-part table names") onto the OneOff admission
+		// surface. parseProjection rejects the bare identifier `a` before FROM is
+		// parsed, so rejection fires with "projection must be '*' or 'table.*'".
+		{name: "TestHandleOneOffQuery_ShunterSqlUnsupportedMultiPartTableNameRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xB6}, sql: "SELECT a FROM s.t"},
+		// TestHandleOneOffQuery_ShunterSqlUnsupportedBitStringLiteralRejected pins
+		// the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select * from t where a = B'1010'` / "Bit-string literals") onto the
+		// OneOff admission surface. The lexer tokenizes `B` as an identifier and
+		// `'1010'` as a separate string literal; parseLiteral rejects the identifier
+		// RHS of `=` with "expected literal, got identifier \"B\"".
+		{name: "TestHandleOneOffQuery_ShunterSqlUnsupportedBitStringLiteralRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xB7}, sql: "SELECT * FROM t WHERE u32 = B'1010'"},
+		// TestHandleOneOffQuery_ShunterSqlUnsupportedWildcardWithBareColumnsRejected
+		// pins the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select a.*, b, c from t` / "Wildcard with non-wildcard projections") onto
+		// the OneOff admission surface. After parseProjection consumes `t.*`,
+		// parseStatement expects FROM but finds `,` and rejects with
+		// "expected FROM, got \",\"".
+		{name: "TestHandleOneOffQuery_ShunterSqlUnsupportedWildcardWithBareColumnsRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xB8}, sql: "SELECT t.*, b, c FROM t"},
+		// TestHandleOneOffQuery_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected
+		// pins the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select * from t order by a limit b` / "Limit expression") onto the OneOff
+		// admission surface. ORDER BY trips parseStatement's EOF guard
+		// (query/sql/parser.go:547-549) with "unexpected token \"ORDER\"" before the
+		// LIMIT identifier is examined.
+		{name: "TestHandleOneOffQuery_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xB9}, sql: "SELECT * FROM t ORDER BY u32 LIMIT u32"},
+		// TestHandleOneOffQuery_ShunterSqlUnsupportedAggregateWithGroupByRejected pins
+		// the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select a, count(*) from t group by a` / "GROUP BY") onto the OneOff
+		// admission surface. parseProjection rejects the leading bare column with
+		// "projection must be '*' or 'table.*'" before the aggregate or GROUP BY
+		// keyword is ever seen.
+		{name: "TestHandleOneOffQuery_ShunterSqlUnsupportedAggregateWithGroupByRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xBA}, sql: "SELECT u32, COUNT(*) FROM t GROUP BY u32"},
+		// TestHandleOneOffQuery_ShunterSqlUnsupportedImplicitCommaJoinRejected pins the
+		// reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select a.* from t as a, s as b where a.id = b.id and b.c = 1` /
+		// "Implicit joins") onto the OneOff admission surface. After consuming
+		// `t AS a`, parseStatement's EOF/keyword guard hits `,` and rejects with
+		// "unexpected token \",\"".
+		{name: "TestHandleOneOffQuery_ShunterSqlUnsupportedImplicitCommaJoinRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xBB}, sql: "SELECT a.* FROM t AS a, s AS b WHERE a.u32 = b.u32"},
+		// TestHandleOneOffQuery_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected pins
+		// the reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
+		// (`select t.* from t join s on int = u32` / "Joins require qualified vars")
+		// onto the OneOff admission surface. parseJoinClause calls
+		// parseQualifiedColumnRef for the left side of ON
+		// (query/sql/parser.go:629); the bare identifier `int` fails there with
+		// "expected qualified column reference".
+		{name: "TestHandleOneOffQuery_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xBC}, sql: "SELECT t.* FROM t JOIN s ON int = u32"},
+		// TestHandleOneOffQuery_ShunterSqlInvalidEmptySelectRejected pins the
+		// reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
+		// (`select from t` / "Empty SELECT") onto the OneOff admission surface.
+		// parseProjection rejects because the next token after SELECT is the
+		// identifier `from`, which is then followed by `t` (not a dot), so the
+		// projection fails with "projection must be '*' or 'table.*'".
+		{name: "TestHandleOneOffQuery_ShunterSqlInvalidEmptySelectRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xBD}, sql: "SELECT FROM t"},
+		// TestHandleOneOffQuery_ShunterSqlInvalidEmptyFromRejected pins the reference
+		// parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
+		// (`select a from where b = 1` / "Empty FROM") onto the OneOff admission
+		// surface. parseProjection rejects the bare column `a` with "projection must
+		// be '*' or 'table.*'" before the empty FROM is examined.
+		{name: "TestHandleOneOffQuery_ShunterSqlInvalidEmptyFromRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xBE}, sql: "SELECT a FROM WHERE b = 1"},
+		// TestHandleOneOffQuery_ShunterSqlInvalidEmptyWhereRejected pins the reference
+		// parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
+		// (`select a from t where` / "Empty WHERE") onto the OneOff admission
+		// surface. parseProjection rejects the bare column `a` with "projection must
+		// be '*' or 'table.*'" before the empty WHERE is examined.
+		{name: "TestHandleOneOffQuery_ShunterSqlInvalidEmptyWhereRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xBF}, sql: "SELECT a FROM t WHERE"},
+		// TestHandleOneOffQuery_ShunterSqlInvalidEmptyGroupByRejected pins the
+		// reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
+		// (`select a, count(*) from t group by` / "Empty GROUP BY") onto the OneOff
+		// admission surface. parseProjection rejects the leading bare column `a` with
+		// "projection must be '*' or 'table.*'" before the aggregate or empty GROUP
+		// BY is examined.
+		{name: "TestHandleOneOffQuery_ShunterSqlInvalidEmptyGroupByRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xC0}, sql: "SELECT a, COUNT(*) FROM t GROUP BY"},
+		// TestHandleOneOffQuery_ShunterSqlInvalidAggregateWithoutAliasRejected pins the
+		// reference parse_sql rejection at
+		// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
+		// (`select count(*) from t` / "Aggregate without alias") onto the OneOff
+		// admission surface. parseProjection reads `count` as an identifier
+		// qualifier, then finds `(` where it expects a dot, rejecting with
+		// "projection must be '*' or 'table.*'".
+		{name: "TestHandleOneOffQuery_ShunterSqlInvalidAggregateWithoutAliasRejected", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xC1}, sql: "SELECT COUNT(*) FROM t"},
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-	requireAnyOneOffError(t, conn)
-}
 
-// TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected pins the
-// reference type-check rejection at reference tree crates/expr/src/
-// check.rs lines 502-504 (`select * from t where t.u32 = 1.3` /
-// "Field u32 is not a float") onto the OneOffQuery admission surface. Float
-// literals parse to LitFloat end-to-end (2026-04-21 follow-through), so the
-// rejection must surface at the coerce boundary rather than at the parser.
-func TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x81},
-		QueryString: "SELECT * FROM t WHERE t.u32 = 1.3",
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			sl := newMockSchema("t", 1, tc.column)
+			snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{tc.rowValue}}}}
+			stateAccess := &mockStateAccess{snap: snap}
+			msg := &OneOffQueryMsg{MessageID: tc.messageID, QueryString: tc.sql}
+			handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+			requireAnyOneOffError(t, conn)
+		})
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-	requireAnyOneOffError(t, conn)
 }
 
 // TestHandleOneOffQuery_ShunterStringDigitsOnIntegerColumnWidens pins the
@@ -4993,51 +5149,6 @@ func TestHandleOneOffQuery_UnknownColumn(t *testing.T) {
 	if !bytes.Equal(result.MessageID, msg.MessageID) {
 		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
 	}
-}
-
-// TestHandleOneOffQuery_ShunterUnknownColumnRejected pins the reference type-
-// check rejection at reference tree crates/expr/src/check.rs lines
-// 491-493 (`select * from t where t.a = 1` / "Field a does not exist on
-// table t") onto the OneOff admission surface. Enforced incidentally via
-// rel.ts.Column returning !ok inside normalizeSQLFilterForRelations.
-func TestHandleOneOffQuery_ShunterUnknownColumnRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x83},
-		QueryString: "SELECT * FROM t WHERE t.a = 1",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterAliasedUnknownColumnRejected pins the
-// reference type-check rejection at reference tree crates/expr/src/
-// check.rs lines 495-497 (`select * from t as r where r.a = 1` / "Field a
-// does not exist on table t") onto the OneOff admission surface. The
-// aliased single-table shape resolves `r` to base table `t` in the parser's
-// relationBindings; normalizeSQLFilterForRelations then fails the
-// rel.ts.Column lookup. Keeps the rejection named on the alias-qualified
-// surface.
-func TestHandleOneOffQuery_ShunterAliasedUnknownColumnRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x84},
-		QueryString: "SELECT * FROM t AS r WHERE r.a = 1",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-	requireAnyOneOffError(t, conn)
 }
 
 // TestHandleOneOffQuery_ShunterBareColumnProjectionReturnsProjectedRows pins the
@@ -5609,29 +5720,6 @@ func TestHandleOneOffQuery_ShunterJoinStarProjectionRejectText(t *testing.T) {
 	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "SELECT * is not supported for joins")
 }
 
-// TestHandleOneOffQuery_ShunterForwardAliasReferenceRejected pins the reference
-// type-check rejection at reference tree crates/expr/src/check.rs lines
-// 526-528 (`select t.* from t join s on t.u32 = r.u32 join s as r` / "Alias
-// r is not in scope when it is referenced") onto the OneOff admission surface.
-// Enforced incidentally in parseQualifiedColumnRef when the forward alias
-// reference fails resolveQualifier against the first join's lookup.
-func TestHandleOneOffQuery_ShunterForwardAliasReferenceRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x89},
-		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = r.u32 JOIN s AS r",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
 // TestHandleOneOffQuery_ShunterLimitClauseAppliesToVisibleRows pins the
 // query-only LIMIT slice from the reference SQL grammar onto Shunter's one-off
 // handler: after the existing row-shaped evaluation path produces matches, the
@@ -5884,72 +5972,6 @@ func TestHandleOneOffQuery_ShunterScientificNotationOverflowInfinity(t *testing.
 	}
 }
 
-// TestHandleOneOffQuery_ShunterInvalidLiteralFloatOnUnsignedRejected pins
-// reference tree crates/expr/src/check.rs:390-393 (`select * from t
-// where u8 = 0.1` / "Float as integer") onto the OneOffQuery admission
-// surface. Complements the existing u32 = 1.3 pin by naming the u8 column
-// variant; coerceUnsigned rejects LitFloat against an integer column.
-func TestHandleOneOffQuery_ShunterInvalidLiteralFloatOnUnsignedRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint8(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x93},
-		QueryString: "SELECT * FROM t WHERE u8 = 0.1",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected
-// pins reference tree crates/expr/src/check.rs:394-397 (`select * from
-// t where u32 = 1e-3` / "Float as integer") onto the OneOffQuery admission
-// surface. `1e-3` stays LitFloat (non-integral) and coerceUnsigned rejects
-// it against an unsigned column.
-func TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x94},
-		QueryString: "SELECT * FROM t WHERE u32 = 1e-3",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnSignedRejected
-// pins reference tree crates/expr/src/check.rs:398-401 (`select * from
-// t where i32 = 1e-3` / "Float as integer") onto the OneOffQuery admission
-// surface. Mirrors the unsigned case on a signed column: coerceSigned rejects
-// the LitFloat against KindInt32.
-func TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnSignedRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "i32", Type: schema.KindInt32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewInt32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x95},
-		QueryString: "SELECT * FROM t WHERE i32 = 1e-3",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
 // TestHandleOneOffQuery_ShunterValidLiteralOnEachIntegerWidth pins
 // reference tree crates/expr/src/check.rs:360-370
 // (`valid_literals_for_type`) at the OneOffQuery admission surface. Each
@@ -6200,402 +6222,29 @@ func TestHandleOneOffQuery_ShunterDMLStatementRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ShunterEmptyStatementRejected pins the reference
-// subscription-parser rejection at
-// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
-// (empty string / "Empty") onto the OneOff admission surface. Enforced
-// incidentally at expectKeyword("SELECT") on an EOF-only token stream.
-func TestHandleOneOffQuery_ShunterEmptyStatementRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xB1},
-		QueryString: "",
+// TestHandleOneOffQuery_ShunterSetQuantifierRejected pins the reference
+// SqlUnsupported diagnostic for DISTINCT and ALL set quantifiers.
+func TestHandleOneOffQuery_ShunterSetQuantifierRejected(t *testing.T) {
+	cases := []struct {
+		name, column, sql string
+		rowValue          types.Value
+		messageID         byte
+	}{
+		{name: "TestHandleOneOffQuery_ShunterDistinctProjectionRejected", column: "u32", sql: "SELECT DISTINCT u32 FROM t", rowValue: types.NewUint32(1), messageID: 0xB3},
+		// A column named ALL confirms the parser treats ALL as a modifier.
+		{name: "TestHandleOneOffQuery_ShunterAllModifierRejected", column: "ALL", sql: "SELECT ALL u32 FROM t", rowValue: types.NewUint32(7), messageID: 0xEE},
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterWhitespaceOnlyStatementRejected pins the
-// reference subscription-parser rejection at
-// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
-// (single space / "Empty after whitespace skip") onto the OneOff admission
-// surface. Enforced incidentally once the tokenizer drops whitespace.
-func TestHandleOneOffQuery_ShunterWhitespaceOnlyStatementRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xB2},
-		QueryString: "   ",
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			sl := newMockSchema("t", 1, schema.ColumnSchema{Index: 0, Name: tc.column, Type: schema.KindUint32})
+			snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{tc.rowValue}}}}
+			stateAccess := &mockStateAccess{snap: snap}
+			msg := &OneOffQueryMsg{MessageID: []byte{tc.messageID}, QueryString: tc.sql}
+			requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Unsupported: "+tc.sql)
+		})
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterDistinctProjectionRejected pins the reference
-// SQL parser rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs:362-394 — the
-// `parse_select` arm requires `distinct: None`; any non-None set quantifier
-// falls into `_ => SqlUnsupported::feature(select)`, which the OneOff
-// surface renders as `Unsupported: {select}`.
-func TestHandleOneOffQuery_ShunterDistinctProjectionRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	const sqlText = "SELECT DISTINCT u32 FROM t"
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xB3},
-		QueryString: sqlText,
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Unsupported: "+sqlText)
-}
-
-// TestHandleOneOffQuery_ShunterAllModifierRejected pins the reference SQL
-// parser rejection at sql.rs:362-394 for `SELECT ALL ...`. The set
-// quantifier `ALL` produces a non-None `distinct` field which the
-// `parse_select` arm rejects through `SqlUnsupported::feature(select)`.
-// The test schema deliberately includes a column named `ALL` to confirm
-// the parser detects the modifier rather than reinterpreting the keyword
-// as a column reference with output alias `u32`.
-func TestHandleOneOffQuery_ShunterAllModifierRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "ALL", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(7)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	const sqlText = "SELECT ALL u32 FROM t"
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xEE},
-		QueryString: sqlText,
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Unsupported: "+sqlText)
-}
-
-// TestHandleOneOffQuery_ShunterSubqueryInFromRejected pins the reference
-// subscription-parser rejection at
-// reference tree crates/sql-parser/src/parser/sub.rs lines 157-168
-// (`select * from (select * from t) join (select * from s) on a = b` /
-// "Subqueries in FROM not supported") onto the OneOff admission surface.
-// Enforced incidentally at parseStatement which requires an identifier token
-// after FROM.
-func TestHandleOneOffQuery_ShunterSubqueryInFromRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xB4},
-		QueryString: "SELECT * FROM (SELECT * FROM t) JOIN (SELECT * FROM s) ON a = b",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected
-// pins the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select 1` / "FROM is required") onto the OneOff admission surface.
-// parseProjection rejects the integer literal `1` with "projection must be
-// '*' or 'table.*'".
-func TestHandleOneOffQuery_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xB5},
-		QueryString: "SELECT 1",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterSqlUnsupportedMultiPartTableNameRejected pins
-// the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select a from s.t` / "Multi-part table names") onto the OneOff admission
-// surface. parseProjection rejects the bare identifier `a` before FROM is
-// parsed, so rejection fires with "projection must be '*' or 'table.*'".
-func TestHandleOneOffQuery_ShunterSqlUnsupportedMultiPartTableNameRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xB6},
-		QueryString: "SELECT a FROM s.t",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterSqlUnsupportedBitStringLiteralRejected pins
-// the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select * from t where a = B'1010'` / "Bit-string literals") onto the
-// OneOff admission surface. The lexer tokenizes `B` as an identifier and
-// `'1010'` as a separate string literal; parseLiteral rejects the identifier
-// RHS of `=` with "expected literal, got identifier \"B\"".
-func TestHandleOneOffQuery_ShunterSqlUnsupportedBitStringLiteralRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xB7},
-		QueryString: "SELECT * FROM t WHERE u32 = B'1010'",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterSqlUnsupportedWildcardWithBareColumnsRejected
-// pins the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select a.*, b, c from t` / "Wildcard with non-wildcard projections") onto
-// the OneOff admission surface. After parseProjection consumes `t.*`,
-// parseStatement expects FROM but finds `,` and rejects with
-// "expected FROM, got \",\"".
-func TestHandleOneOffQuery_ShunterSqlUnsupportedWildcardWithBareColumnsRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xB8},
-		QueryString: "SELECT t.*, b, c FROM t",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected
-// pins the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select * from t order by a limit b` / "Limit expression") onto the OneOff
-// admission surface. ORDER BY trips parseStatement's EOF guard
-// (query/sql/parser.go:547-549) with "unexpected token \"ORDER\"" before the
-// LIMIT identifier is examined.
-func TestHandleOneOffQuery_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xB9},
-		QueryString: "SELECT * FROM t ORDER BY u32 LIMIT u32",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterSqlUnsupportedAggregateWithGroupByRejected pins
-// the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select a, count(*) from t group by a` / "GROUP BY") onto the OneOff
-// admission surface. parseProjection rejects the leading bare column with
-// "projection must be '*' or 'table.*'" before the aggregate or GROUP BY
-// keyword is ever seen.
-func TestHandleOneOffQuery_ShunterSqlUnsupportedAggregateWithGroupByRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xBA},
-		QueryString: "SELECT u32, COUNT(*) FROM t GROUP BY u32",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterSqlUnsupportedImplicitCommaJoinRejected pins the
-// reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select a.* from t as a, s as b where a.id = b.id and b.c = 1` /
-// "Implicit joins") onto the OneOff admission surface. After consuming
-// `t AS a`, parseStatement's EOF/keyword guard hits `,` and rejects with
-// "unexpected token \",\"".
-func TestHandleOneOffQuery_ShunterSqlUnsupportedImplicitCommaJoinRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xBB},
-		QueryString: "SELECT a.* FROM t AS a, s AS b WHERE a.u32 = b.u32",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected pins
-// the reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 411-436
-// (`select t.* from t join s on int = u32` / "Joins require qualified vars")
-// onto the OneOff admission surface. parseJoinClause calls
-// parseQualifiedColumnRef for the left side of ON
-// (query/sql/parser.go:629); the bare identifier `int` fails there with
-// "expected qualified column reference".
-func TestHandleOneOffQuery_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xBC},
-		QueryString: "SELECT t.* FROM t JOIN s ON int = u32",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterSqlInvalidEmptySelectRejected pins the
-// reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
-// (`select from t` / "Empty SELECT") onto the OneOff admission surface.
-// parseProjection rejects because the next token after SELECT is the
-// identifier `from`, which is then followed by `t` (not a dot), so the
-// projection fails with "projection must be '*' or 'table.*'".
-func TestHandleOneOffQuery_ShunterSqlInvalidEmptySelectRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xBD},
-		QueryString: "SELECT FROM t",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterSqlInvalidEmptyFromRejected pins the reference
-// parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
-// (`select a from where b = 1` / "Empty FROM") onto the OneOff admission
-// surface. parseProjection rejects the bare column `a` with "projection must
-// be '*' or 'table.*'" before the empty FROM is examined.
-func TestHandleOneOffQuery_ShunterSqlInvalidEmptyFromRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xBE},
-		QueryString: "SELECT a FROM WHERE b = 1",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterSqlInvalidEmptyWhereRejected pins the reference
-// parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
-// (`select a from t where` / "Empty WHERE") onto the OneOff admission
-// surface. parseProjection rejects the bare column `a` with "projection must
-// be '*' or 'table.*'" before the empty WHERE is examined.
-func TestHandleOneOffQuery_ShunterSqlInvalidEmptyWhereRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xBF},
-		QueryString: "SELECT a FROM t WHERE",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
-// TestHandleOneOffQuery_ShunterSqlInvalidEmptyGroupByRejected pins the
-// reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
-// (`select a, count(*) from t group by` / "Empty GROUP BY") onto the OneOff
-// admission surface. parseProjection rejects the leading bare column `a` with
-// "projection must be '*' or 'table.*'" before the aggregate or empty GROUP
-// BY is examined.
-func TestHandleOneOffQuery_ShunterSqlInvalidEmptyGroupByRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xC0},
-		QueryString: "SELECT a, COUNT(*) FROM t GROUP BY",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
 }
 
 func TestHandleOneOffQuery_ShunterCountAliasReturnsSingleAggregateRow(t *testing.T) {
@@ -7509,30 +7158,6 @@ func TestHandleOneOffQueryCrossJoinCountRejectsRowCountOverflow(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ShunterSqlInvalidAggregateWithoutAliasRejected pins the
-// reference parse_sql rejection at
-// reference tree crates/sql-parser/src/parser/sql.rs lines 457-476
-// (`select count(*) from t` / "Aggregate without alias") onto the OneOff
-// admission surface. parseProjection reads `count` as an identifier
-// qualifier, then finds `(` where it expects a dot, rejecting with
-// "projection must be '*' or 'table.*'".
-func TestHandleOneOffQuery_ShunterSqlInvalidAggregateWithoutAliasRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xC1},
-		QueryString: "SELECT COUNT(*) FROM t",
-	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	requireAnyOneOffError(t, conn)
-}
-
 // TestHandleOneOffQuery_ShunterArraySenderRejected pins reference
 // check.rs:487-489 (`select * from t where arr = :sender` / "The :sender
 // param is an identity") onto the OneOffQuery admission surface. With
@@ -7641,26 +7266,146 @@ func TestHandleOneOffQuery_ShunterLeftJoinKeywordRejected(t *testing.T) {
 	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Non-inner joins are not supported")
 }
 
-// TestHandleOneOffQuery_ShunterUnknownTableRejectText pins the reference
-// type-check rejection literal at
-// reference tree crates/expr/src/errors.rs:14
-// (`Unresolved::Table` = "no such table: `{0}`. If the table exists, it may
-// be marked private."). The OneOff admission surface
-// (module_host.rs:2252 `compile_subscription`, :2316 `format!("{err}")`)
-// emits the raw error text with no `DBError::WithSql` wrap.
-func TestHandleOneOffQuery_ShunterUnknownTableRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x90},
-		QueryString: "SELECT * FROM r",
+// TestHandleOneOffQuery_ExactSQLAdmissionErrors pins exact
+// single-table diagnostics returned by one-off SQL admission.
+func TestHandleOneOffQuery_ExactSQLAdmissionErrors(t *testing.T) {
+	cases := []struct {
+		name      string
+		table     string
+		column    schema.ColumnSchema
+		rowValue  types.Value
+		messageID []byte
+		sql       string
+		want      string
+	}{
+		// TestHandleOneOffQuery_ShunterUnknownTableRejectText pins the reference
+		// type-check rejection literal at
+		// reference tree crates/expr/src/errors.rs:14
+		// (`Unresolved::Table` = "no such table: `{0}`. If the table exists, it may
+		// be marked private."). The OneOff admission surface
+		// (module_host.rs:2252 `compile_subscription`, :2316 `format!("{err}")`)
+		// emits the raw error text with no `DBError::WithSql` wrap.
+		{name: "TestHandleOneOffQuery_ShunterUnknownTableRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0x90}, sql: "SELECT * FROM r", want: "no such table: `r`. If the table exists, it may be marked private."},
+		// TestHandleOneOffQuery_ShunterUnknownFieldRejectText pins the reference
+		// type-check rejection literal at
+		// reference tree crates/expr/src/errors.rs:11-13
+		// (`Unresolved::Var` = "`{0}` is not in scope"). Reference emit site
+		// `_type_expr` lib.rs:107: a missing column inside an existing relvar
+		// surfaces as `Unresolved::var(&field)`. OneOff admission emits the raw
+		// error text with no `DBError::WithSql` wrap.
+		{name: "TestHandleOneOffQuery_ShunterUnknownFieldRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0x91}, sql: "SELECT * FROM t WHERE t.missing_col = 1", want: "`missing_col` is not in scope"},
+		// TestHandleOneOffQuery_ShunterBoolLiteralOnIntegerColumnRejectText pins
+		// UnexpectedType text for Bool literals on integer columns.
+		{name: "TestHandleOneOffQuery_ShunterBoolLiteralOnIntegerColumnRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0x92}, sql: "SELECT * FROM t WHERE u32 = TRUE", want: "Unexpected type: (expected) Bool != U32 (inferred)"},
+		// TestHandleOneOffQuery_ShunterIntOverflowOnUint8RejectText pins
+		// InvalidLiteral text for integer overflow on narrow unsigned columns.
+		{name: "TestHandleOneOffQuery_ShunterIntOverflowOnUint8RejectText", column: schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8}, rowValue: types.NewUint8(1), messageID: []byte{0x93}, sql: "SELECT * FROM t WHERE u8 = 1000", want: "The literal expression `1000` cannot be parsed as type `U8`"},
+		// TestHandleOneOffQuery_ShunterNegativeIntOnUint8RejectText pins the same
+		// reference `InvalidLiteral` literal for the negative-on-unsigned case.
+		// Reference `parse_int` calls `BigDecimal::to_u8` which returns None for
+		// negative inputs; the outer anyhow error is folded into InvalidLiteral by
+		// the `.map_err` at lib.rs:99. Shunter emits via the negative branch of
+		// `coerceUnsigned` rather than a dedicated typecheck pass; the text must
+		// still remain the stable Shunter admission diagnostic.
+		{name: "TestHandleOneOffQuery_ShunterNegativeIntOnUint8RejectText", column: schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8}, rowValue: types.NewUint8(1), messageID: []byte{0x94}, sql: "SELECT * FROM t WHERE u8 = -1", want: "The literal expression `-1` cannot be parsed as type `U8`"},
+		// TestHandleOneOffQuery_ShunterIntOverflowOnInt8RejectText pins the signed
+		// variant of the same reference `InvalidLiteral` literal. Reference
+		// `parse_int` → `BigDecimal::to_i8` returns None for 200 (>127); the outer
+		// anyhow error is folded into InvalidLiteral by `.map_err` at lib.rs:99.
+		// Shunter emits via the range-check branch of `coerceSigned`; the text
+		// is part of Shunter's stable admission diagnostic.
+		{name: "TestHandleOneOffQuery_ShunterIntOverflowOnInt8RejectText", column: schema.ColumnSchema{Index: 0, Name: "i8", Type: schema.KindInt8}, rowValue: types.NewInt8(1), messageID: []byte{0x95}, sql: "SELECT * FROM t WHERE i8 = 200", want: "The literal expression `200` cannot be parsed as type `I8`"},
+		// TestHandleOneOffQuery_ShunterNegativeIntOnUint128RejectText pins the
+		// reference `InvalidLiteral` literal for the LitInt-negative branch against
+		// a 128-bit unsigned column (coerce.go:133 in the Uint128 case arm). The
+		// reference path `parse_int` + `BigDecimal::to_u128` returns None for
+		// negative inputs; the outer `.map_err` folds the anyhow into
+		// InvalidLiteral. Scope: LitInt branch — the LitBigInt branch is covered
+		// by the BigInt cases below.
+		{name: "TestHandleOneOffQuery_ShunterNegativeIntOnUint128RejectText", column: schema.ColumnSchema{Index: 0, Name: "u128", Type: schema.KindUint128}, rowValue: types.NewUint128(0, 1), messageID: []byte{0x96}, sql: "SELECT * FROM t WHERE u128 = -1", want: "The literal expression `-1` cannot be parsed as type `U128`"},
+		// TestHandleOneOffQuery_ShunterNegativeIntOnUint256RejectText pins the
+		// reference `InvalidLiteral` literal for the LitInt-negative branch
+		// against a 256-bit unsigned column (coerce.go:154 in the Uint256 arm).
+		{name: "TestHandleOneOffQuery_ShunterNegativeIntOnUint256RejectText", column: schema.ColumnSchema{Index: 0, Name: "u256", Type: schema.KindUint256}, rowValue: types.NewUint256(0, 0, 0, 1), messageID: []byte{0x99}, sql: "SELECT * FROM t WHERE u256 = -1", want: "The literal expression `-1` cannot be parsed as type `U256`"},
+		// TestHandleOneOffQuery_ShunterFloatLiteralOnUint32RejectText pins
+		// InvalidLiteral text for float literals on integer columns.
+		{name: "TestHandleOneOffQuery_ShunterFloatLiteralOnUint32RejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0x9a}, sql: "SELECT * FROM t WHERE u32 = 1.3", want: "The literal expression `1.3` cannot be parsed as type `U32`"},
+		// TestHandleOneOffQuery_ShunterDuplicateImplicitProjectionRejectText pins
+		// the same `DuplicateName` literal for a SELECT list with no explicit
+		// aliases — the effective output name falls back to the column name, so
+		// `SELECT u32, u32 FROM t` collides on `u32`. Reference reads each
+		// element's effective name from `ProjectElem(_, SqlIdent(alias))` where
+		// `alias` is the column name when no `AS` was written.
+		{name: "TestHandleOneOffQuery_ShunterDuplicateImplicitProjectionRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xE1}, sql: "SELECT u32, u32 FROM t", want: "Duplicate name `u32`"},
+		// TestHandleOneOffQuery_ShunterUnresolvedVarUnqualifiedWhereRejectText pins
+		// the reference `Unresolved::Var` literal (errors.rs:11-13) for an
+		// unqualified single-table WHERE column that does not exist on the
+		// resolved relvar. Reference path: `_type_expr` (lib.rs:107) maps the
+		// missing-field branch through `Unresolved::var(&field)`. The text
+		// carries only the field name — the table name does not appear.
+		{name: "TestHandleOneOffQuery_ShunterUnresolvedVarUnqualifiedWhereRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xE6}, sql: "SELECT * FROM t WHERE missing = 1", want: "`missing` is not in scope"},
+		// TestHandleOneOffQuery_ShunterUnresolvedVarProjectionColumnRejectText pins
+		// the reference `Unresolved::Var` literal for an unknown projection
+		// column. Reference path: `type_proj::Exprs` (check.rs:74) routes each
+		// projection element through `type_expr`, whose missing-field branch at
+		// lib.rs:107 emits `Unresolved::var(&field)`. OneOff-only: SubscribeSingle
+		// rejects column-list projections earlier with `Unsupported::ReturnType`.
+		{name: "TestHandleOneOffQuery_ShunterUnresolvedVarProjectionColumnRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xE7}, sql: "SELECT missing FROM t", want: "`missing` is not in scope"},
+		// TestHandleOneOffQuery_ShunterUnresolvedVarBaseTableAfterAliasRejectText pins
+		// the reference `Unresolved::Var` literal for a WHERE column qualified
+		// by the base table name AFTER an `AS` alias has been declared on the
+		// FROM relvar. Reference `_type_expr` (lib.rs:103) emits
+		// `Unresolved::var(&table)` when `vars.deref().get(&*table)` returns
+		// None — the base name `t` is no longer in scope once `AS r` rebinds
+		// the relvar to `r`. The text carries the qualifier name (the table /
+		// alias identifier), not the column.
+		{name: "TestHandleOneOffQuery_ShunterUnresolvedVarBaseTableAfterAliasRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xEA}, sql: "SELECT * FROM t AS r WHERE t.u32 = 5", want: "`t` is not in scope"},
+		// TestHandleOneOffQuery_ShunterUnresolvedVarWherePrecedesProjectionRejectText
+		// pins the reference type-checker order: `type_select` (WHERE) runs
+		// before `type_proj` (projection columns). Reference path:
+		// `SubChecker::type_set` (check.rs:139-146) computes
+		// `type_proj(type_select(input, expr, vars)?, project, vars)`, so the
+		// WHERE expression types first and a missing WHERE column raises
+		// `Unresolved::Var` before the projection list is walked.
+		{name: "TestHandleOneOffQuery_ShunterUnresolvedVarWherePrecedesProjectionRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xEB}, sql: "SELECT missing FROM t WHERE other_missing = 1", want: "`other_missing` is not in scope"},
+		// TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedProjectionQualifierRejectText
+		// pins reference `type_proj::Exprs` (`expr/src/lib.rs:65-78`): a
+		// qualified column whose qualifier is not a declared relvar routes
+		// through `type_expr` and emits `Unresolved::var(&table)`
+		// (`expr/src/lib.rs:103`). Shunter's parser previously rejected at
+		// projection-qualifier resolution with `parse: unsupported SQL:
+		// projection qualifier "x" does not match relation`; reroute now emits
+		// the reference `Unresolved::Var` text.
+		{name: "TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedProjectionQualifierRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xEF}, sql: "SELECT x.u32 FROM t", want: "`x` is not in scope"},
+		// TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText
+		// pins reference `type_proj` for `Project::Star(Some(var))`:
+		// `input.has_field(&var)` miss emits `Unresolved::var(&var)`. Shunter's
+		// parser previously rejected with `parse: unsupported SQL: projection
+		// qualifier "x" does not match table "t"`; reroute now emits the
+		// reference `Unresolved::Var` text.
+		{name: "TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText", column: schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xF0}, sql: "SELECT x.* FROM t", want: "`x` is not in scope"},
+		// TestHandleOneOffQuery_ShunterSenderParameterCaseSensitiveRejectText pins
+		// reference `parse_expr` (sql-parser/src/parser/mod.rs:223) byte-equal
+		// `":sender"` admission. Any other casing (e.g. `:SENDER`) falls through
+		// to `_ => SqlUnsupported::Expr(expr)` (line 270), rendered as
+		// `Unsupported expression: {expr}` (parser/errors.rs:38-39).
+		{name: "TestHandleOneOffQuery_ShunterSenderParameterCaseSensitiveRejectText", table: "s", column: schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32}, rowValue: types.NewUint32(1), messageID: []byte{0xF5}, sql: "SELECT * FROM s WHERE id = :SENDER", want: "Unsupported expression: :SENDER"},
 	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "no such table: `r`. If the table exists, it may be marked private.")
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			table := tc.table
+			if table == "" {
+				table = "t"
+			}
+			sl := newMockSchema(table, 1, tc.column)
+			snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{tc.rowValue}}}}
+			stateAccess := &mockStateAccess{snap: snap}
+			msg := &OneOffQueryMsg{MessageID: tc.messageID, QueryString: tc.sql}
+			requireOneOffQueryError(t, conn, stateAccess, sl, msg, tc.want)
+		})
+	}
 }
 
 func TestHandleOneOffQuery_AmbiguousCaseFoldedTableNameRejected(t *testing.T) {
@@ -7698,203 +7443,33 @@ func TestHandleOneOffQuery_AmbiguousCaseFoldedTableNameRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ShunterUnknownFieldRejectText pins the reference
-// type-check rejection literal at
-// reference tree crates/expr/src/errors.rs:11-13
-// (`Unresolved::Var` = "`{0}` is not in scope"). Reference emit site
-// `_type_expr` lib.rs:107: a missing column inside an existing relvar
-// surfaces as `Unresolved::var(&field)`. OneOff admission emits the raw
-// error text with no `DBError::WithSql` wrap.
-func TestHandleOneOffQuery_ShunterUnknownFieldRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x91},
-		QueryString: "SELECT * FROM t WHERE t.missing_col = 1",
+// TestHandleOneOffQuery_ShunterBigIntOverflowRejectText pins exact
+// InvalidLiteral diagnostics at the signed and unsigned 128-bit boundaries.
+func TestHandleOneOffQuery_ShunterBigIntOverflowRejectText(t *testing.T) {
+	cases := []struct {
+		name, column, overflow, wantKind string
+		kind                             schema.ValueKind
+		row                              types.Value
+		messageID                        byte
+	}{
+		// 2^128 is one past U128's maximum.
+		{name: "TestHandleOneOffQuery_ShunterBigIntOverflowOnUint128RejectText", column: "u128", overflow: "340282366920938463463374607431768211456", wantKind: "U128", kind: schema.KindUint128, row: types.NewUint128(0, 1), messageID: 0x97},
+		// 2^127 is one past I128's maximum.
+		{name: "TestHandleOneOffQuery_ShunterBigIntOverflowOnInt128RejectText", column: "i128", overflow: "170141183460469231731687303715884105728", wantKind: "I128", kind: schema.KindInt128, row: types.NewInt128(0, 1), messageID: 0x98},
 	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`missing_col` is not in scope")
-}
 
-// TestHandleOneOffQuery_ShunterBoolLiteralOnIntegerColumnRejectText pins
-// UnexpectedType text for Bool literals on integer columns.
-func TestHandleOneOffQuery_ShunterBoolLiteralOnIntegerColumnRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x92},
-		QueryString: "SELECT * FROM t WHERE u32 = TRUE",
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			sl := newMockSchema("t", 1, schema.ColumnSchema{Index: 0, Name: tc.column, Type: tc.kind})
+			snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{tc.row}}}}
+			stateAccess := &mockStateAccess{snap: snap}
+			sqlText := "SELECT * FROM t WHERE " + tc.column + " = " + tc.overflow
+			msg := &OneOffQueryMsg{MessageID: []byte{tc.messageID}, QueryString: sqlText}
+			want := "The literal expression `" + tc.overflow + "` cannot be parsed as type `" + tc.wantKind + "`"
+			requireOneOffQueryError(t, conn, stateAccess, sl, msg, want)
+		})
 	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Unexpected type: (expected) Bool != U32 (inferred)")
-}
-
-// TestHandleOneOffQuery_ShunterIntOverflowOnUint8RejectText pins
-// InvalidLiteral text for integer overflow on narrow unsigned columns.
-func TestHandleOneOffQuery_ShunterIntOverflowOnUint8RejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint8(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x93},
-		QueryString: "SELECT * FROM t WHERE u8 = 1000",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `1000` cannot be parsed as type `U8`")
-}
-
-// TestHandleOneOffQuery_ShunterNegativeIntOnUint8RejectText pins the same
-// reference `InvalidLiteral` literal for the negative-on-unsigned case.
-// Reference `parse_int` calls `BigDecimal::to_u8` which returns None for
-// negative inputs; the outer anyhow error is folded into InvalidLiteral by
-// the `.map_err` at lib.rs:99. Shunter emits via the negative branch of
-// `coerceUnsigned` rather than a dedicated typecheck pass; the text must
-// still remain the stable Shunter admission diagnostic.
-func TestHandleOneOffQuery_ShunterNegativeIntOnUint8RejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint8(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x94},
-		QueryString: "SELECT * FROM t WHERE u8 = -1",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `-1` cannot be parsed as type `U8`")
-}
-
-// TestHandleOneOffQuery_ShunterIntOverflowOnInt8RejectText pins the signed
-// variant of the same reference `InvalidLiteral` literal. Reference
-// `parse_int` → `BigDecimal::to_i8` returns None for 200 (>127); the outer
-// anyhow error is folded into InvalidLiteral by `.map_err` at lib.rs:99.
-// Shunter emits via the range-check branch of `coerceSigned`; the text
-// is part of Shunter's stable admission diagnostic.
-func TestHandleOneOffQuery_ShunterIntOverflowOnInt8RejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "i8", Type: schema.KindInt8},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewInt8(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x95},
-		QueryString: "SELECT * FROM t WHERE i8 = 200",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `200` cannot be parsed as type `I8`")
-}
-
-// TestHandleOneOffQuery_ShunterNegativeIntOnUint128RejectText pins the
-// reference `InvalidLiteral` literal for the LitInt-negative branch against
-// a 128-bit unsigned column (coerce.go:133 in the Uint128 case arm). The
-// reference path `parse_int` + `BigDecimal::to_u128` returns None for
-// negative inputs; the outer `.map_err` folds the anyhow into
-// InvalidLiteral. Scope: LitInt branch — the LitBigInt branch is covered
-// by the BigInt cases below.
-func TestHandleOneOffQuery_ShunterNegativeIntOnUint128RejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u128", Type: schema.KindUint128},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint128(0, 1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x96},
-		QueryString: "SELECT * FROM t WHERE u128 = -1",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `-1` cannot be parsed as type `U128`")
-}
-
-// TestHandleOneOffQuery_ShunterBigIntOverflowOnUint128RejectText pins the
-// reference `InvalidLiteral` literal for the LitBigInt branch against a
-// 128-bit unsigned column (coerceBigIntToUint128 in coerce.go). Input
-// `2^128` exceeds U128's max and `BigDecimal::to_u128` returns None in
-// the reference `parse_int` path.
-func TestHandleOneOffQuery_ShunterBigIntOverflowOnUint128RejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u128", Type: schema.KindUint128},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint128(0, 1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	// 2^128 = 340282366920938463463374607431768211456 — one past u128::MAX.
-	const bigOverflow = "340282366920938463463374607431768211456"
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x97},
-		QueryString: "SELECT * FROM t WHERE u128 = " + bigOverflow,
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `"+bigOverflow+"` cannot be parsed as type `U128`")
-}
-
-// TestHandleOneOffQuery_ShunterBigIntOverflowOnInt128RejectText pins the
-// reference `InvalidLiteral` literal for the signed variant.
-// `2^127` overflows I128::MAX (2^127 - 1) and reference
-// `BigDecimal::to_i128` returns None.
-func TestHandleOneOffQuery_ShunterBigIntOverflowOnInt128RejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "i128", Type: schema.KindInt128},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewInt128(0, 1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	// 2^127 = 170141183460469231731687303715884105728 — one past i128::MAX.
-	const bigOverflow = "170141183460469231731687303715884105728"
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x98},
-		QueryString: "SELECT * FROM t WHERE i128 = " + bigOverflow,
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `"+bigOverflow+"` cannot be parsed as type `I128`")
-}
-
-// TestHandleOneOffQuery_ShunterNegativeIntOnUint256RejectText pins the
-// reference `InvalidLiteral` literal for the LitInt-negative branch
-// against a 256-bit unsigned column (coerce.go:154 in the Uint256 arm).
-func TestHandleOneOffQuery_ShunterNegativeIntOnUint256RejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u256", Type: schema.KindUint256},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint256(0, 0, 0, 1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x99},
-		QueryString: "SELECT * FROM t WHERE u256 = -1",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `-1` cannot be parsed as type `U256`")
-}
-
-// TestHandleOneOffQuery_ShunterFloatLiteralOnUint32RejectText pins
-// InvalidLiteral text for float literals on integer columns.
-func TestHandleOneOffQuery_ShunterFloatLiteralOnUint32RejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0x9a},
-		QueryString: "SELECT * FROM t WHERE u32 = 1.3",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "The literal expression `1.3` cannot be parsed as type `U32`")
 }
 
 // TestHandleOneOffQuery_ShunterNonBoolLiteralOnBoolRejectText pins
@@ -7981,27 +7556,6 @@ func TestHandleOneOffQuery_MultiColumnOrderByAmbiguousProjectionNameRejects(t *t
 		QueryString: "SELECT u32 AS i32 FROM t ORDER BY u32, i32",
 	}
 	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "ORDER BY name \"i32\" is ambiguous")
-}
-
-// TestHandleOneOffQuery_ShunterDuplicateImplicitProjectionRejectText pins
-// the same `DuplicateName` literal for a SELECT list with no explicit
-// aliases — the effective output name falls back to the column name, so
-// `SELECT u32, u32 FROM t` collides on `u32`. Reference reads each
-// element's effective name from `ProjectElem(_, SqlIdent(alias))` where
-// `alias` is the column name when no `AS` was written.
-func TestHandleOneOffQuery_ShunterDuplicateImplicitProjectionRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xE1},
-		QueryString: "SELECT u32, u32 FROM t",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Duplicate name `u32`")
 }
 
 // TestHandleOneOffQuery_ShunterDuplicateJoinAliasRejectText pins the
@@ -8116,48 +7670,6 @@ func TestHandleOneOffQuery_ShunterJoinArrayColumnInvalidOpRejectText(t *testing.
 	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Invalid binary operator `=` for type `Array<String>`")
 }
 
-// TestHandleOneOffQuery_ShunterUnresolvedVarUnqualifiedWhereRejectText pins
-// the reference `Unresolved::Var` literal (errors.rs:11-13) for an
-// unqualified single-table WHERE column that does not exist on the
-// resolved relvar. Reference path: `_type_expr` (lib.rs:107) maps the
-// missing-field branch through `Unresolved::var(&field)`. The text
-// carries only the field name — the table name does not appear.
-func TestHandleOneOffQuery_ShunterUnresolvedVarUnqualifiedWhereRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xE6},
-		QueryString: "SELECT * FROM t WHERE missing = 1",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`missing` is not in scope")
-}
-
-// TestHandleOneOffQuery_ShunterUnresolvedVarProjectionColumnRejectText pins
-// the reference `Unresolved::Var` literal for an unknown projection
-// column. Reference path: `type_proj::Exprs` (check.rs:74) routes each
-// projection element through `type_expr`, whose missing-field branch at
-// lib.rs:107 emits `Unresolved::var(&field)`. OneOff-only: SubscribeSingle
-// rejects column-list projections earlier with `Unsupported::ReturnType`.
-func TestHandleOneOffQuery_ShunterUnresolvedVarProjectionColumnRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xE7},
-		QueryString: "SELECT missing FROM t",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`missing` is not in scope")
-}
-
 // TestHandleOneOffQuery_ShunterUnresolvedVarJoinOnMissingRejectText pins
 // the reference `Unresolved::Var` literal for an unknown JOIN ON
 // equality operand. Reference `type_from` types the ON binop through
@@ -8226,29 +7738,6 @@ func TestHandleOneOffQuery_ShunterUnresolvedVarJoinWhereQualifiedMissingRejectTe
 	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`missing` is not in scope")
 }
 
-// TestHandleOneOffQuery_ShunterUnresolvedVarBaseTableAfterAliasRejectText pins
-// the reference `Unresolved::Var` literal for a WHERE column qualified
-// by the base table name AFTER an `AS` alias has been declared on the
-// FROM relvar. Reference `_type_expr` (lib.rs:103) emits
-// `Unresolved::var(&table)` when `vars.deref().get(&*table)` returns
-// None — the base name `t` is no longer in scope once `AS r` rebinds
-// the relvar to `r`. The text carries the qualifier name (the table /
-// alias identifier), not the column.
-func TestHandleOneOffQuery_ShunterUnresolvedVarBaseTableAfterAliasRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xEA},
-		QueryString: "SELECT * FROM t AS r WHERE t.u32 = 5",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`t` is not in scope")
-}
-
 // TestHandleOneOffQuery_ShunterUnresolvedVarBareJoinWildcardOnMissingRejectText
 // pins reference `type_from` ordering: the JOIN ON expression types
 // before `type_proj` runs the bare-wildcard rejection. Reference path:
@@ -8315,28 +7804,6 @@ func TestHandleOneOffQuery_ShunterUnresolvedVarJoinOnMissingNotHiddenByWhereFals
 	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`missing` is not in scope")
 }
 
-// TestHandleOneOffQuery_ShunterUnresolvedVarWherePrecedesProjectionRejectText
-// pins the reference type-checker order: `type_select` (WHERE) runs
-// before `type_proj` (projection columns). Reference path:
-// `SubChecker::type_set` (check.rs:139-146) computes
-// `type_proj(type_select(input, expr, vars)?, project, vars)`, so the
-// WHERE expression types first and a missing WHERE column raises
-// `Unresolved::Var` before the projection list is walked.
-func TestHandleOneOffQuery_ShunterUnresolvedVarWherePrecedesProjectionRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xEB},
-		QueryString: "SELECT missing FROM t WHERE other_missing = 1",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`other_missing` is not in scope")
-}
-
 // TestHandleOneOffQuery_ShunterBooleanConstantWhereDoesNotMaskBranchErrors
 // pins reference `_type_expr` order for logical WHERE expressions:
 // both operands are typed before Bool operators are lowered. Constant
@@ -8373,50 +7840,6 @@ func TestHandleOneOffQuery_ShunterBooleanConstantWhereDoesNotMaskBranchErrors(t 
 			}
 		})
 	}
-}
-
-// TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedProjectionQualifierRejectText
-// pins reference `type_proj::Exprs` (`expr/src/lib.rs:65-78`): a
-// qualified column whose qualifier is not a declared relvar routes
-// through `type_expr` and emits `Unresolved::var(&table)`
-// (`expr/src/lib.rs:103`). Shunter's parser previously rejected at
-// projection-qualifier resolution with `parse: unsupported SQL:
-// projection qualifier "x" does not match relation`; reroute now emits
-// the reference `Unresolved::Var` text.
-func TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedProjectionQualifierRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xEF},
-		QueryString: "SELECT x.u32 FROM t",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`x` is not in scope")
-}
-
-// TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText
-// pins reference `type_proj` for `Project::Star(Some(var))`:
-// `input.has_field(&var)` miss emits `Unresolved::var(&var)`. Shunter's
-// parser previously rejected with `parse: unsupported SQL: projection
-// qualifier "x" does not match table "t"`; reroute now emits the
-// reference `Unresolved::Var` text.
-func TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("t", 1,
-		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xF0},
-		QueryString: "SELECT x.* FROM t",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "`x` is not in scope")
 }
 
 // TestHandleOneOffQuery_ShunterMissingLeftTablePrecedesDuplicateJoinAliasRejectText
@@ -8543,26 +7966,6 @@ func TestHandleOneOffQuery_ShunterUnqualifiedNamesJoinOnRejectText(t *testing.T)
 		QueryString: "SELECT t.* FROM t JOIN s ON id = s.id",
 	}
 	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Names must be qualified when using joins")
-}
-
-// TestHandleOneOffQuery_ShunterSenderParameterCaseSensitiveRejectText pins
-// reference `parse_expr` (sql-parser/src/parser/mod.rs:223) byte-equal
-// `":sender"` admission. Any other casing (e.g. `:SENDER`) falls through
-// to `_ => SqlUnsupported::Expr(expr)` (line 270), rendered as
-// `Unsupported expression: {expr}` (parser/errors.rs:38-39).
-func TestHandleOneOffQuery_ShunterSenderParameterCaseSensitiveRejectText(t *testing.T) {
-	conn := testConnDirect(nil)
-	sl := newMockSchema("s", 1,
-		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
-	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
-	stateAccess := &mockStateAccess{snap: snap}
-
-	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xF5},
-		QueryString: "SELECT * FROM s WHERE id = :SENDER",
-	}
-	requireOneOffQueryError(t, conn, stateAccess, sl, msg, "Unsupported expression: :SENDER")
 }
 
 func TestCompileSQLQueryString_AppParameterPlaceholderRejectedOutsideTemplate(t *testing.T) {

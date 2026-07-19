@@ -82,13 +82,7 @@ func validateOIDCDiscoveryURL(raw string) error {
 }
 
 func oidcDiscoverySourceAllowsAlgorithm(source OIDCDiscoveryConfig, alg JWTAlgorithm) bool {
-	if alg != JWTAlgorithmRS256 && alg != JWTAlgorithmES256 {
-		return false
-	}
-	if len(source.Algorithms) == 0 {
-		return true
-	}
-	return slices.Contains(source.Algorithms, alg)
+	return remoteSourceAllowsAlgorithm(source.Algorithms, alg)
 }
 
 func jwksForOIDCDiscovery(source OIDCDiscoveryConfig) (JWKSConfig, error) {

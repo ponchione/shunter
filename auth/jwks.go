@@ -208,13 +208,12 @@ func matchingJWKSVerificationKeys(keys []resolvedJWTVerificationKey, alg JWTAlgo
 }
 
 func jwksSourceAllowsAlgorithm(source JWKSConfig, alg JWTAlgorithm) bool {
-	if alg != JWTAlgorithmRS256 && alg != JWTAlgorithmES256 {
-		return false
-	}
-	if len(source.Algorithms) == 0 {
-		return true
-	}
-	return slices.Contains(source.Algorithms, alg)
+	return remoteSourceAllowsAlgorithm(source.Algorithms, alg)
+}
+
+func remoteSourceAllowsAlgorithm(allowed []JWTAlgorithm, alg JWTAlgorithm) bool {
+	return (alg == JWTAlgorithmRS256 || alg == JWTAlgorithmES256) &&
+		(len(allowed) == 0 || slices.Contains(allowed, alg))
 }
 
 func keysForJWKS(source JWKSConfig, forceRefresh bool) ([]resolvedJWTVerificationKey, error) {

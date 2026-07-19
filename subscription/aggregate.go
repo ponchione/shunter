@@ -84,7 +84,7 @@ func ValidateAggregate(pred Predicate, aggregate *Aggregate, s SchemaLookup) err
 			return validateMultiJoinAggregateArgument(multi, label, arg, s)
 		})
 	}
-	table, ok := aggregatePredicateTable(pred)
+	table, ok := singlePredicateTable(pred)
 	if !ok {
 		return fmt.Errorf("%w: live aggregate views require one referenced table", ErrInvalidPredicate)
 	}
@@ -237,17 +237,6 @@ func aggregateArgumentMatchesRelationPair(left TableID, leftAlias uint8, right T
 			(arg.Table == right && arg.Alias == rightAlias)
 	}
 	return arg.Table == left || arg.Table == right
-}
-
-func aggregatePredicateTable(pred Predicate) (TableID, bool) {
-	if pred == nil {
-		return 0, false
-	}
-	tables := pred.Tables()
-	if len(tables) != 1 {
-		return 0, false
-	}
-	return tables[0], true
 }
 
 func aggregateUpdateColumns(aggregate *Aggregate) []schema.ColumnSchema {
@@ -901,7 +890,7 @@ func aggregateEmittedTable(pred Predicate) (TableID, bool) {
 	case MultiJoin:
 		return p.ProjectedTable(), true
 	default:
-		return aggregatePredicateTable(pred)
+		return singlePredicateTable(pred)
 	}
 }
 

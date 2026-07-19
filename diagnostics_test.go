@@ -22,7 +22,7 @@ func TestRuntimeDiagnosticsMountingAndHelperBehavior(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	RuntimeDiagnosticsHandler(rt).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusOK, diagnosticsStatusNotReady, RuntimeStateBuilt)
+	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusOK, HealthStatusNotReady, RuntimeStateBuilt)
 }
 
 func TestHealthInspectionHelpersClassifyRuntimeAndHost(t *testing.T) {
@@ -141,7 +141,7 @@ func TestRuntimeDiagnosticsMountedEndpointsAndProtocolRoute(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	rt.HTTPHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz?ignored=true", nil))
-	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusOK, diagnosticsStatusNotReady, RuntimeStateBuilt)
+	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusOK, HealthStatusNotReady, RuntimeStateBuilt)
 	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
 		t.Fatalf("/healthz Content-Type = %q, want application/json", got)
 	}
@@ -151,7 +151,7 @@ func TestRuntimeDiagnosticsMountedEndpointsAndProtocolRoute(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	rt.HTTPHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, diagnosticsStatusNotReady, RuntimeStateBuilt)
+	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, HealthStatusNotReady, RuntimeStateBuilt)
 
 	rec = httptest.NewRecorder()
 	rt.HTTPHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodHead, "/healthz", nil))
@@ -213,18 +213,18 @@ func TestRuntimeDiagnosticsHealthzAndReadyzStatusSemantics(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	rt.HTTPHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusOK, diagnosticsStatusOK, RuntimeStateReady)
+	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusOK, HealthStatusOK, RuntimeStateReady)
 	rec = httptest.NewRecorder()
 	rt.HTTPHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusOK, diagnosticsStatusOK, RuntimeStateReady)
+	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusOK, HealthStatusOK, RuntimeStateReady)
 
 	notReady := buildValidTestRuntime(t)
 	rec = httptest.NewRecorder()
 	RuntimeDiagnosticsHandler(notReady).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusOK, diagnosticsStatusNotReady, RuntimeStateBuilt)
+	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusOK, HealthStatusNotReady, RuntimeStateBuilt)
 	rec = httptest.NewRecorder()
 	RuntimeDiagnosticsHandler(notReady).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, diagnosticsStatusNotReady, RuntimeStateBuilt)
+	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, HealthStatusNotReady, RuntimeStateBuilt)
 
 	degraded, err := Build(validChatModule(), Config{DataDir: t.TempDir(), EnableProtocol: true})
 	if err != nil {
@@ -239,10 +239,10 @@ func TestRuntimeDiagnosticsHealthzAndReadyzStatusSemantics(t *testing.T) {
 	degraded.mu.Unlock()
 	rec = httptest.NewRecorder()
 	RuntimeDiagnosticsHandler(degraded).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusOK, diagnosticsStatusDegraded, RuntimeStateReady)
+	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusOK, HealthStatusDegraded, RuntimeStateReady)
 	rec = httptest.NewRecorder()
 	RuntimeDiagnosticsHandler(degraded).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, diagnosticsStatusDegraded, RuntimeStateReady)
+	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, HealthStatusDegraded, RuntimeStateReady)
 
 	for _, state := range []RuntimeState{RuntimeStateFailed, RuntimeStateClosing, RuntimeStateClosed} {
 		failed := buildValidTestRuntime(t)
@@ -252,21 +252,21 @@ func TestRuntimeDiagnosticsHealthzAndReadyzStatusSemantics(t *testing.T) {
 		failed.mu.Unlock()
 		rec = httptest.NewRecorder()
 		RuntimeDiagnosticsHandler(failed).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-		assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, diagnosticsStatusFailed, state)
+		assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, HealthStatusFailed, state)
 		rec = httptest.NewRecorder()
 		RuntimeDiagnosticsHandler(failed).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-		assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, diagnosticsStatusFailed, state)
+		assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, HealthStatusFailed, state)
 	}
 }
 
 func TestRuntimeDiagnosticsNilDebugAndRedaction(t *testing.T) {
 	rec := httptest.NewRecorder()
 	RuntimeDiagnosticsHandler(nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, diagnosticsStatusFailed, RuntimeStateFailed)
+	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, HealthStatusFailed, RuntimeStateFailed)
 
 	rec = httptest.NewRecorder()
 	RuntimeDiagnosticsHandler(nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, diagnosticsStatusFailed, RuntimeStateFailed)
+	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, HealthStatusFailed, RuntimeStateFailed)
 
 	rec = httptest.NewRecorder()
 	RuntimeDiagnosticsHandler(nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/shunter/runtime", nil))
@@ -417,11 +417,11 @@ func TestHostDiagnosticsHandlerEndpoints(t *testing.T) {
 	var nilHost *Host
 	rec := httptest.NewRecorder()
 	HostDiagnosticsHandler(nilHost, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	assertHostDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, diagnosticsStatusFailed, 0)
+	assertHostDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, HealthStatusFailed, 0)
 
 	rec = httptest.NewRecorder()
 	HostDiagnosticsHandler(&Host{}, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	assertHostDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, diagnosticsStatusFailed, 0)
+	assertHostDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, HealthStatusFailed, 0)
 
 	rec = httptest.NewRecorder()
 	HostDiagnosticsHandler(nilHost, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/shunter/host?ignored=true", nil))
@@ -439,7 +439,7 @@ func TestHostDiagnosticsHandlerEndpoints(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	HostDiagnosticsHandler(host, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	assertHostDiagnosticsHealthPayload(t, rec, http.StatusOK, diagnosticsStatusNotReady, 2)
+	assertHostDiagnosticsHealthPayload(t, rec, http.StatusOK, HealthStatusNotReady, 2)
 
 	rec = httptest.NewRecorder()
 	HostDiagnosticsHandler(host, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/subscribe", nil))
@@ -507,10 +507,10 @@ func TestHostDiagnosticsStatusSemantics(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	HostDiagnosticsHandler(readyHost, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	assertHostDiagnosticsHealthPayload(t, rec, http.StatusOK, diagnosticsStatusOK, 1)
+	assertHostDiagnosticsHealthPayload(t, rec, http.StatusOK, HealthStatusOK, 1)
 	rec = httptest.NewRecorder()
 	HostDiagnosticsHandler(readyHost, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	assertHostDiagnosticsHealthPayload(t, rec, http.StatusOK, diagnosticsStatusOK, 1)
+	assertHostDiagnosticsHealthPayload(t, rec, http.StatusOK, HealthStatusOK, 1)
 
 	degradedRuntime, err := Build(NewModule("degraded").SchemaVersion(1).TableDef(messagesTableDef()), Config{
 		DataDir:        t.TempDir(),
@@ -533,10 +533,10 @@ func TestHostDiagnosticsStatusSemantics(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	HostDiagnosticsHandler(degradedHost, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	assertHostDiagnosticsHealthPayload(t, rec, http.StatusOK, diagnosticsStatusDegraded, 1)
+	assertHostDiagnosticsHealthPayload(t, rec, http.StatusOK, HealthStatusDegraded, 1)
 	rec = httptest.NewRecorder()
 	HostDiagnosticsHandler(degradedHost, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	assertHostDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, diagnosticsStatusDegraded, 1)
+	assertHostDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, HealthStatusDegraded, 1)
 
 	failedRuntime := buildHostTestRuntime(t, "failed", t.TempDir())
 	failedRuntime.mu.Lock()
@@ -550,18 +550,18 @@ func TestHostDiagnosticsStatusSemantics(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	HostDiagnosticsHandler(failedHost, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	assertHostDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, diagnosticsStatusFailed, 1)
+	assertHostDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, HealthStatusFailed, 1)
 	rec = httptest.NewRecorder()
 	HostDiagnosticsHandler(failedHost, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	assertHostDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, diagnosticsStatusFailed, 1)
+	assertHostDiagnosticsHealthPayload(t, rec, http.StatusServiceUnavailable, HealthStatusFailed, 1)
 }
 
-func assertRuntimeDiagnosticsHealthPayload(t *testing.T, rec *httptest.ResponseRecorder, wantCode int, wantStatus diagnosticsStatus, wantState RuntimeState) {
+func assertRuntimeDiagnosticsHealthPayload(t *testing.T, rec *httptest.ResponseRecorder, wantCode int, wantStatus HealthStatus, wantState RuntimeState) {
 	t.Helper()
 	if rec.Code != wantCode {
 		t.Fatalf("runtime diagnostics status code = %d, want %d; body=%q", rec.Code, wantCode, rec.Body.String())
 	}
-	var payload runtimeDiagnosticsHealthPayload
+	var payload RuntimeHealthInspection
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode runtime diagnostics payload: %v", err)
 	}
@@ -570,12 +570,12 @@ func assertRuntimeDiagnosticsHealthPayload(t *testing.T, rec *httptest.ResponseR
 	}
 }
 
-func assertHostDiagnosticsHealthPayload(t *testing.T, rec *httptest.ResponseRecorder, wantCode int, wantStatus diagnosticsStatus, wantModules int) {
+func assertHostDiagnosticsHealthPayload(t *testing.T, rec *httptest.ResponseRecorder, wantCode int, wantStatus HealthStatus, wantModules int) {
 	t.Helper()
 	if rec.Code != wantCode {
 		t.Fatalf("host diagnostics status code = %d, want %d; body=%q", rec.Code, wantCode, rec.Body.String())
 	}
-	var payload hostDiagnosticsHealthPayload
+	var payload HostHealthInspection
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode host diagnostics payload: %v", err)
 	}

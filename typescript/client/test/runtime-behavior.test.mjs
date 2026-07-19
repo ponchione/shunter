@@ -3542,28 +3542,6 @@ const unexpectedCloseError = unexpectedCloseClient.state.error;
 assert(unexpectedCloseError instanceof ShunterClosedClientError);
 assert.equal(unexpectedCloseError.code, "1006");
 assert.deepEqual(unexpectedCloseError.details, { reason: "lost", wasClean: false });
-function assertInterruptedCall(cause, operation, name, expectedIds) {
-  return (error) => {
-    assert(error instanceof ShunterCallInterruptedError);
-    assert.equal(error.kind, "interrupted");
-    assert.equal(error.code, "call_outcome_unknown");
-    assert.equal(error.outcome, "unknown");
-    assert.equal(error.operation, operation);
-    assert.equal(error.operationName, name);
-    if (cause !== undefined) {
-      assert.strictEqual(error.cause, cause);
-    } else {
-      assert(error.cause instanceof ShunterClosedClientError);
-    }
-    if (expectedIds.requestId !== undefined) {
-      assert.equal(error.requestId, expectedIds.requestId);
-    }
-    if (expectedIds.messageId !== undefined) {
-      assert.deepEqual(error.messageId, expectedIds.messageId);
-    }
-    return true;
-  };
-}
 await assert.rejects(
   unexpectedCloseReducer,
   assertInterruptedCall(unexpectedCloseError, "reducer", "send", { requestId: 0x21222324 }),

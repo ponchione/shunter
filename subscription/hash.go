@@ -159,15 +159,7 @@ func canonicalGroupTable(pred Predicate) (TableID, bool) {
 }
 
 func canReorderCommutativeChildren(left, right Predicate) bool {
-	leftTable, ok := canonicalGroupTable(left)
-	if !ok {
-		return false
-	}
-	rightTable, ok := canonicalGroupTable(right)
-	if !ok {
-		return false
-	}
-	return leftTable == rightTable
+	return sameCanonicalTable(left, right)
 }
 
 func canonicalPredicateBytes(pred Predicate) []byte {

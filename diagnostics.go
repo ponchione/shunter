@@ -20,15 +20,6 @@ const (
 	HealthStatusNotReady HealthStatus = "not_ready"
 )
 
-type diagnosticsStatus = HealthStatus
-
-const (
-	diagnosticsStatusFailed   = HealthStatusFailed
-	diagnosticsStatusDegraded = HealthStatusDegraded
-	diagnosticsStatusOK       = HealthStatusOK
-	diagnosticsStatusNotReady = HealthStatusNotReady
-)
-
 // RuntimeDiagnosticsHandler returns an HTTP handler for runtime diagnostics.
 // It serves diagnostics regardless of the runtime's MountHTTP setting.
 func RuntimeDiagnosticsHandler(r *Runtime) http.Handler {
@@ -126,9 +117,6 @@ type HostHealthInspection struct {
 	Status HealthStatus `json:"status"`
 	Host   HostHealth   `json:"host"`
 }
-
-type runtimeDiagnosticsHealthPayload = RuntimeHealthInspection
-type hostDiagnosticsHealthPayload = HostHealthInspection
 
 // InspectRuntimeHealth returns runtime health with the stable diagnostics status.
 func InspectRuntimeHealth(r *Runtime) RuntimeHealthInspection {

@@ -1242,33 +1242,36 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     });
   };
 
-  const allocateDeclaredQueryRequestId = (): RequestID => {
-    const attempts = Math.min(maxUint32, pendingDeclaredQueries.size + abandonedDeclaredQueries.size + 1);
+  const allocateMessageKeyRequestId = (
+    pending: { readonly size: number; has(messageKey: string): boolean },
+    abandoned: { readonly size: number; has(messageKey: string): boolean },
+    exhaustionMessage: string,
+    exhaustionCode: string,
+  ): RequestID => {
+    const attempts = Math.min(maxUint32, pending.size + abandoned.size + 1);
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const requestId = allocateRequestId();
       const messageKey = bytesKey(requestIdMessageId(requestId));
-      if (!pendingDeclaredQueries.has(messageKey) && !abandonedDeclaredQueries.has(messageKey)) {
+      if (!pending.has(messageKey) && !abandoned.has(messageKey)) {
         return requestId;
       }
     }
-    throw new ShunterValidationError("No declared query message IDs are available.", {
-      code: "declared_query_message_ids_exhausted",
-    });
+    throw new ShunterValidationError(exhaustionMessage, { code: exhaustionCode });
   };
 
-  const allocateProcedureRequestId = (): RequestID => {
-    const attempts = Math.min(maxUint32, pendingProcedureCalls.size + abandonedProcedureCalls.size + 1);
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const requestId = allocateRequestId();
-      const messageKey = bytesKey(requestIdMessageId(requestId));
-      if (!pendingProcedureCalls.has(messageKey) && !abandonedProcedureCalls.has(messageKey)) {
-        return requestId;
-      }
-    }
-    throw new ShunterValidationError("No procedure message IDs are available.", {
-      code: "procedure_message_ids_exhausted",
-    });
-  };
+  const allocateDeclaredQueryRequestId = (): RequestID => allocateMessageKeyRequestId(
+    pendingDeclaredQueries,
+    abandonedDeclaredQueries,
+    "No declared query message IDs are available.",
+    "declared_query_message_ids_exhausted",
+  );
+
+  const allocateProcedureRequestId = (): RequestID => allocateMessageKeyRequestId(
+    pendingProcedureCalls,
+    abandonedProcedureCalls,
+    "No procedure message IDs are available.",
+    "procedure_message_ids_exhausted",
+  );
 
   const settleReducerResponse = (update: TransactionUpdateMessage): void => {
     const { requestId, name } = update.reducerCall;
@@ -1604,117 +1607,81 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     return undefined;
   };
 
-  const pendingSubscriptionForResponse = (
+  const correlatedEntryForResponse = <T extends { readonly requestId: RequestID; readonly queryId: QueryID }>(
     requestId: RequestID | undefined,
     queryId: QueryID | undefined,
     label: string,
-  ): PendingSubscription | undefined => {
-    const requestPending =
-      requestId === undefined ? undefined : pendingSubscriptionsByRequest.get(requestId);
-    const queryPending =
-      queryId === undefined ? undefined : pendingSubscriptionsByQuery.get(queryId);
-    if (requestPending !== undefined && queryPending !== undefined && requestPending !== queryPending) {
-      failConnected(new ShunterProtocolError(`${label} response matched multiple pending subscriptions.`, {
+    noun: string,
+    byRequest: ReadonlyMap<RequestID, T>,
+    byQuery: ReadonlyMap<QueryID, T>,
+  ): T | undefined => {
+    const requestEntry = requestId === undefined ? undefined : byRequest.get(requestId);
+    const queryEntry = queryId === undefined ? undefined : byQuery.get(queryId);
+    if (requestEntry !== undefined && queryEntry !== undefined && requestEntry !== queryEntry) {
+      failConnected(new ShunterProtocolError(`${label} response matched multiple ${noun}s.`, {
         details: { requestId, queryId },
       }));
       return undefined;
     }
-    const pending = requestPending ?? queryPending;
-    if (pending === undefined) {
+    const entry = requestEntry ?? queryEntry;
+    if (entry === undefined) {
       return undefined;
     }
     if (
-      (requestId !== undefined && requestId !== pending.requestId) ||
-      (queryId !== undefined && queryId !== pending.queryId)
+      (requestId !== undefined && requestId !== entry.requestId) ||
+      (queryId !== undefined && queryId !== entry.queryId)
     ) {
-      failConnected(new ShunterProtocolError(`${label} response did not match the pending subscription.`, {
+      failConnected(new ShunterProtocolError(`${label} response did not match the ${noun}.`, {
         details: {
-          expectedRequestId: pending.requestId,
-          expectedQueryId: pending.queryId,
+          expectedRequestId: entry.requestId,
+          expectedQueryId: entry.queryId,
           receivedRequestId: requestId,
           receivedQueryId: queryId,
         },
       }));
       return undefined;
     }
-    return pending;
+    return entry;
   };
+
+  const pendingSubscriptionForResponse = (
+    requestId: RequestID | undefined,
+    queryId: QueryID | undefined,
+    label: string,
+  ): PendingSubscription | undefined => correlatedEntryForResponse(
+    requestId,
+    queryId,
+    label,
+    "pending subscription",
+    pendingSubscriptionsByRequest,
+    pendingSubscriptionsByQuery,
+  );
 
   const abandonedSubscriptionForResponse = (
     requestId: RequestID | undefined,
     queryId: QueryID | undefined,
     label: string,
-  ): AbandonedSubscription | undefined => {
-    const requestAbandoned =
-      requestId === undefined ? undefined : abandonedSubscriptionsByRequest.get(requestId);
-    const queryAbandoned =
-      queryId === undefined ? undefined : abandonedSubscriptionsByQuery.get(queryId);
-    if (
-      requestAbandoned !== undefined &&
-      queryAbandoned !== undefined &&
-      requestAbandoned !== queryAbandoned
-    ) {
-      failConnected(new ShunterProtocolError(`${label} response matched multiple abandoned subscriptions.`, {
-        details: { requestId, queryId },
-      }));
-      return undefined;
-    }
-    const abandoned = requestAbandoned ?? queryAbandoned;
-    if (abandoned === undefined) {
-      return undefined;
-    }
-    if (
-      (requestId !== undefined && requestId !== abandoned.requestId) ||
-      (queryId !== undefined && queryId !== abandoned.queryId)
-    ) {
-      failConnected(new ShunterProtocolError(`${label} response did not match the abandoned subscription.`, {
-        details: {
-          expectedRequestId: abandoned.requestId,
-          expectedQueryId: abandoned.queryId,
-          receivedRequestId: requestId,
-          receivedQueryId: queryId,
-        },
-      }));
-      return undefined;
-    }
-    return abandoned;
-  };
+  ): AbandonedSubscription | undefined => correlatedEntryForResponse(
+    requestId,
+    queryId,
+    label,
+    "abandoned subscription",
+    abandonedSubscriptionsByRequest,
+    abandonedSubscriptionsByQuery,
+  );
 
   const pendingUnsubscribeForResponse = (
     requestId: RequestID | undefined,
     queryId: QueryID | undefined,
     label: string,
-  ): PendingUnsubscribe | undefined => {
-    const requestPending =
-      requestId === undefined ? undefined : pendingUnsubscribesByRequest.get(requestId);
-    const queryPending =
-      queryId === undefined ? undefined : pendingUnsubscribesByQuery.get(queryId);
-    if (requestPending !== undefined && queryPending !== undefined && requestPending !== queryPending) {
-      failConnected(new ShunterProtocolError(`${label} response matched multiple pending unsubscribes.`, {
-        details: { requestId, queryId },
-      }));
-      return undefined;
-    }
-    const pending = requestPending ?? queryPending;
-    if (pending === undefined) {
-      return undefined;
-    }
-    if (
-      (requestId !== undefined && requestId !== pending.requestId) ||
-      (queryId !== undefined && queryId !== pending.queryId)
-    ) {
-      failConnected(new ShunterProtocolError(`${label} response did not match the pending unsubscribe.`, {
-        details: {
-          expectedRequestId: pending.requestId,
-          expectedQueryId: pending.queryId,
-          receivedRequestId: requestId,
-          receivedQueryId: queryId,
-        },
-      }));
-      return undefined;
-    }
-    return pending;
-  };
+  ): PendingUnsubscribe | undefined => correlatedEntryForResponse(
+    requestId,
+    queryId,
+    label,
+    "pending unsubscribe",
+    pendingUnsubscribesByRequest,
+    pendingUnsubscribesByQuery,
+  );
 
   const subscriptionRequestIdInUse = (requestId: RequestID): boolean =>
     pendingSubscriptionsByRequest.has(requestId) ||

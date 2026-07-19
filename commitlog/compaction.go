@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ponchione/shunter/internal/atomicfile"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
@@ -183,10 +184,5 @@ func offsetIndexPathForSegment(segmentPath string) string {
 }
 
 func syncDirPath(path string) error {
-	dir, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
+	return atomicfile.SyncDir(path)
 }

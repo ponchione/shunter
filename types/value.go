@@ -546,40 +546,7 @@ func (v Value) mustKind(want ValueKind) {
 // Equal returns true if v and other have the same kind and value.
 // No cross-kind coercion.
 func (v Value) Equal(other Value) bool {
-	if v.kind != other.kind {
-		return false
-	}
-	if v.isNull || other.isNull {
-		return v.isNull && other.isNull
-	}
-	switch v.kind {
-	case KindBool:
-		return v.b == other.b
-	case KindInt8, KindInt16, KindInt32, KindInt64:
-		return v.i64 == other.i64
-	case KindUint8, KindUint16, KindUint32, KindUint64:
-		return v.u64 == other.u64
-	case KindFloat32:
-		return v.f32 == other.f32
-	case KindFloat64:
-		return v.f64 == other.f64
-	case KindString:
-		return v.str == other.str
-	case KindBytes, KindJSON:
-		return bytes.Equal(v.buf, other.buf)
-	case KindInt128, KindUint128:
-		return v.hi128 == other.hi128 && v.lo128 == other.lo128
-	case KindInt256, KindUint256:
-		return v.w256 == other.w256
-	case KindTimestamp, KindDuration:
-		return v.i64 == other.i64
-	case KindArrayString:
-		return slices.Equal(v.strArr, other.strArr)
-	case KindUUID:
-		return v.uuid == other.uuid
-	default:
-		panic(fmt.Sprintf("shunter: unhandled ValueKind %d", int(v.kind)))
-	}
+	return EqualValues(&v, &other)
 }
 
 // EqualValues returns true if left and right have the same kind and value.
