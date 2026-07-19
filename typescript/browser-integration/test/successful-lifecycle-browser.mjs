@@ -7,6 +7,8 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
+import { launchChromium, loadPlaywright } from "./browser-helpers.mjs";
+
 const testDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(testDir, "../../..");
 const workspace = await mkdtemp(join(tmpdir(), "shunter-browser-lifecycle-"));
@@ -22,7 +24,7 @@ try {
   await runCommand("go", ["build", "-o", fixtureBinary, "./internal/browserintegration/lifecycleserver"]);
   server = await startLifecycleServer({ addr: "127.0.0.1:0", seed: true });
 
-  browser = await launchChromium();
+  browser = await launchChromium(chromium);
   const page = await browser.newPage();
   await page.exposeFunction("killLifecycleFixture", async () => {
     await killLifecycleServer(server);
@@ -436,37 +438,5 @@ async function stopLifecycleServer(activeServer) {
   }
   if (child.exitCode !== 0 && child.signalCode === null) {
     throw new Error(`lifecycle fixture shutdown failed with code ${child.exitCode}\n${activeServer.stderr()}`);
-  }
-}
-
-async function launchChromium() {
-  try {
-    return await chromium.launch({ channel: "chrome", headless: true, args: ["--no-sandbox"] });
-  } catch (channelError) {
-    try {
-      return await chromium.launch({ headless: true, args: ["--no-sandbox"] });
-    } catch (bundledError) {
-      if (
-        String(bundledError).includes("Executable doesn't exist") ||
-        String(bundledError).includes("Please run the following command")
-      ) {
-        throw new Error(
-          "Playwright Chromium is not installed. Run `npm --prefix typescript/browser-integration run install:browsers`.\n" +
-            bundledError,
-        );
-      }
-      throw new Error(`launch chrome failed: ${channelError}\nlaunch bundled chromium failed: ${bundledError}`);
-    }
-  }
-}
-
-async function loadPlaywright() {
-  try {
-    return await import("playwright");
-  } catch (error) {
-    if (error?.code === "ERR_MODULE_NOT_FOUND") {
-      throw new Error("Playwright is not installed. Run `rtk npm ci --prefix typescript/browser-integration`.");
-    }
-    throw error;
   }
 }

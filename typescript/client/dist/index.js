@@ -595,6 +595,37 @@ export function createShunterClient(options) {
         pendingSubscriptionsByQuery.delete(pending.queryId);
         finishReplaySubscription(pending);
     };
+    const registerPendingSubscriptionAbort = (signal, requestId, handle, reject, message) => {
+        if (signal === undefined) {
+            return undefined;
+        }
+        const abort = () => {
+            const pending = pendingSubscriptionsByRequest.get(requestId);
+            if (pending === undefined) {
+                return;
+            }
+            const abandoned = {
+                kind: pending.kind,
+                requestId: pending.requestId,
+                queryId: pending.queryId,
+            };
+            if (!reserveAbandonedOperation(() => {
+                abandonedSubscriptionsByRequest.set(abandoned.requestId, abandoned);
+                abandonedSubscriptionsByQuery.set(abandoned.queryId, abandoned);
+            })) {
+                failConnected(abandonedOperationLimitError());
+                return;
+            }
+            cleanupPendingSubscription(pending);
+            const abortError = new ShunterClosedClientError(message);
+            handle?.close(abortError);
+            reject(abortError);
+        };
+        signal.addEventListener("abort", abort, { once: true });
+        return () => {
+            signal.removeEventListener("abort", abort);
+        };
+    };
     const cleanupAbandonedSubscription = (abandoned) => {
         abandonedSubscriptionsByRequest.delete(abandoned.requestId);
         abandonedSubscriptionsByQuery.delete(abandoned.queryId);
@@ -2200,35 +2231,7 @@ export function createShunterClient(options) {
                 })
                 : undefined;
             return new Promise((resolve, reject) => {
-                let cleanup;
-                if (options.signal !== undefined) {
-                    const abort = () => {
-                        const pending = pendingSubscriptionsByRequest.get(request.requestId);
-                        if (pending === undefined) {
-                            return;
-                        }
-                        const abandoned = {
-                            kind: pending.kind,
-                            requestId: pending.requestId,
-                            queryId: pending.queryId,
-                        };
-                        if (!reserveAbandonedOperation(() => {
-                            abandonedSubscriptionsByRequest.set(abandoned.requestId, abandoned);
-                            abandonedSubscriptionsByQuery.set(abandoned.queryId, abandoned);
-                        })) {
-                            failConnected(abandonedOperationLimitError());
-                            return;
-                        }
-                        cleanupPendingSubscription(pending);
-                        const abortError = new ShunterClosedClientError("Declared view subscription aborted before a response was received.");
-                        handle?.close(abortError);
-                        reject(abortError);
-                    };
-                    options.signal.addEventListener("abort", abort, { once: true });
-                    cleanup = () => {
-                        options.signal?.removeEventListener("abort", abort);
-                    };
-                }
+                const cleanup = registerPendingSubscriptionAbort(options.signal, request.requestId, handle, reject, "Declared view subscription aborted before a response was received.");
                 const pending = {
                     kind: "declared_view",
                     target: name,
@@ -2287,35 +2290,7 @@ export function createShunterClient(options) {
                 })
                 : undefined;
             return new Promise((resolve, reject) => {
-                let cleanup;
-                if (options.signal !== undefined) {
-                    const abort = () => {
-                        const pending = pendingSubscriptionsByRequest.get(request.requestId);
-                        if (pending === undefined) {
-                            return;
-                        }
-                        const abandoned = {
-                            kind: pending.kind,
-                            requestId: pending.requestId,
-                            queryId: pending.queryId,
-                        };
-                        if (!reserveAbandonedOperation(() => {
-                            abandonedSubscriptionsByRequest.set(abandoned.requestId, abandoned);
-                            abandonedSubscriptionsByQuery.set(abandoned.queryId, abandoned);
-                        })) {
-                            failConnected(abandonedOperationLimitError());
-                            return;
-                        }
-                        cleanupPendingSubscription(pending);
-                        const abortError = new ShunterClosedClientError("Table subscription aborted before a response was received.");
-                        handle?.close(abortError);
-                        reject(abortError);
-                    };
-                    options.signal.addEventListener("abort", abort, { once: true });
-                    cleanup = () => {
-                        options.signal?.removeEventListener("abort", abort);
-                    };
-                }
+                const cleanup = registerPendingSubscriptionAbort(options.signal, request.requestId, handle, reject, "Table subscription aborted before a response was received.");
                 const pending = {
                     kind: "table",
                     target: table,

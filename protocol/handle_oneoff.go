@@ -533,10 +533,7 @@ func oneOffLimitReached(count int, limit int) bool {
 }
 
 func oneOffWindowBounds(length int, offset int, limit int) (int, int) {
-	start := offset
-	if start > length {
-		start = length
-	}
+	start := min(offset, length)
 	end := length
 	if limit >= 0 && limit < end-start {
 		end = start + limit

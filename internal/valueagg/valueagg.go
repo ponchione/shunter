@@ -4,6 +4,7 @@ package valueagg
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/ponchione/shunter/types"
 )
@@ -22,10 +23,8 @@ func NewDistinctSet() *DistinctSet {
 // Add inserts value if it is not already present.
 func (s *DistinctSet) Add(value types.Value) {
 	hash := value.Hash64()
-	for _, existing := range s.buckets[hash] {
-		if value.Equal(existing) {
-			return
-		}
+	if slices.ContainsFunc(s.buckets[hash], value.Equal) {
+		return
 	}
 	s.buckets[hash] = append(s.buckets[hash], value)
 	s.n++

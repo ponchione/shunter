@@ -76,10 +76,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 			timer *time.Timer
 		)
 		if !s.nextWakeup.IsZero() {
-			d := s.nextWakeup.Sub(s.now())
-			if d < 0 {
-				d = 0
-			}
+			d := max(s.nextWakeup.Sub(s.now()), 0)
 			timer = time.NewTimer(d)
 			wait = timer.C
 		}

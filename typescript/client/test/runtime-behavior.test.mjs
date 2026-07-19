@@ -3118,40 +3118,28 @@ const assertClosedClientError = (error) => {
   assert(error instanceof ShunterClosedClientError);
   return true;
 };
-await assert.rejects(
-  client.callReducer("send", new Uint8Array(), { requestId: 1 }),
-  assertClosedClientError,
-);
-await assert.rejects(
-  client.runDeclaredQuery("recent_users"),
-  assertClosedClientError,
-);
-await assert.rejects(
-  client.subscribeDeclaredView("live_users", { returnHandle: true }),
-  assertClosedClientError,
-);
-await assert.rejects(
-  client.subscribeTable("users", undefined, { returnHandle: true }),
-  assertClosedClientError,
-);
+const assertClientOperationsRejectClosed = async (closedClient) => {
+  await assert.rejects(
+    closedClient.callReducer("send", new Uint8Array(), { requestId: 1 }),
+    assertClosedClientError,
+  );
+  await assert.rejects(
+    closedClient.runDeclaredQuery("recent_users"),
+    assertClosedClientError,
+  );
+  await assert.rejects(
+    closedClient.subscribeDeclaredView("live_users", { returnHandle: true }),
+    assertClosedClientError,
+  );
+  await assert.rejects(
+    closedClient.subscribeTable("users", undefined, { returnHandle: true }),
+    assertClosedClientError,
+  );
+};
+await assertClientOperationsRejectClosed(client);
 await client.dispose();
 await assert.rejects(client.connect(), assertClosedClientError);
-await assert.rejects(
-  client.callReducer("send", new Uint8Array(), { requestId: 1 }),
-  assertClosedClientError,
-);
-await assert.rejects(
-  client.runDeclaredQuery("recent_users"),
-  assertClosedClientError,
-);
-await assert.rejects(
-  client.subscribeDeclaredView("live_users", { returnHandle: true }),
-  assertClosedClientError,
-);
-await assert.rejects(
-  client.subscribeTable("users", undefined, { returnHandle: true }),
-  assertClosedClientError,
-);
+await assertClientOperationsRejectClosed(client);
 });
 
 isolatedRuntimeTest("pending limits interruptions and send failures", async () => {

@@ -461,12 +461,7 @@ func normalizePlanClassifications(in []shunter.MigrationClassification) []shunte
 }
 
 func hasPlanClassification(classifications []shunter.MigrationClassification, want shunter.MigrationClassification) bool {
-	for _, classification := range classifications {
-		if classification == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(classifications, want)
 }
 
 func migrationClassificationsText(classifications []shunter.MigrationClassification) string {

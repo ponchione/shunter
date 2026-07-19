@@ -5,6 +5,8 @@ import { createInterface } from "node:readline";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { launchChromium, loadPlaywright } from "./browser-helpers.mjs";
+
 const closePolicy = 1008;
 const closeReasonAuthRejected = "auth-token rejected by admission";
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -15,7 +17,7 @@ const server = await startStrictAuthServer();
 let browser;
 
 try {
-  browser = await launchChromium();
+  browser = await launchChromium(chromium);
   const page = await browser.newPage();
   await page.goto(server.url, { waitUntil: "load" });
 
@@ -97,38 +99,6 @@ async function stopStrictAuthServer(child) {
   if (await Promise.race([exit.then(() => "exit"), timeout.then(() => "timeout")]) === "timeout") {
     child.kill("SIGTERM");
     await once(child, "exit");
-  }
-}
-
-async function launchChromium() {
-  try {
-    return await chromium.launch({ channel: "chrome", headless: true, args: ["--no-sandbox"] });
-  } catch (channelError) {
-    try {
-      return await chromium.launch({ headless: true, args: ["--no-sandbox"] });
-    } catch (bundledError) {
-      if (
-        String(bundledError).includes("Executable doesn't exist") ||
-        String(bundledError).includes("Please run the following command")
-      ) {
-        throw new Error(
-          "Playwright Chromium is not installed. Run `npm --prefix typescript/browser-integration run install:browsers`.\n" +
-            bundledError,
-        );
-      }
-      throw new Error(`launch chrome failed: ${channelError}\nlaunch bundled chromium failed: ${bundledError}`);
-    }
-  }
-}
-
-async function loadPlaywright() {
-  try {
-    return await import("playwright");
-  } catch (error) {
-    if (error?.code === "ERR_MODULE_NOT_FOUND") {
-      throw new Error("Playwright is not installed. Run `rtk npm ci --prefix typescript/browser-integration`.");
-    }
-    throw error;
   }
 }
 

@@ -250,10 +250,8 @@ func revalidateInsertAgainstPending(tableID schema.TableID, table *Table, row ty
 		ref := txUniqueRef{table: tableID, index: idxOrdinal}
 		buckets := pendingUnique[ref]
 		hash := key.hash64()
-		for _, priorKey := range buckets[hash] {
-			if key.Equal(priorKey) {
-				return uniqueViolationError(table, idx, key)
-			}
+		if slices.ContainsFunc(buckets[hash], key.Equal) {
+			return uniqueViolationError(table, idx, key)
 		}
 		if buckets == nil {
 			buckets = make(map[uint64][]IndexKey)

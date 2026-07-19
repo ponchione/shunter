@@ -458,7 +458,7 @@ func negotiateSubprotocol(r *http.Request, preferred []string) (string, Protocol
 	header := r.Header.Values("Sec-WebSocket-Protocol")
 	offered := make(map[string]struct{}, len(header))
 	for _, line := range header {
-		for _, raw := range strings.Split(line, ",") {
+		for raw := range strings.SplitSeq(line, ",") {
 			tok := strings.TrimSpace(raw)
 			if tok != "" {
 				offered[tok] = struct{}{}

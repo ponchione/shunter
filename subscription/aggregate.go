@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/ponchione/shunter/internal/valueagg"
 	"github.com/ponchione/shunter/schema"
@@ -420,12 +421,7 @@ func predicateTouchesEventTable(dv *DeltaView, pred Predicate) bool {
 	if dv == nil || pred == nil {
 		return false
 	}
-	for _, table := range pred.Tables() {
-		if dv.IsEventTable(table) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(pred.Tables(), dv.IsEventTable)
 }
 
 func countAggregateBeforeValue(dv *DeltaView, table TableID, pred Predicate, aggregate *Aggregate, after types.Value) types.Value {

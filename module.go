@@ -1,6 +1,10 @@
 package shunter
 
-import "github.com/ponchione/shunter/schema"
+import (
+	"maps"
+
+	"github.com/ponchione/shunter/schema"
+)
 
 // Module owns an application module definition before it is built into a
 // Runtime. It stores module identity metadata and delegates schema, reducer,
@@ -175,8 +179,6 @@ func copyStringMap(values map[string]string) map[string]string {
 	}
 
 	out := make(map[string]string, len(values))
-	for k, v := range values {
-		out[k] = v
-	}
+	maps.Copy(out, values)
 	return out
 }

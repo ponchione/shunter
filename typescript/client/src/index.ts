@@ -1009,6 +1009,44 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
     finishReplaySubscription(pending);
   };
 
+  const registerPendingSubscriptionAbort = (
+    signal: AbortSignal | undefined,
+    requestId: RequestID,
+    handle: PendingSubscription["handle"],
+    reject: PendingSubscription["reject"],
+    message: string,
+  ): (() => void) | undefined => {
+    if (signal === undefined) {
+      return undefined;
+    }
+    const abort = (): void => {
+      const pending = pendingSubscriptionsByRequest.get(requestId);
+      if (pending === undefined) {
+        return;
+      }
+      const abandoned: AbandonedSubscription = {
+        kind: pending.kind,
+        requestId: pending.requestId,
+        queryId: pending.queryId,
+      };
+      if (!reserveAbandonedOperation(() => {
+        abandonedSubscriptionsByRequest.set(abandoned.requestId, abandoned);
+        abandonedSubscriptionsByQuery.set(abandoned.queryId, abandoned);
+      })) {
+        failConnected(abandonedOperationLimitError());
+        return;
+      }
+      cleanupPendingSubscription(pending);
+      const abortError = new ShunterClosedClientError(message);
+      handle?.close(abortError);
+      reject(abortError);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    return () => {
+      signal.removeEventListener("abort", abort);
+    };
+  };
+
   const cleanupAbandonedSubscription = (abandoned: AbandonedSubscription): void => {
     abandonedSubscriptionsByRequest.delete(abandoned.requestId);
     abandonedSubscriptionsByQuery.delete(abandoned.queryId);
@@ -2846,35 +2884,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         })
         : undefined;
       return new Promise<SubscriptionUnsubscribe | SubscriptionHandle<Uint8Array>>((resolve, reject) => {
-        let cleanup: (() => void) | undefined;
-        if (options.signal !== undefined) {
-          const abort = (): void => {
-            const pending = pendingSubscriptionsByRequest.get(request.requestId);
-            if (pending === undefined) {
-              return;
-            }
-            const abandoned: AbandonedSubscription = {
-              kind: pending.kind,
-              requestId: pending.requestId,
-              queryId: pending.queryId,
-            };
-            if (!reserveAbandonedOperation(() => {
-              abandonedSubscriptionsByRequest.set(abandoned.requestId, abandoned);
-              abandonedSubscriptionsByQuery.set(abandoned.queryId, abandoned);
-            })) {
-              failConnected(abandonedOperationLimitError());
-              return;
-            }
-            cleanupPendingSubscription(pending);
-            const abortError = new ShunterClosedClientError("Declared view subscription aborted before a response was received.");
-            handle?.close(abortError);
-            reject(abortError);
-          };
-          options.signal.addEventListener("abort", abort, { once: true });
-          cleanup = () => {
-            options.signal?.removeEventListener("abort", abort);
-          };
-        }
+        const cleanup = registerPendingSubscriptionAbort(
+          options.signal,
+          request.requestId,
+          handle,
+          reject,
+          "Declared view subscription aborted before a response was received.",
+        );
         const pending: PendingSubscription = {
           kind: "declared_view",
           target: name,
@@ -2936,35 +2952,13 @@ export function createShunterClient<Protocol extends ProtocolMetadata>(
         })
         : undefined;
       return new Promise<SubscriptionUnsubscribe | SubscriptionHandle<Uint8Array> | SubscriptionHandle<Row>>((resolve, reject) => {
-        let cleanup: (() => void) | undefined;
-        if (options.signal !== undefined) {
-          const abort = (): void => {
-            const pending = pendingSubscriptionsByRequest.get(request.requestId);
-            if (pending === undefined) {
-              return;
-            }
-            const abandoned: AbandonedSubscription = {
-              kind: pending.kind,
-              requestId: pending.requestId,
-              queryId: pending.queryId,
-            };
-            if (!reserveAbandonedOperation(() => {
-              abandonedSubscriptionsByRequest.set(abandoned.requestId, abandoned);
-              abandonedSubscriptionsByQuery.set(abandoned.queryId, abandoned);
-            })) {
-              failConnected(abandonedOperationLimitError());
-              return;
-            }
-            cleanupPendingSubscription(pending);
-            const abortError = new ShunterClosedClientError("Table subscription aborted before a response was received.");
-            handle?.close(abortError);
-            reject(abortError);
-          };
-          options.signal.addEventListener("abort", abort, { once: true });
-          cleanup = () => {
-            options.signal?.removeEventListener("abort", abort);
-          };
-        }
+        const cleanup = registerPendingSubscriptionAbort(
+          options.signal,
+          request.requestId,
+          handle,
+          reject,
+          "Table subscription aborted before a response was received.",
+        );
         const pending: PendingSubscription = {
           kind: "table",
           target: table,
