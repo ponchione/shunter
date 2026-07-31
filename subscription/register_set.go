@@ -58,6 +58,13 @@ func (c *initialRowCollector) remainingPlusOne() int {
 	return remaining + 1
 }
 
+func (c *initialRowCollector) remaining() int {
+	if c == nil || c.limit <= 0 {
+		return 0
+	}
+	return max(c.limit-c.count, 0)
+}
+
 func (c *initialRowCollector) addReturned(n int) error {
 	if err := c.err(); err != nil {
 		return err
@@ -201,24 +208,66 @@ func (w initialRowWindow) orderedKeepLimit(collector *initialRowCollector, maxRo
 	if len(w.orderBy) == 0 {
 		return 0, nil
 	}
-	outputLimit := w.streamOutputLimit(collector)
-	if outputLimit == 0 {
-		return 0, nil
+	offset := uint64(0)
+	if w.offset != nil {
+		offset = *w.offset
 	}
-	if w.offset == nil || *w.offset == 0 {
-		if maxRows > 0 && outputLimit > maxRows {
-			return 0, NewQuotaError(ErrOrderedWindowLimit, "ordered_window_rows", outputLimit, maxRows)
-		}
-		return outputLimit, nil
-	}
-	if *w.offset > uint64(math.MaxInt-outputLimit) {
+	if offset > uint64(math.MaxInt) {
 		return 0, NewQuotaError(ErrOrderedWindowLimit, "ordered_window_rows", math.MaxInt, maxRows)
 	}
-	keep := int(*w.offset) + outputLimit
+	if maxRows > 0 && offset > uint64(maxRows) {
+		return 0, NewQuotaError(ErrOrderedWindowLimit, "ordered_window_rows", int(offset), maxRows)
+	}
+
+	remaining := collector.remaining()
+	outputLimit := initialUint64LimitAsInt(w.limit)
+	if w.limit == nil {
+		outputLimit = remaining
+	} else if remaining > 0 {
+		outputLimit = min(outputLimit, remaining)
+	}
+	if outputLimit == 0 {
+		if w.limit != nil {
+			return 0, nil
+		}
+		return maxRows, nil
+	}
+	if offset > uint64(math.MaxInt-outputLimit) {
+		return 0, NewQuotaError(ErrOrderedWindowLimit, "ordered_window_rows", math.MaxInt, maxRows)
+	}
+	keep := int(offset) + outputLimit
 	if maxRows > 0 && keep > maxRows {
-		return 0, NewQuotaError(ErrOrderedWindowLimit, "ordered_window_rows", keep, maxRows)
+		if w.limit != nil {
+			return 0, NewQuotaError(ErrOrderedWindowLimit, "ordered_window_rows", keep, maxRows)
+		}
+		return maxRows, nil
 	}
 	return keep, nil
+}
+
+func (w initialRowWindow) orderedRetentionOverflow(collector *initialRowCollector, matchingRows, keep, maxRows int) error {
+	if matchingRows <= keep {
+		return nil
+	}
+	outputRows := uint64(matchingRows)
+	if w.offset != nil {
+		if outputRows <= *w.offset {
+			outputRows = 0
+		} else {
+			outputRows -= *w.offset
+		}
+	}
+	if w.limit != nil && outputRows > *w.limit {
+		outputRows = *w.limit
+	}
+	remaining := collector.remaining()
+	if collector != nil && collector.limit > 0 && outputRows > uint64(remaining) {
+		return NewQuotaError(ErrInitialRowLimit, "snapshot_rows", collector.count+remaining+1, collector.limit)
+	}
+	if w.limit == nil {
+		return NewQuotaError(ErrOrderedWindowLimit, "ordered_window_rows", matchingRows, maxRows)
+	}
+	return nil
 }
 
 func (w initialRowWindow) apply(rows []types.ProductValue) ([]types.ProductValue, error) {
@@ -285,6 +334,16 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 		return nil, err
 	}
 	ordered := newBoundedOrderedInitialRowsWithCapacity(window.orderBy, keep, view.RowCount(table))
+	matchingRows := 0
+	addRow := func(row types.ProductValue) (bool, error) {
+		if ordered != nil {
+			matchingRows++
+			if err := window.orderedRetentionOverflow(collector, matchingRows, keep, m.OrderedWindowMaxRows); err != nil {
+				return false, err
+			}
+		}
+		return addInitialRow(&out, &scan, ordered, row)
+	}
 	if m.resolver != nil {
 		if eq, idxID, ok := initialIndexedEquality(pred, table, m.resolver); ok {
 			key := store.NewIndexKey(eq.Value)
@@ -300,7 +359,7 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 					continue
 				}
 				if MatchRow(pred, table, row) {
-					cont, err := addInitialRow(&out, &scan, ordered, row)
+					cont, err := addRow(row)
 					if err != nil {
 						return nil, err
 					}
@@ -327,7 +386,7 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 				if !MatchRow(pred, table, row) {
 					continue
 				}
-				cont, err := addInitialRow(&out, &scan, ordered, row)
+				cont, err := addRow(row)
 				if err != nil {
 					return nil, err
 				}
@@ -349,7 +408,7 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 			return nil, err
 		}
 		if MatchRow(pred, table, row) {
-			cont, err := addInitialRow(&out, &scan, ordered, row)
+			cont, err := addRow(row)
 			if err != nil {
 				return nil, err
 			}

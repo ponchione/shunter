@@ -372,8 +372,8 @@ func TestRegisterSetMultiJoinWorkLimitStopsRejectedCartesianTuples(t *testing.T)
 				Predicates: []Predicate{pred},
 				Aggregates: aggregates,
 			}, multiJoinCommitted(false))
-			if !errors.Is(err, ErrMultiJoinLimit) {
-				t.Fatalf("RegisterSet work error = %v, want ErrMultiJoinLimit", err)
+			if !errors.Is(err, ErrSubscriptionWorkLimit) {
+				t.Fatalf("RegisterSet work error = %v, want ErrSubscriptionWorkLimit", err)
 			}
 			if active := mgr.ActiveSubscriptionSets(); active != 0 {
 				t.Fatalf("ActiveSubscriptionSets = %d, want 0 after work-limit rejection", active)
@@ -445,8 +445,8 @@ func TestMultiJoinRuntimeWorkLimitQueuesEvalError(t *testing.T) {
 
 	msg := <-inbox
 	errs := msg.Errors[connID]
-	if len(errs) != 1 || !strings.Contains(errs[0].Message, ErrMultiJoinLimit.Error()) {
-		t.Fatalf("subscription errors = %v, want one multi-join limit", msg.Errors)
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, ErrSubscriptionWorkLimit.Error()) {
+		t.Fatalf("subscription errors = %v, want one subscription work limit", msg.Errors)
 	}
 	if updates := msg.Fanout[connID]; len(updates) != 0 {
 		t.Fatalf("fanout updates = %v, want none after work-limit failure", updates)

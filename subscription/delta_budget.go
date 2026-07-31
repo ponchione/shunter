@@ -66,12 +66,3 @@ func chargeDeltaRowN(ctx context.Context, row types.ProductValue, n uint64) erro
 	budget.bytes = bytes
 	return nil
 }
-
-func chargeDeltaRows(ctx context.Context, rows []types.ProductValue) error {
-	for _, row := range rows {
-		if err := chargeDeltaRow(ctx, row); err != nil {
-			return err
-		}
-	}
-	return nil
-}

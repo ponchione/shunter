@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"slices"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -474,6 +475,156 @@ func TestRegisterSetOrderByWindowAppliesInitialRowLimitAfterBoundedSort(t *testi
 	}
 	if got := res.Update[0].Inserts[0][0].AsUint64(); got != 3 {
 		t.Fatalf("ordered window id = %d, want 3", got)
+	}
+}
+
+func TestRegisterSetOrderedEqualRowAndWindowCaps(t *testing.T) {
+	const capRows = 3
+	orderBy := [][]OrderByColumn{{{
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Table:  1,
+		Column: 0,
+	}}}
+	rows := func(n int) []types.ProductValue {
+		out := make([]types.ProductValue, 0, n)
+		for id := n; id > 0; id-- {
+			out = append(out, types.ProductValue{types.NewUint64(uint64(id)), types.NewString("row")})
+		}
+		return out
+	}
+
+	for _, rowCount := range []int{0, 1, capRows, capRows + 1} {
+		t.Run(fmt.Sprintf("rows_%d", rowCount), func(t *testing.T) {
+			s := testSchema()
+			view := buildMockCommitted(s, map[TableID][]types.ProductValue{1: rows(rowCount)})
+			mgr := NewManager(s, s, WithInitialRowLimit(capRows), WithOrderedWindowMaxRows(capRows))
+			res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+				ConnID:         types.ConnectionID{1},
+				QueryID:        30,
+				Predicates:     []Predicate{AllRows{Table: 1}},
+				OrderByColumns: orderBy,
+			}, view)
+			if rowCount == capRows+1 {
+				if !errors.Is(err, ErrInitialRowLimit) {
+					t.Fatalf("RegisterSet error = %v, want ErrInitialRowLimit", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RegisterSet: %v", err)
+			}
+			if rowCount == 0 {
+				if len(res.Update) != 0 {
+					t.Fatalf("empty ordered update = %+v, want none", res.Update)
+				}
+				return
+			}
+			if len(res.Update) != 1 || len(res.Update[0].Inserts) != rowCount {
+				t.Fatalf("ordered update = %+v, want %d rows", res.Update, rowCount)
+			}
+			for i, row := range res.Update[0].Inserts {
+				if got, want := row[0].AsUint64(), uint64(i+1); got != want {
+					t.Fatalf("ordered row %d id = %d, want %d", i, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestUnregisterSetOrderedEqualCapsPreservesFinalOverflow(t *testing.T) {
+	s := testSchema()
+	orderBy := [][]OrderByColumn{{{
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Table:  1,
+		Column: 0,
+	}}}
+	mgr := NewManager(s, s, WithInitialRowLimit(3), WithOrderedWindowMaxRows(3))
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:         types.ConnectionID{1},
+		QueryID:        31,
+		Predicates:     []Predicate{AllRows{Table: 1}},
+		OrderByColumns: orderBy,
+	}, buildMockCommitted(s, nil)); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{1: {
+		{types.NewUint64(4), types.NewString("d")},
+		{types.NewUint64(3), types.NewString("c")},
+		{types.NewUint64(2), types.NewString("b")},
+		{types.NewUint64(1), types.NewString("a")},
+	}})
+	_, err := mgr.UnregisterSet(types.ConnectionID{1}, 31, view)
+	if !errors.Is(err, ErrFinalQuery) || !errors.Is(err, ErrInitialRowLimit) {
+		t.Fatalf("UnregisterSet error = %v, want ErrFinalQuery wrapping ErrInitialRowLimit", err)
+	}
+}
+
+func TestRegisterSetUnboundedOrderedOffsetChecksActualWorkingSet(t *testing.T) {
+	s := testSchema()
+	offset := uint64(1)
+	orderBy := [][]OrderByColumn{{{
+		Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+		Table:  1,
+		Column: 0,
+	}}}
+	request := func(queryID uint32) SubscriptionSetRegisterRequest {
+		return SubscriptionSetRegisterRequest{
+			ConnID:         types.ConnectionID{byte(queryID)},
+			QueryID:        queryID,
+			Predicates:     []Predicate{AllRows{Table: 1}},
+			OrderByColumns: orderBy,
+			Offsets:        []*uint64{&offset},
+		}
+	}
+
+	withinCap := buildMockCommitted(s, map[TableID][]types.ProductValue{1: {
+		{types.NewUint64(3), types.NewString("c")},
+		{types.NewUint64(1), types.NewString("a")},
+		{types.NewUint64(2), types.NewString("b")},
+	}})
+	mgr := NewManager(s, s, WithInitialRowLimit(3), WithOrderedWindowMaxRows(3))
+	res, err := mgr.RegisterSet(request(32), withinCap)
+	if err != nil {
+		t.Fatalf("RegisterSet within cap: %v", err)
+	}
+	if got := rowIDs(res.Update[0].Inserts); !slices.Equal(got, []uint64{2, 3}) {
+		t.Fatalf("offset ordered rows = %v, want [2 3]", got)
+	}
+
+	overCap := buildMockCommitted(s, map[TableID][]types.ProductValue{1: {
+		{types.NewUint64(4), types.NewString("d")},
+		{types.NewUint64(3), types.NewString("c")},
+		{types.NewUint64(2), types.NewString("b")},
+		{types.NewUint64(1), types.NewString("a")},
+	}})
+	_, err = mgr.RegisterSet(request(33), overCap)
+	if !errors.Is(err, ErrOrderedWindowLimit) {
+		t.Fatalf("RegisterSet over working cap error = %v, want ErrOrderedWindowLimit", err)
+	}
+}
+
+func TestRegisterSetOrderedLimitZeroSkipsWindowAllocation(t *testing.T) {
+	s := testSchema()
+	limit := uint64(0)
+	offset := ^uint64(0)
+	mgr := NewManager(s, s, WithInitialRowLimit(3), WithOrderedWindowMaxRows(3))
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    34,
+		Predicates: []Predicate{AllRows{Table: 1}},
+		OrderByColumns: [][]OrderByColumn{{{
+			Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+			Table:  1,
+			Column: 0,
+		}}},
+		Limits:  []*uint64{&limit},
+		Offsets: []*uint64{&offset},
+	}, buildMockCommitted(s, nil))
+	if err != nil {
+		t.Fatalf("RegisterSet LIMIT 0: %v", err)
+	}
+	if len(res.Update) != 0 {
+		t.Fatalf("LIMIT 0 update = %+v, want none", res.Update)
 	}
 }
 

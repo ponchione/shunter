@@ -239,6 +239,7 @@ func BenchmarkBoundedOrderedInitialRowsAdd(b *testing.B) {
 		{totalRows: 4096, keepRows: 100, inputOrder: "descending", keyColumns: 2},
 		{totalRows: 4096, keepRows: 1000, inputOrder: "shuffled", keyColumns: 1},
 		{totalRows: 4096, keepRows: 1000, inputOrder: "shuffled", keyColumns: 2},
+		{totalRows: 200_000, keepRows: 100_000, inputOrder: "descending", keyColumns: 1},
 	}
 
 	for _, tc := range cases {
@@ -307,6 +308,7 @@ func BenchmarkOrderedInitialRowsComparatorShapes(b *testing.B) {
 		{operation: "bounded", totalRows: 1024, keepRows: 100, inputOrder: "shuffled", keyColumns: 1, orderDirection: "desc", keyShape: "unique"},
 		{operation: "bounded", totalRows: 4096, keepRows: 1000, inputOrder: "shuffled", keyColumns: 1, orderDirection: "desc", keyShape: "ties"},
 		{operation: "bounded", totalRows: 4096, keepRows: 1000, inputOrder: "shuffled", keyColumns: 2, orderDirection: "mixed", keyShape: "ties"},
+		{operation: "bounded", totalRows: 200_000, keepRows: 100_000, inputOrder: "descending", keyColumns: 1, orderDirection: "asc", keyShape: "all_ties"},
 		{operation: "full", totalRows: 1024, inputOrder: "shuffled", keyColumns: 1, orderDirection: "desc", keyShape: "ties"},
 		{operation: "full", totalRows: 4096, inputOrder: "descending", keyColumns: 2, orderDirection: "mixed", keyShape: "ties"},
 	}
@@ -417,9 +419,25 @@ func benchmarkOrderedInitialRowsForShape(totalRows int, inputOrder string, keyCo
 		return benchmarkOrderedInitialRows(totalRows, inputOrder, keyColumns)
 	case "ties":
 		return benchmarkTieHeavyOrderedInitialRows(totalRows, inputOrder, keyColumns)
+	case "all_ties":
+		return benchmarkAllTieOrderedInitialRows(totalRows, inputOrder, keyColumns)
 	default:
 		panic(fmt.Sprintf("unsupported ordered key shape %q", keyShape))
 	}
+}
+
+func benchmarkAllTieOrderedInitialRows(totalRows int, inputOrder string, keyColumns int) []types.ProductValue {
+	rows := make([]types.ProductValue, totalRows)
+	for i := range rows {
+		rank := benchmarkOrderInputRank(i, totalRows, inputOrder)
+		row := make(types.ProductValue, 0, keyColumns+1)
+		for range keyColumns {
+			row = append(row, types.NewUint64(0))
+		}
+		row = append(row, types.NewUint64(uint64(rank)))
+		rows[i] = row
+	}
+	return rows
 }
 
 func benchmarkOrderedInitialRows(totalRows int, inputOrder string, keyColumns int) []types.ProductValue {

@@ -166,7 +166,7 @@ func TestOrdinaryQueryWorkLimitClosesSnapshot(t *testing.T) {
 			{types.NewUint64(2)},
 		},
 	}}
-	compiled, err := CompileSQLQueryString("SELECT COUNT(*) AS n FROM items", sl, nil, SQLQueryValidationOptions{})
+	compiled, err := CompileSQLQueryString("SELECT COUNT(*) AS n FROM items", sl, nil, SQLQueryValidationOptions{AllowProjection: true})
 	if err != nil {
 		t.Fatalf("CompileSQLQueryString: %v", err)
 	}

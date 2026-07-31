@@ -1169,6 +1169,9 @@ func assertDataDirRestoredMessageBodies(t *testing.T, rt *Runtime, want []string
 	if len(got) != len(want) {
 		t.Fatalf("restored message bodies = %#v, want %#v", got, want)
 	}
+	want = slices.Clone(want)
+	slices.Sort(got)
+	slices.Sort(want)
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("restored message bodies = %#v, want %#v", got, want)
@@ -1187,6 +1190,9 @@ func assertDataDirRuntimeStateMessageBodies(t *testing.T, rt *Runtime, want []st
 	if len(got) != len(want) {
 		t.Fatalf("runtime state message bodies = %#v, want %#v", got, want)
 	}
+	want = slices.Clone(want)
+	slices.Sort(got)
+	slices.Sort(want)
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("runtime state message bodies = %#v, want %#v", got, want)

@@ -49,13 +49,6 @@ func chargeSubscriptionWorkProduct(ctx context.Context, left, right int) error {
 	return chargeSubscriptionWorkN(ctx, product)
 }
 
-func chargeMultiJoinWork(ctx context.Context) error {
-	if err := querywork.Charge(ctx); err != nil {
-		return fmt.Errorf("%w: %v", ErrMultiJoinLimit, err)
-	}
-	return nil
-}
-
 func (m *Manager) checkMultiJoinLimits(ctx context.Context, pred Predicate, view store.CommittedReadView) error {
 	multi, ok := pred.(MultiJoin)
 	if !ok {

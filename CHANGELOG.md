@@ -8,6 +8,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   accounting across scans, joins, and aggregate input. Live deltas enforce
   row/byte materialization bounds before append, and ordered subscriptions
   reject overflowing or oversized `OFFSET` working sets before allocation.
+- Ordered live snapshots now admit equal default row/window caps, preserve
+  row-limit overflow detection independently of top-K retention, and select
+  bounded windows with a worst-row heap. Shared subscription work exhaustion
+  now reports one stable error class, including multi-way tuple traversal.
 - Remote JWKS and OIDC discovery validation now follows request cancellation,
   shares one in-flight fetch, caches failures behind jittered retry backoff, and
   uses runtime-owned caches; the compatibility cache is bounded and idle-

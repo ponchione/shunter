@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"bytes"
+	"container/heap"
 	"fmt"
 	"sort"
 
@@ -50,11 +51,15 @@ type orderedInitialRow struct {
 	keyLen   uint32
 }
 
+type boundedOrderedInitialRow struct {
+	row types.ProductValue
+	key []byte
+}
+
 type boundedOrderedInitialRows struct {
 	orderBy []OrderByColumn
 	keep    int
-	rows    []orderedInitialRow
-	keys    orderedRowKeyer
+	rows    []boundedOrderedInitialRow
 	itemKey orderedRowKeyer
 }
 
@@ -120,9 +125,8 @@ func newBoundedOrderedInitialRowsWithCapacity(orderBy []OrderByColumn, keep, ava
 	return &boundedOrderedInitialRows{
 		orderBy: orderBy,
 		keep:    keep,
-		rows:    make([]orderedInitialRow, 0, capacity),
-		keys:    orderedRowKeyer{capHint: orderedKeyCapacityHint(capacity, boundedOrderedRowKeyCapHint)},
-		itemKey: orderedRowKeyer{capHint: orderedRowKeyCapHint},
+		rows:    make([]boundedOrderedInitialRow, 0, capacity),
+		itemKey: orderedRowKeyer{capHint: boundedOrderedRowKeyCapHint},
 	}
 }
 
@@ -143,20 +147,21 @@ func (b *boundedOrderedInitialRows) add(row types.ProductValue) error {
 	if err := validateInitialRowOrderRow(row, b.orderBy); err != nil {
 		return err
 	}
-	item := orderedInitialRow{row: row}
-	pos := upperBoundOrderedInitialRows(b.rows, &item, b.orderBy, &b.keys, &b.itemKey)
-	if len(b.rows) == b.keep && pos == b.keep {
+	item := boundedOrderedInitialRow{row: row}
+	if len(b.rows) < b.keep {
+		heap.Push(b, item)
 		return nil
 	}
-	if item.keyLen != 0 {
-		b.keys.appendKey(&item, b.itemKey.rowKey(&item))
+	cmp, itemKey := b.compareCandidate(&item, &b.rows[0])
+	if cmp >= 0 {
+		return nil
 	}
-	b.rows = append(b.rows, orderedInitialRow{})
-	copy(b.rows[pos+1:], b.rows[pos:])
-	b.rows[pos] = item
-	if len(b.rows) > b.keep {
-		b.rows = b.rows[:b.keep]
+	item.key = b.rows[0].key[:0]
+	if itemKey != nil {
+		item.key = append(item.key, itemKey...)
 	}
+	b.rows[0] = item
+	heap.Fix(b, 0)
 	return nil
 }
 
@@ -164,7 +169,59 @@ func (b *boundedOrderedInitialRows) productRows() []types.ProductValue {
 	if b == nil {
 		return nil
 	}
-	return flattenOrderedInitialRows(b.rows)
+	sort.Slice(b.rows, func(i, j int) bool {
+		return b.compareRetained(&b.rows[i], &b.rows[j]) < 0
+	})
+	out := make([]types.ProductValue, 0, len(b.rows))
+	for _, row := range b.rows {
+		out = append(out, row.row)
+	}
+	return out
+}
+
+// boundedOrderedInitialRows implements a max-heap whose root is the worst
+// retained row. Candidates that cannot improve the top-K set are discarded
+// without shifting the retained window.
+func (b *boundedOrderedInitialRows) Len() int { return len(b.rows) }
+
+func (b *boundedOrderedInitialRows) Less(i, j int) bool {
+	return b.compareRetained(&b.rows[i], &b.rows[j]) > 0
+}
+
+func (b *boundedOrderedInitialRows) Swap(i, j int) { b.rows[i], b.rows[j] = b.rows[j], b.rows[i] }
+
+func (b *boundedOrderedInitialRows) Push(value any) {
+	b.rows = append(b.rows, value.(boundedOrderedInitialRow))
+}
+
+func (b *boundedOrderedInitialRows) Pop() any {
+	last := len(b.rows) - 1
+	row := b.rows[last]
+	b.rows[last] = boundedOrderedInitialRow{}
+	b.rows = b.rows[:last]
+	return row
+}
+
+func (b *boundedOrderedInitialRows) compareCandidate(candidate, retained *boundedOrderedInitialRow) (int, []byte) {
+	if cmp := compareOrderedProductRows(candidate.row, retained.row, b.orderBy); cmp != 0 {
+		return cmp, nil
+	}
+	candidateKey := b.itemKey.scratchProductRowKey(candidate.row)
+	return bytes.Compare(candidateKey, retainedOrderedRowKey(retained)), candidateKey
+}
+
+func (b *boundedOrderedInitialRows) compareRetained(a, c *boundedOrderedInitialRow) int {
+	if cmp := compareOrderedProductRows(a.row, c.row, b.orderBy); cmp != 0 {
+		return cmp
+	}
+	return bytes.Compare(retainedOrderedRowKey(a), retainedOrderedRowKey(c))
+}
+
+func retainedOrderedRowKey(row *boundedOrderedInitialRow) []byte {
+	if len(row.key) == 0 {
+		row.key = encodeOrderedRowKey(row.key[:0], row.row)
+	}
+	return row.key
 }
 
 func validateInitialRowOrderRow(row types.ProductValue, orderBy []OrderByColumn) error {
@@ -185,9 +242,13 @@ func compareOrderedInitialRows(a, b *orderedInitialRow, orderBy []OrderByColumn,
 }
 
 func compareOrderedColumns(a, b *orderedInitialRow, orderBy []OrderByColumn) int {
+	return compareOrderedProductRows(a.row, b.row, orderBy)
+}
+
+func compareOrderedProductRows(a, b types.ProductValue, orderBy []OrderByColumn) int {
 	for _, term := range orderBy {
 		idx := int(term.Column)
-		cmp := a.row[idx].Compare(b.row[idx])
+		cmp := a[idx].Compare(b[idx])
 		if cmp == 0 {
 			continue
 		}
@@ -205,32 +266,26 @@ func (k *orderedRowKeyer) rowKey(row *orderedInitialRow) []byte {
 			k.buf = make([]byte, 0, k.capHint)
 		}
 		start := len(k.buf)
-		enc := canonicalEncoder{buf: k.buf}
-		enc.writeLen(len(row.row))
-		for _, v := range row.row {
-			encodeValue(&enc, v)
-		}
-		k.buf = enc.buf
+		k.buf = encodeOrderedRowKey(k.buf, row.row)
 		row.keyStart, row.keyLen = checkedOrderedRowKeyRange(start, len(k.buf)-start)
 	}
 	start := int(row.keyStart)
 	return k.buf[start : start+int(row.keyLen)]
 }
 
-func (k *orderedRowKeyer) scratchRowKey(row *orderedInitialRow) []byte {
-	if row.keyLen == 0 {
-		k.buf = k.buf[:0]
+func encodeOrderedRowKey(buf []byte, row types.ProductValue) []byte {
+	enc := canonicalEncoder{buf: buf}
+	enc.writeLen(len(row))
+	for _, v := range row {
+		encodeValue(&enc, v)
 	}
-	return k.rowKey(row)
+	return enc.buf
 }
 
-func (k *orderedRowKeyer) appendKey(row *orderedInitialRow, key []byte) {
-	if k.buf == nil && k.capHint > 0 {
-		k.buf = make([]byte, 0, k.capHint)
-	}
-	start := len(k.buf)
-	k.buf = append(k.buf, key...)
-	row.keyStart, row.keyLen = checkedOrderedRowKeyRange(start, len(key))
+func (k *orderedRowKeyer) scratchProductRowKey(row types.ProductValue) []byte {
+	k.buf = k.buf[:0]
+	k.buf = encodeOrderedRowKey(k.buf, row)
+	return k.buf
 }
 
 func checkedOrderedRowKeyRange(start, length int) (uint32, uint32) {
@@ -238,23 +293,6 @@ func checkedOrderedRowKeyRange(start, length int) (uint32, uint32) {
 		panic("subscription: ordered row key buffer exceeds uint32")
 	}
 	return uint32(start), uint32(length)
-}
-
-func upperBoundOrderedInitialRows(rows []orderedInitialRow, item *orderedInitialRow, orderBy []OrderByColumn, keys, itemKeys *orderedRowKeyer) int {
-	return sort.Search(len(rows), func(i int) bool {
-		for _, term := range orderBy {
-			idx := int(term.Column)
-			cmp := rows[i].row[idx].Compare(item.row[idx])
-			if cmp == 0 {
-				continue
-			}
-			if term.Desc {
-				return -cmp > 0
-			}
-			return cmp > 0
-		}
-		return bytes.Compare(keys.rowKey(&rows[i]), itemKeys.scratchRowKey(item)) > 0
-	})
 }
 
 func flattenOrderedInitialRows(ordered []orderedInitialRow) []types.ProductValue {

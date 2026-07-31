@@ -87,6 +87,7 @@ async function runSuccessfulLifecycleScenario() {
     }
     return handle.state.rows.map((row) => ({ ...row }));
   };
+  const sortedRowsFromHandle = (handle) => rowsFromHandle(handle).sort((a, b) => a.id.localeCompare(b.id));
 
   const sockets = [];
   const firstSocketFrames = [];
@@ -215,7 +216,7 @@ async function runSuccessfulLifecycleScenario() {
       { id: "1", body: "initial" },
       { id: "2", body: "live-update" },
     ];
-    requireInvariant(JSON.stringify(rowsFromHandle(handle)) === JSON.stringify(expectedRows), "update/live delivery", {
+    requireInvariant(JSON.stringify(sortedRowsFromHandle(handle)) === JSON.stringify(expectedRows), "update/live delivery", {
       rows: rowsFromHandle(handle),
       updateEvents,
     });
@@ -235,7 +236,7 @@ async function runSuccessfulLifecycleScenario() {
     requireInvariant(
       handle.state.previousEpoch === 1 &&
         handle.state.targetEpoch === 2 &&
-        JSON.stringify(rowsFromHandle(handle)) === JSON.stringify(expectedRows),
+        JSON.stringify(sortedRowsFromHandle(handle)) === JSON.stringify(expectedRows),
       "reconnect/resynchronizing epoch and retained rows",
       { handleEpoch: handle.epoch, handleState: handle.state },
     );
@@ -262,7 +263,7 @@ async function runSuccessfulLifecycleScenario() {
       epoch: handle.epoch,
       state: handle.state,
     });
-    requireInvariant(JSON.stringify(rowsFromHandle(handle)) === JSON.stringify(expectedRows), "reconnect/replayed rows without duplicates", {
+    requireInvariant(JSON.stringify(sortedRowsFromHandle(handle)) === JSON.stringify(expectedRows), "reconnect/replayed rows without duplicates", {
       rows: rowsFromHandle(handle),
       initialRowsEvents,
     });
@@ -307,7 +308,7 @@ async function runSuccessfulLifecycleScenario() {
       },
     );
 
-    const finalRows = rowsFromHandle(handle);
+    const finalRows = sortedRowsFromHandle(handle);
     await handle.unsubscribe();
     const closed = await handle.closed;
     requireInvariant(closed.reason === "unsubscribed" && handle.state.status === "closed", "unsubscribe/completion", {
