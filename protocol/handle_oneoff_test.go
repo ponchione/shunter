@@ -6270,13 +6270,7 @@ func TestHandleOneOffQuery_ShunterCountAliasReturnsSingleAggregateRow(t *testing
 		MessageID:   []byte{0xC1},
 		QueryString: "SELECT COUNT(*) AS n FROM t",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	gotRows := requireOneOffRows(t, conn, stateAccess, sl, msg, aggregateSchema)
 	wantRows := []types.ProductValue{{types.NewUint64(3)}}
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
@@ -6303,13 +6297,7 @@ func TestHandleOneOffQuery_ShunterCountBareAliasReturnsSingleAggregateRow(t *tes
 		MessageID:   []byte{0xC4},
 		QueryString: "SELECT COUNT(*) n FROM t",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	gotRows := requireOneOffRows(t, conn, stateAccess, sl, msg, aggregateSchema)
 	wantRows := []types.ProductValue{{types.NewUint64(3)}}
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
@@ -6336,13 +6324,7 @@ func TestHandleOneOffQuery_ShunterCountAliasWithWhereReturnsSingleAggregateRow(t
 		MessageID:   []byte{0xC2},
 		QueryString: "SELECT COUNT(*) AS n FROM t WHERE active = TRUE",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	gotRows := requireOneOffRows(t, conn, stateAccess, sl, msg, aggregateSchema)
 	wantRows := []types.ProductValue{{types.NewUint64(2)}}
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
@@ -6369,13 +6351,7 @@ func TestHandleOneOffQuery_ShunterCountColumnAliasWithWhereLimitReturnsFullAggre
 		MessageID:   []byte{0xCD},
 		QueryString: "SELECT COUNT(u32) AS n FROM t WHERE active = TRUE LIMIT 1",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	gotRows := requireOneOffRows(t, conn, stateAccess, sl, msg, aggregateSchema)
 	wantRows := []types.ProductValue{{types.NewUint64(2)}}
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
@@ -6404,13 +6380,7 @@ func TestHandleOneOffQuery_ShunterCountDistinctColumnAliasWithWhereReturnsAggreg
 		MessageID:   []byte{0xCE},
 		QueryString: "SELECT COUNT(DISTINCT u32) AS n FROM t WHERE active = TRUE",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	gotRows := requireOneOffRows(t, conn, stateAccess, sl, msg, aggregateSchema)
 	wantRows := []types.ProductValue{{types.NewUint64(2)}}
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
@@ -6437,13 +6407,7 @@ func TestHandleOneOffQuery_ShunterSumUintColumnAliasWithWhereLimitReturnsFullAgg
 		MessageID:   []byte{0xD0},
 		QueryString: "SELECT SUM(u32) AS total FROM t WHERE active = TRUE LIMIT 1",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-
-	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (success)", *result.Error)
-	}
-	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	gotRows := requireOneOffRows(t, conn, stateAccess, sl, msg, aggregateSchema)
 	wantRows := []types.ProductValue{{types.NewUint64(4)}}
 	assertProductRowsEqual(t, gotRows, wantRows)
 }

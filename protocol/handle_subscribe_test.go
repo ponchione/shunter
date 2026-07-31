@@ -806,22 +806,10 @@ func TestHandleSubscribeSingle_WhereTrueLiteralCompilesToAllRows(t *testing.T) {
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
-	allRows, ok := req.Predicates[0].(subscription.AllRows)
+	pred, _ := requireSingleSubscribePredicate(t, conn, executor)
+	allRows, ok := pred.(subscription.AllRows)
 	if !ok {
-		t.Fatalf("Predicates[0] type = %T, want AllRows", req.Predicates[0])
+		t.Fatalf("Predicates[0] type = %T, want AllRows", pred)
 	}
 	if allRows.Table != 1 {
 		t.Fatalf("AllRows.Table = %d, want 1", allRows.Table)
@@ -844,22 +832,10 @@ func TestHandleSubscribeSingle_TrueAndComparisonNormalizesToComparison(t *testin
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
-	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	pred, _ := requireSingleSubscribePredicate(t, conn, executor)
+	colEq, ok := pred.(subscription.ColEq)
 	if !ok {
-		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+		t.Fatalf("Predicates[0] type = %T, want ColEq", pred)
 	}
 	if colEq.Table != 1 || colEq.Column != 0 {
 		t.Fatalf("predicate target = table %d col %d, want table 1 col 0", colEq.Table, colEq.Column)
@@ -885,22 +861,10 @@ func TestHandleSubscribeSingle_TrueOrComparisonNormalizesToAllRows(t *testing.T)
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
-	allRows, ok := req.Predicates[0].(subscription.AllRows)
+	pred, _ := requireSingleSubscribePredicate(t, conn, executor)
+	allRows, ok := pred.(subscription.AllRows)
 	if !ok {
-		t.Fatalf("Predicates[0] type = %T, want AllRows", req.Predicates[0])
+		t.Fatalf("Predicates[0] type = %T, want AllRows", pred)
 	}
 	if allRows.Table != 1 {
 		t.Fatalf("AllRows.Table = %d, want 1", allRows.Table)
@@ -923,22 +887,10 @@ func TestHandleSubscribeSingle_SQLWhereFalseCompilesToNoRows(t *testing.T) {
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
-	noRows, ok := req.Predicates[0].(subscription.NoRows)
+	pred, _ := requireSingleSubscribePredicate(t, conn, executor)
+	noRows, ok := pred.(subscription.NoRows)
 	if !ok {
-		t.Fatalf("Predicates[0] type = %T, want NoRows", req.Predicates[0])
+		t.Fatalf("Predicates[0] type = %T, want NoRows", pred)
 	}
 	if noRows.Table != 1 {
 		t.Fatalf("NoRows.Table = %d, want 1", noRows.Table)
@@ -961,22 +913,10 @@ func TestHandleSubscribeSingle_SQLWhereFalseOrComparisonNormalizesToComparison(t
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
-	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	pred, _ := requireSingleSubscribePredicate(t, conn, executor)
+	colEq, ok := pred.(subscription.ColEq)
 	if !ok {
-		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+		t.Fatalf("Predicates[0] type = %T, want ColEq", pred)
 	}
 	if colEq.Table != 1 || colEq.Column != 0 {
 		t.Fatalf("predicate target = table %d col %d, want table 1 col 0", colEq.Table, colEq.Column)
@@ -1002,22 +942,10 @@ func TestHandleSubscribeSingle_SQLWhereFalseAndComparisonCompilesToNoRows(t *tes
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
-	noRows, ok := req.Predicates[0].(subscription.NoRows)
+	pred, _ := requireSingleSubscribePredicate(t, conn, executor)
+	noRows, ok := pred.(subscription.NoRows)
 	if !ok {
-		t.Fatalf("Predicates[0] type = %T, want NoRows", req.Predicates[0])
+		t.Fatalf("Predicates[0] type = %T, want NoRows", pred)
 	}
 	if noRows.Table != 1 {
 		t.Fatalf("NoRows.Table = %d, want 1", noRows.Table)

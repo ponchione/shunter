@@ -300,6 +300,27 @@ class FakeWebSocket {
   }
 }
 
+function createReconnectClient(options = {}) {
+  const sockets = [];
+  const client = createShunterClient({
+    url: "ws://127.0.0.1:3000/subscribe",
+    protocol: shunterProtocol,
+    reconnect: {
+      enabled: true,
+      maxAttempts: 1,
+      initialDelayMs: 0,
+      maxDelayMs: 0,
+    },
+    webSocketFactory: (url, protocols) => {
+      const socket = new FakeWebSocket(url, protocols);
+      sockets.push(socket);
+      return socket;
+    },
+    ...options,
+  });
+  return { client, sockets };
+}
+
 const sockets = [];
 const fakeFactory = (url, protocols) => {
   const socket = new FakeWebSocket(url, protocols);
@@ -4442,28 +4463,13 @@ await preAbortedOperationClient.close();
 });
 
 isolatedRuntimeTest("reconnect replay synchronization epochs and stale events", async () => {
-const reconnectSockets = [];
-const reconnectFactory = (url, protocols) => {
-  const socket = new FakeWebSocket(url, protocols);
-  reconnectSockets.push(socket);
-  return socket;
-};
 const reconnectStates = [];
 let reconnectTokenCalls = 0;
-const reconnectClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
+const { client: reconnectClient, sockets: reconnectSockets } = createReconnectClient({
   token: () => {
     reconnectTokenCalls += 1;
     return `token-${reconnectTokenCalls}`;
   },
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: reconnectFactory,
   onStateChange: ({ current }) => reconnectStates.push(current.status),
 });
 const reconnecting = reconnectClient.connect();
@@ -4606,22 +4612,10 @@ assert.deepEqual(reconnectStates, [
 ]);
 await reconnectClient.close();
 
-const replayUnsubscribeSockets = [];
-const replayUnsubscribeClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    replayUnsubscribeSockets.push(socket);
-    return socket;
-  },
-});
+const {
+  client: replayUnsubscribeClient,
+  sockets: replayUnsubscribeSockets,
+} = createReconnectClient();
 const replayUnsubscribeConnecting = replayUnsubscribeClient.connect();
 await nextTurn();
 replayUnsubscribeSockets[0].open();
@@ -4670,22 +4664,7 @@ assert.deepEqual(replayUnsubscribeClient.state.synchronization, {
 });
 await replayUnsubscribeClient.close();
 
-const replayCloseSockets = [];
-const replayCloseClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    replayCloseSockets.push(socket);
-    return socket;
-  },
-});
+const { client: replayCloseClient, sockets: replayCloseSockets } = createReconnectClient();
 const replayCloseConnecting = replayCloseClient.connect();
 await nextTurn();
 replayCloseSockets[0].open();
@@ -4901,22 +4880,8 @@ assert.deepEqual(reconnectZeroHandle.state, {
 });
 assert.deepEqual(reconnectZeroStates, ["connecting", "connected", "closed"]);
 
-const reconnectCloseSockets = [];
 const reconnectCloseStates = [];
-const reconnectCloseClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectCloseSockets.push(socket);
-    return socket;
-  },
+const { client: reconnectCloseClient, sockets: reconnectCloseSockets } = createReconnectClient({
   onStateChange: ({ current }) => reconnectCloseStates.push(current.status),
 });
 const reconnectCloseConnecting = reconnectCloseClient.connect();
@@ -4948,22 +4913,8 @@ assert.deepEqual(reconnectCloseHandle.state, {
 });
 assert.deepEqual(reconnectCloseStates, ["connecting", "connected", "reconnecting", "closing", "closed"]);
 
-const reconnectDisposeSockets = [];
 const reconnectDisposeStates = [];
-const reconnectDisposeClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectDisposeSockets.push(socket);
-    return socket;
-  },
+const { client: reconnectDisposeClient, sockets: reconnectDisposeSockets } = createReconnectClient({
   onStateChange: ({ current }) => reconnectDisposeStates.push(current.status),
 });
 const reconnectDisposeConnecting = reconnectDisposeClient.connect();
@@ -4996,13 +4947,13 @@ assert.deepEqual(reconnectDisposeHandle.state, {
 await assert.rejects(reconnectDisposeClient.connect(), ShunterClosedClientError);
 assert.deepEqual(reconnectDisposeStates, ["connecting", "connected", "reconnecting", "closing", "closed"]);
 
-const reconnectPendingTokenCloseSockets = [];
 const reconnectPendingTokenCloseStates = [];
 let reconnectPendingTokenCloseCalls = 0;
 let resolveReconnectPendingTokenClose;
-const reconnectPendingTokenCloseClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
+const {
+  client: reconnectPendingTokenCloseClient,
+  sockets: reconnectPendingTokenCloseSockets,
+} = createReconnectClient({
   token: () => {
     reconnectPendingTokenCloseCalls += 1;
     if (reconnectPendingTokenCloseCalls === 1) {
@@ -5011,17 +4962,6 @@ const reconnectPendingTokenCloseClient = createShunterClient({
     return new Promise((resolve) => {
       resolveReconnectPendingTokenClose = resolve;
     });
-  },
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectPendingTokenCloseSockets.push(socket);
-    return socket;
   },
   onStateChange: ({ current }) => reconnectPendingTokenCloseStates.push(current.status),
 });
@@ -5071,13 +5011,13 @@ assert.deepEqual(reconnectPendingTokenCloseStates, [
   "closed",
 ]);
 
-const reconnectPendingTokenDisposeSockets = [];
 const reconnectPendingTokenDisposeStates = [];
 let reconnectPendingTokenDisposeCalls = 0;
 let resolveReconnectPendingTokenDispose;
-const reconnectPendingTokenDisposeClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
+const {
+  client: reconnectPendingTokenDisposeClient,
+  sockets: reconnectPendingTokenDisposeSockets,
+} = createReconnectClient({
   token: () => {
     reconnectPendingTokenDisposeCalls += 1;
     if (reconnectPendingTokenDisposeCalls === 1) {
@@ -5086,17 +5026,6 @@ const reconnectPendingTokenDisposeClient = createShunterClient({
     return new Promise((resolve) => {
       resolveReconnectPendingTokenDispose = resolve;
     });
-  },
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectPendingTokenDisposeSockets.push(socket);
-    return socket;
   },
   onStateChange: ({ current }) => reconnectPendingTokenDisposeStates.push(current.status),
 });
@@ -5148,13 +5077,13 @@ assert.deepEqual(reconnectPendingTokenDisposeStates, [
 ]);
 
 for (const shutdownMode of ["close", "dispose"]) {
-  const reconnectRejectedTokenShutdownSockets = [];
   const reconnectRejectedTokenShutdownStates = [];
   let reconnectRejectedTokenShutdownCalls = 0;
   let rejectReconnectRefreshToken;
-  const reconnectRejectedTokenShutdownClient = createShunterClient({
-    url: "ws://127.0.0.1:3000/subscribe",
-    protocol: shunterProtocol,
+  const {
+    client: reconnectRejectedTokenShutdownClient,
+    sockets: reconnectRejectedTokenShutdownSockets,
+  } = createReconnectClient({
     token: () => {
       reconnectRejectedTokenShutdownCalls += 1;
       if (reconnectRejectedTokenShutdownCalls === 1) {
@@ -5163,17 +5092,6 @@ for (const shutdownMode of ["close", "dispose"]) {
       return new Promise((_, reject) => {
         rejectReconnectRefreshToken = reject;
       });
-    },
-    reconnect: {
-      enabled: true,
-      maxAttempts: 1,
-      initialDelayMs: 0,
-      maxDelayMs: 0,
-    },
-    webSocketFactory: (url, protocols) => {
-      const socket = new FakeWebSocket(url, protocols);
-      reconnectRejectedTokenShutdownSockets.push(socket);
-      return socket;
     },
     onStateChange: ({ current }) => reconnectRejectedTokenShutdownStates.push(current.status),
   });
@@ -5232,22 +5150,11 @@ for (const shutdownMode of ["close", "dispose"]) {
   ]);
 }
 
-const reconnectHandshakeCloseSockets = [];
 const reconnectHandshakeCloseStates = [];
-const reconnectHandshakeCloseClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectHandshakeCloseSockets.push(socket);
-    return socket;
-  },
+const {
+  client: reconnectHandshakeCloseClient,
+  sockets: reconnectHandshakeCloseSockets,
+} = createReconnectClient({
   onStateChange: ({ current }) => reconnectHandshakeCloseStates.push(current.status),
 });
 const reconnectHandshakeCloseConnecting = reconnectHandshakeCloseClient.connect();
@@ -5363,22 +5270,11 @@ assert.deepEqual(reconnectHandshakeAuthCloseStates, [
   "closed",
 ]);
 
-const reconnectUnsubscribeSockets = [];
 const reconnectUnsubscribeStates = [];
-const reconnectUnsubscribeClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectUnsubscribeSockets.push(socket);
-    return socket;
-  },
+const {
+  client: reconnectUnsubscribeClient,
+  sockets: reconnectUnsubscribeSockets,
+} = createReconnectClient({
   onStateChange: ({ current }) => reconnectUnsubscribeStates.push(current.status),
 });
 const reconnectUnsubscribeConnecting = reconnectUnsubscribeClient.connect();
@@ -5415,22 +5311,11 @@ assert.deepEqual(reconnectUnsubscribeStates, [
 ]);
 await reconnectUnsubscribeClient.close();
 
-const reconnectViewUnsubscribeSockets = [];
 const reconnectViewUnsubscribeStates = [];
-const reconnectViewUnsubscribeClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectViewUnsubscribeSockets.push(socket);
-    return socket;
-  },
+const {
+  client: reconnectViewUnsubscribeClient,
+  sockets: reconnectViewUnsubscribeSockets,
+} = createReconnectClient({
   onStateChange: ({ current }) => reconnectViewUnsubscribeStates.push(current.status),
 });
 const reconnectViewUnsubscribeConnecting = reconnectViewUnsubscribeClient.connect();
@@ -5466,22 +5351,11 @@ assert.deepEqual(reconnectViewUnsubscribeStates, [
 ]);
 await reconnectViewUnsubscribeClient.close();
 
-const reconnectConnectingUnsubscribeSockets = [];
 const reconnectConnectingUnsubscribeStates = [];
-const reconnectConnectingUnsubscribeClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectConnectingUnsubscribeSockets.push(socket);
-    return socket;
-  },
+const {
+  client: reconnectConnectingUnsubscribeClient,
+  sockets: reconnectConnectingUnsubscribeSockets,
+} = createReconnectClient({
   onStateChange: ({ current }) => reconnectConnectingUnsubscribeStates.push(current.status),
 });
 const reconnectConnectingUnsubscribeConnecting = reconnectConnectingUnsubscribeClient.connect();
@@ -5520,22 +5394,11 @@ assert.deepEqual(reconnectConnectingUnsubscribeStates, [
 ]);
 await reconnectConnectingUnsubscribeClient.close();
 
-const reconnectPendingUnsubscribeSockets = [];
 const reconnectPendingUnsubscribeStates = [];
-const reconnectPendingUnsubscribeClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectPendingUnsubscribeSockets.push(socket);
-    return socket;
-  },
+const {
+  client: reconnectPendingUnsubscribeClient,
+  sockets: reconnectPendingUnsubscribeSockets,
+} = createReconnectClient({
   onStateChange: ({ current }) => reconnectPendingUnsubscribeStates.push(current.status),
 });
 const reconnectPendingUnsubscribeConnecting = reconnectPendingUnsubscribeClient.connect();
@@ -5579,22 +5442,11 @@ assert.deepEqual(reconnectPendingUnsubscribeStates, [
 ]);
 await reconnectPendingUnsubscribeClient.close();
 
-const reconnectPendingViewUnsubscribeSockets = [];
 const reconnectPendingViewUnsubscribeStates = [];
-const reconnectPendingViewUnsubscribeClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectPendingViewUnsubscribeSockets.push(socket);
-    return socket;
-  },
+const {
+  client: reconnectPendingViewUnsubscribeClient,
+  sockets: reconnectPendingViewUnsubscribeSockets,
+} = createReconnectClient({
   onStateChange: ({ current }) => reconnectPendingViewUnsubscribeStates.push(current.status),
 });
 const reconnectPendingViewUnsubscribeConnecting = reconnectPendingViewUnsubscribeClient.connect();
@@ -5638,28 +5490,13 @@ assert.deepEqual(reconnectPendingViewUnsubscribeStates, [
 ]);
 await reconnectPendingViewUnsubscribeClient.close();
 
-const exhaustionSockets = [];
-const exhaustionFactory = (url, protocols) => {
-  const socket = new FakeWebSocket(url, protocols);
-  exhaustionSockets.push(socket);
-  return socket;
-};
 const exhaustionStates = [];
 let exhaustionTokenCalls = 0;
-const exhaustionClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
+const { client: exhaustionClient, sockets: exhaustionSockets } = createReconnectClient({
   token: () => {
     exhaustionTokenCalls += 1;
     return `token-${exhaustionTokenCalls}`;
   },
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: exhaustionFactory,
   onStateChange: ({ current }) => exhaustionStates.push(current.status),
 });
 const exhaustionConnecting = exhaustionClient.connect();
@@ -5734,23 +5571,11 @@ assert.deepEqual(exhaustionHandle.state, {
 });
 assert.deepEqual(exhaustionStates, ["connecting", "connected", "reconnecting", "connecting", "closed"]);
 
-const reconnectProtocolSockets = [];
-const reconnectProtocolFactory = (url, protocols) => {
-  const socket = new FakeWebSocket(url, protocols);
-  reconnectProtocolSockets.push(socket);
-  return socket;
-};
 const reconnectProtocolStates = [];
-const reconnectProtocolClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: reconnectProtocolFactory,
+const {
+  client: reconnectProtocolClient,
+  sockets: reconnectProtocolSockets,
+} = createReconnectClient({
   onStateChange: ({ current }) => reconnectProtocolStates.push(current.status),
 });
 const reconnectProtocolConnecting = reconnectProtocolClient.connect();
@@ -5798,22 +5623,11 @@ assert.deepEqual(reconnectProtocolStates, [
   "closed",
 ]);
 
-const reconnectMissingProtocolSockets = [];
 const reconnectMissingProtocolStates = [];
-const reconnectMissingProtocolClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectMissingProtocolSockets.push(socket);
-    return socket;
-  },
+const {
+  client: reconnectMissingProtocolClient,
+  sockets: reconnectMissingProtocolSockets,
+} = createReconnectClient({
   onStateChange: ({ current }) => reconnectMissingProtocolStates.push(current.status),
 });
 const reconnectMissingProtocolConnecting = reconnectMissingProtocolClient.connect();
@@ -5928,22 +5742,11 @@ assert.deepEqual(reconnectReplayFailureStates, [
   "closed",
 ]);
 
-const reconnectReplayErrorSockets = [];
 const reconnectReplayErrorStates = [];
-const reconnectReplayErrorClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectReplayErrorSockets.push(socket);
-    return socket;
-  },
+const {
+  client: reconnectReplayErrorClient,
+  sockets: reconnectReplayErrorSockets,
+} = createReconnectClient({
   onStateChange: ({ current }) => reconnectReplayErrorStates.push(current.status),
 });
 const reconnectReplayErrorConnecting = reconnectReplayErrorClient.connect();
@@ -5996,23 +5799,12 @@ assert.deepEqual(reconnectReplayErrorStates, [
 ]);
 await reconnectReplayErrorClient.close();
 
-const reconnectReplayCallbackSockets = [];
 const reconnectReplayCallbackStates = [];
 let reconnectReplayRowCallbacks = 0;
-const reconnectReplayCallbackClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectReplayCallbackSockets.push(socket);
-    return socket;
-  },
+const {
+  client: reconnectReplayCallbackClient,
+  sockets: reconnectReplayCallbackSockets,
+} = createReconnectClient({
   onStateChange: ({ current }) => reconnectReplayCallbackStates.push(current.status),
 });
 const reconnectReplayCallbackConnecting = reconnectReplayCallbackClient.connect();
@@ -6060,29 +5852,15 @@ assert.deepEqual(reconnectReplayCallbackStates, [
 ]);
 await reconnectReplayCallbackClient.close();
 
-const reconnectAuthSockets = [];
 const reconnectAuthStates = [];
 let reconnectAuthTokenCalls = 0;
-const reconnectAuthClient = createShunterClient({
-  url: "ws://127.0.0.1:3000/subscribe",
-  protocol: shunterProtocol,
+const { client: reconnectAuthClient, sockets: reconnectAuthSockets } = createReconnectClient({
   token: () => {
     reconnectAuthTokenCalls += 1;
     if (reconnectAuthTokenCalls === 1) {
       return "initial-token";
     }
     throw new Error("refresh denied");
-  },
-  reconnect: {
-    enabled: true,
-    maxAttempts: 1,
-    initialDelayMs: 0,
-    maxDelayMs: 0,
-  },
-  webSocketFactory: (url, protocols) => {
-    const socket = new FakeWebSocket(url, protocols);
-    reconnectAuthSockets.push(socket);
-    return socket;
   },
   onStateChange: ({ current }) => reconnectAuthStates.push(current.status),
 });
