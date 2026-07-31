@@ -57,7 +57,7 @@ func (c *remoteJWTCacheSet) jwksCache(key string) *jwksCache {
 		cache.touch(now)
 		return cache
 	}
-	c.pruneJWKS(now)
+	pruneRemoteCaches(c.jwks, c.maxEntries, now.Add(-c.idleTTL))
 	cache := &jwksCache{lastUsed: now}
 	if len(c.jwks) < c.maxEntries {
 		c.jwks[key] = cache
@@ -73,7 +73,7 @@ func (c *remoteJWTCacheSet) discoveryCache(key string) *oidcDiscoveryCache {
 		cache.touch(now)
 		return cache
 	}
-	c.pruneDiscoveries(now)
+	pruneRemoteCaches(c.discoveries, c.maxEntries, now.Add(-c.idleTTL))
 	cache := &oidcDiscoveryCache{lastUsed: now}
 	if len(c.discoveries) < c.maxEntries {
 		c.discoveries[key] = cache
@@ -81,49 +81,27 @@ func (c *remoteJWTCacheSet) discoveryCache(key string) *oidcDiscoveryCache {
 	return cache
 }
 
-func (c *remoteJWTCacheSet) pruneJWKS(now time.Time) {
-	for key, cache := range c.jwks {
-		if cache.idleBefore(now.Add(-c.idleTTL)) {
-			delete(c.jwks, key)
-		}
-	}
-	for len(c.jwks) >= c.maxEntries {
-		key := oldestEvictableJWKS(c.jwks)
-		if key == "" {
-			return
-		}
-		delete(c.jwks, key)
-	}
+type remoteAuthCache interface {
+	idleBefore(time.Time) bool
+	evictionState() (time.Time, bool)
 }
 
-func (c *remoteJWTCacheSet) pruneDiscoveries(now time.Time) {
-	for key, cache := range c.discoveries {
-		if cache.idleBefore(now.Add(-c.idleTTL)) {
-			delete(c.discoveries, key)
-		}
-	}
-	for len(c.discoveries) >= c.maxEntries {
-		key := oldestEvictableDiscovery(c.discoveries)
-		if key == "" {
-			return
-		}
-		delete(c.discoveries, key)
-	}
-}
-
-func oldestEvictableJWKS(caches map[string]*jwksCache) string {
-	var oldestKey string
-	var oldest time.Time
+func pruneRemoteCaches[Cache remoteAuthCache](caches map[string]Cache, maxEntries int, idleCutoff time.Time) {
 	for key, cache := range caches {
-		lastUsed, evictable := cache.evictionState()
-		if evictable && (oldestKey == "" || lastUsed.Before(oldest)) {
-			oldestKey, oldest = key, lastUsed
+		if cache.idleBefore(idleCutoff) {
+			delete(caches, key)
 		}
 	}
-	return oldestKey
+	for len(caches) >= maxEntries {
+		key := oldestEvictableRemoteCache(caches)
+		if key == "" {
+			return
+		}
+		delete(caches, key)
+	}
 }
 
-func oldestEvictableDiscovery(caches map[string]*oidcDiscoveryCache) string {
+func oldestEvictableRemoteCache[Cache remoteAuthCache](caches map[string]Cache) string {
 	var oldestKey string
 	var oldest time.Time
 	for key, cache := range caches {

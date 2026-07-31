@@ -5390,18 +5390,11 @@ func TestHandleSubscribeSingle_ShunterDuplicateJoinAliasRejectText(t *testing.T)
 		QueryID:     401,
 		QueryString: sqlText,
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
+	se := requireSubscribeSingleError(t, conn, executor, sl, msg, 401)
 	want := "Duplicate name `dup`, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterDuplicateSelfJoinRejectText pins the
@@ -5427,18 +5420,11 @@ func TestHandleSubscribeSingle_ShunterDuplicateSelfJoinRejectText(t *testing.T) 
 		QueryID:     403,
 		QueryString: sqlText,
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
+	se := requireSubscribeSingleError(t, conn, executor, sl, msg, 403)
 	want := "Duplicate name `t`, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterJoinColumnKindMismatchRejectText pins
@@ -5469,18 +5455,11 @@ func TestHandleSubscribeSingle_ShunterJoinColumnKindMismatchRejectText(t *testin
 		QueryID:     405,
 		QueryString: sqlText,
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
+	se := requireSubscribeSingleError(t, conn, executor, sl, msg, 405)
 	want := "Unexpected type: (expected) String != U32 (inferred), executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterJoinArrayColumnInvalidOpRejectText pins
@@ -5507,18 +5486,11 @@ func TestHandleSubscribeSingle_ShunterJoinArrayColumnInvalidOpRejectText(t *test
 		QueryID:     407,
 		QueryString: sqlText,
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
+	se := requireSubscribeSingleError(t, conn, executor, sl, msg, 407)
 	want := "Invalid binary operator `=` for type `Array<String>`, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingRejectText
@@ -5548,18 +5520,11 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingRejectText(t *te
 		QueryID:     411,
 		QueryString: sqlText,
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
+	se := requireSubscribeSingleError(t, conn, executor, sl, msg, 411)
 	want := "`missing` is not in scope, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnresolvedVarJoinWhereQualifiedMissingRejectText
@@ -5594,18 +5559,11 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarJoinWhereQualifiedMissingReje
 		QueryID:     413,
 		QueryString: sqlText,
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
+	se := requireSubscribeSingleError(t, conn, executor, sl, msg, 413)
 	want := "`missing` is not in scope, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnresolvedVarBareJoinWildcardOnMissingRejectText
@@ -5636,18 +5594,11 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarBareJoinWildcardOnMissingReje
 		QueryID:     419,
 		QueryString: sqlText,
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
+	se := requireSubscribeSingleError(t, conn, executor, sl, msg, 419)
 	want := "`missing` is not in scope, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText
@@ -5678,18 +5629,11 @@ func TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingNotHiddenByWhere
 		QueryID:     421,
 		QueryString: sqlText,
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError) — FALSE-WHERE pruning must not bypass ON resolution", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
+	se := requireSubscribeSingleError(t, conn, executor, sl, msg, 421)
 	want := "`missing` is not in scope, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterBooleanConstantWhereDoesNotMaskBranchErrors
@@ -5758,18 +5702,11 @@ func TestHandleSubscribeSingle_ShunterMissingLeftTablePrecedesDuplicateJoinAlias
 		QueryID:     427,
 		QueryString: sqlText,
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
+	se := requireSubscribeSingleError(t, conn, executor, sl, msg, 427)
 	want := "no such table: `missing`. If the table exists, it may be marked private., executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnqualifiedNamesProjectionRejectText
@@ -5800,18 +5737,11 @@ func TestHandleSubscribeSingle_ShunterUnqualifiedNamesProjectionRejectText(t *te
 		QueryID:     429,
 		QueryString: sqlText,
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
+	se := requireSubscribeSingleError(t, conn, executor, sl, msg, 429)
 	want := "Names must be qualified when using joins, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnqualifiedNamesWhereRejectText pins
@@ -5842,18 +5772,11 @@ func TestHandleSubscribeSingle_ShunterUnqualifiedNamesWhereRejectText(t *testing
 		QueryID:     431,
 		QueryString: sqlText,
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
+	se := requireSubscribeSingleError(t, conn, executor, sl, msg, 431)
 	want := "Names must be qualified when using joins, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	requireNoSubscribeRegistration(t, executor)
 }
 
 // TestHandleSubscribeSingle_ShunterUnqualifiedNamesJoinOnRejectText pins
@@ -5883,16 +5806,9 @@ func TestHandleSubscribeSingle_ShunterUnqualifiedNamesJoinOnRejectText(t *testin
 		QueryID:     433,
 		QueryString: sqlText,
 	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
+	se := requireSubscribeSingleError(t, conn, executor, sl, msg, 433)
 	want := "Names must be qualified when using joins, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	requireNoSubscribeRegistration(t, executor)
 }

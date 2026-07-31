@@ -346,11 +346,7 @@ func (o *runtimeObservability) log(ctx context.Context, level slog.Level, event,
 		slog.String("runtime", o.runtimeLabel),
 	}
 	recordAttrs = append(recordAttrs, attrs...)
-	defer func() {
-		if r := recover(); r != nil {
-			o.recordSinkFailure("logger", r)
-		}
-	}()
+	defer o.recoverSinkFailure("logger")
 	o.logger.LogAttrs(ctx, level, event, recordAttrs...)
 }
 
@@ -516,12 +512,7 @@ func (o *runtimeObservability) PanicStackEnabled() (enabled bool) {
 	if o == nil || o.logger == nil {
 		return false
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			enabled = false
-			o.recordSinkFailure("logger", r)
-		}
-	}()
+	defer o.recoverSinkFailure("logger")
 	return o.logger.Enabled(context.Background(), slog.LevelDebug)
 }
 
@@ -1028,11 +1019,7 @@ func (o *runtimeObservability) addCounter(name MetricName, labels MetricLabels, 
 	if o == nil || o.metrics == nil {
 		return
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			o.recordSinkFailure("metrics", r)
-		}
-	}()
+	defer o.recoverSinkFailure("metrics")
 	o.metrics.AddCounter(name, o.metricLabels(labels), delta)
 }
 
@@ -1040,11 +1027,7 @@ func (o *runtimeObservability) setGauge(name MetricName, labels MetricLabels, va
 	if o == nil || o.metrics == nil {
 		return
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			o.recordSinkFailure("metrics", r)
-		}
-	}()
+	defer o.recoverSinkFailure("metrics")
 	o.metrics.SetGauge(name, o.metricLabels(labels), value)
 }
 
@@ -1052,11 +1035,7 @@ func (o *runtimeObservability) observeHistogram(name MetricName, labels MetricLa
 	if o == nil || o.metrics == nil {
 		return
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			o.recordSinkFailure("metrics", r)
-		}
-	}()
+	defer o.recoverSinkFailure("metrics")
 	o.metrics.ObserveHistogram(name, o.metricLabels(labels), value)
 }
 
@@ -1112,11 +1091,7 @@ func (s observedSpan) AddEvent(name string, attrs ...TraceAttr) {
 	if s.span == nil {
 		return
 	}
-	defer func() {
-		if r := recover(); r != nil && s.owner != nil {
-			s.owner.recordSinkFailure("tracer", r)
-		}
-	}()
+	defer s.owner.recoverSinkFailure("tracer")
 	s.span.AddEvent(name, attrs...)
 }
 
@@ -1127,12 +1102,14 @@ func (s observedSpan) End(err error) {
 	if err != nil && s.owner != nil {
 		err = errors.New(s.owner.redactError(err))
 	}
-	defer func() {
-		if r := recover(); r != nil && s.owner != nil {
-			s.owner.recordSinkFailure("tracer", r)
-		}
-	}()
+	defer s.owner.recoverSinkFailure("tracer")
 	s.span.End(err)
+}
+
+func (o *runtimeObservability) recoverSinkFailure(failedSink string) {
+	if recovered := recover(); recovered != nil {
+		o.recordSinkFailure(failedSink, recovered)
+	}
 }
 
 func (o *runtimeObservability) recordSinkFailure(failedSink string, recovered any) {
