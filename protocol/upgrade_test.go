@@ -225,6 +225,61 @@ func TestUpgradeValidRS256TokenHeaderSucceeds(t *testing.T) {
 	}
 }
 
+func TestUpgradeRequestCancellationStopsRemoteJWTValidation(t *testing.T) {
+	privateKey, _ := generateUpgradeRS256Key(t)
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"sub": "alice",
+		"iss": "remote-issuer",
+		"iat": time.Now().Unix(),
+	})
+	tok.Header["kid"] = "remote-key"
+	token, err := tok.SignedString(privateKey)
+	if err != nil {
+		t.Fatalf("sign remote token: %v", err)
+	}
+
+	entered := make(chan struct{})
+	remoteCanceled := make(chan struct{})
+	remote := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
+		close(entered)
+		<-req.Context().Done()
+		close(remoteCanceled)
+	}))
+	t.Cleanup(remote.Close)
+	server := &Server{
+		JWT: &auth.JWTConfig{
+			JWKS: []auth.JWKSConfig{{
+				Issuer:         "remote-issuer",
+				JWKSURL:        remote.URL,
+				RefreshTimeout: 10 * time.Second,
+			}},
+			Issuers:  []string{"remote-issuer"},
+			AuthMode: auth.AuthModeStrict,
+		},
+		Options: DefaultProtocolOptions(),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/subscribe?token="+token, nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		server.HandleSubscribe(rec, req)
+		close(done)
+	}()
+	<-entered
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("upgrade handler did not return after request cancellation")
+	}
+	select {
+	case <-remoteCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("remote JWKS request did not observe upgrade cancellation")
+	}
+}
+
 func TestUpgradePrefersProtocolV2WhenOffered(t *testing.T) {
 	s, rec := strictServer(t)
 	srv := newTestServer(t, s)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -14,6 +15,7 @@ import (
 const (
 	dataDirMetadataFilename      = "shunter.datadir.json"
 	dataDirMetadataFormatVersion = 1
+	maxDataDirMetadataBytes      = 16 << 10
 )
 
 var syncDataDirMetadataDir = atomicfile.SyncDir
@@ -59,12 +61,23 @@ func validateDataDirMetadata(dataDir string, mod *Module, _ schema.SchemaRegistr
 
 func readDataDirMetadata(dataDir string) (dataDirMetadata, bool, error) {
 	path := filepath.Join(dataDir, dataDirMetadataFilename)
-	data, err := os.ReadFile(path)
+	file, info, err := openDataDirMetadataFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return dataDirMetadata{}, false, nil
 	}
 	if err != nil {
+		return dataDirMetadata{}, false, fmt.Errorf("open data dir metadata %s: %w", path, err)
+	}
+	defer file.Close()
+	if info.Size() < 0 || info.Size() > maxDataDirMetadataBytes {
+		return dataDirMetadata{}, false, fmt.Errorf("read data dir metadata %s: file size %d exceeds %d bytes", path, info.Size(), maxDataDirMetadataBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxDataDirMetadataBytes+1))
+	if err != nil {
 		return dataDirMetadata{}, false, fmt.Errorf("read data dir metadata %s: %w", path, err)
+	}
+	if len(data) > maxDataDirMetadataBytes {
+		return dataDirMetadata{}, false, fmt.Errorf("read data dir metadata %s: file exceeds %d bytes", path, maxDataDirMetadataBytes)
 	}
 	var metadata dataDirMetadata
 	if err := json.Unmarshal(data, &metadata); err != nil {

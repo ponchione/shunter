@@ -130,8 +130,9 @@ func TestRuntimeDiagnosticsMountedEndpointsAndProtocolRoute(t *testing.T) {
 		EnableProtocol: true,
 		Observability: ObservabilityConfig{
 			Diagnostics: DiagnosticsConfig{
-				MountHTTP:      true,
-				MetricsHandler: metrics,
+				MountHTTP:        true,
+				MountMetricsHTTP: true,
+				MetricsHandler:   metrics,
 			},
 		},
 	})
@@ -181,6 +182,11 @@ func TestRuntimeDiagnosticsMountedEndpointsAndProtocolRoute(t *testing.T) {
 			t.Fatalf("%s status = %d, want 404", path, rec.Code)
 		}
 	}
+	rec = httptest.NewRecorder()
+	rt.HTTPHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/shunter/runtime", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("health/metrics mount exposed debug status = %d, want 404", rec.Code)
+	}
 
 	rec = httptest.NewRecorder()
 	rt.HTTPHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
@@ -195,12 +201,98 @@ func TestRuntimeDiagnosticsMountedEndpointsAndProtocolRoute(t *testing.T) {
 	}
 }
 
+func TestRuntimeHealthMountDoesNotExposeDetailedDiagnosticsInStrictMode(t *testing.T) {
+	metrics := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	})
+	rt, err := Build(validChatModule(), Config{
+		DataDir:        t.TempDir(),
+		EnableProtocol: true,
+		AuthMode:       AuthModeStrict,
+		AuthSigningKey: []byte("strict-diagnostics-test-signing-key"),
+		Observability: ObservabilityConfig{
+			Diagnostics: DiagnosticsConfig{
+				MountHealthHTTP: true,
+				MetricsHandler:  metrics,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	for _, path := range []string{"/healthz", "/readyz"} {
+		rec := httptest.NewRecorder()
+		rt.HTTPHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code == http.StatusNotFound {
+			t.Fatalf("%s was not mounted", path)
+		}
+	}
+	for _, path := range []string{"/debug/shunter/runtime", "/metrics"} {
+		rec := httptest.NewRecorder()
+		rt.HTTPHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("strict runtime %s status = %d, want 404 without detailed opt-in", path, rec.Code)
+		}
+	}
+}
+
+func TestRuntimeDetailedDiagnosticsMountsUseMiddlewareIndependently(t *testing.T) {
+	metrics := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	})
+	middleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Header.Get("X-Diagnostics-Token") != "allowed" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, req)
+		})
+	}
+	rt, err := Build(validChatModule(), Config{
+		DataDir: t.TempDir(),
+		Observability: ObservabilityConfig{
+			Diagnostics: DiagnosticsConfig{
+				MountDebugHTTP:         true,
+				MountMetricsHTTP:       true,
+				DetailedHTTPMiddleware: middleware,
+				MetricsHandler:         metrics,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	rt.HTTPHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unselected /healthz status = %d, want 404", rec.Code)
+	}
+	for _, path := range []string{"/debug/shunter/runtime", "/metrics"} {
+		rec = httptest.NewRecorder()
+		rt.HTTPHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthorized %s status = %d, want 401", path, rec.Code)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("X-Diagnostics-Token", "allowed")
+		rec = httptest.NewRecorder()
+		rt.HTTPHandler().ServeHTTP(rec, req)
+		if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusNotFound {
+			t.Fatalf("authorized %s status = %d, want mounted handler", path, rec.Code)
+		}
+	}
+}
+
 func TestRuntimeDiagnosticsHealthzAndReadyzStatusSemantics(t *testing.T) {
 	rt, err := Build(validChatModule(), Config{
 		DataDir:        t.TempDir(),
 		EnableProtocol: true,
 		Observability: ObservabilityConfig{
-			Diagnostics: DiagnosticsConfig{MountHTTP: true},
+			Diagnostics: DiagnosticsConfig{MountHTTP: true, MountDebugHTTP: true},
 		},
 	})
 	if err != nil {
@@ -318,7 +410,8 @@ func TestDiagnosticsMethodHeadPathAndMetricsRules(t *testing.T) {
 		DataDir: t.TempDir(),
 		Observability: ObservabilityConfig{
 			Diagnostics: DiagnosticsConfig{
-				MountHTTP: true,
+				MountHTTP:      true,
+				MountDebugHTTP: true,
 			},
 		},
 	})
@@ -390,8 +483,9 @@ func TestDiagnosticsMetricsPanicRecovered(t *testing.T) {
 		DataDir: t.TempDir(),
 		Observability: ObservabilityConfig{
 			Diagnostics: DiagnosticsConfig{
-				MountHTTP:      true,
-				MetricsHandler: panicHTTPHandler{},
+				MountHTTP:        true,
+				MountMetricsHTTP: true,
+				MetricsHandler:   panicHTTPHandler{},
 			},
 		},
 	})

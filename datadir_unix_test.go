@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestBackupDataDirRejectsUnsupportedSpecialFileEntry(t *testing.T) {
@@ -49,6 +50,26 @@ func TestRestoreDataDirRejectsUnsupportedSpecialFileEntry(t *testing.T) {
 	assertErrorContains(t, err, "unsupported mode")
 	if _, statErr := os.Lstat(filepath.Join(restoreDir, "entry.pipe")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("restore special-file entry stat = %v, want not exist", statErr)
+	}
+}
+
+func TestBuildRejectsDataDirMetadataFIFOWithoutBlocking(t *testing.T) {
+	dir := t.TempDir()
+	makeDataDirNamedPipe(t, filepath.Join(dir, dataDirMetadataFilename))
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := Build(validChatModule(), Config{DataDir: dir})
+		errCh <- err
+	}()
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("Build succeeded with FIFO data dir metadata")
+		}
+		assertErrorContains(t, err, "not a regular file")
+	case <-time.After(time.Second):
+		t.Fatal("Build blocked while opening FIFO data dir metadata")
 	}
 }
 

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -219,11 +220,12 @@ func TestValidateJWTJWKSAcceptsRotationAfterRefreshCooldown(t *testing.T) {
 	}
 	keys.Store([]jwkDocumentKey{newJWK})
 
-	cacheAny, ok := jwksCaches.Load(jwksCacheKey(source))
-	if !ok {
+	defaultRemoteJWTCaches.mu.Lock()
+	cache := defaultRemoteJWTCaches.jwks[jwksCacheKey(source)]
+	defaultRemoteJWTCaches.mu.Unlock()
+	if cache == nil {
 		t.Fatal("JWKS cache missing after validation")
 	}
-	cache := cacheAny.(*jwksCache)
 	cache.mu.Lock()
 	cache.lastForcedRefreshAt = time.Now().Add(-defaultJWKSRefreshCooldown - time.Second)
 	cache.mu.Unlock()
@@ -558,6 +560,221 @@ func TestResolveJWKRejectsInvalidRSAKeyBounds(t *testing.T) {
 				t.Fatal("resolveJWK succeeded; want invalid RSA jwk error")
 			}
 		})
+	}
+}
+
+func TestValidateJWTJWKSFailureCooldownBoundsSequentialFetches(t *testing.T) {
+	privateKey, _ := generateRS256JWK(t, "missing")
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &JWTConfig{
+		JWKS:     []JWKSConfig{{Issuer: "issuer", JWKSURL: srv.URL}},
+		Issuers:  []string{"issuer"},
+		AuthMode: AuthModeStrict,
+	}
+	token := mintRS256Token(t, privateKey, "missing", "issuer")
+	for range 2 {
+		if _, err := ValidateJWT(token, cfg); err == nil {
+			t.Fatal("ValidateJWT succeeded against unavailable JWKS")
+		}
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("JWKS requests = %d, want one request during failure cooldown", got)
+	}
+}
+
+func TestValidateJWTJWKSFailureWaitersShareOneFetch(t *testing.T) {
+	privateKey, _ := generateRS256JWK(t, "missing")
+	var requests atomic.Int32
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var enteredOnce sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		enteredOnce.Do(func() { close(entered) })
+		<-release
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &JWTConfig{
+		JWKS:     []JWKSConfig{{Issuer: "issuer", JWKSURL: srv.URL}},
+		Issuers:  []string{"issuer"},
+		AuthMode: AuthModeStrict,
+	}
+	token := mintRS256Token(t, privateKey, "missing", "issuer")
+	const waiters = 16
+	start := make(chan struct{})
+	errs := make(chan error, waiters)
+	for range waiters {
+		go func() {
+			<-start
+			_, err := ValidateJWT(token, cfg)
+			errs <- err
+		}()
+	}
+	close(start)
+	<-entered
+	close(release)
+	for range waiters {
+		if err := <-errs; err == nil {
+			t.Fatal("ValidateJWT succeeded against unavailable JWKS")
+		}
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("JWKS requests = %d, want one shared failed fetch", got)
+	}
+}
+
+func TestValidateJWTJWKSRecoversAfterFailureCooldown(t *testing.T) {
+	privateKey, jwk := generateRS256JWK(t, "rsa-1")
+	var requests atomic.Int32
+	var healthy atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		if !healthy.Load() {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeJWKS(t, w, jwk)
+	}))
+	t.Cleanup(srv.Close)
+
+	source := JWKSConfig{Issuer: "issuer", JWKSURL: srv.URL}
+	cfg := &JWTConfig{JWKS: []JWKSConfig{source}, Issuers: []string{"issuer"}, AuthMode: AuthModeStrict}
+	token := mintRS256Token(t, privateKey, "rsa-1", "issuer")
+	if _, err := ValidateJWT(token, cfg); err == nil {
+		t.Fatal("ValidateJWT succeeded during JWKS failure")
+	}
+	healthy.Store(true)
+	defaultRemoteJWTCaches.mu.Lock()
+	cache := defaultRemoteJWTCaches.jwks[jwksCacheKey(source)]
+	defaultRemoteJWTCaches.mu.Unlock()
+	if cache == nil {
+		t.Fatal("JWKS cache missing after failed validation")
+	}
+	cache.mu.Lock()
+	cache.retryAfter = time.Now().Add(-time.Second)
+	cache.mu.Unlock()
+	if _, err := ValidateJWT(token, cfg); err != nil {
+		t.Fatalf("ValidateJWT after JWKS recovery: %v", err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("JWKS requests = %d, want failure and post-cooldown recovery fetch", got)
+	}
+}
+
+func TestValidateJWTContextCancelsJWKSFetch(t *testing.T) {
+	privateKey, _ := generateRS256JWK(t, "missing")
+	entered := make(chan struct{})
+	remoteCanceled := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
+		close(entered)
+		<-req.Context().Done()
+		close(remoteCanceled)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &JWTConfig{
+		JWKS: []JWKSConfig{{
+			Issuer:         "issuer",
+			JWKSURL:        srv.URL,
+			RefreshTimeout: 10 * time.Second,
+		}},
+		Issuers:  []string{"issuer"},
+		AuthMode: AuthModeStrict,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	token := mintRS256Token(t, privateKey, "missing", "issuer")
+	go func() {
+		_, err := ValidateJWTContext(ctx, token, cfg)
+		errCh <- err
+	}()
+	<-entered
+	cancel()
+	if err := <-errCh; !errors.Is(err, context.Canceled) {
+		t.Fatalf("ValidateJWTContext error = %v, want context cancellation", err)
+	}
+	select {
+	case <-remoteCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("JWKS HTTP request context was not canceled")
+	}
+}
+
+func TestValidateJWTContextCancelDoesNotAbortSharedJWKSFetch(t *testing.T) {
+	privateKey, jwk := generateRS256JWK(t, "rsa-1")
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		requests.Add(1)
+		close(entered)
+		select {
+		case <-release:
+			writeJWKS(t, w, jwk)
+		case <-req.Context().Done():
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	source := JWKSConfig{Issuer: "issuer", JWKSURL: srv.URL, RefreshTimeout: 10 * time.Second}
+	validator, err := NewValidator(&JWTConfig{
+		JWKS:     []JWKSConfig{source},
+		Issuers:  []string{"issuer"},
+		AuthMode: AuthModeStrict,
+	})
+	if err != nil {
+		t.Fatalf("NewValidator: %v", err)
+	}
+	token := mintRS256Token(t, privateKey, "rsa-1", "issuer")
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	leaderErr := make(chan error, 1)
+	go func() {
+		_, err := validator.ValidateJWT(leaderCtx, token)
+		leaderErr <- err
+	}()
+	<-entered
+	followerErr := make(chan error, 1)
+	go func() {
+		_, err := validator.ValidateJWT(context.Background(), token)
+		followerErr <- err
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		cache := validator.caches.jwksCache(jwksCacheKey(source))
+		cache.mu.Lock()
+		waiters := 0
+		if cache.inFlight != nil {
+			waiters = cache.inFlight.waiters
+		}
+		cache.mu.Unlock()
+		if waiters == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("shared JWKS waiters = %d, want 2", waiters)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	cancelLeader()
+	if err := <-leaderErr; !errors.Is(err, context.Canceled) {
+		t.Fatalf("leader error = %v, want context cancellation", err)
+	}
+	close(release)
+	if err := <-followerErr; err != nil {
+		t.Fatalf("follower validation failed after leader cancellation: %v", err)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("JWKS requests = %d, want one shared fetch", got)
 	}
 }
 

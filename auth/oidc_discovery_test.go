@@ -1,11 +1,13 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -265,6 +267,118 @@ func TestValidateJWTExplicitJWKSBehaviorUnchangedWithDiscoveryConfigured(t *test
 	}
 	if got := discoveryRequests.Load(); got != 0 {
 		t.Fatalf("discovery requests = %d, want explicit JWKS validation to skip unmatched discovery source", got)
+	}
+}
+
+func TestOIDCDiscoveryFailureCooldownSharesAndBoundsFetches(t *testing.T) {
+	var requests atomic.Int32
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		once.Do(func() { close(entered) })
+		<-release
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+
+	source := OIDCDiscoveryConfig{Issuer: "issuer", DiscoveryURL: srv.URL}
+	const waiters = 12
+	start := make(chan struct{})
+	errs := make(chan error, waiters)
+	for range waiters {
+		go func() {
+			<-start
+			_, err := jwksForOIDCDiscovery(source)
+			errs <- err
+		}()
+	}
+	close(start)
+	<-entered
+	close(release)
+	for range waiters {
+		if err := <-errs; err == nil {
+			t.Fatal("discovery succeeded during outage")
+		}
+	}
+	if _, err := jwksForOIDCDiscovery(source); err == nil {
+		t.Fatal("sequential discovery succeeded during cooldown")
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("discovery requests = %d, want one shared request during failure cooldown", got)
+	}
+}
+
+func TestOIDCDiscoveryRecoversAfterFailureCooldown(t *testing.T) {
+	var requests atomic.Int32
+	var healthy atomic.Bool
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, jwk := generateRS256JWK(t, "rsa-1")
+		writeJWKS(t, w, jwk)
+	}))
+	t.Cleanup(jwksServer.Close)
+	discoveryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		if !healthy.Load() {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeOIDCDiscovery(t, w, oidcDiscoveryDoc("issuer", jwksServer.URL))
+	}))
+	t.Cleanup(discoveryServer.Close)
+
+	source := OIDCDiscoveryConfig{Issuer: "issuer", DiscoveryURL: discoveryServer.URL}
+	if _, err := jwksForOIDCDiscovery(source); err == nil {
+		t.Fatal("discovery succeeded during outage")
+	}
+	healthy.Store(true)
+	defaultRemoteJWTCaches.mu.Lock()
+	cache := defaultRemoteJWTCaches.discoveries[oidcDiscoveryCacheKey(source)]
+	defaultRemoteJWTCaches.mu.Unlock()
+	if cache == nil {
+		t.Fatal("discovery cache missing after failure")
+	}
+	cache.mu.Lock()
+	cache.retryAfter = time.Now().Add(-time.Second)
+	cache.mu.Unlock()
+	if _, err := jwksForOIDCDiscovery(source); err != nil {
+		t.Fatalf("discovery after recovery: %v", err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("discovery requests = %d, want failure and post-cooldown recovery fetch", got)
+	}
+}
+
+func TestOIDCDiscoveryContextCancelsFetch(t *testing.T) {
+	entered := make(chan struct{})
+	remoteCanceled := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
+		close(entered)
+		<-req.Context().Done()
+		close(remoteCanceled)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := jwksForOIDCDiscoveryContext(ctx, newRemoteJWTCacheSet(4, time.Hour), OIDCDiscoveryConfig{
+			Issuer:         "issuer",
+			DiscoveryURL:   srv.URL,
+			RefreshTimeout: 10 * time.Second,
+		})
+		errCh <- err
+	}()
+	<-entered
+	cancel()
+	if err := <-errCh; !errors.Is(err, context.Canceled) {
+		t.Fatalf("jwksForOIDCDiscoveryContext error = %v, want context cancellation", err)
+	}
+	select {
+	case <-remoteCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("discovery HTTP request context was not canceled")
 	}
 }
 

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
@@ -165,6 +166,20 @@ var (
 // map to dedicated sentinels so the transport layer can produce the right
 // authentication rejection (SPEC-005 §4.3).
 func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
+	return ValidateJWTContext(context.Background(), tokenString, config)
+}
+
+// ValidateJWTContext is the context-aware compatibility entry point for JWT
+// validation. Long-lived runtimes should prefer a Validator so remote cache
+// ownership follows the runtime lifecycle.
+func ValidateJWTContext(ctx context.Context, tokenString string, config *JWTConfig) (*Claims, error) {
+	return validateJWT(ctx, tokenString, config, defaultRemoteJWTCaches)
+}
+
+func validateJWT(ctx context.Context, tokenString string, config *JWTConfig, caches *remoteJWTCacheSet) (*Claims, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if config == nil {
 		return nil, fmt.Errorf("%w: config is required", ErrJWTInvalid)
 	}
@@ -198,7 +213,7 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 		return nil, errors.Join(ErrJWTInvalid, semanticErr)
 	}
 
-	remoteKeys, remoteErr := resolveJWKSVerificationKeys(config, alg, keyID, tokenIssuer)
+	remoteKeys, remoteErr := resolveJWKSVerificationKeys(ctx, caches, config, alg, keyID, tokenIssuer)
 	if remoteErr != nil && len(localCandidates) == 0 {
 		return nil, errors.Join(ErrJWTInvalid, remoteErr)
 	}

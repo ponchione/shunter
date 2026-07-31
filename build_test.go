@@ -3,6 +3,7 @@ package shunter
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -259,6 +260,49 @@ func TestDataDirMetadataRejectsDifferentModuleName(t *testing.T) {
 	assertErrorContains(t, err, "data dir metadata module name")
 	assertErrorContains(t, err, "chat")
 	assertErrorContains(t, err, "other")
+}
+
+func TestBuildRejectsOversizedDataDirMetadata(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, dataDirMetadataFilename)
+	if err := os.WriteFile(path, make([]byte, maxDataDirMetadataBytes+1), 0o600); err != nil {
+		t.Fatalf("write oversized metadata: %v", err)
+	}
+
+	_, err := Build(validChatModule(), Config{DataDir: dir})
+	if err == nil {
+		t.Fatal("Build succeeded with oversized data dir metadata")
+	}
+	assertErrorContains(t, err, "exceeds")
+	assertErrorContains(t, err, fmt.Sprintf("%d bytes", maxDataDirMetadataBytes))
+}
+
+func TestBuildRejectsDataDirMetadataSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "outside-metadata.json")
+	if err := os.WriteFile(target, []byte(`{"format_version":1}`), 0o600); err != nil {
+		t.Fatalf("write symlink target: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, dataDirMetadataFilename)); err != nil {
+		t.Skipf("create metadata symlink: %v", err)
+	}
+
+	if _, err := Build(validChatModule(), Config{DataDir: dir}); err == nil {
+		t.Fatal("Build succeeded with symlinked data dir metadata")
+	}
+}
+
+func TestBuildRejectsNonRegularDataDirMetadata(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, dataDirMetadataFilename), 0o700); err != nil {
+		t.Fatalf("create metadata directory: %v", err)
+	}
+
+	_, err := Build(validChatModule(), Config{DataDir: dir})
+	if err == nil {
+		t.Fatal("Build succeeded with directory data dir metadata")
+	}
+	assertErrorContains(t, err, "not a regular file")
 }
 
 func TestBuildWithBlankDataDirNormalizesToRuntimeDefault(t *testing.T) {

@@ -146,8 +146,11 @@ func (r *Runtime) HTTPHandler() http.Handler {
 	if r != nil && r.buildConfig.EnableProtocol {
 		mux.HandleFunc("/subscribe", r.handleSubscribe)
 	}
-	if r != nil && r.buildConfig.Observability.Diagnostics.MountHTTP {
-		mux.Handle("/", RuntimeDiagnosticsHandler(r))
+	if r != nil {
+		diagnostics := r.buildConfig.Observability.Diagnostics
+		if diagnostics.MountHTTP || diagnostics.MountHealthHTTP || diagnostics.MountDebugHTTP || diagnostics.MountMetricsHTTP {
+			mux.Handle("/", runtimeMountedDiagnosticsHandler(r))
+		}
 	}
 	return mux
 }
@@ -304,6 +307,10 @@ func (r *Runtime) ensureProtocolGraphLocked() error {
 	if err != nil {
 		return err
 	}
+	jwtValidator, err := auth.NewValidator(jwtCfg)
+	if err != nil {
+		return err
+	}
 	opts, err := buildProtocolOptions(r.config.Protocol)
 	if err != nil {
 		return err
@@ -321,13 +328,14 @@ func (r *Runtime) ensureProtocolGraphLocked() error {
 	r.protocolInbox = inbox
 	r.protocolSender = clientSender
 	r.protocolServer = &protocol.Server{
-		JWT:      jwtCfg,
-		Mint:     mintCfg,
-		Options:  opts,
-		Executor: inbox,
-		Conns:    conns,
-		Schema:   r.registry,
-		State:    committedStateAccess{state: r.state},
+		JWT:          jwtCfg,
+		JWTValidator: jwtValidator,
+		Mint:         mintCfg,
+		Options:      opts,
+		Executor:     inbox,
+		Conns:        conns,
+		Schema:       r.registry,
+		State:        committedStateAccess{state: r.state},
 		SQLQueryLimits: protocol.SQLQueryLimits{
 			MaxRows:  r.buildConfig.OneOffQueryMaxRows,
 			MaxBytes: r.buildConfig.OneOffQueryMaxBytes,

@@ -28,13 +28,16 @@ const (
 	maxJWKSResponseBytes       = 1 << 20
 )
 
-var jwksCaches sync.Map // map[string]*jwksCache
-
 type jwksCache struct {
 	mu                  sync.Mutex
 	expiresAt           time.Time
 	lastForcedRefreshAt time.Time
 	keys                []resolvedJWTVerificationKey
+	inFlight            *remoteAuthFlight
+	lastErr             error
+	retryAfter          time.Time
+	consecutiveFailures uint
+	lastUsed            time.Time
 }
 
 type jwksDocument struct {
@@ -121,7 +124,7 @@ func isLoopbackJWKSHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func resolveJWKSVerificationKeys(config *JWTConfig, alg JWTAlgorithm, keyID, tokenIssuer string) ([]resolvedJWTVerificationKey, error) {
+func resolveJWKSVerificationKeys(ctx context.Context, caches *remoteJWTCacheSet, config *JWTConfig, alg JWTAlgorithm, keyID, tokenIssuer string) ([]resolvedJWTVerificationKey, error) {
 	if config == nil || (len(config.JWKS) == 0 && len(config.OIDCDiscovery) == 0) {
 		return nil, nil
 	}
@@ -140,14 +143,14 @@ func resolveJWKSVerificationKeys(config *JWTConfig, alg JWTAlgorithm, keyID, tok
 		if !jwksSourceAllowsAlgorithm(source, alg) {
 			continue
 		}
-		keys, err := keysForJWKS(source, false)
+		keys, err := keysForJWKS(ctx, caches, source, false)
 		if err != nil {
 			lastErr = err
 			continue
 		}
 		matches := matchingJWKSVerificationKeys(keys, alg, keyID)
 		if len(matches) == 0 && keyID != "" {
-			keys, err = keysForJWKS(source, true)
+			keys, err = keysForJWKS(ctx, caches, source, true)
 			if err != nil {
 				lastErr = err
 				continue
@@ -163,7 +166,7 @@ func resolveJWKSVerificationKeys(config *JWTConfig, alg JWTAlgorithm, keyID, tok
 		if !oidcDiscoverySourceAllowsAlgorithm(discovery, alg) {
 			continue
 		}
-		source, err := jwksForOIDCDiscovery(discovery)
+		source, err := jwksForOIDCDiscoveryContext(ctx, caches, discovery)
 		if err != nil {
 			lastErr = err
 			continue
@@ -171,14 +174,14 @@ func resolveJWKSVerificationKeys(config *JWTConfig, alg JWTAlgorithm, keyID, tok
 		if !jwksSourceAllowsAlgorithm(source, alg) {
 			continue
 		}
-		keys, err := keysForJWKS(source, false)
+		keys, err := keysForJWKS(ctx, caches, source, false)
 		if err != nil {
 			lastErr = err
 			continue
 		}
 		matches := matchingJWKSVerificationKeys(keys, alg, keyID)
 		if len(matches) == 0 && keyID != "" {
-			keys, err = keysForJWKS(source, true)
+			keys, err = keysForJWKS(ctx, caches, source, true)
 			if err != nil {
 				lastErr = err
 				continue
@@ -216,40 +219,125 @@ func remoteSourceAllowsAlgorithm(allowed []JWTAlgorithm, alg JWTAlgorithm) bool 
 		(len(allowed) == 0 || slices.Contains(allowed, alg))
 }
 
-func keysForJWKS(source JWKSConfig, forceRefresh bool) ([]resolvedJWTVerificationKey, error) {
-	cacheAny, _ := jwksCaches.LoadOrStore(jwksCacheKey(source), &jwksCache{})
-	cache := cacheAny.(*jwksCache)
+func keysForJWKS(ctx context.Context, caches *remoteJWTCacheSet, source JWKSConfig, forceRefresh bool) ([]resolvedJWTVerificationKey, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if caches == nil {
+		caches = defaultRemoteJWTCaches
+	}
+	cacheKey := jwksCacheKey(source)
+	cache := caches.jwksCache(cacheKey)
+	for {
+		now := time.Now()
+		cache.mu.Lock()
+		cache.lastUsed = now
+		cacheValid := len(cache.keys) != 0 && now.Before(cache.expiresAt)
+		if !forceRefresh && cacheValid {
+			keys := cloneResolvedJWTVerificationKeys(cache.keys)
+			cache.mu.Unlock()
+			return keys, nil
+		}
+		if cache.inFlight != nil {
+			flight := cache.inFlight
+			flight.waiters++
+			cache.mu.Unlock()
+			if err := waitForJWKSFlight(ctx, cache, flight); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if forceRefresh && cacheValid && !cache.lastForcedRefreshAt.IsZero() &&
+			now.Before(cache.lastForcedRefreshAt.Add(defaultJWKSRefreshCooldown)) {
+			keys := cloneResolvedJWTVerificationKeys(cache.keys)
+			cache.mu.Unlock()
+			return keys, nil
+		}
+		if cache.lastErr != nil && now.Before(cache.retryAfter) {
+			err := cache.lastErr
+			if cacheValid {
+				keys := cloneResolvedJWTVerificationKeys(cache.keys)
+				cache.mu.Unlock()
+				return keys, nil
+			}
+			cache.mu.Unlock()
+			return nil, err
+		}
+
+		fetchCtx, cancel := context.WithCancel(context.Background())
+		flight := &remoteAuthFlight{done: make(chan struct{}), cancel: cancel, waiters: 1}
+		cache.inFlight = flight
+		if forceRefresh {
+			cache.lastForcedRefreshAt = now
+		}
+		cache.mu.Unlock()
+		go refreshJWKSCache(fetchCtx, cache, cacheKey, source, flight)
+		if err := waitForJWKSFlight(ctx, cache, flight); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func waitForJWKSFlight(ctx context.Context, cache *jwksCache, flight *remoteAuthFlight) error {
+	select {
+	case <-flight.done:
+		return nil
+	case <-ctx.Done():
+		cache.mu.Lock()
+		if cache.inFlight == flight {
+			flight.waiters--
+			if flight.waiters == 0 {
+				flight.cancel()
+			}
+		}
+		cache.mu.Unlock()
+		return ctx.Err()
+	}
+}
+
+func refreshJWKSCache(ctx context.Context, cache *jwksCache, cacheKey string, source JWKSConfig, flight *remoteAuthFlight) {
+	defer flight.cancel()
+	keys, err := fetchJWKSContext(ctx, source)
+	completedAt := time.Now()
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
-
-	now := time.Now()
-	cacheValid := len(cache.keys) != 0 && now.Before(cache.expiresAt)
-	if forceRefresh && cacheValid && !cache.lastForcedRefreshAt.IsZero() &&
-		now.Before(cache.lastForcedRefreshAt.Add(defaultJWKSRefreshCooldown)) {
-		return cloneResolvedJWTVerificationKeys(cache.keys), nil
+	if cache.inFlight != flight {
+		return
 	}
-	if !forceRefresh && cacheValid {
-		return cloneResolvedJWTVerificationKeys(cache.keys), nil
-	}
-	if forceRefresh {
-		// Record the attempt before remote I/O. Concurrent waiters serialize on
-		// mu and reuse the current cache instead of each issuing another fetch.
-		cache.lastForcedRefreshAt = now
-	}
-	keys, err := fetchJWKS(source)
+	cache.inFlight = nil
 	if err != nil {
-		if len(cache.keys) != 0 && now.Before(cache.expiresAt) {
-			return cloneResolvedJWTVerificationKeys(cache.keys), nil
+		cache.consecutiveFailures++
+		cache.lastErr = err
+		cache.retryAfter = completedAt.Add(remoteAuthRetryDelay(cacheKey, cache.consecutiveFailures))
+	} else {
+		ttl := source.CacheTTL
+		if ttl == 0 {
+			ttl = defaultJWKSCacheTTL
 		}
-		return nil, err
+		cache.keys = keys
+		cache.expiresAt = completedAt.Add(ttl)
+		cache.lastErr = nil
+		cache.retryAfter = time.Time{}
+		cache.consecutiveFailures = 0
 	}
-	ttl := source.CacheTTL
-	if ttl == 0 {
-		ttl = defaultJWKSCacheTTL
-	}
-	cache.keys = keys
-	cache.expiresAt = now.Add(ttl)
-	return cloneResolvedJWTVerificationKeys(keys), nil
+	close(flight.done)
+}
+
+func (c *jwksCache) touch(now time.Time) {
+	c.mu.Lock()
+	c.lastUsed = now
+	c.mu.Unlock()
+}
+
+func (c *jwksCache) idleBefore(cutoff time.Time) bool {
+	lastUsed, evictable := c.evictionState()
+	return evictable && lastUsed.Before(cutoff)
+}
+
+func (c *jwksCache) evictionState() (time.Time, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastUsed, c.inFlight == nil
 }
 
 func jwksCacheKey(source JWKSConfig) string {
@@ -273,11 +361,18 @@ func jwtSourceCacheKey(issuer, endpoint string, algorithms []JWTAlgorithm, ttl t
 }
 
 func fetchJWKS(source JWKSConfig) ([]resolvedJWTVerificationKey, error) {
+	return fetchJWKSContext(context.Background(), source)
+}
+
+func fetchJWKSContext(ctx context.Context, source JWKSConfig) ([]resolvedJWTVerificationKey, error) {
 	timeout := source.RefreshTimeout
 	if timeout == 0 {
 		timeout = defaultJWKSRefreshTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(source.JWKSURL), nil)

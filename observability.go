@@ -89,12 +89,32 @@ const (
 
 // DiagnosticsConfig configures optional HTTP diagnostics mounting.
 type DiagnosticsConfig struct {
-	// MountHTTP controls whether Runtime.HTTPHandler() mounts runtime
-	// diagnostics endpoints in addition to /subscribe.
+	// MountHTTP is a compatibility alias for MountHealthHTTP. It mounts only
+	// /healthz and /readyz; detailed diagnostics remain separate opt-ins.
+	//
+	// Deprecated: use MountHealthHTTP.
 	MountHTTP bool
 
-	// MetricsHandler is mounted at /metrics only when MountHTTP is true and
-	// MetricsHandler is non-nil. The Prometheus adapter supplies this handler.
+	// MountHealthHTTP mounts /healthz and /readyz on Runtime.HTTPHandler.
+	MountHealthHTTP bool
+
+	// MountDebugHTTP mounts /debug/shunter/runtime. The response contains
+	// authored module structure and bounded operational errors, so public
+	// deployments should also configure DetailedHTTPMiddleware.
+	MountDebugHTTP bool
+
+	// MountMetricsHTTP mounts MetricsHandler at /metrics when the handler is
+	// non-nil. Metrics may expose operational structure and should use the same
+	// access policy as debug diagnostics.
+	MountMetricsHTTP bool
+
+	// DetailedHTTPMiddleware optionally wraps the debug and metrics handlers.
+	// Applications can use it for authentication and authorization. Strict
+	// protocol JWT authentication does not apply to diagnostics routes.
+	DetailedHTTPMiddleware func(http.Handler) http.Handler
+
+	// MetricsHandler supplies /metrics when MountMetricsHTTP is true. The
+	// Prometheus adapter supplies this handler.
 	MetricsHandler http.Handler
 }
 

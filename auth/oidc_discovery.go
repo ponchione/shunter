@@ -14,12 +14,15 @@ import (
 	"time"
 )
 
-var oidcDiscoveryCaches sync.Map // map[string]*oidcDiscoveryCache
-
 type oidcDiscoveryCache struct {
-	mu        sync.Mutex
-	expiresAt time.Time
-	source    JWKSConfig
+	mu                  sync.Mutex
+	expiresAt           time.Time
+	source              JWKSConfig
+	inFlight            *remoteAuthFlight
+	lastErr             error
+	retryAfter          time.Time
+	consecutiveFailures uint
+	lastUsed            time.Time
 }
 
 type oidcDiscoveryDocument struct {
@@ -86,6 +89,16 @@ func oidcDiscoverySourceAllowsAlgorithm(source OIDCDiscoveryConfig, alg JWTAlgor
 }
 
 func jwksForOIDCDiscovery(source OIDCDiscoveryConfig) (JWKSConfig, error) {
+	return jwksForOIDCDiscoveryContext(context.Background(), defaultRemoteJWTCaches, source)
+}
+
+func jwksForOIDCDiscoveryContext(ctx context.Context, caches *remoteJWTCacheSet, source OIDCDiscoveryConfig) (JWKSConfig, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if caches == nil {
+		caches = defaultRemoteJWTCaches
+	}
 	normalized, err := normalizeOIDCDiscoveryConfig(source)
 	if err != nil {
 		return JWKSConfig{}, err
@@ -103,26 +116,103 @@ func jwksForOIDCDiscovery(source OIDCDiscoveryConfig) (JWKSConfig, error) {
 		return JWKSConfig{}, fmt.Errorf("refresh timeout must not be negative")
 	}
 
-	cacheAny, _ := oidcDiscoveryCaches.LoadOrStore(oidcDiscoveryCacheKey(normalized), &oidcDiscoveryCache{})
-	cache := cacheAny.(*oidcDiscoveryCache)
+	cacheKey := oidcDiscoveryCacheKey(normalized)
+	cache := caches.discoveryCache(cacheKey)
+	for {
+		now := time.Now()
+		cache.mu.Lock()
+		cache.lastUsed = now
+		if cache.source.JWKSURL != "" && now.Before(cache.expiresAt) {
+			resolved := oidcDiscoveryJWKSConfig(cache.source, normalized)
+			cache.mu.Unlock()
+			return resolved, nil
+		}
+		if cache.inFlight != nil {
+			flight := cache.inFlight
+			flight.waiters++
+			cache.mu.Unlock()
+			if err := waitForOIDCDiscoveryFlight(ctx, cache, flight); err != nil {
+				return JWKSConfig{}, err
+			}
+			continue
+		}
+		if cache.lastErr != nil && now.Before(cache.retryAfter) {
+			err := cache.lastErr
+			cache.mu.Unlock()
+			return JWKSConfig{}, err
+		}
+
+		fetchCtx, cancel := context.WithCancel(context.Background())
+		flight := &remoteAuthFlight{done: make(chan struct{}), cancel: cancel, waiters: 1}
+		cache.inFlight = flight
+		cache.mu.Unlock()
+		go refreshOIDCDiscoveryCache(fetchCtx, cache, cacheKey, normalized, flight)
+		if err := waitForOIDCDiscoveryFlight(ctx, cache, flight); err != nil {
+			return JWKSConfig{}, err
+		}
+	}
+}
+
+func waitForOIDCDiscoveryFlight(ctx context.Context, cache *oidcDiscoveryCache, flight *remoteAuthFlight) error {
+	select {
+	case <-flight.done:
+		return nil
+	case <-ctx.Done():
+		cache.mu.Lock()
+		if cache.inFlight == flight {
+			flight.waiters--
+			if flight.waiters == 0 {
+				flight.cancel()
+			}
+		}
+		cache.mu.Unlock()
+		return ctx.Err()
+	}
+}
+
+func refreshOIDCDiscoveryCache(ctx context.Context, cache *oidcDiscoveryCache, cacheKey string, source OIDCDiscoveryConfig, flight *remoteAuthFlight) {
+	defer flight.cancel()
+	resolved, err := fetchOIDCDiscoveryContext(ctx, source)
+	completedAt := time.Now()
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
-
-	now := time.Now()
-	if cache.source.JWKSURL != "" && now.Before(cache.expiresAt) {
-		return oidcDiscoveryJWKSConfig(cache.source, normalized), nil
+	if cache.inFlight != flight {
+		return
 	}
-	resolved, err := fetchOIDCDiscovery(normalized)
+	cache.inFlight = nil
 	if err != nil {
-		return JWKSConfig{}, err
+		cache.consecutiveFailures++
+		cache.lastErr = err
+		cache.retryAfter = completedAt.Add(remoteAuthRetryDelay(cacheKey, cache.consecutiveFailures))
+	} else {
+		ttl := source.CacheTTL
+		if ttl == 0 {
+			ttl = defaultJWKSCacheTTL
+		}
+		cache.source = resolved
+		cache.expiresAt = completedAt.Add(ttl)
+		cache.lastErr = nil
+		cache.retryAfter = time.Time{}
+		cache.consecutiveFailures = 0
 	}
-	ttl := normalized.CacheTTL
-	if ttl == 0 {
-		ttl = defaultJWKSCacheTTL
-	}
-	cache.source = resolved
-	cache.expiresAt = now.Add(ttl)
-	return oidcDiscoveryJWKSConfig(resolved, normalized), nil
+	close(flight.done)
+}
+
+func (c *oidcDiscoveryCache) touch(now time.Time) {
+	c.mu.Lock()
+	c.lastUsed = now
+	c.mu.Unlock()
+}
+
+func (c *oidcDiscoveryCache) idleBefore(cutoff time.Time) bool {
+	lastUsed, evictable := c.evictionState()
+	return evictable && lastUsed.Before(cutoff)
+}
+
+func (c *oidcDiscoveryCache) evictionState() (time.Time, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastUsed, c.inFlight == nil
 }
 
 // oidcDiscoveryJWKSConfig overlays caller-owned operational settings on the
@@ -140,11 +230,18 @@ func oidcDiscoveryCacheKey(source OIDCDiscoveryConfig) string {
 }
 
 func fetchOIDCDiscovery(source OIDCDiscoveryConfig) (JWKSConfig, error) {
+	return fetchOIDCDiscoveryContext(context.Background(), source)
+}
+
+func fetchOIDCDiscoveryContext(ctx context.Context, source OIDCDiscoveryConfig) (JWKSConfig, error) {
 	timeout := source.RefreshTimeout
 	if timeout == 0 {
 		timeout = defaultJWKSRefreshTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(source.DiscoveryURL), nil)

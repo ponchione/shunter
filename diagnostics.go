@@ -20,22 +20,71 @@ const (
 	HealthStatusNotReady HealthStatus = "not_ready"
 )
 
-// RuntimeDiagnosticsHandler returns an HTTP handler for runtime diagnostics.
-// It serves diagnostics regardless of the runtime's MountHTTP setting.
+// RuntimeDiagnosticsHandler returns an app-owned HTTP handler containing
+// health, readiness, debug, and configured metrics routes regardless of the
+// runtime mount settings. Applications are responsible for restricting this
+// detailed surface, for example by wrapping the handler with authentication.
 func RuntimeDiagnosticsHandler(r *Runtime) http.Handler {
-	routes := map[string]http.Handler{
-		"/healthz":               runtimeHealthzHandler(r),
-		"/readyz":                runtimeReadyzHandler(r),
-		"/debug/shunter/runtime": runtimeDebugHandler(r),
+	return runtimeDiagnosticsHandler(r, runtimeDiagnosticsRoutes{
+		health:  true,
+		debug:   true,
+		metrics: true,
+	})
+}
+
+type runtimeDiagnosticsRoutes struct {
+	health     bool
+	debug      bool
+	metrics    bool
+	middleware func(http.Handler) http.Handler
+}
+
+func runtimeMountedDiagnosticsHandler(r *Runtime) http.Handler {
+	if r == nil {
+		return http.NotFoundHandler()
 	}
-	if metrics := runtimeMetricsHandler(r); metrics != nil {
-		routes["/metrics"] = metrics
+	cfg := r.buildConfig.Observability.Diagnostics
+	return runtimeDiagnosticsHandler(r, runtimeDiagnosticsRoutes{
+		health:     cfg.MountHTTP || cfg.MountHealthHTTP,
+		debug:      cfg.MountDebugHTTP,
+		metrics:    cfg.MountMetricsHTTP,
+		middleware: cfg.DetailedHTTPMiddleware,
+	})
+}
+
+func runtimeDiagnosticsHandler(r *Runtime, selected runtimeDiagnosticsRoutes) http.Handler {
+	routes := make(map[string]http.Handler)
+	if selected.health {
+		routes["/healthz"] = runtimeHealthzHandler(r)
+		routes["/readyz"] = runtimeReadyzHandler(r)
+	}
+	if selected.debug {
+		routes["/debug/shunter/runtime"] = wrapDetailedDiagnosticsHandler(selected.middleware, runtimeDebugHandler(r))
+	}
+	if selected.metrics {
+		if metrics := runtimeMetricsHandler(r); metrics != nil {
+			routes["/metrics"] = wrapDetailedDiagnosticsHandler(selected.middleware, metrics)
+		}
 	}
 	return recoverDiagnosticsPanics(exactDiagnosticsRouter(routes))
 }
 
+func wrapDetailedDiagnosticsHandler(middleware func(http.Handler) http.Handler, next http.Handler) http.Handler {
+	if middleware == nil {
+		return next
+	}
+	wrapped := middleware(next)
+	if wrapped == nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "diagnostics middleware returned a nil handler", http.StatusInternalServerError)
+		})
+	}
+	return wrapped
+}
+
 // HostDiagnosticsHandler returns an HTTP handler for host diagnostics.
-// It never serves runtime protocol routes such as /subscribe.
+// It never serves runtime protocol routes such as /subscribe. Applications
+// are responsible for restricting the detailed debug and metrics routes.
 func HostDiagnosticsHandler(h *Host, metrics http.Handler) http.Handler {
 	routes := map[string]http.Handler{
 		"/healthz":            hostHealthzHandler(h),

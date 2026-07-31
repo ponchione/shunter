@@ -21,6 +21,10 @@ type Server struct {
 	// whether missing tokens are rejected during protocol admission
 	// (Strict) or converted to a fresh anonymous identity (Anonymous).
 	JWT *auth.JWTConfig
+	// JWTValidator optionally supplies lifecycle-owned remote auth caches. When
+	// nil, HandleSubscribe uses auth.ValidateJWTContext with its bounded
+	// compatibility cache.
+	JWTValidator *auth.Validator
 	// Mint is required only when JWT.AuthMode == AuthModeAnonymous.
 	// Its fields control the issuer/audience/expiry of tokens the
 	// server generates for anonymous connections.
@@ -144,7 +148,13 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	var principal types.AuthPrincipal
 	var permissions []string
 	if hasToken {
-		c, err := auth.ValidateJWT(token, s.JWT)
+		var c *auth.Claims
+		var err error
+		if s.JWTValidator != nil {
+			c, err = s.JWTValidator.ValidateJWT(r.Context(), token)
+		} else {
+			c, err = auth.ValidateJWTContext(r.Context(), token, s.JWT)
+		}
 		if err != nil {
 			authRejectionReason = "invalid_token"
 			authRejectionErr = err
