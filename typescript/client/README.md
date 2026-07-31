@@ -163,6 +163,17 @@ appends a configured token as the server-supported `token` query parameter,
 tracks `idle`/`connecting`/`connected`/`reconnecting`/`closing`/`closed`/
 `failed` states, and accepts an injected WebSocket factory for Node tests or
 host-specific transports.
+
+Because the browser WebSocket API cannot set an `Authorization` header, token
+query transport is part of the browser client contract. Use `wss://` for every
+non-loopback connection, issue short-lived narrowly scoped tokens, and redact
+the `token` query parameter from ingress, proxy, load-balancer, CDN, APM,
+tracing, and application access logs. Strict server auth validates the token;
+it does not encrypt transport or protect diagnostics routes. Non-browser hosts
+that control their WebSocket handshake should prefer an `Authorization: Bearer`
+header and use a host-specific adapter rather than logging or persisting the
+tokenized URL.
+
 `connect()` resolves after the first server frame is decoded as an
 `IdentityToken`. Passing `reconnect: { enabled: true }` reconnects unexpected
 transport failures with configurable bounded backoff.

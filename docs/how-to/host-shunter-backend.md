@@ -26,7 +26,7 @@ func main() {
 
 	cfg := shunter.ConfigFromEnv()
 	cfg.EnableProtocol = true
-	cfg.Observability.Diagnostics.MountHTTP = true
+	cfg.Observability.Diagnostics.MountHealthHTTP = true
 	if cfg.DataDir == "" {
 		cfg.DataDir = "./data/myapp"
 	}
@@ -115,7 +115,7 @@ func main() {
 
 	cfg := shunter.ConfigFromEnv()
 	cfg.EnableProtocol = true
-	cfg.Observability.Diagnostics.MountHTTP = true
+	cfg.Observability.Diagnostics.MountHealthHTTP = true
 	if cfg.DataDir == "" {
 		cfg.DataDir = "./data/myapp"
 	}
@@ -227,7 +227,9 @@ full assertion list.
 `shunter health --contract` validates the local contract artifact only. It
 does not check a running Shunter server or protocol endpoint.
 Use `shunter health --url` and `shunter describe --url` for live server
-diagnostics; the running app must mount diagnostics HTTP endpoints.
+diagnostics. Health requires `MountHealthHTTP`; describe requires the more
+sensitive `MountDebugHTTP` and should be protected with diagnostics middleware
+or authenticated ingress.
 The running-app CLI accepts root app URLs and `/subscribe` protocol URLs for
 live diagnostics, strips query strings and fragments, and rewrites them to the
 mounted diagnostics endpoints.

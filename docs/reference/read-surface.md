@@ -115,10 +115,13 @@ shapes differ by read surface:
   Aggregate views emit replacement aggregate rows when the aggregate changes.
   Declared app placeholders follow the same parameter rules as declared
   queries.
-- Runtime config may cap admitted live multi-way views with
-  `SubscriptionMaxMultiJoinRelations` and
-  `SubscriptionMaxMultiJoinRowsPerRelation`. Zero leaves these compatibility
-  limits disabled.
+- Runtime config bounds live multi-way views with
+  `SubscriptionMaxMultiJoinRelations` (zero uses 8),
+  `SubscriptionMaxMultiJoinRowsPerRelation` (zero uses 100,000), and
+  `SubscriptionMaxMultiJoinWork` (zero uses 1,000,000 work units per snapshot
+  or delta evaluation). Relation and row limits apply at initial admission and
+  again to delta state. One-off and declared multi-way query execution uses
+  `OneOffQueryMaxWork`, whose zero value is 1,000,000 work units.
 - Local ad hoc raw SQL is out of scope for v1. Use `Runtime.Read`,
   `Runtime.CallQuery`, or `Runtime.SubscribeView` instead.
 

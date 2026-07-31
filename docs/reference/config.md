@@ -15,19 +15,21 @@ intent for the root runtime config.
 | `AuthMode` | Development or strict auth behavior. | Use zero-value dev mode for local work, strict mode for public serving. |
 | `OneOffQueryMaxRows` | Hosted raw and declared query result-row limit. | Zero uses 100,000 rows. Set lower for public or memory-constrained services. |
 | `OneOffQueryMaxBytes` | Hosted raw and declared query encoded row-list limit. | Zero uses 64 MiB. Unordered rows are checked before retention; ordered queries apply it to retained top-window row payloads. It does not bound all query working memory. |
+| `OneOffQueryMaxWork` | Candidate-row and index-probe budget for one-off and declared multi-way joins. | Zero uses 1,000,000 work units for each query execution. |
 | `ProcedureResultMaxBytes` | Raw application procedure result limit. | Zero uses 64 MiB. Results above the limit become procedure errors before protocol delivery. |
 | `SubscriptionInitialRowLimit` | Aggregate initial/final rows across one subscription set. | Zero uses 100,000 rows. Set from the largest measured legitimate whole-set snapshot. |
 | `SubscriptionSnapshotMaxBytes` | Aggregate encoded RowList bytes across one initial/final subscription set. | Zero uses 64 MiB. Checked before registry publication. |
 | `SubscriptionMaxQueriesPerSet` | Raw query strings admitted and compiled for one subscription set. | Zero uses 256. The decoder hard ceiling is 4,096. |
 | `SubscriptionMaxActiveSetsPerConnection` | Live client query IDs retained for one connection. | Zero uses 128. Unregister and disconnect release capacity. |
 | `SubscriptionMaxActiveSubscriptionsPerConnection` | Deduplicated internal live subscriptions retained for one connection. | Zero uses 1,024. Repeated predicates within one set consume one slot. |
-| `SubscriptionMaxMultiJoinRelations` | Optional live multi-way join relation-count limit. | Leave zero for compatibility; set before admitting untrusted/high-cardinality live views. |
-| `SubscriptionMaxMultiJoinRowsPerRelation` | Optional committed input-row limit for each live multi-way join relation. | Leave zero for compatibility; set from measured production envelopes. |
+| `SubscriptionMaxMultiJoinRelations` | Live multi-way join relation-count limit checked at admission and delta evaluation. | Zero uses 8 relations. |
+| `SubscriptionMaxMultiJoinRowsPerRelation` | Committed input-row limit per live multi-way join relation, checked for initial snapshots and before/after delta state. | Zero uses 100,000 rows. |
+| `SubscriptionMaxMultiJoinWork` | Candidate-row work budget for one live multi-way join snapshot or delta evaluation. | Zero uses 1,000,000 work units per evaluation. |
 
 Zero queue capacities are normalized to conservative non-zero defaults by the
-runtime. Zero query and subscription admission/snapshot limits use the defaults
-above; zero subscription multi-way join limits mean unlimited. Negative
-resource limits are rejected during `Build`.
+runtime. Zero query and subscription limits use the defaults above, including
+all multi-way join limits. Negative resource limits are rejected during
+`Build`.
 
 ## Auth Fields
 
@@ -115,6 +117,13 @@ tracing. The zero value is a no-op for external observations.
 
 Use this field when the app wants structured runtime logs, custom metrics
 recording, diagnostic HTTP endpoints, or tracing integration.
+
+`Diagnostics.MountHealthHTTP` mounts health and readiness only.
+`MountDebugHTTP` and `MountMetricsHTTP` are separate detailed-route opt-ins;
+`DetailedHTTPMiddleware` can authenticate those two routes. `MountHTTP` remains
+a deprecated health-only alias. Strict protocol auth does not protect any
+diagnostics route. See [Serve protocol traffic](../how-to/serve-protocol-traffic.md#diagnostics)
+for route contents and deployment guidance.
 
 ## Common Configs
 

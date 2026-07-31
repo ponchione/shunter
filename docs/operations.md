@@ -41,6 +41,9 @@ metadata records Shunter build metadata separately from app-owned module
 metadata. Shunter uses it as a guardrail against opening a data directory with a
 different module name, schema version, or contract metadata version; app module
 version changes are recorded but do not by themselves block startup.
+Startup accepts this metadata only as a non-symlink regular file no larger than
+16 KiB, preventing restored or locally modified special/oversized files from
+blocking startup or causing unbounded reads.
 
 ### Normal Restart
 

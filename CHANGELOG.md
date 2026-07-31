@@ -4,6 +4,18 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Remote JWKS and OIDC discovery validation now follows request cancellation,
+  shares one in-flight fetch, caches failures behind jittered retry backoff, and
+  uses runtime-owned caches; the compatibility cache is bounded and idle-
+  evicting.
+- Runtime health/readiness, debug, and metrics HTTP mounts are now independent.
+  Health-only mounting no longer exposes debug or metrics, and detailed routes
+  can be wrapped with app-provided authentication middleware.
+- DataDir metadata startup reads now reject symlinks, non-regular files, and
+  files larger than 16 KiB before JSON decoding.
+- Strict-auth and TypeScript client guidance now requires encrypted public
+  WebSocket transport and query-token log redaction, and the public config/read
+  references now document the live zero-value query and multi-join limits.
 - Runtime `Build` now acquires a canonical, cross-process DataDir lease before
   recovery or bootstrap and retains it through `Close`; conflicting builds,
   restores, migrations, backups, and compatibility inspections return the new

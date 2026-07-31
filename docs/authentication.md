@@ -81,7 +81,15 @@ Behavior:
 JWKS keys are fetched on demand, cached, and refreshed when a token presents a
 `kid` that is not present in the cached keyed remote set. OIDC discovery
 documents are also fetched on demand and cached; Shunter does not run
-background remote key or discovery refresh workers.
+background remote key or discovery refresh workers. A runtime owns its remote
+cache entries, concurrent callers share one in-flight fetch, and failed fetches
+enter a bounded jittered retry backoff instead of issuing one request per token.
+WebSocket request cancellation also cancels remote fetches and callers waiting
+for an in-flight result. Expired keys are not served stale after a failed
+refresh.
+
+Strict mode validates bearer tokens; it does not provide TLS, encrypt
+connections, redact proxy URLs, or authorize diagnostics endpoints.
 
 ## Delegated Providers And Supabase
 
@@ -248,11 +256,23 @@ Before deploying strict auth:
 3. Configure `AuthIssuers` to the accepted token issuer values.
 4. Configure `AuthAudiences` when tokens should be scoped to this app.
 5. Ensure issued tokens contain `iss`, `sub`, and any required `permissions`.
-6. Keep token TTL and refresh policy in the application or identity provider.
-7. Test reducer, declared-read, raw subscription, raw query, and visibility
+6. Use TLS and `wss://` for every non-loopback token-bearing connection.
+   `Runtime.ListenAndServe` serves plain HTTP, so terminate TLS at a trusted
+   proxy or use an app-owned TLS server.
+7. Browser WebSocket clients send the bearer token in the `token` query
+   parameter. Redact that parameter from ingress, reverse-proxy, load-balancer,
+   CDN, APM, tracing, and application access logs. Prefer an
+   `Authorization: Bearer` header for non-browser clients that can set one.
+8. Keep tokens short-lived and narrowly scoped, and keep refresh policy in the
+   application or identity provider.
+9. Test reducer, declared-read, raw subscription, raw query, and visibility
    behavior with allowed and denied callers.
-8. Document local key replacement as a restart/deployment event, or document
+10. Document local key replacement as a restart/deployment event, or document
    the JWKS cache TTL and issuer rotation policy when using remote keys.
+11. Treat diagnostics as a separate authorization surface. Strict protocol
+    auth does not protect `/healthz`, `/readyz`, `/debug/shunter/runtime`, or
+    `/metrics`; keep detailed diagnostics on a loopback/private network or
+    protect them with application middleware or authenticated ingress.
 
 ## Unsupported In Current Strict Mode
 

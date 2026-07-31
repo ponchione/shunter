@@ -251,6 +251,10 @@ decoder independently rejects more than 4,096 queries, and
 `Protocol.MaxOutboundMessageSize` caps uncompressed server frames before final
 allocation. Lower these limits for untrusted or memory-constrained deployments.
 
+One-off and declared multi-way joins also use
+`Config.OneOffQueryMaxWork`; zero provides a 1,000,000-work-unit budget for
+candidate rows and index probes during each query execution.
+
 Aggregate reads currently accept `COUNT(*)`, `COUNT(column)`,
 `COUNT(DISTINCT column)`, and `SUM(column)`. `COUNT` results are non-null
 `Uint64`; `COUNT(column)` and `COUNT(DISTINCT column)` ignore null argument
@@ -335,9 +339,13 @@ treated as app design risks until the app has measured its workload.
 Live multi-way joins are correctness-first and may materialize input relation
 rows during initial snapshots and post-commit deltas. For production workloads
 with untrusted query shapes or high-cardinality tables, set
-`Config.SubscriptionMaxMultiJoinRelations` and/or
-`Config.SubscriptionMaxMultiJoinRowsPerRelation`. These limits reject matching
-declared live views at admission and drop already-live subscriptions with a
-sanitized subscription error before post-commit evaluation if a later commit
-leaves an input relation past the configured ceiling, even when pruning would
-otherwise skip the view. Zero leaves the compatibility behavior unlimited.
+`Config.SubscriptionMaxMultiJoinRelations`,
+`Config.SubscriptionMaxMultiJoinRowsPerRelation`, and
+`Config.SubscriptionMaxMultiJoinWork`. Their zero values use 8 relations,
+100,000 rows per relation, and 1,000,000 candidate-row work units. Relation and
+row limits reject matching declared live views during initial admission and
+are checked again against before/after relation state for deltas. The work
+budget applies independently to each initial snapshot or delta evaluation.
+Already-live subscriptions that exceed a limit receive a sanitized
+subscription error before further post-commit evaluation, even when pruning
+would otherwise skip the view.

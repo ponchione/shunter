@@ -170,12 +170,23 @@ const (
 )
 
 type DiagnosticsConfig struct {
-    // MountHTTP controls whether Runtime.HTTPHandler() mounts the runtime
-    // diagnostics endpoints from section 10 in addition to /subscribe.
+    // MountHTTP is a deprecated compatibility alias for MountHealthHTTP.
     MountHTTP bool
 
-    // MetricsHandler is mounted at /metrics only when MountHTTP is true and
-    // MetricsHandler is non-nil. The Prometheus adapter supplies this handler.
+    // MountHealthHTTP mounts /healthz and /readyz.
+    MountHealthHTTP bool
+
+    // MountDebugHTTP mounts /debug/shunter/runtime.
+    MountDebugHTTP bool
+
+    // MountMetricsHTTP mounts MetricsHandler at /metrics when non-nil.
+    MountMetricsHTTP bool
+
+    // DetailedHTTPMiddleware optionally authenticates/authorizes debug and
+    // metrics handlers. Protocol authentication does not protect diagnostics.
+    DetailedHTTPMiddleware func(http.Handler) http.Handler
+
+    // MetricsHandler supplies /metrics when MountMetricsHTTP is true.
     MetricsHandler http.Handler
 }
 
@@ -578,7 +589,7 @@ if err != nil {
 }
 cfg.Observability.Metrics.Enabled = true
 cfg.Observability.Metrics.Recorder = adapter.Recorder()
-cfg.Observability.Diagnostics.MountHTTP = true
+cfg.Observability.Diagnostics.MountMetricsHTTP = true
 cfg.Observability.Diagnostics.MetricsHandler = adapter.Handler()
 ```
 
@@ -857,15 +868,18 @@ and metrics MUST NOT invent free-form reason lists.
 ## 10. HTTP Diagnostics
 
 `Runtime.HTTPHandler()` MUST continue to serve `/subscribe` exactly as defined
-by SPEC-005. When `Config.Observability.Diagnostics.MountHTTP` is false, the
-runtime handler MUST NOT mount SPEC-007 endpoints.
+by SPEC-005. Diagnostics routes are independent opt-ins:
 
-When `MountHTTP` is true, `Runtime.HTTPHandler()` MUST additionally mount:
+- `MountHealthHTTP` or the deprecated `MountHTTP` alias mounts `/healthz` and
+  `/readyz` only.
+- `MountDebugHTTP` mounts `/debug/shunter/runtime`.
+- `MountMetricsHTTP` mounts `/metrics` only when
+  `Diagnostics.MetricsHandler != nil`.
+- `DetailedHTTPMiddleware`, when non-nil, wraps the debug and metrics handlers
+  but MUST NOT wrap health/readiness or `/subscribe`.
 
-- `/healthz`
-- `/readyz`
-- `/debug/shunter/runtime`
-- `/metrics` only when `Diagnostics.MetricsHandler != nil`
+The zero value MUST mount no diagnostics. Strict protocol authentication MUST
+NOT be treated as authorization for any diagnostics route.
 
 Host-level diagnostics are explicit to avoid ambiguity with module route
 prefixes:
@@ -905,7 +919,9 @@ code mapping as `/healthz` and `/readyz`.
 
 `RuntimeDiagnosticsHandler` MUST serve the same runtime endpoints listed above,
 using the runtime's configured metrics handler. It MUST serve those diagnostics
-endpoints regardless of the runtime's `Diagnostics.MountHTTP` setting.
+endpoints regardless of the runtime's diagnostics mount settings. This explicit
+composition helper is app-owned and MUST NOT imply authentication; callers own
+middleware and network placement.
 `HostDiagnosticsHandler` MUST serve `/healthz`, `/readyz`,
 `/debug/shunter/host`, and `/metrics` when the `metrics` argument is non-nil.
 It MUST NOT serve `/subscribe`.
@@ -1008,9 +1024,11 @@ such as `/healthz/`, `/readyz/`, `/debug/shunter/runtime/`, and
 `/debug/shunter/host/` MUST return `404 Not Found` unless a caller wraps the
 handler with its own router that rewrites paths before they reach Shunter.
 
-When `Runtime.HTTPHandler()` is used with `Diagnostics.MountHTTP=false`, the
-SPEC-007 endpoints MUST be absent and MUST return `404 Not Found`; `/subscribe`
-behavior remains governed by SPEC-005.
+When `Runtime.HTTPHandler()` is used with all diagnostics mount fields false,
+the SPEC-007 endpoints MUST be absent and MUST return `404 Not Found`;
+`/subscribe` behavior remains governed by SPEC-005. A route whose corresponding
+mount field is false MUST remain absent even when another diagnostics category
+is mounted.
 
 `RuntimeDiagnosticsHandler(nil)` MUST return runtime health/readiness payloads
 with classification `failed`, status `503` for `/healthz` and `/readyz`, and a
@@ -1255,8 +1273,11 @@ the relevant Go tests before claiming completion.
 | Redacted error truncation respects UTF-8 boundaries and default 1024-byte limit | Error bound |
 | Raw SQL appears only in debug logs when explicitly enabled | SQL redaction exception |
 | Debug raw SQL field is UTF-8 normalized and bounded by `ErrorMessageMaxBytes` | Debug SQL bound |
-| `/healthz` absent when `MountHTTP=false` | Endpoint opt-in |
-| `RuntimeDiagnosticsHandler` serves diagnostics even when `MountHTTP=false` | Explicit handler behavior |
+| `/healthz` absent when both health mount fields are false | Endpoint opt-in |
+| Health-only mounting does not expose debug or metrics | Independent mount policy |
+| Detailed mounts pass through `DetailedHTTPMiddleware` | App-owned authorization hook |
+| Strict protocol auth does not authorize diagnostics | Separate security boundary |
+| `RuntimeDiagnosticsHandler` serves all diagnostics regardless of mount fields | Explicit handler behavior |
 | `/healthz` returns 200 for ready, degraded, and not-ready nonfailed runtimes | Liveness status semantics |
 | `/readyz` returns 200 only when ready and not degraded | Readiness status semantics |
 | Failed, closing, and closed runtimes return 503 from `/healthz` and `/readyz` | Failed status semantics |

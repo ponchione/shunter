@@ -17,7 +17,7 @@ func main() {
 
 	cfg := shunter.ConfigFromEnv()
 	cfg.EnableProtocol = true
-	cfg.Observability.Diagnostics.MountHTTP = true
+	cfg.Observability.Diagnostics.MountHealthHTTP = true
 	if cfg.DataDir == "" {
 		cfg.DataDir = "./data/hosted-chat"
 	}

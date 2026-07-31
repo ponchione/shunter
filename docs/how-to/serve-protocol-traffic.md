@@ -153,9 +153,34 @@ production checklist.
 ## Diagnostics
 
 Runtime diagnostics are configured through `Config.Observability.Diagnostics`.
-When diagnostics HTTP mounting is enabled, `Runtime.HTTPHandler()` also exposes
-runtime diagnostic endpoints such as health, readiness, and optional metrics
-handlers.
+The mounts are independent and disabled by default:
+
+- `MountHealthHTTP` adds `/healthz` and `/readyz`. The deprecated `MountHTTP`
+  field is a compatibility alias for this health-only behavior.
+- `MountDebugHTTP` adds `/debug/shunter/runtime`.
+- `MountMetricsHTTP` adds `/metrics` when `MetricsHandler` is non-nil.
+- `DetailedHTTPMiddleware` wraps only the debug and metrics handlers so the app
+  can authenticate and authorize them.
+
+Strict protocol auth protects `/subscribe` only; it does not protect any
+diagnostics route. Health/readiness responses include runtime state, subsystem
+status and bounded/redacted operational errors. The runtime debug response also
+includes authored module metadata, schemas, declared query/view SQL and health
+details. App-supplied metrics determine their own data exposure. Enable debug
+and metrics only on loopback or a private network, or protect them with
+`DetailedHTTPMiddleware` or authenticated ingress.
+
+`RuntimeDiagnosticsHandler` is the app-owned composition helper and includes
+health, readiness, debug, and configured metrics regardless of mount flags.
+Wrap it before exposing it publicly. `HostDiagnosticsHandler` likewise exposes
+host debug details, including module DataDir paths, and must be protected by the
+app.
+
+```go
+cfg.Observability.Diagnostics.MountHealthHTTP = true
+cfg.Observability.Diagnostics.MountDebugHTTP = true
+cfg.Observability.Diagnostics.DetailedHTTPMiddleware = requireOperatorAuth
+```
 
 For in-process checks, use:
 
