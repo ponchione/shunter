@@ -259,11 +259,7 @@ func newPipelineHarness(t *testing.T) *pipelineHarness {
 		t.Fatal(err)
 	}
 	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := committedStateForRegistry(reg)
 
 	rr := NewReducerRegistry()
 	rr.Register(RegisteredReducer{
@@ -1172,11 +1168,7 @@ func TestReducerPanicDoesNotSetFatal(t *testing.T) {
 	rr.Freeze()
 	// Swap the registry on the harness executor. Simpler: rebuild with fresh
 	// reducer set.
-	cs := store.NewCommittedState()
-	for _, tid := range h.reg.Tables() {
-		ts, _ := h.reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := committedStateForRegistry(h.reg)
 	exec := NewExecutor(ExecutorConfig{
 		InboxCapacity: 8,
 		Durability:    h.dur,

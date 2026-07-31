@@ -62,24 +62,8 @@ type lifecycleOpt struct {
 
 func newLifecycleHarness(t *testing.T, opt lifecycleOpt) *lifecycleHarness {
 	t.Helper()
-	b := schema.NewBuilder()
-	b.SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "noop",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	reg := noopSchemaRegistry(t)
+	cs := committedStateForRegistry(reg)
 
 	rr := NewReducerRegistry()
 	h := &lifecycleHarness{reg: reg, cs: cs}

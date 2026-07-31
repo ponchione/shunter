@@ -20,24 +20,8 @@ import (
 // reassigning s.now.
 func schedulerWorkerFixture(t *testing.T) (*Scheduler, *store.CommittedState, schema.TableID, chan ExecutorCommand) {
 	t.Helper()
-	b := schema.NewBuilder()
-	b.SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "noop",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	reg := noopSchemaRegistry(t)
+	cs := committedStateForRegistry(reg)
 	schedTS, _ := SysScheduledTable(reg)
 	inbox := make(chan ExecutorCommand, 16)
 
@@ -456,11 +440,7 @@ func TestSchedulerRunCancelsWhileEnqueueBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := committedStateForRegistry(reg)
 	schedTS, _ := SysScheduledTable(reg)
 	seedSchedule(t, cs, schedTS.ID, 1, "blocked", nil, time.Unix(50, 0).UnixNano(), 0)
 

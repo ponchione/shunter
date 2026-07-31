@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
@@ -428,24 +427,8 @@ func TestSchedulerReplayPreservesScanOrderWithoutSorting(t *testing.T) {
 // from the max existing schedule_id so post-restart Schedule() doesn't
 // clash with replayed rows.
 func TestNewExecutorResetsSchedSeqFromExistingRows(t *testing.T) {
-	b := schema.NewBuilder()
-	b.SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "noop",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	reg := noopSchemaRegistry(t)
+	cs := committedStateForRegistry(reg)
 	schedTS, _ := SysScheduledTable(reg)
 
 	// Simulate a prior process that had allocated schedule_id up to 5.
@@ -473,24 +456,8 @@ func TestNewExecutorResetsSchedSeqFromExistingRows(t *testing.T) {
 }
 
 func TestNewExecutorExhaustedRecoveredSchedSeqFailsWithoutWrapping(t *testing.T) {
-	b := schema.NewBuilder()
-	b.SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "noop",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	reg := noopSchemaRegistry(t)
+	cs := committedStateForRegistry(reg)
 	schedTS, _ := SysScheduledTable(reg)
 
 	seedSchedule(t, cs, schedTS.ID, ^uint64(0), "last", nil, time.Unix(100, 0).UnixNano(), 0)

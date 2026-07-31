@@ -3,24 +3,11 @@ package executor
 import (
 	"testing"
 
-	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
 
 func TestSysScheduledTableResolves(t *testing.T) {
-	b := schema.NewBuilder()
-	b.SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "noop",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := eng.Registry()
+	reg := noopSchemaRegistry(t)
 
 	ts, ok := SysScheduledTable(reg)
 	if !ok {
@@ -35,19 +22,7 @@ func TestSysScheduledTableResolves(t *testing.T) {
 }
 
 func TestSysScheduledColumnLayout(t *testing.T) {
-	b := schema.NewBuilder()
-	b.SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "noop",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := eng.Registry()
+	reg := noopSchemaRegistry(t)
 	ts, ok := SysScheduledTable(reg)
 	if !ok {
 		t.Fatal("expected sys_scheduled")

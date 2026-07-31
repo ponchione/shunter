@@ -24,24 +24,8 @@ type firingFixture struct {
 
 func newFiringFixture(t *testing.T, reducerErr error) firingFixture {
 	t.Helper()
-	b := schema.NewBuilder()
-	b.SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "noop",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	reg := noopSchemaRegistry(t)
+	cs := committedStateForRegistry(reg)
 	schedTS, _ := SysScheduledTable(reg)
 
 	callCount := 0
@@ -215,24 +199,8 @@ var errFireFailed = stubError("scheduled reducer failed on purpose")
 // fresh tx regardless of panic outcome. See
 // working-docs/shunter-design-decisions.md#scheduler-startup-and-firing.
 func TestSchedulerPanicRetainsScheduledRow(t *testing.T) {
-	b := schema.NewBuilder()
-	b.SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "noop",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	reg := noopSchemaRegistry(t)
+	cs := committedStateForRegistry(reg)
 	schedTS, _ := SysScheduledTable(reg)
 
 	rr := NewReducerRegistry()

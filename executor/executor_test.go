@@ -31,11 +31,7 @@ func setupExecutorWithRecovered(recoveredTxID uint64) (*Executor, schema.SchemaR
 	e, _ := b.Build(schema.EngineOptions{})
 	reg := e.Registry()
 
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := committedStateForRegistry(reg)
 
 	rr := NewReducerRegistry()
 	rr.Register(RegisteredReducer{
@@ -155,11 +151,7 @@ func TestReducerContextHandlesClosedAfterReducerReturn(t *testing.T) {
 	if !ok {
 		t.Fatal("items table missing")
 	}
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := committedStateForRegistry(reg)
 
 	var leakedDB types.ReducerDB
 	var leakedScheduler types.ReducerScheduler
@@ -250,11 +242,7 @@ func TestExecutorPermissionDeniedBeforeReducerExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg := engine.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := committedStateForRegistry(reg)
 
 	called := false
 	rr := NewReducerRegistry()

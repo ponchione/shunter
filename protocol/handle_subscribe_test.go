@@ -268,9 +268,6 @@ func TestHandleSubscribeSingleSuccess(t *testing.T) {
 	if req.RequestID != 10 {
 		t.Errorf("RequestID = %d, want 10", req.RequestID)
 	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
 	if req.Reply == nil {
 		t.Error("Reply = nil, want non-nil subscribe reply closure")
 	}
@@ -754,19 +751,7 @@ func TestHandleSubscribeSingle_OrComparisonWithAlias(t *testing.T) {
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	orPred, ok := req.Predicates[0].(subscription.Or)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Or", req.Predicates[0])
@@ -1270,19 +1255,7 @@ func TestHandleSubscribeSingle_QuotedSpecialCharacterIdentifiers(t *testing.T) {
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	colEq, ok := req.Predicates[0].(subscription.ColEq)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
@@ -1311,19 +1284,7 @@ func TestHandleSubscribeSingle_QuotedReservedIdentifiers(t *testing.T) {
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	colEq, ok := req.Predicates[0].(subscription.ColEq)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
@@ -1362,19 +1323,7 @@ func TestHandleSubscribeSingle_QualifiedStarAlias(t *testing.T) {
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	colEq, ok := req.Predicates[0].(subscription.ColEq)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
@@ -1423,19 +1372,7 @@ func TestHandleSubscribeSingle_JoinFilterOnLeftFloatColumn(t *testing.T) {
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	joinPred, ok := req.Predicates[0].(subscription.Join)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
@@ -1489,19 +1426,7 @@ func TestHandleSubscribeSingle_JoinFilterOnRightTable(t *testing.T) {
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	joinPred, ok := req.Predicates[0].(subscription.Join)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
@@ -1566,19 +1491,7 @@ func TestHandleSubscribeSingle_JoinFilterTrueAndComparisonNormalizesFilter(t *te
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	joinPred, ok := req.Predicates[0].(subscription.Join)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
@@ -1625,19 +1538,7 @@ func TestHandleSubscribeSingle_QuotedIdentifiersJoinFilterOnRightTable(t *testin
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	joinPred, ok := req.Predicates[0].(subscription.Join)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
@@ -1699,19 +1600,7 @@ func TestHandleSubscribeSingle_QuotedIdentifiersJoinFilterWithParenthesizedConju
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	joinPred, ok := req.Predicates[0].(subscription.Join)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
@@ -1786,19 +1675,7 @@ func TestHandleSubscribeSingle_JoinProjectionOnRightTable(t *testing.T) {
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	joinPred, ok := req.Predicates[0].(subscription.Join)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
@@ -1860,19 +1737,7 @@ func TestHandleSubscribeSingle_JoinProjectionOnRightTableWithLeftFilter(t *testi
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	joinPred, ok := req.Predicates[0].(subscription.Join)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
@@ -1919,18 +1784,7 @@ func TestHandleSubscribeSingle_CrossJoinProjection(t *testing.T) {
 	sl := registrySchemaLookup{reg: eng.Registry()}
 	msg := &SubscribeSingleMsg{RequestID: 21, QueryID: 18, QueryString: "SELECT o.* FROM Orders o JOIN Inventory product"}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	pred, ok := req.Predicates[0].(subscription.CrossJoin)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want CrossJoin", req.Predicates[0])
@@ -2055,18 +1909,7 @@ func TestHandleSubscribeSingle_AliasedSelfCrossJoin(t *testing.T) {
 	sl := registrySchemaLookup{reg: eng.Registry()}
 	msg := &SubscribeSingleMsg{RequestID: 23, QueryID: 24, QueryString: "SELECT a.* FROM t AS a JOIN t AS b"}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	pred, ok := req.Predicates[0].(subscription.CrossJoin)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want CrossJoin", req.Predicates[0])
@@ -2132,18 +1975,7 @@ func TestHandleSubscribeSingle_AliasedSelfEquiJoin(t *testing.T) {
 	sl := registrySchemaLookup{reg: eng.Registry()}
 	msg := &SubscribeSingleMsg{RequestID: 30, QueryID: 31, QueryString: "SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32"}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	pred, ok := req.Predicates[0].(subscription.Join)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
@@ -2194,18 +2026,7 @@ func TestHandleSubscribeSingle_CaseDistinctRelationAliasesRouteJoinSides(t *test
 		QueryString: `SELECT "R".* FROM t AS "R" JOIN s AS r ON "R".u32 = r.u32`,
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	pred, ok := req.Predicates[0].(subscription.Join)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
@@ -2274,18 +2095,7 @@ func TestHandleSubscribeSingle_AliasedSelfEquiJoinWithWhere(t *testing.T) {
 	sl := registrySchemaLookup{reg: eng.Registry()}
 	msg := &SubscribeSingleMsg{RequestID: 32, QueryID: 33, QueryString: "SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1"}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	pred, ok := req.Predicates[0].(subscription.Join)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
@@ -2365,18 +2175,7 @@ func TestHandleSubscribeSingle_MultiWayJoinAcceptedForTableShape(t *testing.T) {
 	msg := &SubscribeSingleMsg{RequestID: 70, QueryID: 71, QueryString: sqlText}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	pred, ok := req.Predicates[0].(subscription.MultiJoin)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want MultiJoin", req.Predicates[0])
@@ -2914,19 +2713,7 @@ func TestHandleSubscribeSingle_SenderParameterOnIdentityColumn(t *testing.T) {
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	colEq, ok := req.Predicates[0].(subscription.ColEq)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
@@ -3111,19 +2898,7 @@ func TestHandleSubscribeSingle_ShunterSenderResolvesToHexOnStringColumn(t *testi
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x (resolve_sender on KindString must succeed)", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	colEq, ok := req.Predicates[0].(subscription.ColEq)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
@@ -3157,19 +2932,7 @@ func TestHandleSubscribeSingle_SenderParameterOnAliasedSingleTable(t *testing.T)
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	colEq, ok := req.Predicates[0].(subscription.ColEq)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
@@ -3228,19 +2991,7 @@ func TestHandleSubscribeSingle_SenderParameterInJoinFilter(t *testing.T) {
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	joinPred, ok := req.Predicates[0].(subscription.Join)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
@@ -3305,19 +3056,7 @@ func TestHandleSubscribeSingle_ShunterSenderInJoinFilterResolvesOnStringColumn(t
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x (resolve_sender on KindString join leaf must succeed)", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	joinPred, ok := req.Predicates[0].(subscription.Join)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
@@ -3578,18 +3317,7 @@ func TestHandleSubscribeSingle_ShunterStringDigitsOnIntegerColumnWidens(t *testi
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet — widening rejected")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	colEq, ok := req.Predicates[0].(subscription.ColEq)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
@@ -3663,19 +3391,7 @@ func TestHandleSubscribeSingle_ShunterNumericLiteralOnStringColumnWidens(t *test
 			}
 			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-			select {
-			case frame := <-conn.OutboundCh:
-				t.Fatalf("unexpected message on OutboundCh: %x", frame)
-			default:
-			}
-
-			req := executor.getRegisterSetReq()
-			if req == nil {
-				t.Fatal("executor did not receive RegisterSubscriptionSet — widening rejected")
-			}
-			if len(req.Predicates) != 1 {
-				t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-			}
+			_, req := requireSingleSubscribePredicate(t, conn, executor)
 			colEq, ok := req.Predicates[0].(subscription.ColEq)
 			if !ok {
 				t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
@@ -3742,19 +3458,7 @@ func TestHandleSubscribeSingle_ShunterHexLiteralWidensOntoStringColumn(t *testin
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x (hex widening must succeed)", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	colEq, ok := req.Predicates[0].(subscription.ColEq)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
@@ -4127,19 +3831,7 @@ func TestHandleSubscribeSingle_ShunterLeadingPlusIntLiteral(t *testing.T) {
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	colEq, ok := req.Predicates[0].(subscription.ColEq)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
@@ -4193,19 +3885,7 @@ func TestHandleSubscribeSingle_ShunterScientificNotationUnsignedInteger(t *testi
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	colEq, ok := req.Predicates[0].(subscription.ColEq)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
@@ -4388,19 +4068,7 @@ func TestHandleSubscribeSingle_ShunterValidLiteralOnEachIntegerWidth(t *testing.
 			}
 			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-			select {
-			case frame := <-conn.OutboundCh:
-				t.Fatalf("unexpected message on OutboundCh: %x", frame)
-			default:
-			}
-
-			req := executor.getRegisterSetReq()
-			if req == nil {
-				t.Fatal("executor did not receive RegisterSubscriptionSet call")
-			}
-			if len(req.Predicates) != 1 {
-				t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-			}
+			_, req := requireSingleSubscribePredicate(t, conn, executor)
 			colEq, ok := req.Predicates[0].(subscription.ColEq)
 			if !ok {
 				t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
@@ -4435,19 +4103,7 @@ func TestHandleSubscribeSingle_ShunterValidLiteralU256Scientific(t *testing.T) {
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
+	_, req := requireSingleSubscribePredicate(t, conn, executor)
 	colEq, ok := req.Predicates[0].(subscription.ColEq)
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
@@ -4495,19 +4151,7 @@ func TestHandleSubscribeSingle_ShunterTimestampLiteralAccepted(t *testing.T) {
 			}
 			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-			select {
-			case frame := <-conn.OutboundCh:
-				t.Fatalf("unexpected message on OutboundCh: %x", frame)
-			default:
-			}
-
-			req := executor.getRegisterSetReq()
-			if req == nil {
-				t.Fatal("executor did not receive RegisterSubscriptionSet call")
-			}
-			if len(req.Predicates) != 1 {
-				t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-			}
+			_, req := requireSingleSubscribePredicate(t, conn, executor)
 			colEq, ok := req.Predicates[0].(subscription.ColEq)
 			if !ok {
 				t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])

@@ -343,11 +343,7 @@ func setupExecutorWithObserver(observer Observer, cfg ExecutorConfig) (*Executor
 	})
 	engine, _ := b.Build(schema.EngineOptions{})
 	reg := engine.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := committedStateForRegistry(reg)
 	rr := NewReducerRegistry()
 	_ = rr.Register(RegisteredReducer{Name: "ok", Handler: func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
 		_, err := ctx.DB.Insert(0, types.ProductValue{types.NewUint64(uint64(time.Now().UnixNano())), types.NewString("ok")})

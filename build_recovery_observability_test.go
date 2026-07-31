@@ -8,8 +8,6 @@ import (
 	"slices"
 	"sync"
 	"testing"
-
-	"github.com/ponchione/shunter/commitlog"
 )
 
 func TestBuildFailureObservabilityLabels(t *testing.T) {
@@ -227,21 +225,7 @@ func TestBuildRecoveryFailureRecordsRecoveryAndBuildObservability(t *testing.T) 
 }
 
 func TestBuildRecoverySkippedSnapshotMarksDegradedFactsAndWarns(t *testing.T) {
-	dir := t.TempDir()
-	initial, err := Build(validChatModule(), Config{DataDir: dir})
-	if err != nil {
-		t.Fatalf("initial Build returned error: %v", err)
-	}
-	initial.state.SetCommittedTxID(1)
-	if err := commitlog.NewSnapshotWriter(dir, initial.registry).CreateSnapshot(initial.state, 1); err != nil {
-		t.Fatalf("create snapshot to corrupt: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "1", "snapshot"), []byte("corrupt"), 0o644); err != nil {
-		t.Fatalf("corrupt snapshot: %v", err)
-	}
-	if err := initial.Close(); err != nil {
-		t.Fatalf("close initial runtime: %v", err)
-	}
+	dir := corruptSnapshotRecoveryDataDir(t)
 
 	logs, metrics, obs := newRecordingObservability(t)
 	rt, err := Build(validChatModule(), Config{

@@ -26,11 +26,7 @@ func TestReducerDBRejectsSystemTableMutationsAndAllowsReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg := engine.Registry()
-	cs := store.NewCommittedState()
-	for _, tableID := range reg.Tables() {
-		table, _ := reg.Table(tableID)
-		cs.RegisterTable(tableID, store.NewTable(table))
-	}
+	cs := committedStateForRegistry(reg)
 
 	itemsID, _, ok := reg.TableByName("items")
 	if !ok {

@@ -15,25 +15,9 @@ import (
 // sys_scheduled, then returns a fresh Transaction + handle over it.
 func setupScheduler(t *testing.T) (*store.Transaction, *schedulerHandle, schema.SchemaRegistry) {
 	t.Helper()
-	b := schema.NewBuilder()
-	b.SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "noop",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := eng.Registry()
+	reg := noopSchemaRegistry(t)
 
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := committedStateForRegistry(reg)
 
 	ts, ok := SysScheduledTable(reg)
 	if !ok {
@@ -335,11 +319,7 @@ func TestSchedulerHandleCommitPersistsRow(t *testing.T) {
 	})
 	eng, _ := b.Build(schema.EngineOptions{})
 	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := committedStateForRegistry(reg)
 
 	rr := NewReducerRegistry()
 	rr.Register(RegisteredReducer{
@@ -385,11 +365,7 @@ func TestSchedulerHandleRollbackDiscardsSchedule(t *testing.T) {
 	})
 	eng, _ := b.Build(schema.EngineOptions{})
 	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := committedStateForRegistry(reg)
 
 	rr := NewReducerRegistry()
 	sentinel := &struct{ err error }{err: errSchedRollback}

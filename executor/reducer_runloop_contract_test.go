@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/ponchione/shunter/schema"
-	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -63,11 +62,7 @@ func TestRunLoopSequentialAndCancels(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := committedStateForRegistry(reg)
 	rr := NewReducerRegistry()
 	var active atomic.Int32
 	var peak atomic.Int32
@@ -135,11 +130,7 @@ func TestDispatchPanicRecoverySurvivesNextCommand(t *testing.T) {
 		b.TableDef(schema.TableDefinition{Name: "players", Columns: []schema.ColumnDefinition{{Name: "id", Type: types.KindUint64, PrimaryKey: true}, {Name: "name", Type: types.KindString}}})
 		eng, _ := b.Build(schema.EngineOptions{})
 		reg := eng.Registry()
-		cs := store.NewCommittedState()
-		for _, tid := range reg.Tables() {
-			ts, _ := reg.Table(tid)
-			cs.RegisterTable(tid, store.NewTable(ts))
-		}
+		cs := committedStateForRegistry(reg)
 		rr := NewReducerRegistry()
 		_ = rr.Register(RegisteredReducer{Name: "ok", Handler: func(*types.ReducerContext, []byte) ([]byte, error) { return []byte("ok"), nil }})
 		rr.Freeze()
@@ -166,11 +157,7 @@ func TestHandleCallReducerBeginExecuteCommitRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := committedStateForRegistry(reg)
 	players, _ := cs.Table(0)
 	if err := players.InsertRow(players.AllocRowID(), types.ProductValue{types.NewUint64(1), types.NewString("taken")}); err != nil {
 		t.Fatal(err)
@@ -292,11 +279,7 @@ func TestHandleCallReducerNilResponseChannelDoesNotPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := committedStateForRegistry(reg)
 	rr := NewReducerRegistry()
 	if err := rr.Register(RegisteredReducer{Name: "ok", Handler: func(*types.ReducerContext, []byte) ([]byte, error) { return nil, nil }}); err != nil {
 		t.Fatal(err)

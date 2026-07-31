@@ -61,24 +61,8 @@ type sysScheduledSeed struct {
 // so tests can prove the sweep does NOT invoke it.
 func newStartupHarness(t *testing.T, seed startupSeed) *startupHarness {
 	t.Helper()
-	b := schema.NewBuilder()
-	b.SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "noop",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	reg := noopSchemaRegistry(t)
+	cs := committedStateForRegistry(reg)
 
 	sysTS, ok := SysClientsTable(reg)
 	if !ok {
@@ -2288,24 +2272,8 @@ func TestStartup_NilSchedulerSkipsReplay(t *testing.T) {
 // this pin anchors the TxID arithmetic end-to-end.
 func TestStartup_RecoveredTxIDHandoffChain(t *testing.T) {
 	const recoveredTxID = 42
-	b := schema.NewBuilder()
-	b.SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "noop",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	reg := noopSchemaRegistry(t)
+	cs := committedStateForRegistry(reg)
 
 	rr := NewReducerRegistry()
 	if err := rr.Register(RegisteredReducer{
