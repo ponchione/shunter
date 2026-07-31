@@ -206,17 +206,6 @@ func (h *Host) ListenAndServe(ctx context.Context, addr string) error {
 	return h.serveStarted(ctx, ln)
 }
 
-func (h *Host) serve(ctx context.Context, ln net.Listener) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if !h.tryBeginServing() {
-		_ = ln.Close()
-		return ErrHostServing
-	}
-	return h.serveStarted(ctx, ln)
-}
-
 func (h *Host) tryBeginServing() bool {
 	if h == nil {
 		return true

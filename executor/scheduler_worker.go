@@ -116,15 +116,6 @@ func (s *Scheduler) Notify() {
 	}
 }
 
-// scan reads sys_scheduled via a read-locked snapshot, enqueues every
-// row with next_run_at_ns <= now, and records the earliest future
-// next_run_at_ns into s.nextWakeup. Per-row behavior is shared with
-// ReplayFromCommitted; callers interested in the observed max
-// schedule_id should use ReplayFromCommitted directly.
-func (s *Scheduler) scan() {
-	_, _ = s.scanAndTrackMaxWithContext(context.Background())
-}
-
 func (s *Scheduler) scanWithContext(ctx context.Context) bool {
 	_, ok := s.scanAndTrackMaxWithContext(ctx)
 	return ok
@@ -297,10 +288,6 @@ func (s *Scheduler) inFlightSnapshot() map[scheduledFireKey]struct{} {
 		return nil
 	}
 	return maps.Clone(s.inFlight)
-}
-
-func (s *Scheduler) isInFlight(row types.ProductValue) bool {
-	return s.isInFlightKey(scheduledFireKeyForRow(row))
 }
 
 func (s *Scheduler) isInFlightKey(key scheduledFireKey) bool {

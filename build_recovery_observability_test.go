@@ -137,8 +137,12 @@ func TestBuildFreshBootstrapRecordsRecoveryObservability(t *testing.T) {
 
 func TestBuildExistingRecoveryRecordsReportAndMetrics(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Build(validChatModule(), Config{DataDir: dir}); err != nil {
+	initial, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
 		t.Fatalf("initial Build returned error: %v", err)
+	}
+	if err := initial.Close(); err != nil {
+		t.Fatalf("close initial runtime: %v", err)
 	}
 
 	logs, metrics, obs := newRecordingObservability(t)
@@ -235,6 +239,9 @@ func TestBuildRecoverySkippedSnapshotMarksDegradedFactsAndWarns(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "1", "snapshot"), []byte("corrupt"), 0o644); err != nil {
 		t.Fatalf("corrupt snapshot: %v", err)
 	}
+	if err := initial.Close(); err != nil {
+		t.Fatalf("close initial runtime: %v", err)
+	}
 
 	logs, metrics, obs := newRecordingObservability(t)
 	rt, err := Build(validChatModule(), Config{
@@ -248,11 +255,12 @@ func TestBuildRecoverySkippedSnapshotMarksDegradedFactsAndWarns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("recovery Build returned error: %v", err)
 	}
-	if !rt.recovery.degraded() {
-		t.Fatalf("recovery facts = %+v, want degraded marker", rt.recovery)
+	health := rt.Health()
+	if !health.Degraded {
+		t.Fatalf("runtime health = %+v, want degraded recovery classification", health)
 	}
-	if len(rt.recovery.report.SkippedSnapshots) != 1 {
-		t.Fatalf("skipped snapshots = %+v, want one", rt.recovery.report.SkippedSnapshots)
+	if health.Recovery.SkippedSnapshots != 1 {
+		t.Fatalf("recovery health = %+v, want one skipped snapshot", health.Recovery)
 	}
 
 	record := obs.requireLog(t, "recovery.completed")

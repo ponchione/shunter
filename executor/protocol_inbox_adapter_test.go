@@ -1321,9 +1321,7 @@ func TestProtocolInboxAdapter_CallReducer_DeliversFailureEvenWhenNoSuccessNotify
 	}
 }
 
-func TestProtocolInboxAdapter_ForwardReducerResponse_ClosedInternalChannelFails(t *testing.T) {
-	respCh := make(chan ProtocolCallReducerResponse)
-	close(respCh)
+func TestProtocolInboxAdapter_CallReducer_ClosedInternalChannelFails(t *testing.T) {
 	req := protocol.CallReducerRequest{
 		ConnID:      types.ConnectionID{17},
 		Identity:    types.Identity{18},
@@ -1331,9 +1329,18 @@ func TestProtocolInboxAdapter_ForwardReducerResponse_ClosedInternalChannelFails(
 		ReducerName: "ClosedInternalResponse",
 		ResponseCh:  make(chan protocol.TransactionUpdate, 1),
 	}
-	adapter := &ProtocolInboxAdapter{}
+	adapter := newProtocolInboxAdapter(stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+		call, ok := cmd.(CallReducerCmd)
+		if !ok {
+			t.Fatalf("command type = %T, want CallReducerCmd", cmd)
+		}
+		close(call.ProtocolResponseCh)
+		return nil
+	}}, nil)
 
-	adapter.forwardReducerResponse(context.Background(), req, respCh)
+	if err := adapter.CallReducer(context.Background(), req); err != nil {
+		t.Fatalf("CallReducer: %v", err)
+	}
 
 	select {
 	case update := <-req.ResponseCh:
@@ -1349,11 +1356,10 @@ func TestProtocolInboxAdapter_ForwardReducerResponse_ClosedInternalChannelFails(
 	}
 }
 
-func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnContextCancelWhenOutboundBlocked(t *testing.T) {
+func TestProtocolInboxAdapter_CallReducer_ExitsOnContextCancelWhenOutboundBlocked(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	respCh := make(chan ProtocolCallReducerResponse, 1)
 	req := protocol.CallReducerRequest{
 		ConnID:      types.ConnectionID{21},
 		Identity:    types.Identity{22},
@@ -1361,19 +1367,24 @@ func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnContextCancelWhenOut
 		ReducerName: "BlockedForward",
 		ResponseCh:  make(chan protocol.TransactionUpdate),
 	}
-	adapter := &ProtocolInboxAdapter{}
+	adapter := newProtocolInboxAdapter(stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+		call, ok := cmd.(CallReducerCmd)
+		if !ok {
+			t.Fatalf("command type = %T, want CallReducerCmd", cmd)
+		}
+		call.ProtocolResponseCh <- ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusFailedUser, Error: errors.New("boom")}}
+		return nil
+	}}, nil)
 	done := make(chan struct{})
 
 	go func() {
-		adapter.forwardReducerResponse(ctx, req, respCh)
+		_ = adapter.CallReducer(ctx, req)
 		close(done)
 	}()
 
-	respCh <- ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusFailedUser, Error: errors.New("boom")}}
-
 	select {
 	case <-done:
-		t.Fatal("forwardReducerResponse returned before context cancellation while outbound channel was blocked")
+		t.Fatal("CallReducer returned before context cancellation while outbound channel was blocked")
 	case <-time.After(25 * time.Millisecond):
 	}
 
@@ -1382,6 +1393,6 @@ func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnContextCancelWhenOut
 	select {
 	case <-done:
 	case <-time.After(250 * time.Millisecond):
-		t.Fatal("forwardReducerResponse did not exit after context cancellation")
+		t.Fatal("CallReducer did not exit after context cancellation")
 	}
 }

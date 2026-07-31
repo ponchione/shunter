@@ -68,6 +68,7 @@ func TestBuildDurablyCreatesMissingDataDirHierarchy(t *testing.T) {
 		filepath.Dir(existing),
 		existing,
 		filepath.Join(existing, "new-a"),
+		filepath.Join(existing, "new-a"),
 		filepath.Join(existing, "new-a", "new-b"),
 	}
 	if !slices.Equal(synced, wantSynced) {
@@ -113,6 +114,9 @@ func TestBuildReopensExistingBootstrappedState(t *testing.T) {
 	if first.state == nil {
 		t.Fatal("first runtime state is nil")
 	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first runtime: %v", err)
+	}
 
 	second, err := Build(validChatModule(), Config{DataDir: dir})
 	if err != nil {
@@ -134,6 +138,7 @@ func TestBuildReopensExistingBootstrappedState(t *testing.T) {
 	if _, ok := second.state.Table(tid); !ok {
 		t.Fatal("messages table missing from reopened committed state")
 	}
+	t.Cleanup(func() { _ = second.Close() })
 }
 
 func TestBuildWritesDataDirMetadata(t *testing.T) {
@@ -203,12 +208,18 @@ func TestBuildSyncsDataDirMetadataParentAfterAtomicRename(t *testing.T) {
 
 func TestBuildUpdatesDataDirModuleVersionMetadataWithoutBlocking(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Build(validChatModule().Version("v1.0.0"), Config{DataDir: dir}); err != nil {
+	first, err := Build(validChatModule().Version("v1.0.0"), Config{DataDir: dir})
+	if err != nil {
 		t.Fatalf("first Build returned error: %v", err)
 	}
-	if _, err := Build(validChatModule().Version("v1.1.0"), Config{DataDir: dir}); err != nil {
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first runtime: %v", err)
+	}
+	second, err := Build(validChatModule().Version("v1.1.0"), Config{DataDir: dir})
+	if err != nil {
 		t.Fatalf("second Build with updated module version returned error: %v", err)
 	}
+	t.Cleanup(func() { _ = second.Close() })
 
 	metadata, ok, err := readDataDirMetadata(dir)
 	if err != nil {
@@ -224,12 +235,16 @@ func TestBuildUpdatesDataDirModuleVersionMetadataWithoutBlocking(t *testing.T) {
 
 func TestDataDirMetadataRejectsDifferentModuleName(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Build(validChatModule(), Config{DataDir: dir}); err != nil {
+	initial, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
 		t.Fatalf("initial Build returned error: %v", err)
+	}
+	if err := initial.Close(); err != nil {
+		t.Fatalf("close initial runtime: %v", err)
 	}
 	other := NewModule("other").SchemaVersion(1).TableDef(messagesTableDef())
 
-	err := CheckDataDirCompatibility(other, Config{DataDir: dir})
+	err = CheckDataDirCompatibility(other, Config{DataDir: dir})
 	if err == nil {
 		t.Fatal("CheckDataDirCompatibility returned nil, want metadata mismatch")
 	}
@@ -254,8 +269,12 @@ func TestBuildWithBlankDataDirNormalizesToRuntimeDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
-	if rt.dataDir != defaultDataDir {
-		t.Fatalf("runtime dataDir = %q, want %q", rt.dataDir, defaultDataDir)
+	wantDataDir, err := filepath.Abs(defaultDataDir)
+	if err != nil {
+		t.Fatalf("resolve default data dir: %v", err)
+	}
+	if rt.dataDir != wantDataDir {
+		t.Fatalf("runtime dataDir = %q, want %q", rt.dataDir, wantDataDir)
 	}
 	if rt.Config().DataDir != "" {
 		t.Fatalf("public Config().DataDir = %q, want blank original value", rt.Config().DataDir)
@@ -484,13 +503,19 @@ func TestCheckDataDirCompatibilityAcceptsMissingAndMatchingDataDir(t *testing.T)
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("preflight stat = %v, want missing DataDir left uncreated", err)
 	}
-	if _, err := Build(mod, Config{DataDir: path}); err != nil {
+	built, err := Build(mod, Config{DataDir: path})
+	if err != nil {
 		t.Fatalf("Build after preflight returned error: %v", err)
 	}
+	t.Cleanup(func() { _ = built.Close() })
 
 	dir := t.TempDir()
-	if _, err := Build(validChatModule(), Config{DataDir: dir}); err != nil {
+	initial, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
 		t.Fatalf("initial Build returned error: %v", err)
+	}
+	if err := initial.Close(); err != nil {
+		t.Fatalf("close initial runtime: %v", err)
 	}
 	if err := CheckDataDirCompatibility(validChatModule(), Config{DataDir: dir}); err != nil {
 		t.Fatalf("CheckDataDirCompatibility matching DataDir returned error: %v", err)
@@ -513,13 +538,17 @@ func TestCheckDataDirCompatibilityAcceptsEmptyDataDirWithoutMutation(t *testing.
 
 func TestCheckDataDirCompatibilityReportsSchemaMismatch(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Build(validChatModule(), Config{DataDir: dir}); err != nil {
+	initial, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
 		t.Fatalf("initial Build returned error: %v", err)
+	}
+	if err := initial.Close(); err != nil {
+		t.Fatalf("close initial runtime: %v", err)
 	}
 	mismatch := messagesTableDef()
 	mismatch.Columns[1].Name = "text"
 
-	err := CheckDataDirCompatibility(NewModule("chat").SchemaVersion(1).TableDef(mismatch), Config{DataDir: dir})
+	err = CheckDataDirCompatibility(NewModule("chat").SchemaVersion(1).TableDef(mismatch), Config{DataDir: dir})
 	if err == nil {
 		t.Fatal("CheckDataDirCompatibility returned nil, want schema mismatch")
 	}
@@ -535,8 +564,12 @@ func TestCheckDataDirCompatibilityReportsSchemaMismatch(t *testing.T) {
 
 func TestCheckDataDirCompatibilityAllowsSafeAdditiveTableAndIndex(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Build(validChatModule(), Config{DataDir: dir}); err != nil {
+	initial, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
 		t.Fatalf("initial Build returned error: %v", err)
+	}
+	if err := initial.Close(); err != nil {
+		t.Fatalf("close initial runtime: %v", err)
 	}
 	messages := messagesTableDef()
 	messages.Indexes = []schema.IndexDefinition{{Name: "body_idx", Columns: []string{"body"}}}
@@ -634,6 +667,9 @@ func TestCheckDataDirCompatibilityBlocksLogOnlySchemaVersionDrift(t *testing.T) 
 	if err := os.RemoveAll(filepath.Join(dir, "0")); err != nil {
 		t.Fatalf("remove bootstrap snapshot: %v", err)
 	}
+	if err := initial.Close(); err != nil {
+		t.Fatalf("close initial runtime: %v", err)
+	}
 
 	audit := messagesTableDef()
 	audit.Name = "audit_events"
@@ -660,8 +696,12 @@ func TestCheckDataDirCompatibilityBlocksLogOnlySchemaVersionDrift(t *testing.T) 
 
 func TestCheckDataDirCompatibilityReportBlocksRowShapeChanges(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Build(validChatModule(), Config{DataDir: dir}); err != nil {
+	initial, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
 		t.Fatalf("initial Build returned error: %v", err)
+	}
+	if err := initial.Close(); err != nil {
+		t.Fatalf("close initial runtime: %v", err)
 	}
 	mismatch := messagesTableDef()
 	mismatch.Columns = append(mismatch.Columns, schema.ColumnDefinition{Name: "extra", Type: types.KindString, Nullable: true})

@@ -9,42 +9,54 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs
-// pins that reducer response forwarding exits when the owning request is done.
-func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs(t *testing.T) {
-	respCh := make(chan ProtocolCallReducerResponse) // never sends, never closes
-
-	done := make(chan struct{})
+// Once admitted, CallReducer waits for executor completion even when the
+// owning request ends. This keeps connection teardown from overtaking an
+// accepted reducer command.
+func TestProtocolInboxAdapter_CallReducer_ReqDoneWaitsForAdmittedCommand(t *testing.T) {
+	commands := make(chan CallReducerCmd, 1)
+	adapter := newProtocolInboxAdapter(stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+		call, ok := cmd.(CallReducerCmd)
+		if !ok {
+			t.Fatalf("command type = %T, want CallReducerCmd", cmd)
+		}
+		commands <- call
+		return nil
+	}}, nil)
 	reqDone := make(chan struct{})
 	req := protocol.CallReducerRequest{
 		ConnID:      types.ConnectionID{7},
 		Identity:    types.Identity{8},
 		RequestID:   123,
 		ReducerName: "HangingReducer",
-		ResponseCh:  make(chan protocol.TransactionUpdate, 1),
+		ResponseCh:  make(chan protocol.TransactionUpdate),
 		Done:        reqDone,
 	}
-	adapter := &ProtocolInboxAdapter{}
-
+	done := make(chan struct{})
 	go func() {
-		adapter.forwardReducerResponse(context.Background(), req, respCh)
+		_ = adapter.CallReducer(context.Background(), req)
 		close(done)
 	}()
 
-	// Forwarder must not exit spontaneously while both respCh and
-	// reqDone are open; pin the blocked state for a small window.
+	var call CallReducerCmd
 	select {
-	case <-done:
-		t.Fatal("forwardReducerResponse returned before req.Done signalled")
-	case <-time.After(25 * time.Millisecond):
+	case call = <-commands:
+	case <-time.After(time.Second):
+		t.Fatal("CallReducer command was not admitted")
 	}
 
 	close(reqDone)
 
 	select {
 	case <-done:
+		t.Fatal("CallReducer returned before the admitted command completed")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	call.ProtocolResponseCh <- ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusCommitted}}
+	select {
+	case <-done:
 	case <-time.After(1 * time.Second):
-		t.Fatal("forwardReducerResponse did not exit after req.Done closed; goroutine leak")
+		t.Fatal("CallReducer did not return after executor completion")
 	}
 
 	select {
@@ -54,15 +66,12 @@ func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHan
 	}
 }
 
-// TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenOutboundBlocked
-// pins the second half of the same lifecycle contract: after the executor
-// has produced a reducer response, the forwarding goroutine must still stop
-// if the owning connection is torn down while the protocol response channel
-// is blocked.
-func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenOutboundBlocked(t *testing.T) {
-	respCh := make(chan ProtocolCallReducerResponse, 1)
-	respCh <- ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusCommitted}}
-
+func TestProtocolInboxAdapter_CallReducer_ExitsOnReqDoneWhenOutboundBlocked(t *testing.T) {
+	adapter := newProtocolInboxAdapter(stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+		call := cmd.(CallReducerCmd)
+		call.ProtocolResponseCh <- ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusCommitted}}
+		return nil
+	}}, nil)
 	done := make(chan struct{})
 	reqDone := make(chan struct{})
 	req := protocol.CallReducerRequest{
@@ -73,16 +82,14 @@ func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenOutboundB
 		ResponseCh:  make(chan protocol.TransactionUpdate),
 		Done:        reqDone,
 	}
-	adapter := &ProtocolInboxAdapter{}
-
 	go func() {
-		adapter.forwardReducerResponse(context.Background(), req, respCh)
+		_ = adapter.CallReducer(context.Background(), req)
 		close(done)
 	}()
 
 	select {
 	case <-done:
-		t.Fatal("forwardReducerResponse returned before req.Done signalled while outbound channel was blocked")
+		t.Fatal("CallReducer returned before req.Done signalled while outbound channel was blocked")
 	case <-time.After(25 * time.Millisecond):
 	}
 
@@ -91,7 +98,7 @@ func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenOutboundB
 	select {
 	case <-done:
 	case <-time.After(1 * time.Second):
-		t.Fatal("forwardReducerResponse did not exit after req.Done closed while outbound send was blocked")
+		t.Fatal("CallReducer did not exit after req.Done closed while outbound send was blocked")
 	}
 
 	select {
@@ -101,16 +108,14 @@ func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenOutboundB
 	}
 }
 
-// TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneAlreadyClosed
-// pins that a pre-closed req.Done does not wedge the forwarder: the
-// goroutine returns promptly even if no other select arm fires. Guards
-// against a future refactor that stops watching req.Done on the fast
-// path.
-func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneAlreadyClosed(t *testing.T) {
-	respCh := make(chan ProtocolCallReducerResponse) // never fires
-
+func TestProtocolInboxAdapter_CallReducer_ExitsWhenReqDoneAlreadyClosedAfterCompletion(t *testing.T) {
 	reqDone := make(chan struct{})
 	close(reqDone)
+	adapter := newProtocolInboxAdapter(stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+		call := cmd.(CallReducerCmd)
+		call.ProtocolResponseCh <- ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusCommitted}}
+		return nil
+	}}, nil)
 
 	req := protocol.CallReducerRequest{
 		ConnID:      types.ConnectionID{9},
@@ -120,17 +125,15 @@ func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneAlreadyClosed
 		ResponseCh:  make(chan protocol.TransactionUpdate, 1),
 		Done:        reqDone,
 	}
-	adapter := &ProtocolInboxAdapter{}
-
 	done := make(chan struct{})
 	go func() {
-		adapter.forwardReducerResponse(context.Background(), req, respCh)
+		_ = adapter.CallReducer(context.Background(), req)
 		close(done)
 	}()
 
 	select {
 	case <-done:
 	case <-time.After(1 * time.Second):
-		t.Fatal("forwardReducerResponse did not exit when req.Done was pre-closed")
+		t.Fatal("CallReducer did not exit when req.Done was pre-closed")
 	}
 }

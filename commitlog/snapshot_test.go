@@ -1286,7 +1286,11 @@ func TestSnapshotBodyRejectsShortWrite(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	cs.SetCommittedTxID(91)
 	writer := NewSnapshotWriter(filepath.Join(t.TempDir(), "snapshots"), reg).(*FileSnapshotWriter)
-	err := writer.writeSnapshotBody(shortWriteSink{}, cs, 91)
+	body, err := writer.captureSnapshotBody(cs, 91)
+	if err != nil {
+		t.Fatalf("captureSnapshotBody: %v", err)
+	}
+	err = writeSnapshotBodyCapture(shortWriteSink{}, writer.reg, 91, body)
 	if !errors.Is(err, io.ErrShortWrite) {
 		t.Fatalf("writeSnapshotBody short write error = %v, want io.ErrShortWrite", err)
 	}

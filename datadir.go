@@ -20,9 +20,9 @@ import (
 // must not already exist, and it must not be nested inside the source DataDir.
 //
 // BackupDataDir is an offline helper: callers must stop the runtime that owns
-// dataDir before calling it. The helper does not quiesce, lock, or snapshot a
-// running runtime.
-func BackupDataDir(dataDir, outputPath string) error {
+// dataDir before calling it. The helper refuses to copy a DataDir held by a
+// running runtime; it does not quiesce or snapshot that runtime.
+func BackupDataDir(dataDir, outputPath string) (retErr error) {
 	src, err := cleanRequiredPath("data dir", dataDir)
 	if err != nil {
 		return err
@@ -31,7 +31,12 @@ func BackupDataDir(dataDir, outputPath string) error {
 	if err != nil {
 		return err
 	}
-	return copyOfflineDataDir(src, dst, "source data dir", "copy", false)
+	sourceLease, err := acquireDataDirLease(src, dataDirLeaseShared, nil)
+	if err != nil {
+		return fmt.Errorf("backup data dir ownership: %w", err)
+	}
+	defer releaseLeaseInto(&retErr, sourceLease)
+	return copyOfflineDataDir(src, dst, "source data dir", "copy", false, false)
 }
 
 // RestoreDataDir transactionally copies a complete offline DataDir backup into
@@ -43,7 +48,7 @@ func BackupDataDir(dataDir, outputPath string) error {
 //
 // RestoreDataDir is an offline helper: callers must stop the runtime that owns
 // dataDir before calling it.
-func RestoreDataDir(backupPath, dataDir string) error {
+func RestoreDataDir(backupPath, dataDir string) (retErr error) {
 	src, err := cleanRequiredPath("backup", backupPath)
 	if err != nil {
 		return err
@@ -52,7 +57,12 @@ func RestoreDataDir(backupPath, dataDir string) error {
 	if err != nil {
 		return err
 	}
-	return copyOfflineDataDir(src, dst, "backup", "restore", true)
+	sourceLease, err := acquireDataDirLease(src, dataDirLeaseShared, nil)
+	if err != nil {
+		return fmt.Errorf("restore backup ownership: %w", err)
+	}
+	defer releaseLeaseInto(&retErr, sourceLease)
+	return copyOfflineDataDir(src, dst, "backup", "restore", true, true)
 }
 
 func cleanRequiredPath(label, path string) (string, error) {
@@ -63,7 +73,7 @@ func cleanRequiredPath(label, path string) (string, error) {
 	return filepath.Clean(trimmed), nil
 }
 
-func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestination bool) (retErr error) {
+func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestination, lockDestination bool) (retErr error) {
 	srcInfo, err := os.Lstat(src)
 	if err != nil {
 		return fmt.Errorf("read %s %s: %w", sourceLabel, src, err)
@@ -76,6 +86,16 @@ func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestinat
 	}
 	if err := rejectNestedCopy(src, dst); err != nil {
 		return err
+	}
+	var destinationLease *dataDirLease
+	if lockDestination {
+		destinationLease, err = acquireDataDirLease(dst, dataDirLeaseExclusive, func(parent string) error {
+			return atomicfile.MkdirAllDurable(parent, 0o755, syncOfflineCopyCreateDir)
+		})
+		if err != nil {
+			return fmt.Errorf("%s data dir ownership: %w", action, err)
+		}
+		defer releaseLeaseInto(&retErr, destinationLease)
 	}
 	destinationWasEmpty := false
 	var destinationMode fs.FileMode
@@ -93,8 +113,10 @@ func copyOfflineDataDir(src, dst, sourceLabel, action string, allowEmptyDestinat
 	}
 
 	parent := filepath.Dir(dst)
-	if err := atomicfile.MkdirAllDurable(parent, 0o755, syncOfflineCopyCreateDir); err != nil {
-		return fmt.Errorf("create destination parent directory %s: %w", parent, err)
+	if !lockDestination {
+		if err := atomicfile.MkdirAllDurable(parent, 0o755, syncOfflineCopyCreateDir); err != nil {
+			return fmt.Errorf("create destination parent directory %s: %w", parent, err)
+		}
 	}
 	staging, err := makeOfflineCopyStagingDir(parent, "."+filepath.Base(dst)+".staging-*")
 	if err != nil {

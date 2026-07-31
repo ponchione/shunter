@@ -271,9 +271,19 @@ func (r *Runtime) Close() error {
 	if (r.stateName == RuntimeStateBuilt || r.stateName == RuntimeStateFailed) && r.startupDone == nil {
 		r.stateName = RuntimeStateClosed
 		r.ready.Store(false)
+		lease := r.dataDirLease
+		r.dataDirLease = nil
 		r.mu.Unlock()
-		r.recordClosed(time.Since(startedAt))
-		return nil
+		closeErr := lease.release()
+		if closeErr != nil {
+			r.mu.Lock()
+			r.lastErr = closeErr
+			r.mu.Unlock()
+			r.recordCloseFailure(closeErr, time.Since(startedAt))
+		} else {
+			r.recordClosed(time.Since(startedAt))
+		}
+		return closeErr
 	}
 	r.stateName = RuntimeStateClosing
 	r.ready.Store(false)
@@ -286,6 +296,8 @@ func (r *Runtime) Close() error {
 	subscriptions := r.subscriptions
 	protocolConns := r.protocolConns
 	protocolInbox := r.protocolInbox
+	lease := r.dataDirLease
+	r.dataDirLease = nil
 	r.mu.Unlock()
 	r.recordRuntimeMetrics()
 	if startupCancel != nil {
@@ -330,6 +342,7 @@ func (r *Runtime) Close() error {
 	if durability != nil {
 		finalDurableTxID, closeErr = closeRuntimeDurability(durability)
 	}
+	closeErr = errors.Join(closeErr, lease.release())
 
 	r.mu.Lock()
 	if finalDurableTxID > 0 || durability != nil {

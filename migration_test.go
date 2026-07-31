@@ -304,6 +304,9 @@ func TestMigrationHookFailureRollsBackAndBlocksStart(t *testing.T) {
 	if rt.Ready() {
 		t.Fatal("runtime ready after migration hook failure")
 	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close failed runtime: %v", err)
+	}
 
 	restarted, err := Build(validChatModule(), Config{DataDir: dir})
 	if err != nil {
@@ -346,6 +349,9 @@ func TestMigrationHookContextCancelAfterHookRollsBackAndBlocksStart(t *testing.T
 	}
 	if rt.Ready() {
 		t.Fatal("runtime ready after canceled migration hook")
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close failed runtime: %v", err)
 	}
 
 	restarted, err := Build(validChatModule(), Config{DataDir: dir})
@@ -502,6 +508,9 @@ func TestMigrationHookDurabilityFailureBlocksSameRuntimeRetry(t *testing.T) {
 	if rt.Ready() {
 		t.Fatal("runtime ready after blocked same-runtime retry")
 	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close failed runtime: %v", err)
+	}
 
 	injectFailure = false
 	restarted, err := Build(validChatModule().MigrationHook(hook), Config{DataDir: dir})
@@ -588,6 +597,9 @@ func TestMigrationHookLaterDirtyFailurePreservesEarlierDurableHookAndBlocksSameR
 	}
 	if firstCalls != 1 || secondCalls != 1 {
 		t.Fatalf("blocked same-runtime retry reran hooks first/second = %d/%d, want 1/1", firstCalls, secondCalls)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close failed runtime: %v", err)
 	}
 
 	injectFailure = false

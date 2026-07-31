@@ -439,17 +439,6 @@ func encodeProtocolProductRows(rows []types.ProductValue, columns []schema.Colum
 	return protocol.EncodeProductRowsForColumns(rows, columns)
 }
 
-// forwardReducerResponse bridges the executor response onto the protocol
-// TransactionUpdate channel and exits when the owning request is done.
-func (a *ProtocolInboxAdapter) forwardReducerResponse(ctx context.Context, req protocol.CallReducerRequest, respCh <-chan ProtocolCallReducerResponse) {
-	select {
-	case resp, ok := <-respCh:
-		a.deliverReducerResponse(ctx, req, resp, ok)
-	case <-ctx.Done():
-	case <-req.Done:
-	}
-}
-
 func (a *ProtocolInboxAdapter) deliverReducerResponse(ctx context.Context, req protocol.CallReducerRequest, resp ProtocolCallReducerResponse, ok bool) {
 	if !ok {
 		sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(ReducerResponse{

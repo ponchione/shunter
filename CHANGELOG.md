@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Runtime `Build` now acquires a canonical, cross-process DataDir lease before
+  recovery or bootstrap and retains it through `Close`; conflicting builds,
+  restores, migrations, backups, and compatibility inspections return the new
+  classifiable `ErrDataDirInUse`. `AllowRawSQLInDebugLogs` is deprecated as an
+  inert option; runtime observability continues not to emit raw SQL.
 - Reducer acknowledgement documentation now distinguishes ordinary committed
   success from explicit fsync confirmation through `Runtime.WaitUntilDurable`;
   the WebSocket protocol continues to expose committed, non-durable success.

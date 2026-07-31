@@ -753,14 +753,6 @@ func writeSnapshotBodyCapture(dst io.Writer, reg schema.SchemaRegistry, txID typ
 	return nil
 }
 
-func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.CommittedState, txID types.TxID) error {
-	body, err := w.captureSnapshotBody(committed, txID)
-	if err != nil {
-		return err
-	}
-	return writeSnapshotBodyCapture(dst, w.reg, txID, body)
-}
-
 func validateSnapshotRowPayloadLen(rowLen int, maxRowBytes uint32) error {
 	if rowLen < 0 {
 		return fmt.Errorf("%w: negative snapshot row payload size %d", ErrSnapshot, rowLen)

@@ -58,9 +58,10 @@ type RedactionConfig struct {
 	// diagnostics. Values <= 0 use 1024.
 	ErrorMessageMaxBytes int
 
-	// AllowRawSQLInDebugLogs permits raw SQL text only in debug-level logs.
-	// It never permits raw SQL in metrics, traces, info/warn/error logs, or
-	// HTTP health payloads.
+	// AllowRawSQLInDebugLogs has no effect. Raw SQL is not emitted by runtime
+	// observability.
+	//
+	// Deprecated: this option will be removed in the next breaking release.
 	AllowRawSQLInDebugLogs bool
 }
 
@@ -1161,13 +1162,6 @@ func (o *runtimeObservability) redactErrorString(raw string) string {
 		raw = raw[:scanBytes]
 	}
 	return boundUTF8(redactSensitive(strings.ToValidUTF8(raw, "")), maxBytes)
-}
-
-func (o *runtimeObservability) debugSQLString(raw string) (string, bool) {
-	if o == nil || !o.redaction.AllowRawSQLInDebugLogs {
-		return "", false
-	}
-	return boundUTF8(strings.ToValidUTF8(raw, ""), o.errorMessageMaxBytes()), true
 }
 
 func (o *runtimeObservability) errorMessageMaxBytes() int {

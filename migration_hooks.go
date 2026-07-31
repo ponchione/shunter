@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ponchione/shunter/commitlog"
+	"github.com/ponchione/shunter/internal/atomicfile"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
@@ -88,7 +89,7 @@ func (c *MigrationContext) Transaction() *store.Transaction {
 // without starting normal runtime services. It is intended for app-owned
 // binaries that link the module directly; callers must stop any runtime that
 // owns the DataDir before calling it.
-func RunDataDirMigrations(ctx context.Context, mod *Module, cfg Config, hooks ...MigrationHook) (MigrationRunResult, error) {
+func RunDataDirMigrations(ctx context.Context, mod *Module, cfg Config, hooks ...MigrationHook) (result MigrationRunResult, retErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -99,10 +100,21 @@ func RunDataDirMigrations(ctx context.Context, mod *Module, cfg Config, hooks ..
 	if err != nil {
 		return MigrationRunResult{}, err
 	}
-	result := MigrationRunResult{DataDir: preview.dataDir}
+	result = MigrationRunResult{DataDir: preview.dataDir}
 	if len(hooks) == 0 {
 		return result, nil
 	}
+	lease, err := acquireDataDirLease(preview.dataDir, dataDirLeaseExclusive, func(parent string) error {
+		return atomicfile.MkdirAllDurable(parent, dataDirMode, syncDataDirBootstrapDir)
+	})
+	if err != nil {
+		return MigrationRunResult{}, fmt.Errorf("run data dir migrations ownership: %w", err)
+	}
+	defer releaseLeaseInto(&retErr, lease)
+	preview.dataDir = lease.canonicalPath
+	preview.schemaOpts.DataDir = lease.canonicalPath
+	preview.normalized.DataDir = lease.canonicalPath
+	result.DataDir = lease.canonicalPath
 
 	state, recoveredTxID, resumePlan, _, recoveryRegistry, err := openOrBootstrapState(preview.dataDir, preview.registry)
 	if err != nil {

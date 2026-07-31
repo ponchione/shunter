@@ -805,7 +805,7 @@ func TestUpgradeCompressionUnknownRejected(t *testing.T) {
 
 func TestBuildMessageHandlers_NilWhenDependenciesMissing(t *testing.T) {
 	s := &Server{}
-	h := s.buildMessageHandlers()
+	h := buildValidatedMessageHandlers(t, s)
 	if h.OnSubscribeSingle != nil {
 		t.Fatal("OnSubscribeSingle should be nil when schema/executor are missing")
 	}
@@ -828,7 +828,7 @@ func TestBuildMessageHandlers_NilWhenDependenciesMissing(t *testing.T) {
 
 func TestBuildMessageHandlers_WiresOnlySatisfiedDependencies(t *testing.T) {
 	s := &Server{Executor: &fakeInbox{}}
-	h := s.buildMessageHandlers()
+	h := buildValidatedMessageHandlers(t, s)
 	if h.OnSubscribeSingle != nil {
 		t.Fatal("OnSubscribeSingle should stay nil until schema is wired")
 	}
@@ -847,6 +847,19 @@ func TestBuildMessageHandlers_WiresOnlySatisfiedDependencies(t *testing.T) {
 	if h.OnOneOffQuery != nil {
 		t.Fatal("OnOneOffQuery should stay nil until schema and state are both wired")
 	}
+}
+
+func buildValidatedMessageHandlers(t *testing.T, s *Server) *MessageHandlers {
+	t.Helper()
+	queryLimits, err := NormalizeSQLQueryLimits(s.SQLQueryLimits)
+	if err != nil {
+		t.Fatalf("NormalizeSQLQueryLimits: %v", err)
+	}
+	subscriptionLimits, err := NormalizeSubscriptionLimits(s.SubscriptionLimits)
+	if err != nil {
+		t.Fatalf("NormalizeSubscriptionLimits: %v", err)
+	}
+	return s.buildMessageHandlersWithLimits(queryLimits, subscriptionLimits)
 }
 
 func responseBodyString(t *testing.T, resp *http.Response) string {

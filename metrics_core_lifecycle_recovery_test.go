@@ -86,6 +86,9 @@ func TestRuntimeMetricsReadyAndDegradedGaugesTrackRecoveryHealth(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "1", "snapshot"), []byte("corrupt"), 0o644); err != nil {
 		t.Fatalf("corrupt snapshot: %v", err)
 	}
+	if err := initial.Close(); err != nil {
+		t.Fatalf("close initial runtime: %v", err)
+	}
 
 	metrics := &recordingMetricsRecorder{}
 	rt, err := Build(validChatModule(), Config{

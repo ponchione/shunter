@@ -85,7 +85,7 @@ func TestHostRejectsOverlappingRoutePrefixes(t *testing.T) {
 	assertErrorMentions(t, err, "conflicts")
 }
 
-func TestBuildRejectsSharedRuntimeDataDirModuleMismatch(t *testing.T) {
+func TestBuildRejectsSharedRuntimeDataDirOwnership(t *testing.T) {
 	dir := t.TempDir()
 	_ = buildHostTestRuntime(t, "chat", dir)
 
@@ -93,9 +93,9 @@ func TestBuildRejectsSharedRuntimeDataDirModuleMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("Build succeeded with shared runtime data dir")
 	}
-	assertErrorMentions(t, err, "data dir metadata module name")
-	assertErrorMentions(t, err, "chat")
-	assertErrorMentions(t, err, "ops")
+	if !errors.Is(err, ErrDataDirInUse) {
+		t.Fatalf("Build error = %v, want ErrDataDirInUse", err)
+	}
 }
 
 func TestHostDataDirKeyResolvesSymlinkAliases(t *testing.T) {

@@ -12,6 +12,7 @@ require (
 	github.com/prometheus/client_golang v1.21.1
 	github.com/prometheus/client_model v0.6.2
 	go.uber.org/goleak v1.3.0
+	golang.org/x/sys v0.44.0
 	lukechampine.com/blake3 v1.4.1
 	pgregory.net/rapid v1.2.0
 )
@@ -28,7 +29,6 @@ require (
 	golang.org/x/exp/typeparams v0.0.0-20231108232855-2478ac86f678 // indirect
 	golang.org/x/mod v0.31.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/tools v0.40.1-0.20260108161641-ca281cf95054 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 	honnef.co/go/tools v0.7.0 // indirect

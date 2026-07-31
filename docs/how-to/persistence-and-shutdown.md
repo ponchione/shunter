@@ -16,8 +16,16 @@ Use separate data directories for separate applications, modules, tenants, or
 incompatible schema lines.
 
 A blank `DataDir` uses the runtime default `./shunter-data`. Set an explicit
-directory for real services and tests that need predictable ownership. Do not
-run two runtimes against the same `DataDir`.
+directory for real services and tests that need predictable ownership. `Build`
+acquires an exclusive lease on the canonical directory path before recovery or
+bootstrap. Another runtime, process, or offline operation that conflicts with
+that lease fails with `ErrDataDirInUse`; lexical and symlink aliases do not
+bypass ownership.
+
+The crash-safe advisory lock is held on an empty sibling file named by appending
+`.shunter-lock` to the canonical `DataDir`. It contains no runtime data, is not
+part of a backup, and may remain after shutdown. Do not remove it while a
+runtime or maintenance operation may be using the directory.
 
 ## Startup
 
@@ -38,7 +46,9 @@ if err := rt.Start(ctx); err != nil {
 ```
 
 If startup recovery or schema validation fails, preserve the data directory and
-investigate. Do not delete selected log or snapshot files to force startup.
+investigate. Do not delete selected log or snapshot files to force startup. A
+built runtime retains its lease after a failed `Start`, including retryable
+failures; call `Close` before building a replacement runtime.
 
 ## Graceful Shutdown
 
@@ -59,9 +69,9 @@ if err := rt.Close(); err != nil {
 ```
 
 `Close` shuts down runtime-owned lifecycle, durability, executor,
-subscription, and protocol resources. If called during `Start`, it cancels and
-waits for startup before returning, so offline tooling may safely use `Close` as
-the data-directory ownership boundary.
+subscription, and protocol resources, then releases the DataDir lease. If
+called during `Start`, it cancels and waits for startup before returning, so
+offline tooling may safely use `Close` as the data-directory ownership boundary.
 
 ## Snapshot And Compaction
 
@@ -133,6 +143,8 @@ root's identity or mode. Staged directories stay owner-private and writable
 until copying and source verification finish; source directory permission bits
 are then applied deepest-first before publication, so readable, read-only
 directories are preserved without blocking their children.
+Backup takes a transient shared lease and returns `ErrDataDirInUse` rather than
+copying from a live runtime owner.
 
 ## Restore
 
@@ -153,6 +165,8 @@ if err := shunter.RestoreDataDir("./backups/chat-2026-05-04", "./data/chat"); er
 
 Restore uses the same staged publication. Failures leave a missing destination
 missing or an existing empty destination empty; no partial DataDir is exposed.
+Restore takes a transient shared lease on the backup and an exclusive lease on
+the destination, so it cannot replace a live runtime's directory.
 
 ```bash
 rtk go run ./cmd/shunter restore --backup ./backups/chat-2026-05-04 --data-dir ./data/chat
@@ -185,6 +199,8 @@ Row-shape changes, table drops, and new unique or primary constraints require
 an app-owned migration plan. If recovery has durable log data but cannot select
 a snapshot, schema-version drift is blocked because there is no persisted schema
 map to reconcile table IDs safely.
+Compatibility inspection takes a transient shared lease and returns
+`ErrDataDirInUse` when an exclusive runtime or migration owner is active.
 
 Preflight CLIs must be app-owned binaries because they need to link the module
 declarations directly:
@@ -223,6 +239,7 @@ _ = result.DurableTxID
 ```
 
 Take an offline backup before data-rewrite migrations.
+Offline migration runners take a transient exclusive DataDir lease.
 
 ## More Detail
 

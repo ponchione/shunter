@@ -202,17 +202,6 @@ func (r *Runtime) listenAddr() string {
 	return r.buildConfig.ListenAddr
 }
 
-func (r *Runtime) serve(ctx context.Context, ln net.Listener) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if !r.tryBeginServing() {
-		_ = ln.Close()
-		return ErrRuntimeServing
-	}
-	return r.serveStarted(ctx, ln)
-}
-
 func (r *Runtime) tryBeginServing() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()

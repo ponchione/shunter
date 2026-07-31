@@ -259,7 +259,7 @@ func copyAuthOIDCDiscoveryIssuers(in []AuthOIDCDiscoveryIssuer) []AuthOIDCDiscov
 // CheckDataDirCompatibility validates that mod can recover cfg.DataDir without
 // starting runtime services or bootstrapping missing state. A missing or empty
 // DataDir is compatible because Build can create a fresh runtime state there.
-func CheckDataDirCompatibility(mod *Module, cfg Config) error {
+func CheckDataDirCompatibility(mod *Module, cfg Config) (retErr error) {
 	preview, err := previewRuntimeBuild(mod, cfg)
 	if err != nil {
 		return err
@@ -274,6 +274,12 @@ func CheckDataDirCompatibility(mod *Module, cfg Config) error {
 	if !info.IsDir() {
 		return fmt.Errorf("data dir %s is not a directory", preview.dataDir)
 	}
+	lease, err := acquireDataDirLease(preview.dataDir, dataDirLeaseShared, nil)
+	if err != nil {
+		return fmt.Errorf("check data dir compatibility ownership: %w", err)
+	}
+	defer releaseLeaseInto(&retErr, lease)
+	preview.dataDir = lease.canonicalPath
 	if err := validateDataDirMetadata(preview.dataDir, mod, preview.registry); err != nil {
 		return fmt.Errorf("check data dir compatibility: %w", err)
 	}
@@ -297,12 +303,12 @@ func CheckDataDirCompatibility(mod *Module, cfg Config) error {
 // schema-version-only drift, added tables, and appended non-unique/non-primary
 // indexes; row-shape changes and destructive table/index changes remain
 // blocked until app-owned migration hooks rewrite or validate persisted rows.
-func CheckDataDirCompatibilityReport(mod *Module, cfg Config) (DataDirCompatibilityReport, error) {
+func CheckDataDirCompatibilityReport(mod *Module, cfg Config) (report DataDirCompatibilityReport, retErr error) {
 	preview, err := previewRuntimeBuild(mod, cfg)
 	if err != nil {
 		return DataDirCompatibilityReport{}, err
 	}
-	report := DataDirCompatibilityReport{
+	report = DataDirCompatibilityReport{
 		Compatible: true,
 		Status:     DataDirCompatibilityFresh,
 		DataDir:    preview.dataDir,
@@ -322,6 +328,13 @@ func CheckDataDirCompatibilityReport(mod *Module, cfg Config) (DataDirCompatibil
 	if !info.IsDir() {
 		return blockedDataDirCompatibilityReport(report, fmt.Errorf("data dir %s is not a directory", preview.dataDir)), nil
 	}
+	lease, err := acquireDataDirLease(preview.dataDir, dataDirLeaseShared, nil)
+	if err != nil {
+		return blockedDataDirCompatibilityReport(report, fmt.Errorf("check data dir compatibility ownership: %w", err)), err
+	}
+	defer releaseLeaseInto(&retErr, lease)
+	preview.dataDir = lease.canonicalPath
+	report.DataDir = lease.canonicalPath
 	if err := validateDataDirMetadata(preview.dataDir, mod, preview.registry); err != nil {
 		return blockedDataDirCompatibilityReport(report, fmt.Errorf("check data dir compatibility: %w", err)), nil
 	}

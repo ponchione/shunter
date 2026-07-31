@@ -344,32 +344,6 @@ func FuzzObservabilityRedactErrorString(f *testing.F) {
 	})
 }
 
-func TestObservabilityDebugSQLBoundedWhenAllowed(t *testing.T) {
-	obs := newRuntimeObservability("chat", ObservabilityConfig{
-		RuntimeLabel: "default",
-		Redaction: RedactionConfig{
-			ErrorMessageMaxBytes:   4,
-			AllowRawSQLInDebugLogs: true,
-		},
-	})
-
-	got, ok := obs.debugSQLString(string([]byte{'a', 'b', 0xff, 0xe2, 0x82, 0xac, 'c'}))
-	if !ok {
-		t.Fatal("debug SQL was not allowed")
-	}
-	if got != "ab" {
-		t.Fatalf("debug SQL = %q, want ab", got)
-	}
-	if !utf8.ValidString(got) {
-		t.Fatalf("debug SQL is invalid UTF-8: %q", got)
-	}
-
-	disabled := newRuntimeObservability("chat", ObservabilityConfig{RuntimeLabel: "default"})
-	if got, ok := disabled.debugSQLString("select 1"); ok || got != "" {
-		t.Fatalf("disabled debug SQL = %q, %v; want empty false", got, ok)
-	}
-}
-
 func TestObservabilityDisabledMetricsAndTracingIgnoreSinks(t *testing.T) {
 	rec := &countingMetricsRecorder{}
 	tracer := &countingTracer{}

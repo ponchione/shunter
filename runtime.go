@@ -2,6 +2,7 @@ package shunter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/ponchione/shunter/commitlog"
 	"github.com/ponchione/shunter/executor"
+	"github.com/ponchione/shunter/internal/atomicfile"
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
@@ -27,6 +29,7 @@ type Runtime struct {
 	registry      schema.SchemaRegistry
 	readCatalog   *declaredReadCatalog
 	dataDir       string
+	dataDirLease  *dataDirLease
 	state         *store.CommittedState
 	recoveredTxID types.TxID
 	resumePlan    commitlog.RecoveryResumePlan
@@ -75,7 +78,12 @@ type Runtime struct {
 // runtime services.
 func Build(mod *Module, cfg Config) (*Runtime, error) {
 	observability, _ := newBuildObservability("unknown", cfg.Observability)
+	var lease *dataDirLease
 	fail := func(err error) (*Runtime, error) {
+		if lease != nil {
+			err = errors.Join(err, lease.release())
+			lease = nil
+		}
 		observability.recordBuildFailed(err)
 		return nil, err
 	}
@@ -93,6 +101,15 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		return fail(err)
 	}
 	observability = newRuntimeObservability(mod.name, preview.normalized.Observability)
+	lease, err = acquireDataDirLease(preview.dataDir, dataDirLeaseExclusive, func(parent string) error {
+		return atomicfile.MkdirAllDurable(parent, dataDirMode, syncDataDirBootstrapDir)
+	})
+	if err != nil {
+		return fail(fmt.Errorf("build hosted runtime data dir ownership: %w", err))
+	}
+	preview.dataDir = lease.canonicalPath
+	preview.schemaOpts.DataDir = lease.canonicalPath
+	preview.normalized.DataDir = lease.canonicalPath
 
 	engine, err := mod.builder.Build(preview.schemaOpts)
 	if err != nil {
@@ -135,6 +152,7 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		registry:      registry,
 		readCatalog:   readCatalog,
 		dataDir:       preview.dataDir,
+		dataDirLease:  lease,
 		state:         state,
 		recoveredTxID: recoveredTxID,
 		resumePlan:    resumePlan,
@@ -144,6 +162,7 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		stateName:     RuntimeStateBuilt,
 		durableTxID:   recoveredTxID,
 	}
+	lease = nil
 	rt.recordRuntimeMetrics()
 	return rt, nil
 }
@@ -161,10 +180,6 @@ func newSuccessfulRuntimeRecoveryFacts(report commitlog.RecoveryReport) runtimeR
 		succeeded: true,
 		report:    copyRecoveryReport(report),
 	}
-}
-
-func (f runtimeRecoveryFacts) degraded() bool {
-	return f.succeeded && (len(f.report.DamagedTailSegments) > 0 || len(f.report.SkippedSnapshots) > 0)
 }
 
 func copyRecoveryReport(report commitlog.RecoveryReport) commitlog.RecoveryReport {

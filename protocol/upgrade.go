@@ -347,21 +347,6 @@ func (s *Server) recordRejected(result string, err error) {
 	}
 }
 
-// buildMessageHandlers constructs the MessageHandlers that wire each
-// client message type to the appropriate handler function, closing over
-// the Server's dependencies (executor, schema, state).
-func (s *Server) buildMessageHandlers() *MessageHandlers {
-	limits, err := NormalizeSQLQueryLimits(s.SQLQueryLimits)
-	if err != nil {
-		limits = SQLQueryLimits{MaxRows: DefaultSQLQueryMaxRows, MaxBytes: DefaultSQLQueryMaxBytes, MaxWork: DefaultSQLQueryMaxWork}
-	}
-	subscriptionLimits, subErr := NormalizeSubscriptionLimits(s.SubscriptionLimits)
-	if subErr != nil {
-		subscriptionLimits = SubscriptionLimits{MaxQueriesPerSet: DefaultSubscriptionMaxQueriesPerSet}
-	}
-	return s.buildMessageHandlersWithLimits(limits, subscriptionLimits)
-}
-
 func (s *Server) buildMessageHandlersWithLimits(queryLimits SQLQueryLimits, subLimits SubscriptionLimits) *MessageHandlers {
 	handlers := &MessageHandlers{}
 	if s.Executor != nil && s.Schema != nil {
