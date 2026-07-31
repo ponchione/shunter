@@ -33,8 +33,7 @@ func evalMultiJoinDelta(ctx context.Context, dv *DeltaView, p MultiJoin, project
 		if err != nil {
 			return nil, nil, err
 		}
-		inserts, deletes = ReconcileJoinDelta([][]types.ProductValue{after}, [][]types.ProductValue{before})
-		return inserts, deletes, nil
+		return reconcileJoinDelta(ctx, [][]types.ProductValue{after}, [][]types.ProductValue{before})
 	}
 	insertFragments := make([][]types.ProductValue, 0, len(p.Relations))
 	deleteFragments := make([][]types.ProductValue, 0, len(p.Relations))
@@ -59,8 +58,7 @@ func evalMultiJoinDelta(ctx context.Context, dv *DeltaView, p MultiJoin, project
 			deleteFragments = append(deleteFragments, fragment)
 		}
 	}
-	inserts, deletes = ReconcileJoinDelta(insertFragments, deleteFragments)
-	return inserts, deletes, nil
+	return reconcileJoinDelta(ctx, insertFragments, deleteFragments)
 }
 
 func multiJoinDeltaRowsByRelation(beforeRows, afterRows [][]types.ProductValue, relation int, deltaRows []types.ProductValue, insert bool) [][]types.ProductValue {
@@ -141,7 +139,11 @@ func collectMultiJoinProjectedRows(ctx context.Context, p MultiJoin, rowsByRelat
 		if limit > 0 && len(out) >= limit {
 			return NewQuotaError(ErrInitialRowLimit, "snapshot_rows", len(out)+1, limit)
 		}
-		out = append(out, projectMultiJoinTuple(tuple, p, projection))
+		row := projectMultiJoinTuple(tuple, p, projection)
+		if err := chargeDeltaRow(ctx, row); err != nil {
+			return err
+		}
+		out = append(out, row)
 		return nil
 	})
 	return out, err

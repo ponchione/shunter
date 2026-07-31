@@ -181,6 +181,7 @@ func (r *Runtime) Start(ctx context.Context) (startErr error) {
 		subscription.WithObserver(r.observability),
 		subscription.WithInitialRowLimit(r.buildConfig.SubscriptionInitialRowLimit),
 		subscription.WithSnapshotByteLimit(r.buildConfig.SubscriptionSnapshotMaxBytes),
+		subscription.WithOrderedWindowMaxRows(r.buildConfig.SubscriptionOrderedWindowMaxRows),
 		subscription.WithMaxQueriesPerSet(r.buildConfig.SubscriptionMaxQueriesPerSet),
 		subscription.WithMaxActiveSetsPerConnection(r.buildConfig.SubscriptionMaxActiveSetsPerConnection),
 		subscription.WithMaxActiveSubscriptionsPerConnection(r.buildConfig.SubscriptionMaxActiveSubscriptionsPerConnection),

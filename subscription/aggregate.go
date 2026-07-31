@@ -257,9 +257,6 @@ func (m *Manager) initialAggregateUpdates(ctx context.Context, pred Predicate, a
 	if err := m.checkMultiJoinLimits(ctx, pred, view); err != nil {
 		return nil, err
 	}
-	if _, ok := pred.(MultiJoin); ok {
-		ctx = m.withMultiJoinWorkBudget(ctx)
-	}
 	table, ok := aggregateEmittedTable(pred)
 	if !ok {
 		return nil, nil
@@ -286,9 +283,6 @@ func (m *Manager) evalAggregateQuery(ctx context.Context, qs *queryState, dv *De
 	if err := m.checkMultiJoinDeltaLimits(ctx, qs.predicate, dv); err != nil {
 		return nil, err
 	}
-	if _, ok := qs.predicate.(MultiJoin); ok {
-		ctx = m.withMultiJoinWorkBudget(ctx)
-	}
 	after, err := aggregateAfterValue(ctx, dv, table, qs.predicate, qs.aggregate, m.resolver)
 	if err != nil {
 		return nil, err
@@ -305,7 +299,7 @@ func (m *Manager) evalAggregateQuery(ctx context.Context, qs *queryState, dv *De
 		if err != nil {
 			return nil, err
 		}
-		before, err = aggregateJoinRowsValue(leftBefore, rightBefore, join, qs.aggregate)
+		before, err = aggregateJoinRowsValue(ctx, leftBefore, rightBefore, join, qs.aggregate)
 		if err != nil {
 			return nil, err
 		}
@@ -319,7 +313,7 @@ func (m *Manager) evalAggregateQuery(ctx context.Context, qs *queryState, dv *De
 		if err != nil {
 			return nil, err
 		}
-		before, err = aggregateCrossJoinRowsValue(leftBefore, rightBefore, cross, qs.aggregate)
+		before, err = aggregateCrossJoinRowsValue(ctx, leftBefore, rightBefore, cross, qs.aggregate)
 		if err != nil {
 			return nil, err
 		}
@@ -341,19 +335,22 @@ func (m *Manager) evalAggregateQuery(ctx context.Context, qs *queryState, dv *De
 				if err != nil {
 					return nil, err
 				}
-				before, err = aggregateRowsValue(rows, table, qs.predicate, qs.aggregate)
+				before, err = aggregateRowsValue(ctx, rows, table, qs.predicate, qs.aggregate)
 				if err != nil {
 					return nil, err
 				}
 			} else {
-				before = countAggregateBeforeValue(dv, table, qs.predicate, qs.aggregate, after)
+				before, err = countAggregateBeforeValue(ctx, dv, table, qs.predicate, qs.aggregate, after)
+				if err != nil {
+					return nil, err
+				}
 			}
 		case AggregateSum:
 			rows, err := projectedRowsBefore(ctx, dv, table)
 			if err != nil {
 				return nil, err
 			}
-			before, err = aggregateRowsValue(rows, table, qs.predicate, qs.aggregate)
+			before, err = aggregateRowsValue(ctx, rows, table, qs.predicate, qs.aggregate)
 			if err != nil {
 				return nil, err
 			}
@@ -363,6 +360,12 @@ func (m *Manager) evalAggregateQuery(ctx context.Context, qs *queryState, dv *De
 	}
 	if before.Equal(after) {
 		return nil, nil
+	}
+	if err := chargeDeltaRow(ctx, aggregateValueRow(after)); err != nil {
+		return nil, err
+	}
+	if err := chargeDeltaRow(ctx, aggregateValueRow(before)); err != nil {
+		return nil, err
 	}
 	return []SubscriptionUpdate{{
 		TableID:   table,
@@ -390,7 +393,7 @@ func aggregateAfterValue(ctx context.Context, dv *DeltaView, table TableID, pred
 		if err != nil {
 			return types.Value{}, err
 		}
-		return aggregateJoinRowsValue(leftRows, rightRows, join, aggregate)
+		return aggregateJoinRowsValue(ctx, leftRows, rightRows, join, aggregate)
 	}
 	if cross, ok := pred.(CrossJoin); ok {
 		leftRows, err := tableRowsAfter(ctx, dv, cross.Left)
@@ -401,7 +404,7 @@ func aggregateAfterValue(ctx context.Context, dv *DeltaView, table TableID, pred
 		if err != nil {
 			return types.Value{}, err
 		}
-		return aggregateCrossJoinRowsValue(leftRows, rightRows, cross, aggregate)
+		return aggregateCrossJoinRowsValue(ctx, leftRows, rightRows, cross, aggregate)
 	}
 	if multi, ok := pred.(MultiJoin); ok {
 		rowsByRelation, err := multiJoinRowsByRelationAfter(ctx, dv, multi)
@@ -414,7 +417,7 @@ func aggregateAfterValue(ctx context.Context, dv *DeltaView, table TableID, pred
 	if err != nil {
 		return types.Value{}, err
 	}
-	return aggregateRowsValue(rows, table, pred, aggregate)
+	return aggregateRowsValue(ctx, rows, table, pred, aggregate)
 }
 
 func predicateTouchesEventTable(dv *DeltaView, pred Predicate) bool {
@@ -424,17 +427,23 @@ func predicateTouchesEventTable(dv *DeltaView, pred Predicate) bool {
 	return slices.ContainsFunc(pred.Tables(), dv.IsEventTable)
 }
 
-func countAggregateBeforeValue(dv *DeltaView, table TableID, pred Predicate, aggregate *Aggregate, after types.Value) types.Value {
+func countAggregateBeforeValue(ctx context.Context, dv *DeltaView, table TableID, pred Predicate, aggregate *Aggregate, after types.Value) (types.Value, error) {
 	afterCount := after.AsUint64()
-	inserted := countAggregateDeltaRows(dv.InsertedRows(table), table, pred, aggregate)
-	deleted := countAggregateDeltaRows(dv.DeletedRows(table), table, pred, aggregate)
+	inserted, err := countAggregateDeltaRows(ctx, dv.InsertedRows(table), table, pred, aggregate)
+	if err != nil {
+		return types.Value{}, err
+	}
+	deleted, err := countAggregateDeltaRows(ctx, dv.DeletedRows(table), table, pred, aggregate)
+	if err != nil {
+		return types.Value{}, err
+	}
 	before := afterCount + deleted
 	if inserted > before {
-		return types.NewUint64(0)
+		return types.NewUint64(0), nil
 	} else {
 		before -= inserted
 	}
-	return types.NewUint64(before)
+	return types.NewUint64(before), nil
 }
 
 func aggregateCommittedValue(ctx context.Context, view store.CommittedReadView, table TableID, pred Predicate, aggregate *Aggregate, resolver IndexResolver) (types.Value, error) {
@@ -463,7 +472,7 @@ func aggregateCommittedValue(ctx context.Context, view store.CommittedReadView, 
 		if err != nil {
 			return types.Value{}, err
 		}
-		return aggregateRowsValue(rows, table, pred, aggregate)
+		return aggregateRowsValue(ctx, rows, table, pred, aggregate)
 	case AggregateSum:
 		if view == nil {
 			return emptySumAggregateValue(aggregate)
@@ -472,7 +481,7 @@ func aggregateCommittedValue(ctx context.Context, view store.CommittedReadView, 
 		if err != nil {
 			return types.Value{}, err
 		}
-		return aggregateRowsValue(rows, table, pred, aggregate)
+		return aggregateRowsValue(ctx, rows, table, pred, aggregate)
 	default:
 		return types.Value{}, fmt.Errorf("aggregate %q not supported", aggregate.Func)
 	}
@@ -549,6 +558,9 @@ func aggregateCommittedRows(ctx context.Context, view store.CommittedReadView, t
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return nil, err
+		}
 		rows = append(rows, row)
 	}
 	return rows, nil
@@ -564,6 +576,9 @@ func countAggregateCommittedRows(ctx context.Context, view store.CommittedReadVi
 	var count uint64
 	for _, row := range view.TableScan(table) {
 		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		if err := chargeSubscriptionWork(ctx); err != nil {
 			return 0, err
 		}
 		if aggregateRowContributes(row, table, pred, aggregate) {
@@ -608,6 +623,9 @@ func visitJoinCommittedPairsWithProbeIndex(
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return err
+		}
 		driveValue, ok := rowValue(driveRow, driveCol)
 		if !ok {
 			continue
@@ -615,6 +633,9 @@ func visitJoinCommittedPairsWithProbeIndex(
 		key := store.NewIndexKey(driveValue)
 		for _, rid := range view.IndexSeek(probeTable, probeIdx, key) {
 			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := chargeSubscriptionWork(ctx); err != nil {
 				return err
 			}
 			probeRow, ok := view.GetRow(probeTable, rid)
@@ -654,8 +675,14 @@ func visitCrossJoinCommittedPairs(ctx context.Context, view store.CommittedReadV
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return err
+		}
 		for _, rightRow := range view.TableScan(cross.Right) {
 			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := chargeSubscriptionWork(ctx); err != nil {
 				return err
 			}
 			if !MatchJoinPair(cross.Filter, cross.Left, cross.LeftAlias, leftRow, cross.Right, cross.RightAlias, rightRow) {
@@ -757,7 +784,7 @@ func (a *joinAggregateAccumulator) value() (types.Value, error) {
 	}
 }
 
-func aggregateJoinRowsValue(leftRows, rightRows []types.ProductValue, join Join, aggregate *Aggregate) (types.Value, error) {
+func aggregateJoinRowsValue(ctx context.Context, leftRows, rightRows []types.ProductValue, join Join, aggregate *Aggregate) (types.Value, error) {
 	acc, err := newJoinAggregateAccumulator(aggregate)
 	if err != nil {
 		return types.Value{}, err
@@ -765,10 +792,16 @@ func aggregateJoinRowsValue(leftRows, rightRows []types.ProductValue, join Join,
 	leftCol := int(join.LeftCol)
 	rightCol := int(join.RightCol)
 	for _, leftRow := range leftRows {
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return types.Value{}, err
+		}
 		if leftCol < 0 || leftCol >= len(leftRow) {
 			continue
 		}
 		for _, rightRow := range rightRows {
+			if err := chargeSubscriptionWork(ctx); err != nil {
+				return types.Value{}, err
+			}
 			if rightCol < 0 || rightCol >= len(rightRow) || !leftRow[leftCol].Equal(rightRow[rightCol]) {
 				continue
 			}
@@ -783,13 +816,19 @@ func aggregateJoinRowsValue(leftRows, rightRows []types.ProductValue, join Join,
 	return acc.value()
 }
 
-func aggregateCrossJoinRowsValue(leftRows, rightRows []types.ProductValue, cross CrossJoin, aggregate *Aggregate) (types.Value, error) {
+func aggregateCrossJoinRowsValue(ctx context.Context, leftRows, rightRows []types.ProductValue, cross CrossJoin, aggregate *Aggregate) (types.Value, error) {
 	acc, err := newJoinAggregateAccumulator(aggregate)
 	if err != nil {
 		return types.Value{}, err
 	}
 	for _, leftRow := range leftRows {
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return types.Value{}, err
+		}
 		for _, rightRow := range rightRows {
+			if err := chargeSubscriptionWork(ctx); err != nil {
+				return types.Value{}, err
+			}
 			if !MatchJoinPair(cross.Filter, cross.Left, cross.LeftAlias, leftRow, cross.Right, cross.RightAlias, rightRow) {
 				continue
 			}
@@ -867,14 +906,17 @@ func multiJoinAggregateRelationIndex(relations []MultiJoinRelation, table TableI
 	return 0, false
 }
 
-func countAggregateDeltaRows(rows []types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) uint64 {
+func countAggregateDeltaRows(ctx context.Context, rows []types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) (uint64, error) {
 	var count uint64
 	for _, row := range rows {
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return 0, err
+		}
 		if aggregateRowContributes(row, table, pred, aggregate) {
 			count++
 		}
 	}
-	return count
+	return count, nil
 }
 
 func aggregateEmittedTable(pred Predicate) (TableID, bool) {
@@ -909,16 +951,27 @@ func aggregateValueRow(value types.Value) types.ProductValue {
 	return types.ProductValue{value}
 }
 
-func aggregateRowsValue(rows []types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) (types.Value, error) {
+func aggregateRowsValue(ctx context.Context, rows []types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) (types.Value, error) {
 	switch aggregate.Func {
 	case AggregateCount:
 		if aggregate.Distinct {
-			return types.NewUint64(distinctCountAggregateRows(rows, table, pred, aggregate)), nil
+			count, err := distinctCountAggregateRows(ctx, rows, table, pred, aggregate)
+			if err != nil {
+				return types.Value{}, err
+			}
+			return types.NewUint64(count), nil
 		}
-		return types.NewUint64(countAggregateDeltaRows(rows, table, pred, aggregate)), nil
+		count, err := countAggregateDeltaRows(ctx, rows, table, pred, aggregate)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewUint64(count), nil
 	case AggregateSum:
 		acc := valueagg.NewSum(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
 		for _, row := range rows {
+			if err := chargeSubscriptionWork(ctx); err != nil {
+				return types.Value{}, err
+			}
 			value, ok := aggregateArgumentValue(row, table, pred, aggregate)
 			if !ok {
 				continue
@@ -933,16 +986,19 @@ func aggregateRowsValue(rows []types.ProductValue, table TableID, pred Predicate
 	}
 }
 
-func distinctCountAggregateRows(rows []types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) uint64 {
+func distinctCountAggregateRows(ctx context.Context, rows []types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) (uint64, error) {
 	seen := valueagg.NewDistinctSet()
 	for _, row := range rows {
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return 0, err
+		}
 		value, ok := aggregateArgumentValue(row, table, pred, aggregate)
 		if !ok || value.IsNull() {
 			continue
 		}
 		seen.Add(value)
 	}
-	return seen.Count()
+	return seen.Count(), nil
 }
 
 func aggregateArgumentValue(row types.ProductValue, table TableID, pred Predicate, aggregate *Aggregate) (types.Value, bool) {

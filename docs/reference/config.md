@@ -15,16 +15,17 @@ intent for the root runtime config.
 | `AuthMode` | Development or strict auth behavior. | Use zero-value dev mode for local work, strict mode for public serving. |
 | `OneOffQueryMaxRows` | Hosted raw and declared query result-row limit. | Zero uses 100,000 rows. Set lower for public or memory-constrained services. |
 | `OneOffQueryMaxBytes` | Hosted raw and declared query encoded row-list limit. | Zero uses 64 MiB. Unordered rows are checked before retention; ordered queries apply it to retained top-window row payloads. It does not bound all query working memory. |
-| `OneOffQueryMaxWork` | Candidate-row and index-probe budget for one-off and declared multi-way joins. | Zero uses 1,000,000 work units for each query execution. |
+| `OneOffQueryMaxWork` | Candidate-row, index-probe, and join-pair budget for one-off and declared queries, including aggregate input. | Zero uses 1,000,000 work units for each query execution. |
 | `ProcedureResultMaxBytes` | Raw application procedure result limit. | Zero uses 64 MiB. Results above the limit become procedure errors before protocol delivery. |
-| `SubscriptionInitialRowLimit` | Aggregate initial/final rows across one subscription set. | Zero uses 100,000 rows. Set from the largest measured legitimate whole-set snapshot. |
-| `SubscriptionSnapshotMaxBytes` | Aggregate encoded RowList bytes across one initial/final subscription set. | Zero uses 64 MiB. Checked before registry publication. |
+| `SubscriptionInitialRowLimit` | Aggregate initial/final rows across one subscription set and materialized row slots per live query delta. | Zero uses 100,000 rows. Set from the largest measured legitimate snapshot or delta. |
+| `SubscriptionSnapshotMaxBytes` | Aggregate encoded RowList bytes across one initial/final subscription set and conservative materialized bytes per live query delta. | Zero uses 64 MiB. Initial/final snapshots are checked before registry publication; live deltas fail atomically. |
+| `SubscriptionOrderedWindowMaxRows` | Working rows retained for `ORDER BY`, computed as `OFFSET + effective LIMIT`. | Zero uses 100,000 rows. Unsafe or overflowing windows fail before snapshot allocation. |
 | `SubscriptionMaxQueriesPerSet` | Raw query strings admitted and compiled for one subscription set. | Zero uses 256. The decoder hard ceiling is 4,096. |
 | `SubscriptionMaxActiveSetsPerConnection` | Live client query IDs retained for one connection. | Zero uses 128. Unregister and disconnect release capacity. |
 | `SubscriptionMaxActiveSubscriptionsPerConnection` | Deduplicated internal live subscriptions retained for one connection. | Zero uses 1,024. Repeated predicates within one set consume one slot. |
 | `SubscriptionMaxMultiJoinRelations` | Live multi-way join relation-count limit checked at admission and delta evaluation. | Zero uses 8 relations. |
 | `SubscriptionMaxMultiJoinRowsPerRelation` | Committed input-row limit per live multi-way join relation, checked for initial snapshots and before/after delta state. | Zero uses 100,000 rows. |
-| `SubscriptionMaxMultiJoinWork` | Candidate-row work budget for one live multi-way join snapshot or delta evaluation. | Zero uses 1,000,000 work units per evaluation. |
+| `SubscriptionMaxMultiJoinWork` | Compatibility-named candidate-row, index-probe, and join-pair budget for every live snapshot or delta evaluation, including aggregate input. | Zero uses 1,000,000 work units per evaluation. |
 
 Zero queue capacities are normalized to conservative non-zero defaults by the
 runtime. Zero query and subscription limits use the defaults above, including

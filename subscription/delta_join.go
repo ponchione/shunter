@@ -1,6 +1,8 @@
 package subscription
 
 import (
+	"context"
+
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
@@ -20,6 +22,11 @@ type JoinFragments struct {
 // callers must include the join columns in deltaIndexColumns when constructing
 // the DeltaView.
 func EvalJoinDeltaFragments(dv *DeltaView, join *Join, resolver IndexResolver) JoinFragments {
+	f, _ := evalJoinDeltaFragments(context.Background(), dv, join, resolver)
+	return f
+}
+
+func evalJoinDeltaFragments(ctx context.Context, dv *DeltaView, join *Join, resolver IndexResolver) (JoinFragments, error) {
 	var f JoinFragments
 
 	dInsT1 := dv.InsertedRows(join.Left)
@@ -29,39 +36,65 @@ func EvalJoinDeltaFragments(dv *DeltaView, join *Join, resolver IndexResolver) J
 
 	// Insert fragments.
 	// I1: dT1(+) join T2'   (drive=dT1(+), probe=committed T2)
-	f.Inserts[0] = joinDriveCommitted(dv, dInsT1, true, join.Left, join.LeftCol,
+	var err error
+	f.Inserts[0], err = joinDriveCommitted(ctx, dv, dInsT1, true, join.Left, join.LeftCol,
 		join.Right, join.RightCol, join, resolver)
+	if err != nil {
+		return JoinFragments{}, err
+	}
 	// I2: T1' join dT2(+)   (drive=dT2(+), probe=committed T1, swap to keep LHS,RHS order)
-	f.Inserts[1] = joinDriveCommittedReversed(dv, dInsT2, true, join.Right, join.RightCol,
+	f.Inserts[1], err = joinDriveCommittedReversed(ctx, dv, dInsT2, true, join.Right, join.RightCol,
 		join.Left, join.LeftCol, join, resolver)
+	if err != nil {
+		return JoinFragments{}, err
+	}
 	// I3: dT1(+) join dT2(-)
-	f.Inserts[2] = joinDriveDelta(dv, dInsT1, join.Left, join.LeftCol,
+	f.Inserts[2], err = joinDriveDelta(ctx, dv, dInsT1, join.Left, join.LeftCol,
 		join.Right, join.RightCol, false /* probe deletes */, join)
+	if err != nil {
+		return JoinFragments{}, err
+	}
 	// I4: dT1(-) join dT2(+)
-	f.Inserts[3] = joinDriveDelta(dv, dDelT1, join.Left, join.LeftCol,
+	f.Inserts[3], err = joinDriveDelta(ctx, dv, dDelT1, join.Left, join.LeftCol,
 		join.Right, join.RightCol, true /* probe inserts */, join)
+	if err != nil {
+		return JoinFragments{}, err
+	}
 
 	// Delete fragments.
 	// D1: dT1(-) join T2'
-	f.Deletes[0] = joinDriveCommitted(dv, dDelT1, false, join.Left, join.LeftCol,
+	f.Deletes[0], err = joinDriveCommitted(ctx, dv, dDelT1, false, join.Left, join.LeftCol,
 		join.Right, join.RightCol, join, resolver)
+	if err != nil {
+		return JoinFragments{}, err
+	}
 	// D2: T1' join dT2(-)
-	f.Deletes[1] = joinDriveCommittedReversed(dv, dDelT2, false, join.Right, join.RightCol,
+	f.Deletes[1], err = joinDriveCommittedReversed(ctx, dv, dDelT2, false, join.Right, join.RightCol,
 		join.Left, join.LeftCol, join, resolver)
+	if err != nil {
+		return JoinFragments{}, err
+	}
 	// D3: dT1(+) join dT2(+)
-	f.Deletes[2] = joinDriveDelta(dv, dInsT1, join.Left, join.LeftCol,
+	f.Deletes[2], err = joinDriveDelta(ctx, dv, dInsT1, join.Left, join.LeftCol,
 		join.Right, join.RightCol, true /* probe inserts */, join)
+	if err != nil {
+		return JoinFragments{}, err
+	}
 	// D4: dT1(-) join dT2(-)
-	f.Deletes[3] = joinDriveDelta(dv, dDelT1, join.Left, join.LeftCol,
+	f.Deletes[3], err = joinDriveDelta(ctx, dv, dDelT1, join.Left, join.LeftCol,
 		join.Right, join.RightCol, false /* probe deletes */, join)
+	if err != nil {
+		return JoinFragments{}, err
+	}
 
-	return f
+	return f, nil
 }
 
 // joinDriveCommitted iterates the LHS driving slice and probes the committed
 // RHS table by join column. Outputs (LHS, RHS)-concatenated rows that pass
 // the optional Join.Filter.
 func joinDriveCommitted(
+	ctx context.Context,
 	dv *DeltaView,
 	driving []types.ProductValue,
 	driveInserted bool,
@@ -69,13 +102,14 @@ func joinDriveCommitted(
 	rhsTable TableID, rhsCol ColID,
 	join *Join,
 	resolver IndexResolver,
-) []types.ProductValue {
-	return joinDriveCommittedRows(dv, driving, driveInserted, lhsTable, lhsCol, rhsTable, rhsCol, true, join, resolver)
+) ([]types.ProductValue, error) {
+	return joinDriveCommittedRows(ctx, dv, driving, driveInserted, lhsTable, lhsCol, rhsTable, rhsCol, true, join, resolver)
 }
 
 // joinDriveCommittedReversed probes the committed LHS side while driving
 // from the RHS delta. Output rows are still emitted in (Left, Right) order.
 func joinDriveCommittedReversed(
+	ctx context.Context,
 	dv *DeltaView,
 	driving []types.ProductValue,
 	driveInserted bool,
@@ -83,11 +117,12 @@ func joinDriveCommittedReversed(
 	lhsTable TableID, lhsCol ColID,
 	join *Join,
 	resolver IndexResolver,
-) []types.ProductValue {
-	return joinDriveCommittedRows(dv, driving, driveInserted, rhsTable, rhsCol, lhsTable, lhsCol, false, join, resolver)
+) ([]types.ProductValue, error) {
+	return joinDriveCommittedRows(ctx, dv, driving, driveInserted, rhsTable, rhsCol, lhsTable, lhsCol, false, join, resolver)
 }
 
 func joinDriveCommittedRows(
+	ctx context.Context,
 	dv *DeltaView,
 	driving []types.ProductValue,
 	driveInserted bool,
@@ -96,13 +131,16 @@ func joinDriveCommittedRows(
 	driveIsLeft bool,
 	join *Join,
 	resolver IndexResolver,
-) []types.ProductValue {
+) ([]types.ProductValue, error) {
 	if len(driving) == 0 || resolver == nil || dv.committed == nil {
-		return nil
+		return nil, nil
 	}
 	if probeIdx, ok := resolver.IndexIDForColumn(probeTable, probeCol); ok {
 		var out []types.ProductValue
 		for _, driveRow := range driving {
+			if err := chargeSubscriptionWork(ctx); err != nil {
+				return nil, err
+			}
 			driveValue, ok := rowValue(driveRow, driveCol)
 			if !ok {
 				continue
@@ -110,38 +148,51 @@ func joinDriveCommittedRows(
 			key := store.NewIndexKey(driveValue)
 			rowIDs := dv.committed.IndexSeek(probeTable, probeIdx, key)
 			for _, rid := range rowIDs {
+				if err := chargeSubscriptionWork(ctx); err != nil {
+					return nil, err
+				}
 				probeRow, ok := dv.committed.GetRow(probeTable, rid)
 				if !ok {
 					continue
 				}
 				if joined := tryJoinFilterFromDrive(driveRow, driveTable, probeRow, probeTable, driveIsLeft, join); joined != nil {
+					if err := chargeDeltaRow(ctx, joined); err != nil {
+						return nil, err
+					}
 					out = append(out, joined)
 				}
 			}
 			if dv.IsEventTable(probeTable) {
 				for _, probeRow := range dv.InsertedRows(probeTable) {
+					if err := chargeSubscriptionWork(ctx); err != nil {
+						return nil, err
+					}
 					probeValue, ok := rowValue(probeRow, probeCol)
 					if !ok || !driveValue.Equal(probeValue) {
 						continue
 					}
 					if joined := tryJoinFilterFromDrive(driveRow, driveTable, probeRow, probeTable, driveIsLeft, join); joined != nil {
+						if err := chargeDeltaRow(ctx, joined); err != nil {
+							return nil, err
+						}
 						out = append(out, joined)
 					}
 				}
 			}
 		}
-		return out
+		return out, nil
 	}
 	if dv.hasDeltaIndex(driveTable, driveCol, driveInserted) {
-		return joinDriveCommittedByDeltaIndex(dv, driving, driveInserted, driveTable, driveCol, probeTable, probeCol, driveIsLeft, join)
+		return joinDriveCommittedByDeltaIndex(ctx, dv, driving, driveInserted, driveTable, driveCol, probeTable, probeCol, driveIsLeft, join)
 	}
-	return joinDriveCommittedByNestedScan(dv, driving, driveTable, driveCol, probeTable, probeCol, driveIsLeft, join)
+	return joinDriveCommittedByNestedScan(ctx, dv, driving, driveTable, driveCol, probeTable, probeCol, driveIsLeft, join)
 }
 
 // joinDriveCommittedByDeltaIndex handles joins where only the changed side's
 // join column is indexed: scan the committed probe table once, then use the
 // per-transaction delta index to preserve drive-row output order.
 func joinDriveCommittedByDeltaIndex(
+	ctx context.Context,
 	dv *DeltaView,
 	driving []types.ProductValue,
 	driveInserted bool,
@@ -149,16 +200,19 @@ func joinDriveCommittedByDeltaIndex(
 	probeTable TableID, probeCol ColID,
 	driveIsLeft bool,
 	join *Join,
-) []types.ProductValue {
+) ([]types.ProductValue, error) {
 	matchesByDrive := make([][]types.ProductValue, len(driving))
 	pending := 0
-	visitRowsAfter(dv, probeTable, func(probeRow types.ProductValue) {
+	err := visitRowsAfter(dv, probeTable, func(probeRow types.ProductValue) error {
 		probeValue, ok := rowValue(probeRow, probeCol)
 		if !ok {
-			return
+			return nil
 		}
 		positions := dv.deltaIndexPositions(driveTable, driveCol, probeValue, driveInserted)
 		for _, pos := range positions {
+			if err := chargeSubscriptionWork(ctx); err != nil {
+				return err
+			}
 			if pos >= len(driving) {
 				continue
 			}
@@ -167,62 +221,88 @@ func joinDriveCommittedByDeltaIndex(
 				continue
 			}
 			if joined := tryJoinFilterFromDrive(driveRow, driveTable, probeRow, probeTable, driveIsLeft, join); joined != nil {
+				if err := chargeDeltaRow(ctx, joined); err != nil {
+					return err
+				}
 				matchesByDrive[pos] = append(matchesByDrive[pos], joined)
 				pending++
 			}
 		}
-	})
-	if pending == 0 {
 		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if pending == 0 {
+		return nil, nil
 	}
 	out := make([]types.ProductValue, 0, pending)
 	for _, rows := range matchesByDrive {
 		out = append(out, rows...)
 	}
-	return out
+	return out, nil
 }
 
 func joinDriveCommittedByNestedScan(
+	ctx context.Context,
 	dv *DeltaView,
 	driving []types.ProductValue,
 	driveTable TableID, driveCol ColID,
 	probeTable TableID, probeCol ColID,
 	driveIsLeft bool,
 	join *Join,
-) []types.ProductValue {
+) ([]types.ProductValue, error) {
 	var out []types.ProductValue
 	for _, driveRow := range driving {
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return nil, err
+		}
 		driveValue, ok := rowValue(driveRow, driveCol)
 		if !ok {
 			continue
 		}
-		visitRowsAfter(dv, probeTable, func(probeRow types.ProductValue) {
+		err := visitRowsAfter(dv, probeTable, func(probeRow types.ProductValue) error {
+			if err := chargeSubscriptionWork(ctx); err != nil {
+				return err
+			}
 			probeValue, ok := rowValue(probeRow, probeCol)
 			if !ok || !driveValue.Equal(probeValue) {
-				return
+				return nil
 			}
 			if joined := tryJoinFilterFromDrive(driveRow, driveTable, probeRow, probeTable, driveIsLeft, join); joined != nil {
+				if err := chargeDeltaRow(ctx, joined); err != nil {
+					return err
+				}
 				out = append(out, joined)
 			}
+			return nil
 		})
+		if err != nil {
+			return nil, err
+		}
 	}
-	return out
+	return out, nil
 }
 
-func visitRowsAfter(dv *DeltaView, table TableID, visit func(types.ProductValue)) {
+func visitRowsAfter(dv *DeltaView, table TableID, visit func(types.ProductValue) error) error {
 	if dv == nil || visit == nil {
-		return
+		return nil
 	}
 	if dv.committed != nil {
 		for _, row := range dv.committed.TableScan(table) {
-			visit(row)
+			if err := visit(row); err != nil {
+				return err
+			}
 		}
 	}
 	if dv.IsEventTable(table) {
 		for _, row := range dv.InsertedRows(table) {
-			visit(row)
+			if err := visit(row); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func tryJoinFilterFromDrive(
@@ -243,30 +323,40 @@ func tryJoinFilterFromDrive(
 // delta (inserts or deletes) using the delta index on the RHS join column.
 // probeInserts selects the RHS side: true → insert delta, false → delete delta.
 func joinDriveDelta(
+	ctx context.Context,
 	dv *DeltaView,
 	driving []types.ProductValue,
 	lhsTable TableID, lhsCol ColID,
 	rhsTable TableID, rhsCol ColID,
 	probeInserts bool,
 	join *Join,
-) []types.ProductValue {
+) ([]types.ProductValue, error) {
 	if len(driving) == 0 {
-		return nil
+		return nil, nil
 	}
 	var out []types.ProductValue
 	for _, lrow := range driving {
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return nil, err
+		}
 		lhsValue, ok := rowValue(lrow, lhsCol)
 		if !ok {
 			continue
 		}
 		rhsRows := dv.DeltaIndexScan(rhsTable, rhsCol, lhsValue, probeInserts)
 		for _, rrow := range rhsRows {
+			if err := chargeSubscriptionWork(ctx); err != nil {
+				return nil, err
+			}
 			if joined := tryJoinFilter(lrow, lhsTable, rrow, rhsTable, join); joined != nil {
+				if err := chargeDeltaRow(ctx, joined); err != nil {
+					return nil, err
+				}
 				out = append(out, joined)
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
 // tryJoinFilter applies Join.Filter (if any) to the pair of rows and returns

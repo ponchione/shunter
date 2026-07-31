@@ -12,8 +12,8 @@ const (
 	// DefaultSQLQueryMaxBytes bounds the encoded RowList payload returned by
 	// hosted one-off and declared queries.
 	DefaultSQLQueryMaxBytes = 64 << 20
-	// DefaultSQLQueryMaxWork bounds candidate rows and index probes performed
-	// by one-off and declared multi-way joins.
+	// DefaultSQLQueryMaxWork bounds candidate rows, join pairs, and index probes
+	// performed by one-off and declared queries.
 	DefaultSQLQueryMaxWork = 1_000_000
 )
 
@@ -25,8 +25,8 @@ var ErrSQLQueryResultLimit = errors.New("protocol: SQL query result limit exceed
 // execution-work boundary before producing a result.
 var ErrSQLQueryWorkLimit = errors.New("protocol: SQL query work limit exceeded")
 
-// SQLQueryLimits bounds one-off and declared SQL query results and multi-way
-// join execution work. Zero values use the hosted defaults when passed through
+// SQLQueryLimits bounds one-off and declared SQL query results and execution
+// work. Zero values use the hosted defaults when passed through
 // NormalizeSQLQueryLimits.
 type SQLQueryLimits struct {
 	MaxRows  int

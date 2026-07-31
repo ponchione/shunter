@@ -3,12 +3,108 @@ package subscription
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
+
+func TestRegisterSetWorkLimitCoversOrdinaryPlansAtomically(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	rows := []types.ProductValue{
+		{types.NewUint64(1)},
+		{types.NewUint64(2)},
+		{types.NewUint64(3)},
+	}
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{1: rows, 2: rows})
+	tests := []struct {
+		name      string
+		predicate Predicate
+		aggregate *Aggregate
+		maxWork   int
+	}{
+		{
+			name: "filtered cross join with empty result",
+			predicate: CrossJoin{Left: 1, Right: 2, Filter: ColEq{
+				Table: 1, Column: 0, Value: types.NewUint64(999),
+			}},
+			maxWork: 8,
+		},
+		{
+			name:      "single table distinct aggregate",
+			predicate: AllRows{Table: 1},
+			aggregate: &Aggregate{
+				Func:         AggregateCount,
+				Distinct:     true,
+				ResultColumn: schema.ColumnSchema{Index: 0, Name: "n", Type: types.KindUint64},
+				Argument: &AggregateColumn{
+					Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64},
+					Table:  1,
+					Column: 0,
+				},
+			},
+			maxWork: 2,
+		},
+		{
+			name:      "cross join aggregate",
+			predicate: CrossJoin{Left: 1, Right: 2},
+			aggregate: &Aggregate{
+				Func:         AggregateCount,
+				ResultColumn: schema.ColumnSchema{Index: 0, Name: "n", Type: types.KindUint64},
+			},
+			maxWork: 8,
+		},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := NewManager(s, s, WithMaxMultiJoinWork(tt.maxWork))
+			var aggregates []*Aggregate
+			if tt.aggregate != nil {
+				aggregates = []*Aggregate{tt.aggregate}
+			}
+			_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+				ConnID:     types.ConnectionID{1},
+				QueryID:    uint32(100 + i),
+				Predicates: []Predicate{tt.predicate},
+				Aggregates: aggregates,
+			}, view)
+			if !errors.Is(err, ErrSubscriptionQuota) || !errors.Is(err, ErrSubscriptionWorkLimit) {
+				t.Fatalf("RegisterSet error = %v, want work quota", err)
+			}
+			if mgr.registry.hasActive() || len(mgr.querySets) != 0 || len(mgr.connectionUsage) != 0 {
+				t.Fatalf("work-limit failure mutated manager state: sets=%v usage=%v", mgr.querySets, mgr.connectionUsage)
+			}
+		})
+	}
+}
+
+func TestOrderedWindowLimitRejectsLiteralBeforeSnapshotAllocation(t *testing.T) {
+	s := testSchema()
+	view := buildMockCommitted(s, nil)
+	limit := uint64(1)
+	offset := uint64(math.MaxInt)
+	mgr := NewManager(s, s, WithOrderedWindowMaxRows(16))
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    200,
+		Predicates: []Predicate{AllRows{Table: 1}},
+		OrderByColumns: [][]OrderByColumn{{
+			{Schema: schema.ColumnSchema{Index: 0, Name: "id", Type: types.KindUint64}, Table: 1, Column: 0},
+		}},
+		Limits:  []*uint64{&limit},
+		Offsets: []*uint64{&offset},
+	}, view)
+	if !errors.Is(err, ErrSubscriptionQuota) || !errors.Is(err, ErrOrderedWindowLimit) {
+		t.Fatalf("RegisterSet error = %v, want ordered-window quota", err)
+	}
+	if mgr.registry.hasActive() || len(mgr.querySets) != 0 || len(mgr.connectionUsage) != 0 {
+		t.Fatalf("ordered-window failure mutated manager state: sets=%v usage=%v", mgr.querySets, mgr.connectionUsage)
+	}
+}
 
 func TestRegisterSetRejectsQueryCountBeforePredicateValidation(t *testing.T) {
 	mgr := NewManager(testSchema(), nil, WithMaxQueriesPerSet(2))

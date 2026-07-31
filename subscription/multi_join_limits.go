@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ponchione/shunter/internal/querywork"
@@ -13,13 +14,39 @@ const (
 	DefaultMultiJoinMaxRelations = 8
 	// DefaultMultiJoinMaxRowsPerRelation bounds each materialized live input.
 	DefaultMultiJoinMaxRowsPerRelation = 100_000
-	// DefaultMultiJoinMaxWork bounds candidate rows examined by one live
-	// snapshot or delta evaluation.
+	// DefaultMultiJoinMaxWork is the historical name of the work limit shared
+	// by every live snapshot and delta evaluation.
 	DefaultMultiJoinMaxWork = 1_000_000
 )
 
-func (m *Manager) withMultiJoinWorkBudget(ctx context.Context) context.Context {
+func (m *Manager) withWorkBudget(ctx context.Context) context.Context {
 	return querywork.WithBudget(ctx, m.MaxMultiJoinWork)
+}
+
+func chargeSubscriptionWork(ctx context.Context) error {
+	return chargeSubscriptionWorkN(ctx, 1)
+}
+
+func chargeSubscriptionWorkN(ctx context.Context, n uint64) error {
+	if err := querywork.ChargeN(ctx, n); err != nil {
+		var exhausted *querywork.ExhaustedError
+		if errors.As(err, &exhausted) {
+			return NewQuotaError(ErrSubscriptionWorkLimit, "work", exhausted.Used, exhausted.Limit)
+		}
+		return fmt.Errorf("%w: %v", ErrSubscriptionWorkLimit, err)
+	}
+	return nil
+}
+
+func chargeSubscriptionWorkProduct(ctx context.Context, left, right int) error {
+	if left < 0 || right < 0 {
+		return fmt.Errorf("%w: negative work cardinality %d * %d", ErrSubscriptionWorkLimit, left, right)
+	}
+	product := uint64(left) * uint64(right)
+	if left != 0 && product/uint64(left) != uint64(right) {
+		product = ^uint64(0)
+	}
+	return chargeSubscriptionWorkN(ctx, product)
 }
 
 func chargeMultiJoinWork(ctx context.Context) error {

@@ -118,8 +118,12 @@ type Manager struct {
 	// snapshot. Zero means unlimited.
 	InitialRowLimit int
 	// SnapshotByteLimit caps aggregate encoded RowList bytes across one initial
-	// or final set snapshot. Zero means unlimited.
+	// or final set snapshot and conservative bytes materialized by one live
+	// query delta. Zero means unlimited.
 	SnapshotByteLimit int
+	// OrderedWindowMaxRows caps OFFSET plus the effective output limit for an
+	// ordered subscription snapshot. Zero means unlimited.
+	OrderedWindowMaxRows int
 	// MaxQueriesPerSet caps predicates admitted in one registration request.
 	// Zero means unlimited.
 	MaxQueriesPerSet int
@@ -135,8 +139,9 @@ type Manager struct {
 	// MaxMultiJoinRowsPerRelation caps committed input rows per multi-way
 	// join relation. Zero means unlimited.
 	MaxMultiJoinRowsPerRelation int
-	// MaxMultiJoinWork caps candidate rows examined across one multi-way join
-	// snapshot or delta evaluation. Zero means unlimited.
+	// MaxMultiJoinWork is the compatibility name for the candidate-work cap
+	// applied to every initial, final, and live delta evaluation. Zero means
+	// unlimited.
 	MaxMultiJoinWork int
 }
 
@@ -156,6 +161,12 @@ func WithInitialRowLimit(n int) ManagerOption {
 // WithSnapshotByteLimit sets the aggregate per-set encoded RowList byte cap.
 func WithSnapshotByteLimit(n int) ManagerOption {
 	return func(m *Manager) { m.SnapshotByteLimit = n }
+}
+
+// WithOrderedWindowMaxRows caps the working rows retained by an ordered
+// subscription snapshot.
+func WithOrderedWindowMaxRows(n int) ManagerOption {
+	return func(m *Manager) { m.OrderedWindowMaxRows = n }
 }
 
 // WithMaxQueriesPerSet caps predicates in one registration request.
@@ -186,8 +197,9 @@ func WithMaxMultiJoinRowsPerRelation(n int) ManagerOption {
 	return func(m *Manager) { m.MaxMultiJoinRowsPerRelation = n }
 }
 
-// WithMaxMultiJoinWork caps candidate rows examined by each multi-way join
-// snapshot or delta evaluation. Non-positive values disable this guardrail.
+// WithMaxMultiJoinWork caps candidate rows and join pairs examined by each
+// subscription snapshot or delta evaluation. The name is retained for API
+// compatibility. Non-positive values disable this guardrail.
 func WithMaxMultiJoinWork(n int) ManagerOption {
 	return func(m *Manager) { m.MaxMultiJoinWork = n }
 }
@@ -220,6 +232,7 @@ func NewManager(lookup SchemaLookup, resolver IndexResolver, opts ...ManagerOpti
 		MaxMultiJoinRelations:       DefaultMultiJoinMaxRelations,
 		MaxMultiJoinRowsPerRelation: DefaultMultiJoinMaxRowsPerRelation,
 		MaxMultiJoinWork:            DefaultMultiJoinMaxWork,
+		OrderedWindowMaxRows:        DefaultOrderedWindowMaxRows,
 	}
 	for _, opt := range opts {
 		opt(m)

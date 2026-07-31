@@ -1972,6 +1972,76 @@ func TestEvalCrossJoinProjectedProjectedInsertPreservesMultiplicity(t *testing.T
 	}
 }
 
+func TestEvalCrossJoinDeltaLimitFailsBeforePublishingPartialUpdate(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {
+			{types.NewUint64(10)},
+			{types.NewUint64(11)},
+			{types.NewUint64(12)},
+			{types.NewUint64(13)},
+			{types.NewUint64(14)},
+		},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox), WithInitialRowLimit(3), WithSnapshotByteLimit(1<<20))
+	connID := types.ConnectionID{9}
+	pred := CrossJoin{Left: 1, Right: 2}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: connID, QueryID: 24, RequestID: 42, Predicates: []Predicate{pred},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	inserted := types.ProductValue{types.NewUint64(1)}
+	committed.addRow(1, 1, inserted)
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {TableID: 1, TableName: "projected", Inserts: []types.ProductValue{inserted}},
+	}}
+	mgr.EvalAndBroadcast(types.TxID(2), cs, committed, PostCommitMeta{})
+	msg := <-inbox
+	if updates := msg.Fanout[connID]; len(updates) != 0 {
+		t.Fatalf("fanout updates = %v, want no partial update", updates)
+	}
+	errs := msg.Errors[connID]
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, ErrDeltaRowLimit.Error()) {
+		t.Fatalf("subscription errors = %v, want one delta-row limit", msg.Errors)
+	}
+}
+
+func TestEvalCrossJoinDeltaByteLimitFailsBeforePublishingPartialUpdate(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindString})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(10)}},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox), WithInitialRowLimit(100), WithSnapshotByteLimit(16))
+	connID := types.ConnectionID{10}
+	pred := CrossJoin{Left: 1, Right: 2}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: connID, QueryID: 25, RequestID: 43, Predicates: []Predicate{pred},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	inserted := types.ProductValue{types.NewString(strings.Repeat("x", 64))}
+	committed.addRow(1, 1, inserted)
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {TableID: 1, TableName: "projected", Inserts: []types.ProductValue{inserted}},
+	}}
+	mgr.EvalAndBroadcast(types.TxID(2), cs, committed, PostCommitMeta{})
+	msg := <-inbox
+	if updates := msg.Fanout[connID]; len(updates) != 0 {
+		t.Fatalf("fanout updates = %v, want no partial update", updates)
+	}
+	errs := msg.Errors[connID]
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, ErrDeltaByteLimit.Error()) {
+		t.Fatalf("subscription errors = %v, want one delta-byte limit", msg.Errors)
+	}
+}
+
 func TestEvalCrossJoinProjectedOtherDeletePreservesMultiplicity(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})

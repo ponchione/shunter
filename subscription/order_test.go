@@ -1,11 +1,38 @@
 package subscription
 
 import (
+	"errors"
+	"math"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
+
+func TestOrderedKeepLimitBoundariesAndSafeHints(t *testing.T) {
+	limit := uint64(1)
+	offset := uint64(math.MaxInt - 1)
+	window := initialRowWindow{
+		orderBy: []OrderByColumn{{}},
+		limit:   &limit,
+		offset:  &offset,
+	}
+	keep, err := window.orderedKeepLimit(newInitialRowCollector(nil, 0), math.MaxInt)
+	if err != nil || keep != math.MaxInt {
+		t.Fatalf("orderedKeepLimit boundary = (%d, %v), want (%d, nil)", keep, err, math.MaxInt)
+	}
+	offset++
+	if _, err := window.orderedKeepLimit(newInitialRowCollector(nil, 0), math.MaxInt); !errors.Is(err, ErrOrderedWindowLimit) {
+		t.Fatalf("orderedKeepLimit overflow error = %v, want ErrOrderedWindowLimit", err)
+	}
+	if got := orderedKeyCapacityHint(math.MaxInt, boundedOrderedRowKeyCapHint); got != orderedSafeKeyCapHint {
+		t.Fatalf("orderedKeyCapacityHint = %d, want %d", got, orderedSafeKeyCapHint)
+	}
+	bounded := newBoundedOrderedInitialRows([]OrderByColumn{{}}, math.MaxInt)
+	if got := cap(bounded.rows); got != orderedSafePreallocationRows {
+		t.Fatalf("bounded ordered row capacity = %d, want %d", got, orderedSafePreallocationRows)
+	}
+}
 
 func TestBoundedOrderedInitialRowsKeepsOnlyTopWindow(t *testing.T) {
 	orderBy := []OrderByColumn{{

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/ponchione/shunter/internal/querywork"
 	"github.com/ponchione/shunter/internal/valueagg"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
@@ -124,7 +125,7 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 }
 
 // ExecuteCompiledSQLQueryWithLimits evaluates a precompiled query while
-// enforcing host-controlled result and multi-way-join work limits.
+// enforcing host-controlled result and execution-work limits.
 func ExecuteCompiledSQLQueryWithLimits(ctx context.Context, compiled CompiledSQLQuery, stateAccess CommittedStateAccess, sl SchemaLookup, limits SQLQueryLimits) (SQLQueryResult, error) {
 	normalized, err := NormalizeSQLQueryLimits(limits)
 	if err != nil {
@@ -144,6 +145,7 @@ func executeCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 		return SQLQueryResult{}, fmt.Errorf("schema lookup must not be nil")
 	}
 	query := compiled.query
+	ctx = querywork.WithBudget(ctx, limits.MaxWork)
 	limits, err := applyOneOffResponseBudget(limits, query.TableName)
 	if err != nil {
 		return SQLQueryResult{}, err
@@ -398,6 +400,9 @@ func evaluateOneOffSingleTableOrderedByIndex(ctx context.Context, view store.Com
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
+			if err := chargeOneOffWork(ctx); err != nil {
+				return nil, err
+			}
 			if !subscription.MatchRow(pred, tableID, row) {
 				continue
 			}
@@ -419,6 +424,9 @@ func evaluateOneOffSingleTableOrderedByIndex(ctx context.Context, view store.Com
 	collector := newOneOffResultCollector(offset, executionLimit, budget)
 	for _, row := range view.IndexRange(tableID, orderIndex.indexID, store.UnboundedLow(), store.UnboundedHigh()) {
 		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := chargeOneOffWork(ctx); err != nil {
 			return nil, err
 		}
 		if !subscription.MatchRow(pred, tableID, row) {
@@ -449,6 +457,9 @@ func visitOneOffSingleTableRows(ctx context.Context, view store.CommittedReadVie
 					if err := ctx.Err(); err != nil {
 						return true, err
 					}
+					if err := chargeOneOffWork(ctx); err != nil {
+						return true, err
+					}
 					row, ok := view.GetRow(eq.Table, rid)
 					if !ok {
 						continue
@@ -468,6 +479,9 @@ func visitOneOffSingleTableRows(ctx context.Context, view store.CommittedReadVie
 					if err := ctx.Err(); err != nil {
 						return true, err
 					}
+					if err := chargeOneOffWork(ctx); err != nil {
+						return true, err
+					}
 					if subscription.MatchRow(pred, tableID, row) && !visit(row) {
 						return true, nil
 					}
@@ -478,6 +492,9 @@ func visitOneOffSingleTableRows(ctx context.Context, view store.CommittedReadVie
 	}
 	for _, pv := range view.TableScan(tableID) {
 		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if err := chargeOneOffWork(ctx); err != nil {
 			return false, err
 		}
 		if subscription.MatchRow(pred, tableID, pv) && !visit(pv) {
@@ -878,6 +895,9 @@ func visitOneOffJoinPairs(ctx context.Context, view store.CommittedReadView, joi
 				if err := ctx.Err(); err != nil {
 					return err
 				}
+				if err := chargeOneOffWork(ctx); err != nil {
+					return err
+				}
 				outerValue, ok := oneOffRowValue(outerRow, outerCol)
 				if !ok {
 					continue
@@ -885,6 +905,9 @@ func visitOneOffJoinPairs(ctx context.Context, view store.CommittedReadView, joi
 				key := store.NewIndexKey(outerValue)
 				for _, rid := range view.IndexSeek(innerTable, innerIdx, key) {
 					if err := ctx.Err(); err != nil {
+						return err
+					}
+					if err := chargeOneOffWork(ctx); err != nil {
 						return err
 					}
 					innerRow, ok := view.GetRow(innerTable, rid)
@@ -904,11 +927,17 @@ func visitOneOffJoinPairs(ctx context.Context, view store.CommittedReadView, joi
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if err := chargeOneOffWork(ctx); err != nil {
+			return err
+		}
 		if _, ok := oneOffRowValue(outerRow, outerCol); !ok {
 			continue
 		}
 		for _, innerRow := range view.TableScan(innerTable) {
 			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := chargeOneOffWork(ctx); err != nil {
 				return err
 			}
 			if !emit(outerRow, innerRow) {
@@ -1162,6 +1191,9 @@ func evaluateOneOffCrossJoin(ctx context.Context, view store.CommittedReadView, 
 	if otherCount == 0 {
 		return nil, nil
 	}
+	if err := chargeOneOffWorkProduct(ctx, view.RowCount(projectedTable), otherCount); err != nil {
+		return nil, err
+	}
 	collector := newOneOffResultCollector(offset, limit, budget)
 	for _, row := range view.TableScan(projectedTable) {
 		if err := ctx.Err(); err != nil {
@@ -1198,7 +1230,16 @@ func countOneOffCrossJoin(ctx context.Context, view store.CommittedReadView, pro
 	if projectedTable == cross.Left {
 		otherTable = cross.Right
 	}
-	return checkedCrossJoinRowCount(view.RowCount(projectedTable), view.RowCount(otherTable))
+	projectedCount := view.RowCount(projectedTable)
+	otherCount := view.RowCount(otherTable)
+	count, err := checkedCrossJoinRowCount(projectedCount, otherCount)
+	if err != nil {
+		return 0, err
+	}
+	if err := chargeOneOffWorkN(ctx, count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func checkedCrossJoinRowCount(projectedCount, otherCount int) (uint64, error) {
@@ -1225,8 +1266,14 @@ func visitOneOffCrossJoinPairs(ctx context.Context, view store.CommittedReadView
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			if err := chargeOneOffWork(ctx); err != nil {
+				return err
+			}
 			for _, leftRow := range view.TableScan(cross.Left) {
 				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if err := chargeOneOffWork(ctx); err != nil {
 					return err
 				}
 				if !visitIfMatch(leftRow, rightRow) {
@@ -1240,8 +1287,14 @@ func visitOneOffCrossJoinPairs(ctx context.Context, view store.CommittedReadView
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if err := chargeOneOffWork(ctx); err != nil {
+			return err
+		}
 		for _, rightRow := range view.TableScan(cross.Right) {
 			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := chargeOneOffWork(ctx); err != nil {
 				return err
 			}
 			if !visitIfMatch(leftRow, rightRow) {

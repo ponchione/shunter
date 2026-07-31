@@ -80,18 +80,25 @@ type Config struct {
 	// hosted raw and declared queries. Zero uses 64 MiB. It does not cap scan
 	// work, aggregate state, order keys, or other query working memory.
 	OneOffQueryMaxBytes int
-	// OneOffQueryMaxWork caps candidate rows and index probes examined by
-	// hosted raw and declared multi-way joins. Zero uses 1,000,000 work units.
+	// OneOffQueryMaxWork caps candidate rows, index probes, and join pairs
+	// examined by hosted raw and declared queries. Zero uses 1,000,000 work
+	// units.
 	OneOffQueryMaxWork int
 	// ProcedureResultMaxBytes caps the raw result returned by an application
 	// procedure. Zero uses 64 MiB.
 	ProcedureResultMaxBytes int
 	// SubscriptionInitialRowLimit caps rows across an initial or final
-	// subscription-set snapshot in aggregate. Zero uses 100,000 rows.
+	// subscription-set snapshot in aggregate and materialized row slots per
+	// live query delta. Zero uses 100,000 rows.
 	SubscriptionInitialRowLimit int
 	// SubscriptionSnapshotMaxBytes caps aggregate encoded RowList bytes for an
-	// initial or final subscription-set snapshot. Zero uses 64 MiB.
+	// initial or final subscription-set snapshot and conservative bytes
+	// materialized per live query delta. Zero uses 64 MiB.
 	SubscriptionSnapshotMaxBytes int
+	// SubscriptionOrderedWindowMaxRows caps OFFSET plus the effective output
+	// limit retained for an ordered subscription snapshot. Zero uses 100,000
+	// working rows.
+	SubscriptionOrderedWindowMaxRows int
 	// SubscriptionMaxQueriesPerSet caps raw query strings admitted in one set.
 	// Zero uses 256; values cannot exceed the protocol decoder hard limit.
 	SubscriptionMaxQueriesPerSet int
@@ -107,9 +114,9 @@ type Config struct {
 	// SubscriptionMaxMultiJoinRowsPerRelation caps committed input rows per
 	// relation for live multi-way joins. Zero uses 100,000 rows.
 	SubscriptionMaxMultiJoinRowsPerRelation int
-	// SubscriptionMaxMultiJoinWork caps candidate rows examined across one
-	// live multi-way join snapshot or delta evaluation. Zero uses 1,000,000
-	// work units.
+	// SubscriptionMaxMultiJoinWork is the compatibility name for the candidate
+	// row, index-probe, and join-pair budget applied to every live snapshot and
+	// delta evaluation. Zero uses 1,000,000 work units.
 	SubscriptionMaxMultiJoinWork int
 
 	Protocol      ProtocolConfig

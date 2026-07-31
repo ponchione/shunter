@@ -40,6 +40,18 @@ var (
 	// ErrSnapshotByteLimit reports an initial or final snapshot whose encoded
 	// row-list data exceeds the configured aggregate byte limit.
 	ErrSnapshotByteLimit = errors.New("subscription: snapshot byte limit exceeded")
+	// ErrSubscriptionWorkLimit reports an initial, final, or live evaluation
+	// that exhausted its host-controlled execution-work budget.
+	ErrSubscriptionWorkLimit = errors.New("subscription: execution work limit exceeded")
+	// ErrDeltaRowLimit reports a live delta that exceeded its materialized row
+	// budget before the complete update could be constructed.
+	ErrDeltaRowLimit = errors.New("subscription: live delta row limit exceeded")
+	// ErrDeltaByteLimit reports a live delta that exceeded its conservative
+	// encoded-byte budget before the complete update could be constructed.
+	ErrDeltaByteLimit = errors.New("subscription: live delta byte limit exceeded")
+	// ErrOrderedWindowLimit reports an ordered subscription whose OFFSET plus
+	// effective output limit exceeds the host-controlled working-set bound.
+	ErrOrderedWindowLimit = errors.New("subscription: ordered window limit exceeded")
 	// ErrMultiJoinLimit — live multi-way join exceeds configured production limits.
 	ErrMultiJoinLimit = errors.New("subscription: multi-way join limit exceeded")
 	// ErrInitialQuery wraps initial-snapshot evaluation failures.

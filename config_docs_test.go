@@ -21,6 +21,7 @@ func TestConfigReferencePinsZeroValueWorkAndMultiJoinDefaults(t *testing.T) {
 		value int
 	}{
 		{field: "OneOffQueryMaxWork", value: protocol.DefaultSQLQueryMaxWork},
+		{field: "SubscriptionOrderedWindowMaxRows", value: subscription.DefaultOrderedWindowMaxRows},
 		{field: "SubscriptionMaxMultiJoinRelations", value: subscription.DefaultMultiJoinMaxRelations},
 		{field: "SubscriptionMaxMultiJoinRowsPerRelation", value: subscription.DefaultMultiJoinMaxRowsPerRelation},
 		{field: "SubscriptionMaxMultiJoinWork", value: subscription.DefaultMultiJoinMaxWork},

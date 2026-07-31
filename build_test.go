@@ -346,6 +346,7 @@ func TestBuildWithBlankDataDirNormalizesToRuntimeDefault(t *testing.T) {
 		t.Fatalf("SubscriptionInitialRowLimit = %d, want %d", rt.buildConfig.SubscriptionInitialRowLimit, defaultSubscriptionInitialRows)
 	}
 	if rt.buildConfig.SubscriptionSnapshotMaxBytes != defaultSubscriptionSnapshotBytes ||
+		rt.buildConfig.SubscriptionOrderedWindowMaxRows != subscription.DefaultOrderedWindowMaxRows ||
 		rt.buildConfig.SubscriptionMaxQueriesPerSet != protocol.DefaultSubscriptionMaxQueriesPerSet ||
 		rt.buildConfig.SubscriptionMaxActiveSetsPerConnection != defaultSubscriptionActiveSets ||
 		rt.buildConfig.SubscriptionMaxActiveSubscriptionsPerConnection != defaultSubscriptionActiveSubscriptions ||
@@ -391,6 +392,11 @@ func TestBuildRejectsNegativeResourceLimits(t *testing.T) {
 			name: "subscription snapshot bytes",
 			cfg:  Config{DataDir: t.TempDir(), SubscriptionSnapshotMaxBytes: -1},
 			want: "subscription snapshot max bytes must not be negative",
+		},
+		{
+			name: "subscription ordered window rows",
+			cfg:  Config{DataDir: t.TempDir(), SubscriptionOrderedWindowMaxRows: -1},
+			want: "subscription ordered window max rows must not be negative",
 		},
 		{
 			name: "subscription queries per set",
@@ -450,6 +456,7 @@ func TestStartConfiguresSubscriptionLimits(t *testing.T) {
 		DataDir:                                         t.TempDir(),
 		SubscriptionInitialRowLimit:                     128,
 		SubscriptionSnapshotMaxBytes:                    1_024,
+		SubscriptionOrderedWindowMaxRows:                64,
 		SubscriptionMaxQueriesPerSet:                    3,
 		SubscriptionMaxActiveSetsPerConnection:          4,
 		SubscriptionMaxActiveSubscriptionsPerConnection: 5,
@@ -471,7 +478,7 @@ func TestStartConfiguresSubscriptionLimits(t *testing.T) {
 	if rt.subscriptions.InitialRowLimit != 128 {
 		t.Fatalf("InitialRowLimit = %d, want 128", rt.subscriptions.InitialRowLimit)
 	}
-	if rt.subscriptions.SnapshotByteLimit != 1_024 || rt.subscriptions.MaxQueriesPerSet != 3 ||
+	if rt.subscriptions.SnapshotByteLimit != 1_024 || rt.subscriptions.OrderedWindowMaxRows != 64 || rt.subscriptions.MaxQueriesPerSet != 3 ||
 		rt.subscriptions.MaxActiveSetsPerConnection != 4 || rt.subscriptions.MaxActiveSubscriptionsPerConnection != 5 {
 		t.Fatalf("subscription quota wiring = %+v", rt.subscriptions)
 	}

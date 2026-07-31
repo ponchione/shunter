@@ -27,7 +27,8 @@ import (
 
 // mockSnapshot implements store.CommittedReadView with in-memory rows.
 type mockSnapshot struct {
-	rows map[schema.TableID][]types.ProductValue
+	rows   map[schema.TableID][]types.ProductValue
+	closed bool
 }
 
 func (s *mockSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, types.ProductValue] {
@@ -58,7 +59,7 @@ func (s *mockSnapshot) GetRow(_ schema.TableID, _ types.RowID) (types.ProductVal
 
 func (s *mockSnapshot) RowCount(id schema.TableID) int { return len(s.rows[id]) }
 
-func (s *mockSnapshot) Close() {}
+func (s *mockSnapshot) Close() { s.closed = true }
 
 type rowCountSnapshot struct {
 	*mockSnapshot

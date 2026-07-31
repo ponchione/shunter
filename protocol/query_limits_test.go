@@ -93,6 +93,96 @@ func TestMultiJoinWorkLimitStopsCartesianExecution(t *testing.T) {
 	}
 }
 
+func TestOrdinaryQueryWorkLimitCoversFilteredCrossJoinAndAggregates(t *testing.T) {
+	aSchema := &schema.TableSchema{ID: 1, Name: "a", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: schema.KindUint32},
+	}}
+	bSchema := &schema.TableSchema{ID: 2, Name: "b", Columns: append([]schema.ColumnSchema(nil), aSchema.Columns...)}
+	bSchema.Name = "b"
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"a": {id: aSchema.ID, schema: aSchema},
+		"b": {id: bSchema.ID, schema: bSchema},
+	}}
+	rows := []types.ProductValue{
+		{types.NewUint32(1)},
+		{types.NewUint32(2)},
+		{types.NewUint32(3)},
+	}
+	state := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: rows,
+		2: rows,
+	}}}
+	opts := SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true}
+	tests := []struct {
+		name    string
+		query   string
+		maxWork int
+	}{
+		{
+			name:    "filtered cross join with empty result",
+			query:   "SELECT a.* FROM a CROSS JOIN b WHERE a.id = b.id AND a.id = 999",
+			maxWork: 8,
+		},
+		{
+			name:    "single table distinct aggregate",
+			query:   "SELECT COUNT(DISTINCT id) AS n FROM a",
+			maxWork: 2,
+		},
+		{
+			name:    "cross join aggregate",
+			query:   "SELECT COUNT(*) AS n FROM a CROSS JOIN b",
+			maxWork: 8,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compiled, err := CompileSQLQueryString(tt.query, sl, nil, opts)
+			if err != nil {
+				t.Fatalf("CompileSQLQueryString: %v", err)
+			}
+			_, err = ExecuteCompiledSQLQueryWithLimits(context.Background(), compiled, state, sl, SQLQueryLimits{
+				MaxRows:  100,
+				MaxBytes: 1 << 20,
+				MaxWork:  tt.maxWork,
+			})
+			if !errors.Is(err, ErrSQLQueryWorkLimit) {
+				t.Fatalf("execution error = %v, want ErrSQLQueryWorkLimit", err)
+			}
+		})
+	}
+}
+
+func TestOrdinaryQueryWorkLimitClosesSnapshot(t *testing.T) {
+	ts := &schema.TableSchema{ID: 1, Name: "items", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: schema.KindUint64},
+	}}
+	sl := newMockSchema("items", ts.ID, ts.Columns...)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		ts.ID: {
+			{types.NewUint64(1)},
+			{types.NewUint64(2)},
+		},
+	}}
+	compiled, err := CompileSQLQueryString("SELECT COUNT(*) AS n FROM items", sl, nil, SQLQueryValidationOptions{})
+	if err != nil {
+		t.Fatalf("CompileSQLQueryString: %v", err)
+	}
+	_, err = ExecuteCompiledSQLQueryWithLimits(context.Background(), compiled, &mockStateAccess{snap: snap}, sl, SQLQueryLimits{
+		MaxRows:  1,
+		MaxBytes: 1 << 20,
+		MaxWork:  1,
+	})
+	if !errors.Is(err, ErrSQLQueryWorkLimit) {
+		t.Fatalf("execution error = %v, want ErrSQLQueryWorkLimit", err)
+	}
+	if !snap.closed {
+		t.Fatal("snapshot remained open after work-limit failure")
+	}
+}
+
 func TestExecuteCompiledSQLQueryMatchesUpperUint64Literal(t *testing.T) {
 	ts := &schema.TableSchema{
 		ID:   1,

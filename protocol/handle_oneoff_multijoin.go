@@ -17,7 +17,6 @@ func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, st
 	if multi == nil {
 		return SQLQueryResult{}, fmt.Errorf("multi-join metadata must not be nil")
 	}
-	ctx = querywork.WithBudget(ctx, limits.MaxWork)
 	view := stateAccess.Snapshot()
 	defer view.Close()
 	resultColumns := multiJoinResultColumns(query, multi)
@@ -177,7 +176,7 @@ func visitOneOffMultiJoinCandidateRows(ctx context.Context, view store.Committed
 			if err := ctx.Err(); err != nil {
 				return false, err
 			}
-			if err := chargeOneOffMultiJoinWork(ctx); err != nil {
+			if err := chargeOneOffWork(ctx); err != nil {
 				return false, err
 			}
 			row, ok := view.GetRow(rel.Table, rid)
@@ -194,7 +193,7 @@ func visitOneOffMultiJoinCandidateRows(ctx context.Context, view store.Committed
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
-		if err := chargeOneOffMultiJoinWork(ctx); err != nil {
+		if err := chargeOneOffWork(ctx); err != nil {
 			return false, err
 		}
 		if !visit(row) {
@@ -204,8 +203,26 @@ func visitOneOffMultiJoinCandidateRows(ctx context.Context, view store.Committed
 	return true, nil
 }
 
-func chargeOneOffMultiJoinWork(ctx context.Context) error {
-	if err := querywork.Charge(ctx); err != nil {
+func chargeOneOffWork(ctx context.Context) error {
+	return chargeOneOffWorkN(ctx, 1)
+}
+
+func chargeOneOffWorkN(ctx context.Context, n uint64) error {
+	if err := querywork.ChargeN(ctx, n); err != nil {
+		return fmt.Errorf("%w: %v", ErrSQLQueryWorkLimit, err)
+	}
+	return nil
+}
+
+func chargeOneOffWorkProduct(ctx context.Context, left, right int) error {
+	if left < 0 || right < 0 {
+		return fmt.Errorf("%w: negative work cardinality %d * %d", ErrSQLQueryWorkLimit, left, right)
+	}
+	product := uint64(left) * uint64(right)
+	if left != 0 && product/uint64(left) != uint64(right) {
+		product = ^uint64(0)
+	}
+	if err := querywork.ChargeN(ctx, product); err != nil {
 		return fmt.Errorf("%w: %v", ErrSQLQueryWorkLimit, err)
 	}
 	return nil

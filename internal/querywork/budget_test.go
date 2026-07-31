@@ -28,3 +28,18 @@ func TestMissingAndUnlimitedBudgetsDoNotExhaust(t *testing.T) {
 		}
 	}
 }
+
+func TestChargeNRejectsExpansionAtomically(t *testing.T) {
+	ctx := WithBudget(context.Background(), 5)
+	if err := ChargeN(ctx, 4); err != nil {
+		t.Fatalf("ChargeN within limit: %v", err)
+	}
+	err := ChargeN(ctx, 2)
+	var exhausted *ExhaustedError
+	if !errors.As(err, &exhausted) || exhausted.Used != 6 || exhausted.Limit != 5 {
+		t.Fatalf("ChargeN exhaustion = %#v, want used=6 limit=5", err)
+	}
+	if err := Charge(ctx); err != nil {
+		t.Fatalf("failed ChargeN mutated budget: %v", err)
+	}
+}

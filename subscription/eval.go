@@ -470,30 +470,43 @@ func (e *evalPanic) Unwrap() error { return ErrSubscriptionEval }
 // rows (TableID = Join.Left by convention). SubscriptionID is filled in by
 // the caller because it varies per subscriber.
 func (m *Manager) evalQuery(ctx context.Context, qs *queryState, dv *DeltaView) ([]SubscriptionUpdate, error) {
+	ctx = m.withWorkBudget(ctx)
+	ctx = withDeltaBudget(ctx, m.InitialRowLimit, m.SnapshotByteLimit)
 	if qs.aggregate != nil {
 		return m.evalAggregateQuery(ctx, qs, dv)
 	}
 	switch p := qs.predicate.(type) {
 	case Join:
-		frags := EvalJoinDeltaFragments(dv, &p, m.resolver)
+		frags, err := evalJoinDeltaFragments(ctx, dv, &p, m.resolver)
+		if err != nil {
+			return nil, err
+		}
 		lhsWidth := m.schema.ColumnCount(p.Left)
 		projectJoinFragments(frags.Inserts[:], lhsWidth, p.ProjectRight)
 		projectJoinFragments(frags.Deletes[:], lhsWidth, p.ProjectRight)
-		ins, del := ReconcileJoinDelta(frags.Inserts[:], frags.Deletes[:])
-		ins, del = projectDeltaRows(ins, del, qs.projection, len(qs.projection) > 0)
+		ins, del, err := reconcileJoinDelta(ctx, frags.Inserts[:], frags.Deletes[:])
+		if err != nil {
+			return nil, err
+		}
+		ins, del, err = projectDeltaRows(ctx, ins, del, qs.projection, len(qs.projection) > 0)
+		if err != nil {
+			return nil, err
+		}
 		return m.deltaUpdate(p.ProjectedTable(), qs.projection, ins, del), nil
 	case CrossJoin:
 		ins, del, err := evalCrossJoinDelta(ctx, dv, p)
 		if err != nil {
 			return nil, err
 		}
-		ins, del = projectDeltaRows(ins, del, qs.projection, len(qs.projection) > 0)
+		ins, del, err = projectDeltaRows(ctx, ins, del, qs.projection, len(qs.projection) > 0)
+		if err != nil {
+			return nil, err
+		}
 		return m.deltaUpdate(p.ProjectedTable(), qs.projection, ins, del), nil
 	case MultiJoin:
 		if err := m.checkMultiJoinDeltaLimits(ctx, p, dv); err != nil {
 			return nil, err
 		}
-		ctx = m.withMultiJoinWorkBudget(ctx)
 		ins, del, err := evalMultiJoinDelta(ctx, dv, p, qs.projection)
 		if err != nil {
 			return nil, err
@@ -512,8 +525,14 @@ func (m *Manager) evalQuery(ctx context.Context, qs *queryState, dv *DeltaView) 
 				}
 				continue
 			}
-			ins, del := EvalSingleTableDelta(dv, qs.predicate, t)
-			ins, del = projectDeltaRows(ins, del, qs.projection, true)
+			ins, del, err := evalSingleTableDelta(ctx, dv, qs.predicate, t)
+			if err != nil {
+				return nil, err
+			}
+			ins, del, err = projectDeltaRows(ctx, ins, del, qs.projection, true)
+			if err != nil {
+				return nil, err
+			}
 			if update, ok := m.makeDeltaUpdate(t, qs.projection, ins, del); ok {
 				updates = append(updates, update)
 			}
@@ -558,8 +577,14 @@ func (m *Manager) evalWindowedSingleTableDelta(ctx context.Context, qs *querySta
 	if err != nil {
 		return SubscriptionUpdate{}, false, err
 	}
-	inserts, deletes := ReconcileJoinDelta([][]types.ProductValue{after}, [][]types.ProductValue{before})
-	inserts, deletes = projectDeltaRows(inserts, deletes, qs.projection, len(qs.projection) > 0)
+	inserts, deletes, err := reconcileJoinDelta(ctx, [][]types.ProductValue{after}, [][]types.ProductValue{before})
+	if err != nil {
+		return SubscriptionUpdate{}, false, err
+	}
+	inserts, deletes, err = projectDeltaRows(ctx, inserts, deletes, qs.projection, len(qs.projection) > 0)
+	if err != nil {
+		return SubscriptionUpdate{}, false, err
+	}
 	update, ok := m.makeDeltaUpdate(table, qs.projection, inserts, deletes)
 	return update, ok, nil
 }
@@ -595,6 +620,9 @@ func collectWindowRowsBeforeAfter(
 			if err := ctx.Err(); err != nil {
 				return nil, nil, err
 			}
+			if err := chargeSubscriptionWork(ctx); err != nil {
+				return nil, nil, err
+			}
 			inserted := insertCounts != nil && decrementRowCount(insertCounts, row)
 			if MatchRow(pred, table, row) {
 				after = append(after, row)
@@ -606,6 +634,9 @@ func collectWindowRowsBeforeAfter(
 	}
 	for _, row := range deletedRows {
 		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		if err := chargeSubscriptionWork(ctx); err != nil {
 			return nil, nil, err
 		}
 		if MatchRow(pred, table, row) {
@@ -641,13 +672,41 @@ func (m *Manager) makeDeltaUpdate(table TableID, projection []ProjectionColumn, 
 	}, true
 }
 
-func projectDeltaRows(inserts, deletes []types.ProductValue, projection []ProjectionColumn, reconcile bool) ([]types.ProductValue, []types.ProductValue) {
-	inserts = projectRows(inserts, projection)
-	deletes = projectRows(deletes, projection)
-	if !reconcile || len(inserts) == 0 || len(deletes) == 0 {
-		return inserts, deletes
+func projectDeltaRows(ctx context.Context, inserts, deletes []types.ProductValue, projection []ProjectionColumn, reconcile bool) ([]types.ProductValue, []types.ProductValue, error) {
+	var err error
+	inserts, err = projectDeltaBatch(ctx, inserts, projection)
+	if err != nil {
+		return nil, nil, err
 	}
-	return ReconcileJoinDelta([][]types.ProductValue{inserts}, [][]types.ProductValue{deletes})
+	deletes, err = projectDeltaBatch(ctx, deletes, projection)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !reconcile || len(inserts) == 0 || len(deletes) == 0 {
+		return inserts, deletes, nil
+	}
+	return reconcileJoinDelta(ctx, [][]types.ProductValue{inserts}, [][]types.ProductValue{deletes})
+}
+
+func projectDeltaBatch(ctx context.Context, rows []types.ProductValue, projection []ProjectionColumn) ([]types.ProductValue, error) {
+	if len(rows) == 0 || len(projection) == 0 {
+		return rows, nil
+	}
+	out := make([]types.ProductValue, 0, len(rows))
+	for _, row := range rows {
+		projected := make(types.ProductValue, 0, len(projection))
+		for _, col := range projection {
+			idx := int(col.Column)
+			if idx >= 0 && idx < len(row) {
+				projected = append(projected, row[idx])
+			}
+		}
+		if err := chargeDeltaRow(ctx, projected); err != nil {
+			return nil, err
+		}
+		out = append(out, projected)
+	}
+	return out, nil
 }
 
 // projectJoinedRows slices each LHS++RHS-concatenated joined row down to the
@@ -703,8 +762,7 @@ func evalCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin) (insert
 		if err != nil {
 			return nil, nil, err
 		}
-		ins, del := diffProjectedRowBags(before, after)
-		return ins, del, nil
+		return diffProjectedRowBagsWithBudget(ctx, before, after)
 	}
 	projectedTable := p.ProjectedTable()
 	otherTable := crossJoinOtherTable(p)
@@ -718,8 +776,7 @@ func evalCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin) (insert
 	}
 	afterOtherCount := rowCountAfter(dv, otherTable)
 	beforeOtherCount := rowCountBefore(dv, otherTable)
-	ins, del := diffProjectedRowsWithMultiplicity(beforeProjectedRows, beforeOtherCount, afterProjectedRows, afterOtherCount)
-	return ins, del, nil
+	return diffProjectedRowsWithMultiplicity(ctx, beforeProjectedRows, beforeOtherCount, afterProjectedRows, afterOtherCount)
 }
 
 func evalFilteredCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin) (inserts, deletes []types.ProductValue, err error) {
@@ -778,8 +835,7 @@ func evalFilteredCrossJoinDelta(ctx context.Context, dv *DeltaView, p CrossJoin)
 		deleteFragments = append(deleteFragments, deleteFromRight)
 	}
 
-	ins, del := ReconcileJoinDelta(insertFragments, deleteFragments)
-	return ins, del, nil
+	return reconcileJoinDelta(ctx, insertFragments, deleteFragments)
 }
 
 func crossJoinProjectedRows(ctx context.Context, p CrossJoin, leftRows, rightRows []types.ProductValue) ([]types.ProductValue, error) {
@@ -788,18 +844,27 @@ func crossJoinProjectedRows(ctx context.Context, p CrossJoin, leftRows, rightRow
 		if err := ctxErr(ctx); err != nil {
 			return nil, err
 		}
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return nil, err
+		}
 		for _, rightRow := range rightRows {
 			if err := ctxErr(ctx); err != nil {
+				return nil, err
+			}
+			if err := chargeSubscriptionWork(ctx); err != nil {
 				return nil, err
 			}
 			if !MatchJoinPair(p.Filter, p.Left, p.LeftAlias, leftRow, p.Right, p.RightAlias, rightRow) {
 				continue
 			}
+			projected := leftRow
 			if p.ProjectRight {
-				rows = append(rows, rightRow)
-			} else {
-				rows = append(rows, leftRow)
+				projected = rightRow
 			}
+			if err := chargeDeltaRow(ctx, projected); err != nil {
+				return nil, err
+			}
+			rows = append(rows, projected)
 		}
 	}
 	return rows, nil
@@ -840,6 +905,9 @@ func tableRowsFromView(ctx context.Context, view store.CommittedReadView, table 
 		if err := ctxErr(ctx); err != nil {
 			return nil, err
 		}
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return nil, err
+		}
 		rows = append(rows, row)
 	}
 	return rows, nil
@@ -864,14 +932,21 @@ func rowCountBefore(dv *DeltaView, table TableID) int {
 	return n
 }
 
-func diffProjectedRowsWithMultiplicity(beforeRows []types.ProductValue, beforeMultiplier int, afterRows []types.ProductValue, afterMultiplier int) (inserts, deletes []types.ProductValue) {
+func diffProjectedRowsWithMultiplicity(ctx context.Context, beforeRows []types.ProductValue, beforeMultiplier int, afterRows []types.ProductValue, afterMultiplier int) (inserts, deletes []types.ProductValue, err error) {
 	beforeCounts, beforeValues, beforeOrder := countProjectedRowsWithMultiplier(beforeRows, beforeMultiplier)
 	afterCounts, afterValues, afterOrder := countProjectedRowsWithMultiplier(afterRows, afterMultiplier)
 	for _, key := range afterOrder {
 		if afterCounts[key] <= beforeCounts[key] {
 			continue
 		}
-		for n := afterCounts[key] - beforeCounts[key]; n > 0; n-- {
+		n := afterCounts[key] - beforeCounts[key]
+		if err := chargeSubscriptionWorkN(ctx, n); err != nil {
+			return nil, nil, err
+		}
+		if err := chargeDeltaRowN(ctx, afterValues[key], n); err != nil {
+			return nil, nil, err
+		}
+		for ; n > 0; n-- {
 			inserts = append(inserts, afterValues[key])
 		}
 	}
@@ -879,11 +954,18 @@ func diffProjectedRowsWithMultiplicity(beforeRows []types.ProductValue, beforeMu
 		if beforeCounts[key] <= afterCounts[key] {
 			continue
 		}
-		for n := beforeCounts[key] - afterCounts[key]; n > 0; n-- {
+		n := beforeCounts[key] - afterCounts[key]
+		if err := chargeSubscriptionWorkN(ctx, n); err != nil {
+			return nil, nil, err
+		}
+		if err := chargeDeltaRowN(ctx, beforeValues[key], n); err != nil {
+			return nil, nil, err
+		}
+		for ; n > 0; n-- {
 			deletes = append(deletes, beforeValues[key])
 		}
 	}
-	return inserts, deletes
+	return inserts, deletes, nil
 }
 
 func countProjectedRowsWithMultiplier(rows []types.ProductValue, multiplier int) (map[string]uint64, map[string]types.ProductValue, []string) {
@@ -905,7 +987,12 @@ func countProjectedRowsWithMultiplier(rows []types.ProductValue, multiplier int)
 }
 
 func diffProjectedRowBags(beforeRows, afterRows []types.ProductValue) (inserts, deletes []types.ProductValue) {
-	return diffProjectedRowsWithMultiplicity(beforeRows, 1, afterRows, 1)
+	inserts, deletes, _ = diffProjectedRowBagsWithBudget(context.Background(), beforeRows, afterRows)
+	return inserts, deletes
+}
+
+func diffProjectedRowBagsWithBudget(ctx context.Context, beforeRows, afterRows []types.ProductValue) (inserts, deletes []types.ProductValue, err error) {
+	return diffProjectedRowsWithMultiplicity(ctx, beforeRows, 1, afterRows, 1)
 }
 
 func projectedRowsBefore(ctx context.Context, dv *DeltaView, table TableID) ([]types.ProductValue, error) {

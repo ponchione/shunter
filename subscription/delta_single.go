@@ -1,23 +1,44 @@
 package subscription
 
-import "github.com/ponchione/shunter/types"
+import (
+	"context"
+
+	"github.com/ponchione/shunter/types"
+)
 
 // EvalSingleTableDelta produces the per-subscription delta for a single-table
 // predicate (SPEC-004 §6.1). Inserts and deletes from the changeset are
 // filtered independently; no deduplication is required because a single-table
 // scan cannot emit duplicates.
 func EvalSingleTableDelta(dv *DeltaView, pred Predicate, table TableID) (inserts, deletes []types.ProductValue) {
+	inserts, deletes, _ = evalSingleTableDelta(context.Background(), dv, pred, table)
+	return inserts, deletes
+}
+
+func evalSingleTableDelta(ctx context.Context, dv *DeltaView, pred Predicate, table TableID) (inserts, deletes []types.ProductValue, err error) {
 	for _, row := range dv.InsertedRows(table) {
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return nil, nil, err
+		}
 		if MatchRow(pred, table, row) {
+			if err := chargeDeltaRow(ctx, row); err != nil {
+				return nil, nil, err
+			}
 			inserts = append(inserts, row)
 		}
 	}
 	for _, row := range dv.DeletedRows(table) {
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return nil, nil, err
+		}
 		if MatchRow(pred, table, row) {
+			if err := chargeDeltaRow(ctx, row); err != nil {
+				return nil, nil, err
+			}
 			deletes = append(deletes, row)
 		}
 	}
-	return inserts, deletes
+	return inserts, deletes, nil
 }
 
 // MatchRow reports whether pred matches a row from the given table.

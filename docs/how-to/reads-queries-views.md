@@ -336,16 +336,21 @@ Indexes matter for reads that must stay fast:
 Large scans, unindexed live joins, and high-fanout subscriptions should be
 treated as app design risks until the app has measured its workload.
 
-Live multi-way joins are correctness-first and may materialize input relation
-rows during initial snapshots and post-commit deltas. For production workloads
-with untrusted query shapes or high-cardinality tables, set
+Live joins and aggregates may examine substantially more input than they emit.
+For production workloads with untrusted query shapes or high-cardinality
+tables, set
 `Config.SubscriptionMaxMultiJoinRelations`,
 `Config.SubscriptionMaxMultiJoinRowsPerRelation`, and
-`Config.SubscriptionMaxMultiJoinWork`. Their zero values use 8 relations,
-100,000 rows per relation, and 1,000,000 candidate-row work units. Relation and
-row limits reject matching declared live views during initial admission and
-are checked again against before/after relation state for deltas. The work
-budget applies independently to each initial snapshot or delta evaluation.
+`Config.SubscriptionMaxMultiJoinWork`. The last name is retained for
+compatibility, but its work budget applies to every subscription plan. Their
+zero values use 8 relations, 100,000 rows per relation, and 1,000,000 work
+units. Relation and row limits reject matching declared live views during
+initial admission and are checked again against before/after relation state for
+deltas. The work budget applies independently to each initial, final, or live
+delta evaluation. `SubscriptionInitialRowLimit` and
+`SubscriptionSnapshotMaxBytes` also bound live-delta materialization, while
+`SubscriptionOrderedWindowMaxRows` rejects oversized `OFFSET` working sets
+before allocation.
 Already-live subscriptions that exceed a limit receive a sanitized
 subscription error before further post-commit evaluation, even when pruning
 would otherwise skip the view.

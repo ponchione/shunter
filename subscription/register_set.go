@@ -83,6 +83,7 @@ func copyRegisterSetOption[S, D any](label string, in []S, want int, out []D, co
 }
 
 func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection []ProjectionColumn, aggregate *Aggregate, orderBy []OrderByColumn, limit *uint64, offset *uint64, view store.CommittedReadView, subID types.SubscriptionID, queryID uint32, rowLimit int) ([]SubscriptionUpdate, error) {
+	ctx = m.withWorkBudget(ctx)
 	if aggregate != nil {
 		return m.initialAggregateUpdates(ctx, pred, aggregate, view, subID, queryID)
 	}
@@ -111,7 +112,6 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, projection
 		case CrossJoin:
 			rows, err = m.appendProjectedCrossJoinRows(ctx, nil, view, p, rowLimit)
 		case MultiJoin:
-			ctx = m.withMultiJoinWorkBudget(ctx)
 			rows, err = m.appendProjectedMultiJoinRows(ctx, nil, view, p, projection, rowLimit)
 		}
 		if err != nil {
@@ -197,21 +197,28 @@ func (w initialRowWindow) streamOutputLimit(collector *initialRowCollector) int 
 	}
 }
 
-func (w initialRowWindow) orderedKeepLimit(collector *initialRowCollector) int {
+func (w initialRowWindow) orderedKeepLimit(collector *initialRowCollector, maxRows int) (int, error) {
 	if len(w.orderBy) == 0 {
-		return 0
+		return 0, nil
 	}
 	outputLimit := w.streamOutputLimit(collector)
 	if outputLimit == 0 {
-		return 0
+		return 0, nil
 	}
 	if w.offset == nil || *w.offset == 0 {
-		return outputLimit
+		if maxRows > 0 && outputLimit > maxRows {
+			return 0, NewQuotaError(ErrOrderedWindowLimit, "ordered_window_rows", outputLimit, maxRows)
+		}
+		return outputLimit, nil
 	}
 	if *w.offset > uint64(math.MaxInt-outputLimit) {
-		return 0
+		return 0, NewQuotaError(ErrOrderedWindowLimit, "ordered_window_rows", math.MaxInt, maxRows)
 	}
-	return int(*w.offset) + outputLimit
+	keep := int(*w.offset) + outputLimit
+	if maxRows > 0 && keep > maxRows {
+		return 0, NewQuotaError(ErrOrderedWindowLimit, "ordered_window_rows", keep, maxRows)
+	}
+	return keep, nil
 }
 
 func (w initialRowWindow) apply(rows []types.ProductValue) ([]types.ProductValue, error) {
@@ -273,12 +280,19 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 		scan.offset = window.offset
 		scan.outputLimit = window.streamOutputLimit(collector)
 	}
-	ordered := newBoundedOrderedInitialRows(window.orderBy, window.orderedKeepLimit(collector))
+	keep, err := window.orderedKeepLimit(collector, m.OrderedWindowMaxRows)
+	if err != nil {
+		return nil, err
+	}
+	ordered := newBoundedOrderedInitialRowsWithCapacity(window.orderBy, keep, view.RowCount(table))
 	if m.resolver != nil {
 		if eq, idxID, ok := initialIndexedEquality(pred, table, m.resolver); ok {
 			key := store.NewIndexKey(eq.Value)
 			for _, rid := range view.IndexSeek(eq.Table, idxID, key) {
 				if err := collector.err(); err != nil {
+					return nil, err
+				}
+				if err := chargeSubscriptionWork(collector.ctx); err != nil {
 					return nil, err
 				}
 				row, ok := view.GetRow(eq.Table, rid)
@@ -307,6 +321,9 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 				if err := collector.err(); err != nil {
 					return nil, err
 				}
+				if err := chargeSubscriptionWork(collector.ctx); err != nil {
+					return nil, err
+				}
 				if !MatchRow(pred, table, row) {
 					continue
 				}
@@ -326,6 +343,9 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 	}
 	for _, row := range view.TableScan(table) {
 		if err := collector.err(); err != nil {
+			return nil, err
+		}
+		if err := chargeSubscriptionWork(collector.ctx); err != nil {
 			return nil, err
 		}
 		if MatchRow(pred, table, row) {
@@ -406,6 +426,11 @@ func (m *Manager) appendProjectedCrossJoinRows(ctx context.Context, out []types.
 	if otherCount == 0 {
 		return out, nil
 	}
+	if p.Filter == nil {
+		if err := chargeSubscriptionWorkProduct(ctx, view.RowCount(projectedTable), otherCount); err != nil {
+			return nil, err
+		}
+	}
 	add := func(row types.ProductValue) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -421,8 +446,14 @@ func (m *Manager) appendProjectedCrossJoinRows(ctx context.Context, out []types.
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
+			if err := chargeSubscriptionWork(ctx); err != nil {
+				return nil, err
+			}
 			for _, rightRow := range view.TableScan(p.Right) {
 				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				if err := chargeSubscriptionWork(ctx); err != nil {
 					return nil, err
 				}
 				if !MatchJoinPair(p.Filter, p.Left, p.LeftAlias, leftRow, p.Right, p.RightAlias, rightRow) {
@@ -484,8 +515,14 @@ func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.Produ
 		}
 		return m.appendProjectedJoinRowsFromProjectedIndex(ctx, out, view, p, projectedTable, projectedJoinCol, projectedIdx, otherTable, otherJoinCol, orientedRows, rowLimit)
 	}
-	projectedCandidates, filterProjected := initialIndexedFilterRowIDs(view, p.Filter, projectedTable, m.resolver)
-	otherCandidates, filterOther := initialIndexedFilterRowIDs(view, p.Filter, otherTable, m.resolver)
+	projectedCandidates, filterProjected, err := initialIndexedFilterRowIDs(ctx, view, p.Filter, projectedTable, m.resolver)
+	if err != nil {
+		return nil, err
+	}
+	otherCandidates, filterOther, err := initialIndexedFilterRowIDs(ctx, view, p.Filter, otherTable, m.resolver)
+	if err != nil {
+		return nil, err
+	}
 	if hasProjectedIdx && initialJoinScanCost(view, otherTable, otherCandidates, filterOther) < initialJoinScanCost(view, projectedTable, projectedCandidates, filterProjected) {
 		return m.appendProjectedJoinRowsFromProjectedIndex(ctx, out, view, p, projectedTable, projectedJoinCol, projectedIdx, otherTable, otherJoinCol, orientedRows, rowLimit)
 	}
@@ -503,6 +540,9 @@ func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.Produ
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		if err := chargeSubscriptionWork(ctx); err != nil {
+			return nil, err
+		}
 		if !initialRowIDAllowed(projectedCandidates, filterProjected, projectedRID) {
 			continue
 		}
@@ -514,6 +554,9 @@ func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.Produ
 			key := store.NewIndexKey(projectedJoinValue)
 			for _, rid := range view.IndexSeek(otherTable, otherIdx, key) {
 				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				if err := chargeSubscriptionWork(ctx); err != nil {
 					return nil, err
 				}
 				if !initialRowIDAllowed(otherCandidates, filterOther, rid) {
@@ -551,10 +594,19 @@ func (m *Manager) appendProjectedJoinRowsFromProjectedIndex(
 ) ([]types.ProductValue, error) {
 	matchesByProjectedRow := make(map[types.RowID][]types.ProductValue)
 	pending := 0
-	projectedCandidates, filterProjected := initialIndexedFilterRowIDs(view, p.Filter, projectedTable, m.resolver)
-	otherCandidates, filterOther := initialIndexedFilterRowIDs(view, p.Filter, otherTable, m.resolver)
+	projectedCandidates, filterProjected, err := initialIndexedFilterRowIDs(ctx, view, p.Filter, projectedTable, m.resolver)
+	if err != nil {
+		return nil, err
+	}
+	otherCandidates, filterOther, err := initialIndexedFilterRowIDs(ctx, view, p.Filter, otherTable, m.resolver)
+	if err != nil {
+		return nil, err
+	}
 	for otherRID, otherRow := range view.TableScan(otherTable) {
 		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := chargeSubscriptionWork(ctx); err != nil {
 			return nil, err
 		}
 		if !initialRowIDAllowed(otherCandidates, filterOther, otherRID) {
@@ -567,6 +619,9 @@ func (m *Manager) appendProjectedJoinRowsFromProjectedIndex(
 		key := store.NewIndexKey(otherJoinValue)
 		for _, projectedRID := range view.IndexSeek(projectedTable, projectedIdx, key) {
 			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if err := chargeSubscriptionWork(ctx); err != nil {
 				return nil, err
 			}
 			if !initialRowIDAllowed(projectedCandidates, filterProjected, projectedRID) {
@@ -602,28 +657,34 @@ func (m *Manager) appendProjectedJoinRowsFromProjectedIndex(
 	return out, nil
 }
 
-func initialIndexedFilterRowIDs(view store.CommittedReadView, pred Predicate, table TableID, resolver IndexResolver) (map[types.RowID]struct{}, bool) {
+func initialIndexedFilterRowIDs(ctx context.Context, view store.CommittedReadView, pred Predicate, table TableID, resolver IndexResolver) (map[types.RowID]struct{}, bool, error) {
 	if view == nil || pred == nil || resolver == nil {
-		return nil, false
+		return nil, false, nil
 	}
 	if eq, idxID, ok := initialIndexedEquality(pred, table, resolver); ok {
 		out := make(map[types.RowID]struct{})
 		key := store.NewIndexKey(eq.Value)
 		for _, rid := range view.IndexSeek(eq.Table, idxID, key) {
+			if err := chargeSubscriptionWork(ctx); err != nil {
+				return nil, false, err
+			}
 			out[rid] = struct{}{}
 		}
-		return out, true
+		return out, true, nil
 	}
 	if r, idxID, ok := initialIndexedRange(pred, table, resolver); ok {
 		out := make(map[types.RowID]struct{})
 		lower := store.Bound{Value: r.Lower.Value, Inclusive: r.Lower.Inclusive, Unbounded: r.Lower.Unbounded}
 		upper := store.Bound{Value: r.Upper.Value, Inclusive: r.Upper.Inclusive, Unbounded: r.Upper.Unbounded}
 		for rid := range view.IndexRange(r.Table, idxID, lower, upper) {
+			if err := chargeSubscriptionWork(ctx); err != nil {
+				return nil, false, err
+			}
 			out[rid] = struct{}{}
 		}
-		return out, true
+		return out, true, nil
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 func initialJoinScanCost(view store.CommittedReadView, table TableID, candidates map[types.RowID]struct{}, filtered bool) int {
@@ -742,6 +803,12 @@ func (m *Manager) RegisterSet(
 		}
 		if err := validateRowOffset(canonical, offsets[i], aggregates[i], m.schema); err != nil {
 			return SubscriptionSetRegisterResult{}, fmt.Errorf("offset validation: %w", err)
+		}
+		if limits[i] == nil || *limits[i] != 0 {
+			window := initialRowWindow{orderBy: orderBys[i], limit: limits[i], offset: offsets[i]}
+			if _, err := window.orderedKeepLimit(newInitialRowCollector(ctx, m.InitialRowLimit), m.OrderedWindowMaxRows); err != nil {
+				return SubscriptionSetRegisterResult{}, fmt.Errorf("ordered window validation: %w", err)
+			}
 		}
 		canonicalPreds = append(canonicalPreds, canonical)
 	}

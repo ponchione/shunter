@@ -131,6 +131,9 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	if cfg.SubscriptionSnapshotMaxBytes < 0 {
 		return Config{}, "", fmt.Errorf("subscription snapshot max bytes must not be negative")
 	}
+	if cfg.SubscriptionOrderedWindowMaxRows < 0 {
+		return Config{}, "", fmt.Errorf("subscription ordered window max rows must not be negative")
+	}
 	if cfg.SubscriptionMaxQueriesPerSet < 0 {
 		return Config{}, "", fmt.Errorf("subscription max queries per set must not be negative")
 	}
@@ -189,6 +192,9 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	}
 	if normalized.SubscriptionSnapshotMaxBytes == 0 {
 		normalized.SubscriptionSnapshotMaxBytes = defaultSubscriptionSnapshotBytes
+	}
+	if normalized.SubscriptionOrderedWindowMaxRows == 0 {
+		normalized.SubscriptionOrderedWindowMaxRows = subscription.DefaultOrderedWindowMaxRows
 	}
 	if normalized.SubscriptionMaxQueriesPerSet == 0 {
 		normalized.SubscriptionMaxQueriesPerSet = protocol.DefaultSubscriptionMaxQueriesPerSet

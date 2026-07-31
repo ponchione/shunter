@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Hosted one-off queries and all subscription plans now share finite work
+  accounting across scans, joins, and aggregate input. Live deltas enforce
+  row/byte materialization bounds before append, and ordered subscriptions
+  reject overflowing or oversized `OFFSET` working sets before allocation.
 - Remote JWKS and OIDC discovery validation now follows request cancellation,
   shares one in-flight fetch, caches failures behind jittered retry backoff, and
   uses runtime-owned caches; the compatibility cache is bounded and idle-

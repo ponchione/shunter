@@ -80,8 +80,13 @@ type orderedRowKeyer struct {
 }
 
 const (
-	orderedRowKeyCapHint        = 40
-	boundedOrderedRowKeyCapHint = 64
+	orderedRowKeyCapHint         = 40
+	boundedOrderedRowKeyCapHint  = 64
+	orderedSafePreallocationRows = 1_024
+	orderedSafeKeyCapHint        = 64 << 10
+	// DefaultOrderedWindowMaxRows bounds the logical top-K working set used by
+	// ordered subscription snapshots.
+	DefaultOrderedWindowMaxRows = 100_000
 )
 
 func orderWindowRows(rows []types.ProductValue, orderBy []OrderByColumn, deterministic bool) ([]types.ProductValue, error) {
@@ -98,22 +103,37 @@ func orderWindowRows(rows []types.ProductValue, orderBy []OrderByColumn, determi
 	sort.Stable(&orderedInitialRowsSorter{
 		rows:    ordered,
 		orderBy: orderBy,
-		keys:    orderedRowKeyer{capHint: len(ordered) * orderedRowKeyCapHint},
+		keys:    orderedRowKeyer{capHint: orderedKeyCapacityHint(len(ordered), orderedRowKeyCapHint)},
 	})
 	return flattenOrderedInitialRows(ordered), nil
 }
 
 func newBoundedOrderedInitialRows(orderBy []OrderByColumn, keep int) *boundedOrderedInitialRows {
+	return newBoundedOrderedInitialRowsWithCapacity(orderBy, keep, keep)
+}
+
+func newBoundedOrderedInitialRowsWithCapacity(orderBy []OrderByColumn, keep, available int) *boundedOrderedInitialRows {
 	if len(orderBy) == 0 || keep <= 0 {
 		return nil
 	}
+	capacity := min(keep, max(available, 0), orderedSafePreallocationRows)
 	return &boundedOrderedInitialRows{
 		orderBy: orderBy,
 		keep:    keep,
-		rows:    make([]orderedInitialRow, 0, keep),
-		keys:    orderedRowKeyer{capHint: keep * boundedOrderedRowKeyCapHint},
+		rows:    make([]orderedInitialRow, 0, capacity),
+		keys:    orderedRowKeyer{capHint: orderedKeyCapacityHint(capacity, boundedOrderedRowKeyCapHint)},
 		itemKey: orderedRowKeyer{capHint: orderedRowKeyCapHint},
 	}
+}
+
+func orderedKeyCapacityHint(rows, bytesPerRow int) int {
+	if rows <= 0 || bytesPerRow <= 0 {
+		return 0
+	}
+	if rows > orderedSafeKeyCapHint/bytesPerRow {
+		return orderedSafeKeyCapHint
+	}
+	return rows * bytesPerRow
 }
 
 func (b *boundedOrderedInitialRows) add(row types.ProductValue) error {
