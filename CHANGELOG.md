@@ -4,6 +4,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- The module now requires Go 1.27.0.
 - Hosted one-off queries and all subscription plans now share finite work
   accounting across scans, joins, and aggregate input. Live deltas enforce
   row/byte materialization bounds before append, and ordered subscriptions

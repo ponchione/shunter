@@ -17,7 +17,7 @@ func TestExternalModuleCompilesWithoutWebSocketReplace(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(`module external.test/shunterconsumer
 
-go 1.25.5
+go 1.27.0
 
 require github.com/ponchione/shunter v0.0.0
 

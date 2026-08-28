@@ -1,8 +1,6 @@
 module github.com/ponchione/shunter
 
-go 1.25.5
-
-toolchain go1.26.5
+go 1.27.0
 
 require (
 	github.com/andybalholm/brotli v1.2.1
