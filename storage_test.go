@@ -9,25 +9,30 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/ponchione/shunter/commitlog"
-	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
-type snapshotBarrierMemoryObserver struct {
+type snapshotBarrierMetricsRecorder struct {
+	countingMetricsRecorder
+	armed   atomic.Bool
+	once    sync.Once
 	entered chan struct{}
 	release chan struct{}
 }
 
-func (*snapshotBarrierMemoryObserver) LogStoreSnapshotLeaked(string)      {}
-func (*snapshotBarrierMemoryObserver) RecordStoreReadRows(string, uint64) {}
-func (*snapshotBarrierMemoryObserver) StoreMemoryUsageEnabled() bool      { return true }
-func (o *snapshotBarrierMemoryObserver) RecordStoreMemoryUsage([]store.MemoryUsage) {
-	close(o.entered)
-	<-o.release
+func (o *snapshotBarrierMetricsRecorder) ObserveHistogram(name MetricName, _ MetricLabels, _ float64) {
+	if name == MetricStoreCommitDurationSeconds && o.armed.Load() {
+		o.once.Do(func() {
+			close(o.entered)
+			<-o.release
+		})
+	}
 }
 
 func TestRuntimeCreateSnapshotWritesCommittedHorizon(t *testing.T) {
@@ -107,10 +112,20 @@ func TestRuntimeCreateSnapshotFaultKeepsRuntimeUsable(t *testing.T) {
 
 func TestRuntimeCreateSnapshotSerializesCommitDurabilityAndRecovery(t *testing.T) {
 	dir := t.TempDir()
-	rt, err := Build(dataDirBackupTestModule(), Config{DataDir: dir})
+	observer := &snapshotBarrierMetricsRecorder{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	release := sync.OnceFunc(func() { close(observer.release) })
+	rt, err := Build(dataDirBackupTestModule(), Config{
+		DataDir:       dir,
+		Observability: ObservabilityConfig{Metrics: MetricsConfig{Enabled: true, Recorder: observer}},
+	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
+	t.Cleanup(func() { _ = rt.Close() })
+	t.Cleanup(release)
 	if err := rt.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -123,11 +138,7 @@ func TestRuntimeCreateSnapshotSerializesCommitDurabilityAndRecovery(t *testing.T
 		t.Fatalf("WaitUntilDurable(%d): %v", first.TxID, err)
 	}
 
-	observer := &snapshotBarrierMemoryObserver{
-		entered: make(chan struct{}),
-		release: make(chan struct{}),
-	}
-	rt.state.SetObserver(observer)
+	observer.armed.Store(true)
 	type reducerCallResult struct {
 		result ReducerResult
 		err    error
@@ -140,7 +151,7 @@ func TestRuntimeCreateSnapshotSerializesCommitDurabilityAndRecovery(t *testing.T
 	select {
 	case <-observer.entered:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for commit memory observation")
+		t.Fatal("timeout waiting for commit duration observation")
 	}
 	if got := rt.state.CommittedTxID(); got != first.TxID+1 {
 		t.Fatalf("committed horizon while observation paused = %d, want %d", got, first.TxID+1)
@@ -168,7 +179,7 @@ func TestRuntimeCreateSnapshotSerializesCommitDurabilityAndRecovery(t *testing.T
 	default:
 	}
 
-	close(observer.release)
+	release()
 	second := <-reducerDone
 	if second.err != nil || second.result.Status != StatusCommitted {
 		t.Fatalf("second reducer = %+v, %v; want committed", second.result, second.err)
@@ -191,7 +202,6 @@ func TestRuntimeCreateSnapshotSerializesCommitDurabilityAndRecovery(t *testing.T
 	if len(data.Tables) == 0 || data.Tables[0].TableID != 0 || len(data.Tables[0].Rows) != 2 {
 		t.Fatalf("snapshot tables = %#v, want two message rows", data.Tables)
 	}
-	rt.state.SetObserver(rt.observability)
 	tail, err := rt.CallReducer(context.Background(), "insert_message", []byte("tail"))
 	if err != nil || tail.Status != StatusCommitted {
 		t.Fatalf("tail reducer = %+v, %v; want committed", tail, err)

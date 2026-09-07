@@ -239,6 +239,13 @@ func (r *Runtime) Start(ctx context.Context) (startErr error) {
 	}
 	r.schedulerWG.Add(1)
 	r.fanOutWG.Add(1)
+	if r.observability.StoreMemoryUsageEnabled() {
+		r.memoryMetricsWG.Add(1)
+		go func() {
+			defer r.memoryMetricsWG.Done()
+			r.runStoreMemoryMetrics(lifecycleCtx)
+		}()
+	}
 	r.stateName = RuntimeStateReady
 	r.ready.Store(true)
 	r.mu.Unlock()
@@ -316,6 +323,7 @@ func (r *Runtime) Close() error {
 	}
 	r.closeProtocolGraph(protocolConns, protocolInbox)
 	r.schedulerWG.Wait()
+	r.memoryMetricsWG.Wait()
 	executorFatal := false
 	if exec != nil {
 		exec.Shutdown()

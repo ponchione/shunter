@@ -507,6 +507,10 @@ Store metrics:
 - `store_memory_bytes` is an approximate gauge emitted for table rows and
   schema indexes when store memory metrics are enabled. `table` and `index`
   values come from schema names; table-row samples use an empty `index` label.
+  Runtime sampling occurs at build, after startup, and 30 seconds after each
+  completed sample, outside reducer and migration commits. Gauges may lag writes
+  by that interval plus collection time. Samples do not overlap; runtime close
+  cancels the timer and waits for an in-flight sample.
 - `store_read_rows_total` increments by the number of rows matched or delivered
   through committed snapshot read paths. `kind="table_scan"` covers table
   iteration; `kind="index_scan"`, `kind="index_seek"`, and

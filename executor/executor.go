@@ -1085,8 +1085,6 @@ func (e *Executor) commitTransaction(tx *store.Transaction, txID types.TxID) (*s
 	result := "ok"
 	if err != nil {
 		result = "error"
-	} else {
-		e.committed.RecordMemoryUsage()
 	}
 	e.recordStoreCommitDuration(result, time.Since(start))
 	return changeset, err

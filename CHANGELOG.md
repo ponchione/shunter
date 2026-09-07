@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Store memory gauges now sample outside reducer and migration commits, waiting
+  30 seconds after each sample, instead of scanning all rows and
+  indexes after every commit. Runtime close drains any in-flight sample.
 - The module now requires Go 1.27.0.
 - Hosted one-off queries and all subscription plans now share finite work
   accounting across scans, joins, and aggregate input. Live deltas enforce

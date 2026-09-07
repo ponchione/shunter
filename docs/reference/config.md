@@ -119,6 +119,14 @@ tracing. The zero value is a no-op for external observations.
 Use this field when the app wants structured runtime logs, custom metrics
 recording, diagnostic HTTP endpoints, or tracing integration.
 
+With metrics enabled and a recorder configured, `store_memory_bytes` is sampled
+at build, after startup, and 30 seconds after each completed sample. Gauges can
+lag writes by that interval plus collection time. Sampling scans tables and
+indexes under a store read lock outside reducer and migration commits; a sample
+can briefly delay writers. One sample runs at a time, and `Close` cancels the
+timer and waits for any in-flight sample. Custom recorders must support concurrent
+calls and return promptly.
+
 `Diagnostics.MountHealthHTTP` mounts health and readiness only.
 `MountDebugHTTP` and `MountMetricsHTTP` are separate detailed-route opt-ins;
 `DetailedHTTPMiddleware` can authenticate those two routes. `MountHTTP` remains

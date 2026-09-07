@@ -269,7 +269,6 @@ func (e *migrationExecutor) runHook(ctx context.Context, hookIndex int, hook Mig
 	if changeset.IsEmpty() {
 		return result, nil
 	}
-	e.state.RecordMemoryUsage()
 	if migrationAfterCommitBeforeDurabilityHook != nil {
 		if err := migrationAfterCommitBeforeDurabilityHook(txID, changeset); err != nil {
 			return result, dirtyMigrationStateErrorf("migration hook %d durability: %w", hookIndex+1, err)

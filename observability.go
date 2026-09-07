@@ -20,6 +20,7 @@ const (
 	defaultObservabilityRuntimeLabel         = "default"
 	defaultObservabilityErrorMessageMaxBytes = 1024
 	redactionLookaheadBytes                  = 4096
+	storeMemorySampleInterval                = 30 * time.Second
 )
 
 const (
@@ -65,7 +66,9 @@ type RedactionConfig struct {
 	AllowRawSQLInDebugLogs bool
 }
 
-// MetricsConfig configures Shunter-owned metric observations.
+// MetricsConfig configures Shunter-owned metric observations. Store memory
+// gauges are sampled at build, after startup, and 30 seconds after each completed
+// sample, outside reducer and migration commits.
 type MetricsConfig struct {
 	// Enabled gates all metrics calls. False means no-op even when Recorder is
 	// non-nil.
@@ -181,7 +184,8 @@ type MetricLabels struct {
 	Index     string
 }
 
-// MetricsRecorder receives Shunter metric observations.
+// MetricsRecorder receives Shunter metric observations. Methods must be safe
+// for concurrent calls and return promptly; Close waits for in-flight sampling.
 type MetricsRecorder interface {
 	AddCounter(name MetricName, labels MetricLabels, delta uint64)
 	SetGauge(name MetricName, labels MetricLabels, value float64)
@@ -717,6 +721,22 @@ func (o *runtimeObservability) RecordStoreCommitDuration(result string, duration
 
 func (o *runtimeObservability) StoreMemoryUsageEnabled() bool {
 	return o != nil && o.metrics != nil
+}
+
+func (r *Runtime) runStoreMemoryMetrics(ctx context.Context) {
+	timer := time.NewTimer(storeMemorySampleInterval)
+	defer timer.Stop()
+	for ctx.Err() == nil {
+		// ponytail: a whole-store read lock per sample; use incremental accounting
+		// if measured sampling pauses become too expensive.
+		r.state.RecordMemoryUsage()
+		timer.Reset(storeMemorySampleInterval)
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+	}
 }
 
 func (o *runtimeObservability) RecordStoreMemoryUsage(usage []store.MemoryUsage) {

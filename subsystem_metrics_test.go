@@ -1,12 +1,152 @@
 package shunter
 
 import (
+	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
+
+type blockingMemoryMetricsRecorder struct {
+	countingMetricsRecorder
+	armed   atomic.Bool
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingMemoryMetricsRecorder) SetGauge(name MetricName, _ MetricLabels, _ float64) {
+	if name == MetricStoreMemoryBytes && r.armed.Load() {
+		r.once.Do(func() {
+			close(r.entered)
+			<-r.release
+		})
+	}
+}
+
+func TestRuntimeMemoryMetricsDoNotBlockCommitsAndDrainOnClose(t *testing.T) {
+	metrics := &blockingMemoryMetricsRecorder{entered: make(chan struct{}), release: make(chan struct{})}
+	release := sync.OnceFunc(func() { close(metrics.release) })
+	rt, err := Build(dataDirBackupTestModule(), Config{
+		DataDir:       t.TempDir(),
+		Observability: ObservabilityConfig{Metrics: MetricsConfig{Enabled: true, Recorder: metrics}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	t.Cleanup(release)
+	metrics.armed.Store(true)
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-metrics.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("startup did not start memory sampling")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	result, err := rt.CallReducer(ctx, "insert_message", []byte("while sampling"))
+	if err != nil || result.Status != StatusCommitted {
+		t.Fatalf("commit during memory sampling = %+v, %v", result, err)
+	}
+	if err := rt.WaitUntilDurable(ctx, result.TxID); err != nil {
+		t.Fatalf("durability during memory sampling: %v", err)
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- rt.Close() }()
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned with memory sampling in flight: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	release()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not drain memory sampling")
+	}
+}
+
+func TestStoreMemoryMetricsSampleInsertsDeletesAndCancel(t *testing.T) {
+	metrics := &recordingMetricsRecorder{}
+	rt, err := Build(validChatModule(), Config{
+		DataDir:       t.TempDir(),
+		Observability: ObservabilityConfig{Metrics: MetricsConfig{Enabled: true, Recorder: metrics}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan struct{})
+		go func() {
+			rt.runStoreMemoryMetrics(ctx)
+			close(done)
+		}()
+		synctest.Wait()
+		initialSamples := countMetricObservations(metrics, "gauge", MetricStoreMemoryBytes)
+		tx := store.NewTransaction(rt.state, rt.registry)
+		rowID, err := tx.Insert(0, types.ProductValue{types.NewUint64(0), types.NewString("hello")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx.Seal()
+		if _, err := store.Commit(rt.state, tx); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(storeMemorySampleInterval / 2)
+		synctest.Wait()
+		if got := countMetricObservations(metrics, "gauge", MetricStoreMemoryBytes); got != initialSamples {
+			t.Fatalf("sampled before interval: %d observations, want %d", got, initialSamples)
+		}
+		requireLatestGauge(t, metrics, MetricStoreMemoryBytes, MetricLabels{
+			Module: "chat", Runtime: "default", Kind: store.StoreMemoryKindTableRows, Table: "messages",
+		}, 0)
+
+		time.Sleep(storeMemorySampleInterval / 2)
+		synctest.Wait()
+		for _, usage := range rt.state.MemoryUsage() {
+			requireLatestGauge(t, metrics, MetricStoreMemoryBytes, MetricLabels{
+				Module: "chat", Runtime: "default", Kind: usage.Kind, Table: usage.TableName, Index: usage.IndexName,
+			}, float64(usage.Bytes))
+		}
+		tx = store.NewTransaction(rt.state, rt.registry)
+		if err := tx.Delete(0, rowID); err != nil {
+			t.Fatal(err)
+		}
+		tx.Seal()
+		if _, err := store.Commit(rt.state, tx); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(storeMemorySampleInterval)
+		synctest.Wait()
+		for _, usage := range rt.state.MemoryUsage() {
+			requireLatestGauge(t, metrics, MetricStoreMemoryBytes, MetricLabels{
+				Module: "chat", Runtime: "default", Kind: usage.Kind, Table: usage.TableName, Index: usage.IndexName,
+			}, float64(usage.Bytes))
+		}
+		cancel()
+		<-done
+		finalSamples := countMetricObservations(metrics, "gauge", MetricStoreMemoryBytes)
+		time.Sleep(2 * storeMemorySampleInterval)
+		if got := countMetricObservations(metrics, "gauge", MetricStoreMemoryBytes); got != finalSamples {
+			t.Fatalf("sampled after cancellation: %d observations, want %d", got, finalSamples)
+		}
+	})
+}
 
 func TestSubsystemMetricsUseExactFamiliesAndLabels(t *testing.T) {
 	metrics := &recordingMetricsRecorder{}

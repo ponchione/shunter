@@ -58,6 +58,7 @@ type Runtime struct {
 	fanOutCancel                context.CancelFunc
 	schedulerWG                 sync.WaitGroup
 	fanOutWG                    sync.WaitGroup
+	memoryMetricsWG             sync.WaitGroup
 	durability                  *commitlog.DurabilityWorker
 	subscriptions               *subscription.Manager
 	fanOutInbox                 chan subscription.FanOutMessage
