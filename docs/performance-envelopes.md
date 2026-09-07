@@ -5,6 +5,37 @@ exists. The rows are advisory unless a release process defines hard thresholds
 for a specific workload. The snapshot below uses the preferred repo toolchain
 from `go.mod`.
 
+## 2026-09-07 Snapshot Capture And Publication
+
+Runtime snapshot publication now runs outside the executor. Only waiting for
+the selected horizon to become durable and copying its state pause reducers.
+The existing ID/name fixture measures that capture separately from file
+serialization, writes, fsync, and publication:
+
+| Rows | Capture, median | Publication, median | Peak additional heap, GC disabled |
+| ---: | ---: | ---: | ---: |
+| 4,096 | 0.54 ms | 59.74 ms | 1.74 MiB |
+| 65,536 | 12.55 ms | 90.88 ms | 29.94 MiB |
+| 262,144 | 68.23 ms | 202.90 ms | 120.31 MiB |
+
+Measured on linux/amd64, Go 1.27.1, AMD Ryzen 9 9900X, with five runs of three
+operations each. The heap column is the maximum operation's growth above the
+already-built state; GC is disabled within each operation so it includes all
+transient snapshot allocations. It is a conservative allocation peak, not
+process RSS or a production memory forecast. Capture excludes durability wait
+and executor queueing; publication includes filesystem work and is advisory.
+These are phase timings from the new path, not a separate before/after run.
+
+```bash
+go test -run '^$' -bench '^BenchmarkSnapshotPhases$' -benchtime=3x -count=5 -benchmem ./commitlog
+```
+
+The runtime regression `TestRuntimeSnapshotPublicationAllowsCommitsAndDrainsOnClose`
+pauses publication deterministically, commits another reducer, checks storage
+ownership during close, and recovers the captured horizon plus the later log
+entry. Snapshot requests and compaction serialize to retain one capture and
+prevent compaction from racing publication.
+
 ## 2026-07-12 Optimization Closeout
 
 This focused comparison measures the recovery, snapshot, maintained-window,

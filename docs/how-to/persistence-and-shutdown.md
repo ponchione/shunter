@@ -88,8 +88,10 @@ if err := rt.CompactCommitLog(snapshotTxID); err != nil {
 }
 ```
 
-Snapshot creation is synchronous and can block commits while state is
-serialized. Service processes should quiesce writes first.
+Snapshot creation returns after publication completes. Reducers pause for the
+durability wait and detached state capture, then proceed during serialization
+and disk I/O. Concurrent snapshot requests and compaction serialize; `Close`
+waits for active storage maintenance before releasing the DataDir lease.
 
 `CompactCommitLog` only deletes sealed commit log segments fully covered by the
 completed snapshot TX ID.

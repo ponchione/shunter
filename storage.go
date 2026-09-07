@@ -25,14 +25,19 @@ type runtimeStorageHandles struct {
 	executor      *executor.Executor
 }
 
+var captureRuntimeSnapshot = (*commitlog.FileSnapshotWriter).CaptureSnapshot
+
 // CreateSnapshot writes a full snapshot for the runtime's current committed
-// state and returns the represented transaction ID. On a running runtime the
-// call is serialized with executor work and publishes only after the selected
-// transaction horizon is durable.
+// state and returns the represented transaction ID after publication completes.
+// On a running runtime only the durability wait and detached capture serialize
+// with executor work; reducers can proceed during serialization and disk I/O.
+// Snapshot creation, compaction, and Close are serialized with each other.
 func (r *Runtime) CreateSnapshot() (types.TxID, error) {
 	if r == nil {
 		return 0, ErrRuntimeNotReady
 	}
+	r.closeMu.Lock()
+	defer r.closeMu.Unlock()
 
 	r.mu.Lock()
 	handles, err := r.storageHandlesLocked()
@@ -43,9 +48,16 @@ func (r *Runtime) CreateSnapshot() (types.TxID, error) {
 
 	writer := commitlog.NewFileSnapshotWriterWithObserver(handles.dataDir, handles.registry, handles.observability)
 	if r.stateName == RuntimeStateBuilt {
-		txID, err := writer.CreateSnapshotAtCurrentHorizon(handles.state)
+		txID := handles.state.CommittedTxID()
+		publish, err := captureRuntimeSnapshot(writer, handles.state, txID)
 		r.mu.Unlock()
-		return txID, err
+		if err != nil {
+			return 0, err
+		}
+		if err := publish(); err != nil {
+			return 0, err
+		}
+		return txID, nil
 	}
 	if handles.executor == nil || handles.executor.Fatal() {
 		r.mu.Unlock()
@@ -53,9 +65,12 @@ func (r *Runtime) CreateSnapshot() (types.TxID, error) {
 	}
 
 	responseCh := make(chan executor.CreateSnapshotResult, 1)
+	var publish func() error
 	err = handles.executor.Submit(executor.CreateSnapshotCmd{
 		Capture: func(committed *store.CommittedState, txID types.TxID) error {
-			return writer.CreateSnapshot(committed, txID)
+			var err error
+			publish, err = captureRuntimeSnapshot(writer, committed, txID)
+			return err
 		},
 		ResponseCh: responseCh,
 	})
@@ -64,13 +79,24 @@ func (r *Runtime) CreateSnapshot() (types.TxID, error) {
 		return 0, err
 	}
 	result := <-responseCh
-	return result.TxID, result.Err
+	if result.Err != nil {
+		return 0, result.Err
+	}
+	if err := publish(); err != nil {
+		return 0, err
+	}
+	return result.TxID, nil
 }
 
 // CompactCommitLog deletes sealed commit log segments fully covered by a
 // completed snapshot. snapshotTxID must name a completed snapshot in the
-// runtime data directory.
+// runtime data directory. The call serializes with snapshot creation and Close.
 func (r *Runtime) CompactCommitLog(snapshotTxID types.TxID) error {
+	if r == nil {
+		return ErrRuntimeNotReady
+	}
+	r.closeMu.Lock()
+	defer r.closeMu.Unlock()
 	handles, err := r.storageHandles()
 	if err != nil {
 		return err

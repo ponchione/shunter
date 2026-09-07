@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Runtime snapshots now publish outside the executor after a durable, detached
+  capture, allowing reducers to commit during serialization and disk I/O.
+  Snapshot creation, compaction, and close serialize with each other to bound
+  retained captures and preserve DataDir ownership through publication.
 - Store memory gauges now sample outside reducer and migration commits, waiting
   30 seconds after each sample, instead of scanning all rows and
   indexes after every commit. Runtime close drains any in-flight sample.

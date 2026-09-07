@@ -446,6 +446,30 @@ func openSnapshotTempFile(path string) (snapshotTempFile, error) {
 	return os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 }
 
+// CaptureSnapshot detaches the committed state at txID without writing files.
+// The returned function publishes that capture and returns the same result on
+// repeated calls. It may also be discarded without publishing. Callers must
+// bound outstanding captures and retain schema and storage ownership until
+// publication finishes. Durability of txID is the caller's responsibility.
+func (w *FileSnapshotWriter) CaptureSnapshot(committed *store.CommittedState, txID types.TxID) (func() error, error) {
+	start := time.Now()
+	body, err := w.captureSnapshotBody(committed, txID)
+	if err != nil {
+		recordSnapshotDuration(w.observer, resultFromErr(err), time.Since(start))
+		return nil, err
+	}
+	return sync.OnceValue(func() (err error) {
+		defer func() {
+			recordSnapshotDuration(w.observer, resultFromErr(err), time.Since(start))
+		}()
+		if err := w.beginSnapshot(); err != nil {
+			return err
+		}
+		defer w.endSnapshot()
+		return w.createSnapshotFromBody(txID, body)
+	}), nil
+}
+
 func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txID types.TxID) (err error) {
 	start := time.Now()
 	defer func() {

@@ -126,6 +126,7 @@ func (OnDisconnectCmd) isExecutorCommand() {}
 // CreateSnapshotCmd establishes a serialized maintenance point. The executor
 // waits for the current committed horizon to become durable before invoking
 // Capture and does not begin a later command until Capture returns.
+// Capture should detach state only; the submitter owns subsequent publication.
 type CreateSnapshotCmd struct {
 	Capture    func(*store.CommittedState, types.TxID) error
 	ResponseCh chan<- CreateSnapshotResult
@@ -133,8 +134,8 @@ type CreateSnapshotCmd struct {
 
 func (CreateSnapshotCmd) isExecutorCommand() {}
 
-// CreateSnapshotResult reports the durable transaction horizon represented by
-// a maintenance snapshot, or the error that prevented its publication.
+// CreateSnapshotResult reports the durable transaction horizon captured at the
+// maintenance point, or the error that prevented capture. Publication is separate.
 type CreateSnapshotResult struct {
 	TxID types.TxID
 	Err  error

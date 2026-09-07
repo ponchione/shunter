@@ -38,7 +38,7 @@ type Runtime struct {
 	observability *runtimeObservability
 
 	mu                          sync.Mutex
-	closeMu                     sync.Mutex
+	closeMu                     sync.Mutex // Serializes Close and storage maintenance.
 	stateName                   RuntimeState
 	ready                       atomic.Bool
 	lastErr                     error

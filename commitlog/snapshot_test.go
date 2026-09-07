@@ -8,10 +8,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/schema"
@@ -1969,6 +1972,44 @@ func TestConcurrentSnapshotReturnsInProgress(t *testing.T) {
 	}
 }
 
+func TestCaptureSnapshotDetachesStateBeforePublication(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	dir := t.TempDir()
+	writer := NewFileSnapshotWriterWithObserver(dir, reg, nil)
+	cs.SetCommittedTxID(1)
+	var mismatch *SnapshotHorizonMismatchError
+	if publish, err := writer.CaptureSnapshot(cs, 2); !errors.As(err, &mismatch) || publish != nil {
+		t.Fatalf("mismatched capture = %v, publish nil = %v", err, publish == nil)
+	}
+	publish, err := writer.CaptureSnapshot(cs, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Fatalf("capture created files: %v, %v", entries, err)
+	}
+	players, _ := cs.Table(0)
+	for id := range players.Scan() {
+		players.DeleteRow(id)
+	}
+	if err := players.InsertRow(players.AllocRowID(), types.ProductValue{types.NewUint64(3), types.NewString("later")}); err != nil {
+		t.Fatal(err)
+	}
+	cs.SetCommittedTxID(2)
+	for range 2 {
+		if err := publish(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := ReadSnapshot(filepath.Join(dir, "1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.TxID != 1 || len(data.Tables[0].Rows) != 2 || data.Tables[0].Rows[0][1].AsString() != "alice" || data.Tables[0].Rows[1][1].AsString() != "bob" {
+		t.Fatalf("snapshot changed after capture: %+v", data)
+	}
+}
+
 func TestCreateSnapshotUsesTempFileUntilRename(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()
@@ -2831,6 +2872,50 @@ func BenchmarkCreateSnapshotLarge(b *testing.B) {
 		root := b.TempDir()
 		writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
 		createSnapshotAt(b, writer, cs, types.TxID(i+1))
+	}
+}
+
+// BenchmarkSnapshotPhases measures the capture portion of the executor pause
+// separately from publication. Disabling GC within each operation makes the
+// final heap growth a conservative peak for snapshot-owned allocations.
+func BenchmarkSnapshotPhases(b *testing.B) {
+	for _, rows := range []int{4096, 65536, 262144} {
+		b.Run(strconv.Itoa(rows), func(b *testing.B) {
+			cs, reg := buildLargeSnapshotCommittedState(b, rows)
+			cs.SetCommittedTxID(1)
+			root := b.TempDir()
+			var captureTime, publicationTime time.Duration
+			var peakHeap uint64
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				writer := NewFileSnapshotWriterWithObserver(filepath.Join(root, strconv.Itoa(i)), reg, nil)
+				gcPercent := debug.SetGCPercent(-1)
+				runtime.GC()
+				var before, after runtime.MemStats
+				runtime.ReadMemStats(&before)
+				b.StartTimer()
+				start := time.Now()
+				publish, err := writer.CaptureSnapshot(cs, 1)
+				captureTime += time.Since(start)
+				if err == nil {
+					start = time.Now()
+					err = publish()
+					publicationTime += time.Since(start)
+				}
+				b.StopTimer()
+				runtime.ReadMemStats(&after)
+				debug.SetGCPercent(gcPercent)
+				peakHeap = max(peakHeap, after.HeapAlloc-before.HeapAlloc)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ReportMetric(float64(captureTime.Nanoseconds())/float64(b.N), "capture-ns/op")
+			b.ReportMetric(float64(publicationTime.Nanoseconds())/float64(b.N), "publish-ns/op")
+			b.ReportMetric(float64(peakHeap), "peak-heap-B")
+		})
 	}
 }
 

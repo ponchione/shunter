@@ -98,8 +98,11 @@ full copy of the damaged directory for investigation.
 ## Snapshot And Compaction
 
 Use `Runtime.CreateSnapshot` to write a full snapshot at the current committed
-transaction horizon. The call is synchronous and can block commits while state
-is serialized, so quiesce writes first when creating a maintenance point.
+transaction horizon. The call returns after publication finishes. Reducers pause
+while the selected horizon becomes durable and its state is copied; serialization
+and disk I/O then proceed alongside reducers. Snapshot creation, compaction, and
+`Close` serialize with each other, retaining at most one detached snapshot and
+keeping the DataDir lease held until publication finishes.
 
 Use `Runtime.CompactCommitLog(snapshotTxID)` only with a completed snapshot TX
 ID returned by `CreateSnapshot`. Compaction deletes sealed commit log segments

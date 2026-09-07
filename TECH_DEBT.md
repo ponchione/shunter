@@ -140,41 +140,6 @@ Recover acknowledged transactions after an abrupt process exit. Run targeted
 commitlog, executor, protocol, and client checks, and update the protocol contract
 and release-facing documentation when implementing the capability.
 
-## TD-005: Snapshot publication occupies the executor through disk I/O
-
-**Status:** Open. **Evidence:** Code-supported operational tradeoff; pause duration
-not measured in the audit. **Priority:** Fifth.
-
-**Goal and consequence.** A consistent snapshot needs a stable captured horizon,
-but today's implementation also stops reducer progress throughout serialization,
-file writes, fsync, and publication. Larger state or slower storage extends
-application write pauses beyond capture. The current path favors simplicity and
-correctness; the debt is its operational ceiling, not demonstrated data loss.
-
-**Evidence and entry points.**
-
-- [Runtime.CreateSnapshot](storage.go#L28) submits a capture closure calling the
-  complete file writer.
-- [Executor.handleCreateSnapshot](executor/executor.go#L528) waits for the durable
-  horizon and synchronously runs that closure before processing more work.
-- [FileSnapshotWriter.CreateSnapshot](commitlog/snapshot_io.go#L449) captures a
-  detached body, then calls `createSnapshotFromBody`; the
-  [publication path](commitlog/snapshot_io.go#L504) performs serialization, fsync,
-  rename, and directory synchronization before returning.
-
-**Smallest useful remedy.** Keep consistent detached capture serialized, then
-publish that captured body outside the executor. Preserve horizon validation,
-snapshot completion/error semantics, storage ownership through publication,
-bounded concurrent snapshots, and safe interaction with compaction and shutdown.
-
-**Done when.** Pause snapshot writing after capture and demonstrate that another
-reducer commits while publication remains pending. Recovery must reconstruct the
-captured horizon plus subsequent log entries; failed publication must not enable
-unsafe compaction. Exercise close during publication and existing snapshot fault
-tests. Run targeted root storage, executor snapshot, and commitlog recovery/
-compaction tests, then measure pause time and peak memory with representative
-state sizes.
-
 ## Audit evidence and limits
 
 The assessment ran `rtk go test` across the root runtime, store, commitlog,

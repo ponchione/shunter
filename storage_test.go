@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ponchione/shunter/commitlog"
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -228,6 +229,195 @@ func TestRuntimeCreateSnapshotSerializesCommitDurabilityAndRecovery(t *testing.T
 	want := []string{"first", "second", "tail"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("rebuilt message bodies = %#v, want %#v", got, want)
+	}
+}
+
+func TestRuntimeSnapshotPublicationAllowsCommitsAndDrainsOnClose(t *testing.T) {
+	for _, running := range []bool{false, true} {
+		for _, fail := range []bool{false, true} {
+			t.Run("running="+strconv.FormatBool(running)+"/fail="+strconv.FormatBool(fail), func(t *testing.T) {
+				dir := t.TempDir()
+				rt, err := Build(dataDirBackupTestModule(), Config{DataDir: dir})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = rt.Close() })
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				horizon := types.TxID(7)
+				if running {
+					if err := rt.Start(ctx); err != nil {
+						t.Fatal(err)
+					}
+					result, err := rt.CallReducer(ctx, "insert_message", []byte("captured"))
+					if err != nil || result.Status != StatusCommitted {
+						t.Fatalf("first reducer = %+v, %v", result, err)
+					}
+					horizon = result.TxID
+				} else {
+					rt.state.SetCommittedTxID(horizon)
+				}
+
+				entered, resume := make(chan struct{}), make(chan struct{})
+				release := sync.OnceFunc(func() { close(resume) })
+				original := captureRuntimeSnapshot
+				var captures atomic.Int32
+				secondCaptureErr := errors.New("second capture")
+				captureRuntimeSnapshot = func(w *commitlog.FileSnapshotWriter, state *store.CommittedState, txID types.TxID) (func() error, error) {
+					if captures.Add(1) > 1 {
+						return nil, secondCaptureErr
+					}
+					publish, err := original(w, state, txID)
+					if err != nil {
+						return nil, err
+					}
+					return func() error {
+						close(entered)
+						<-resume
+						return publish()
+					}, nil
+				}
+				t.Cleanup(func() {
+					release()
+					_ = rt.Close()
+					captureRuntimeSnapshot = original
+				})
+				type snapshotResult struct {
+					txID types.TxID
+					err  error
+				}
+				done := make(chan snapshotResult, 1)
+				go func() {
+					txID, err := rt.CreateSnapshot()
+					done <- snapshotResult{txID, err}
+				}()
+				select {
+				case <-entered:
+				case <-ctx.Done():
+					t.Fatal("snapshot did not reach publication")
+				}
+				secondSnapshot := make(chan error, 1)
+				go func() { _, err := rt.CreateSnapshot(); secondSnapshot <- err }()
+				compacted := make(chan error, 1)
+				go func() { compacted <- rt.CompactCommitLog(horizon) }()
+				if running {
+					result, err := rt.CallReducer(ctx, "insert_message", []byte("tail"))
+					if err != nil || result.Status != StatusCommitted || result.TxID != horizon+1 {
+						t.Fatalf("reducer during paused publication = %+v, %v", result, err)
+					}
+				}
+				snapshotDir := filepath.Join(dir, strconv.FormatUint(uint64(horizon), 10))
+				if fail {
+					if err := os.WriteFile(snapshotDir, []byte("obstruction"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+
+				closed := make(chan error, 1)
+				go func() { closed <- rt.Close() }()
+				if rt.closeMu.TryLock() {
+					rt.closeMu.Unlock()
+					t.Fatal("publication did not retain the storage maintenance lock")
+				}
+				select {
+				case err := <-secondSnapshot:
+					t.Fatalf("second snapshot returned during publication: %v", err)
+				case err := <-compacted:
+					t.Fatalf("compaction returned during publication: %v", err)
+				case err := <-closed:
+					t.Fatalf("Close returned during publication: %v", err)
+				default:
+				}
+				if other, err := Build(dataDirBackupTestModule(), Config{DataDir: dir}); !errors.Is(err, ErrDataDirInUse) {
+					if other != nil {
+						_ = other.Close()
+					}
+					t.Fatalf("Build during publication = %v, want ErrDataDirInUse", err)
+				}
+				release()
+				select {
+				case result := <-done:
+					if fail {
+						if result.txID != 0 || !errors.Is(result.err, commitlog.ErrSnapshot) {
+							t.Fatalf("failed publication = %+v", result)
+						}
+						if err := commitlog.RunCompaction(dir, horizon, rt.registry); err == nil {
+							t.Fatal("compaction accepted failed publication")
+						}
+					} else if result.err != nil || result.txID != horizon {
+						t.Fatalf("snapshot = %+v, want tx %d", result, horizon)
+					}
+				case <-ctx.Done():
+					t.Fatal("publication did not finish")
+				}
+				select {
+				case err := <-closed:
+					if err != nil {
+						t.Fatal(err)
+					}
+				case <-ctx.Done():
+					t.Fatal("Close did not drain publication")
+				}
+				select {
+				case err := <-secondSnapshot:
+					if !errors.Is(err, ErrRuntimeClosed) && !errors.Is(err, secondCaptureErr) {
+						t.Fatalf("second snapshot = %v", err)
+					}
+				case <-ctx.Done():
+					t.Fatal("second snapshot did not finish")
+				}
+				select {
+				case err := <-compacted:
+					if fail && err == nil {
+						t.Fatal("compaction accepted failed publication")
+					}
+					if !fail && err != nil && !errors.Is(err, ErrRuntimeClosed) {
+						t.Fatalf("compaction = %v", err)
+					}
+				case <-ctx.Done():
+					t.Fatal("compaction did not finish")
+				}
+				if !fail {
+					data, err := commitlog.ReadSnapshot(snapshotDir)
+					if err != nil {
+						t.Fatal(err)
+					}
+					wantRows := 0
+					if running {
+						wantRows = 1
+					}
+					if data.TxID != horizon || len(data.Tables[0].Rows) != wantRows {
+						t.Fatalf("snapshot = %+v, want captured horizon only", data)
+					}
+				}
+				rebuilt, err := Build(dataDirBackupTestModule(), Config{DataDir: dir})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer rebuilt.Close()
+				if !fail {
+					report := rebuilt.recovery.report
+					if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != horizon {
+						t.Fatalf("recovery did not select captured snapshot: %+v", report)
+					}
+					if running && report.ReplayedTxRange != (commitlog.RecoveryTxIDRange{Start: horizon + 1, End: horizon + 1}) {
+						t.Fatalf("recovery replay = %+v, want only the log tail", report.ReplayedTxRange)
+					}
+				}
+				if running {
+					snapshot := rebuilt.state.Snapshot()
+					defer snapshot.Close()
+					var rows []string
+					for _, row := range snapshot.TableScan(0) {
+						rows = append(rows, row[1].AsString())
+					}
+					slices.Sort(rows)
+					if !slices.Equal(rows, []string{"captured", "tail"}) {
+						t.Fatalf("recovery = %v, want captured row and log tail", rows)
+					}
+				}
+			})
+		}
 	}
 }
 
