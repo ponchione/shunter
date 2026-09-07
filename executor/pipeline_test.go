@@ -833,39 +833,48 @@ func TestPostCommitPropagatesCallerFlags(t *testing.T) {
 }
 
 func TestPostCommit_ProtocolRepliesUseOrderedCallerFanout(t *testing.T) {
-	h := newPipelineHarness(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go h.exec.Run(ctx)
+	for _, flags := range []byte{subscription.CallerOutcomeFlagFullUpdate, subscription.CallerOutcomeFlagDurableSuccess} {
+		h := newPipelineHarness(t)
+		h.dur.waitCh = make(chan types.TxID)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go h.exec.Run(ctx)
 
-	respCh := make(chan ProtocolCallReducerResponse, 1)
-	if err := h.exec.Submit(CallReducerCmd{
-		Request: ReducerRequest{
-			ReducerName: "InsertPlayer",
-			Source:      CallSourceExternal,
-			RequestID:   90,
-			Caller:      types.CallerContext{ConnectionID: types.ConnectionID{9}},
-		},
-		ProtocolResponseCh: respCh,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	resp := <-respCh
-	if !resp.FanoutOwned {
-		t.Fatal("protocol reply must be owned by fanout")
-	}
+		respCh := make(chan ProtocolCallReducerResponse, 1)
+		if err := h.exec.Submit(CallReducerCmd{
+			Request: ReducerRequest{
+				ReducerName: "InsertPlayer",
+				Source:      CallSourceExternal,
+				RequestID:   90,
+				Flags:       flags,
+				Caller:      types.CallerContext{ConnectionID: types.ConnectionID{9}},
+			},
+			ProtocolResponseCh: respCh,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var resp ProtocolCallReducerResponse
+		select {
+		case resp = <-respCh:
+		case <-time.After(time.Second):
+			t.Fatal("executor blocked on durability")
+		}
+		if !resp.FanoutOwned {
+			t.Fatal("protocol reply must be owned by fanout")
+		}
 
-	h.subs.mu.Lock()
-	defer h.subs.mu.Unlock()
-	if len(h.subs.metas) != 1 {
-		t.Fatalf("metas=%d want 1", len(h.subs.metas))
-	}
-	meta := h.subs.metas[0]
-	if meta.CallerConnID == nil {
-		t.Fatal("CallerConnID = nil")
-	}
-	if meta.CallerOutcome == nil || meta.CallerOutcome.RequestID != 90 || !meta.CallerOutcome.FastReply {
-		t.Fatalf("CallerOutcome = %+v, want ordered fast reply for request 90", meta.CallerOutcome)
+		h.subs.mu.Lock()
+		defer h.subs.mu.Unlock()
+		if len(h.subs.metas) != 1 {
+			t.Fatalf("metas=%d want 1", len(h.subs.metas))
+		}
+		meta := h.subs.metas[0]
+		if meta.CallerConnID == nil {
+			t.Fatal("CallerConnID = nil")
+		}
+		if meta.CallerOutcome == nil || meta.CallerOutcome.RequestID != 90 || !meta.CallerOutcome.FastReply || meta.CallerOutcome.Flags != flags || meta.TxDurable != h.dur.waitCh {
+			t.Fatalf("CallerOutcome = %+v, want ordered fast reply for request 90", meta.CallerOutcome)
+		}
 	}
 }
 

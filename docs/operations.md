@@ -74,14 +74,17 @@ operator attention.
 
 Reducer acknowledgement levels are intentionally distinct:
 
-- `Runtime.CallReducer` returning `StatusCommitted`, and the equivalent
-  WebSocket `StatusCommitted`, mean the transaction is visible to the running
-  runtime and queued for durability. Immediate process loss may still omit it
-  from recovered state.
+- `Runtime.CallReducer` returning `StatusCommitted`, and the default WebSocket
+  `StatusCommitted`, mean the transaction is visible to the running runtime and
+  queued for durability. Immediate process loss may still omit it from recovered
+  state.
 - `Runtime.WaitUntilDurable(ctx, result.TxID)` returning nil is the supported
   fsync-durability acknowledgement. Use that exact barrier before reporting a
-  local operation as durable. The WebSocket protocol has no durable response in
-  this version.
+  local operation as durable.
+- Remote reducer calls using `CallReducerFlagsDurableSuccess` (TypeScript
+  `{ durable: true }`) receive `StatusCommitted` only after fsync. An unavailable
+  durability acknowledgement disconnects the caller; cancellation or a lost
+  response leaves the outcome unknown. Reconcile application state before retrying.
 
 ### Crash Recovery
 

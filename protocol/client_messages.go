@@ -34,6 +34,9 @@ const (
 	CallReducerFlagsFullUpdate byte = 0
 	// CallReducerFlagsNoSuccessNotify suppresses committed success echoes only.
 	CallReducerFlagsNoSuccessNotify byte = 1
+	// CallReducerFlagsDurableSuccess waits for fsync before committed success.
+	// Failure to confirm durability disconnects the caller with outcome unknown.
+	CallReducerFlagsDurableSuccess byte = 2
 )
 
 // OneOffQueryMsg executes one raw SQL query with an opaque message ID.

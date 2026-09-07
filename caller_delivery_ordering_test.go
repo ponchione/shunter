@@ -45,10 +45,13 @@ func TestProtocolCallerDeltaCommitOrder(t *testing.T) {
 	for _, tc := range []struct {
 		name                       string
 		externalInsert, disconnect bool
+		durable                    bool
 	}{
 		{name: "local_insert_external_delete"},
 		{name: "external_insert_local_delete", externalInsert: true},
 		{name: "disconnect_with_queued_reply", disconnect: true},
+		{name: "local_insert_durable_delete", durable: true},
+		{name: "durable_insert_local_delete", externalInsert: true, durable: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deleted := make(chan struct{})
@@ -114,7 +117,11 @@ func TestProtocolCallerDeltaCommitOrder(t *testing.T) {
 				}
 			}
 			external := func(client *protocolclient.Client, name string, args []byte, requestID uint32) {
-				if err := client.Send(ctx, protocol.CallReducerMsg{ReducerName: name, Args: args, RequestID: requestID}); err != nil {
+				flags := protocol.CallReducerFlagsFullUpdate
+				if tc.durable {
+					flags = protocol.CallReducerFlagsDurableSuccess
+				}
+				if err := client.Send(ctx, protocol.CallReducerMsg{ReducerName: name, Args: args, RequestID: requestID, Flags: flags}); err != nil {
 					t.Fatal(err)
 				}
 			}

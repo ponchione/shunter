@@ -112,8 +112,7 @@ func TestCallReducerFlagsNoSuccessNotifyRoundTrip(t *testing.T) {
 }
 
 // TestCallReducerFlagsInvalidByteRejected pins that the decoder rejects
-// flag bytes outside the defined range (0, 1). Matches reference
-// impl_deserialize! behavior returning "invalid call reducer flag".
+// flag bytes outside the defined range (0, 1, 2).
 func TestCallReducerFlagsInvalidByteRejected(t *testing.T) {
 	// Encode a valid message, mutate the trailing flags byte to 99.
 	in := CallReducerMsg{RequestID: 1, ReducerName: "x", Args: nil, Flags: 0}
@@ -122,6 +121,28 @@ func TestCallReducerFlagsInvalidByteRejected(t *testing.T) {
 	_, _, err := DecodeClientMessage(frame)
 	if !errors.Is(err, ErrMalformedMessage) {
 		t.Fatalf("err = %v, want ErrMalformedMessage for out-of-range flags byte", err)
+	}
+}
+
+func TestCallReducerDurableSuccessRoundTrip(t *testing.T) {
+	request := CallReducerMsg{ReducerName: "save", Args: []byte{0x42}, RequestID: 7, Flags: CallReducerFlagsDurableSuccess}
+	frame, err := EncodeClientMessage(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame[len(frame)-1] != 2 {
+		t.Fatalf("durable flag = %d, want 2", frame[len(frame)-1])
+	}
+	for _, version := range SupportedProtocolVersions() {
+		_, decoded, err := DecodeClientMessageForVersion(version, frame)
+		if err != nil || !cmp.Equal(decoded, request) {
+			t.Fatalf("%s round trip = %+v, %v", version, decoded, err)
+		}
+		invalid := append([]byte(nil), frame...)
+		invalid[len(invalid)-1] = 3 // Flags are alternatives, not a bitmask.
+		if _, _, err := DecodeClientMessageForVersion(version, invalid); !errors.Is(err, ErrMalformedMessage) {
+			t.Fatalf("%s combined flags error = %v", version, err)
+		}
 	}
 }
 

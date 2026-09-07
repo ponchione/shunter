@@ -189,8 +189,9 @@ if err := rt.WaitUntilDurable(ctx, res.TxID); err != nil {
 ```
 
 Omit `WaitUntilDurable` when committed-but-not-yet-fsynced acknowledgement is
-acceptable. The WebSocket protocol's committed reducer response has the same
-non-durable meaning and does not expose a remote durability barrier.
+acceptable. WebSocket reducer success has the same default meaning. Remote
+callers can opt into fsync confirmation with `CallReducerFlagsDurableSuccess`,
+or `{ durable: true }` in the TypeScript client's reducer call options.
 
 Strict permission checks use caller options:
 

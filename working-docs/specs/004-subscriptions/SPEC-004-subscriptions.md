@@ -568,7 +568,8 @@ type FanOutMessage struct {
     // CallerConnID identifies the caller so the fan-out worker can suppress the
     // caller's light delivery. Committed protocol replies carry CallerOutcome
     // and share this ordered delivery path with earlier subscription deltas.
-    // CallerOutcome.FastReply preserves the protocol's pre-fsync success policy.
+    // CallerOutcome.FastReply preserves the default pre-fsync success policy;
+    // an explicit DurableSuccess flag requires confirmation first.
     CallerConnID *ConnectionID
     CallerOutcome *CallerOutcome
 }
@@ -580,7 +581,11 @@ Ownership rule: once `FanOutMessage` is sent to `FanOutWorker.inbox`, ownership 
 
 ```
 For each FanOutMessage received:
-  0. Deliver a FastReply caller outcome without waiting for this commit's durability,
+  0. For committed DurableSuccess calls, require a nonzero TxID and wait for
+     TxDurable to confirm at least that TxID, even with an internal fast-read policy.
+     Missing/failed readiness or delivery cancellation interrupts the caller
+     connection without a success or rollback status.
+     Deliver a FastReply caller outcome without any additional durability wait,
      unless NoSuccessNotify suppresses its committed success. Earlier fan-out
      messages must finish first; the protocol adapter must not send a second reply.
      Then deliver queued SubscriptionError entries before remaining updates.
@@ -747,6 +752,7 @@ type CallerOutcomeKind uint8
 const (
     CallerOutcomeCommitted CallerOutcomeKind = iota
     CallerOutcomeFailed
+    CallerOutcomeDurabilityUnknown // internal interruption; no wire status
 )
 
 // CallerOutcome carries the caller-visible reducer outcome plus metadata
@@ -763,6 +769,7 @@ type CallerOutcome struct {
     Timestamp                  int64
     TotalHostExecutionDuration int64
     Flags                      byte
+    FastReply                  bool
 }
 
 // QueryHash is the 32-byte blake3 digest of the canonical predicate byte stream
@@ -873,7 +880,15 @@ Should delta delivery wait for the transaction to be durable (fsync'd to commit 
 - **Yes (confirmed reads)**: Client only sees data that will survive a crash. Higher latency.
 - **No (fast reads)**: Client sees data immediately after in-memory commit. Lower latency, but client could see data that is lost on crash.
 
-**v1 protocol contract:** the public WebSocket protocol (SPEC-005) does not expose a client-selectable confirmed-read flag. Non-caller fan-out delivery defaults to confirmed reads: the fan-out worker waits on `TxDurable` before sending `SubscriptionError` or `TransactionUpdateLight` unless an internal fast-read policy opts a connection out. Protocol-originated caller-heavy `TransactionUpdate` responses share the ordered fan-out path after commit and synchronous subscription evaluation. They wait behind earlier deltas but do not wait for their own commit's fsync; clients must not treat reducer success as a durable-commit acknowledgement unless a future explicit durability acknowledgement is added.
+**Public protocol contract:** non-caller fan-out defaults to confirmed reads:
+`SubscriptionError` and `TransactionUpdateLight` wait on `TxDurable` unless an
+internal fast-read policy opts the connection out. Caller-heavy replies share
+the ordered fan-out path after commit and synchronous subscription evaluation.
+Default caller success waits behind earlier deltas but does not require its own
+fsync. `CallReducerFlagsDurableSuccess` (SPEC-005 §7.3) explicitly requires that
+confirmation before success, without waiting inside the executor. A failed
+waiter interrupts the connection with outcome unknown; reconnect never replays
+the call.
 
 ### 12.4 Reference-Informed Shunter Decisions
 

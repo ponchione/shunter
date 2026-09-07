@@ -1164,7 +1164,7 @@ func TestProtocolInboxAdapter_CallReducerWaitsForAcceptedCommandAfterCancellatio
 }
 
 func TestProtocolInboxAdapter_CallReducer_FanoutOwnsCommittedReply(t *testing.T) {
-	for _, flags := range []byte{protocol.CallReducerFlagsFullUpdate, protocol.CallReducerFlagsNoSuccessNotify} {
+	for _, flags := range []byte{protocol.CallReducerFlagsFullUpdate, protocol.CallReducerFlagsNoSuccessNotify, protocol.CallReducerFlagsDurableSuccess} {
 		respCh := make(chan protocol.TransactionUpdate, 1)
 		adapter := newProtocolInboxAdapter(
 			stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {

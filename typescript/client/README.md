@@ -220,6 +220,16 @@ converted into failed result envelopes on that path. Typed reducer callers can u
 their own argument encoder; generated bindings provide schema-derived argument
 encoders and standalone reducer result product decoders when the contract
 exports those schemas.
+
+Use `await client.callReducer(name, args, { durable: true })` when success must
+confirm fsync. The same option works through generated reducer helpers and
+`callReducerWithResult()`. Default calls still acknowledge the in-memory commit.
+`durable: true` cannot be combined with `noSuccessNotify: true`. An unavailable
+durability acknowledgement closes the connection; cancellation or a lost reply
+rejects with `ShunterCallInterruptedError`, with outcome unknown. Reconnect never
+replays the call. Reconcile app state before retrying. Older servers reject the
+new flag; the client never falls back to fast success.
+
 Reducer and procedure calls that were sent but lose the authoritative server
 response—including through explicit close or post-send cancellation—reject
 with `ShunterCallInterruptedError` (`kind: "interrupted"`,

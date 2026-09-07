@@ -27,6 +27,7 @@ export const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_MULTI_APPLIED = 10 as const;
 export const SHUNTER_SERVER_MESSAGE_PROCEDURE_RESPONSE = 11 as const;
 export const SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE = 0 as const;
 export const SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY = 1 as const;
+export const SHUNTER_CALL_REDUCER_FLAGS_DURABLE_SUCCESS = 2 as const;
 export const SHUNTER_MODULE_CONTRACT_FORMAT = "shunter.module_contract" as const;
 export const SHUNTER_MODULE_CONTRACT_VERSION_V1 = 1 as const;
 export const SHUNTER_MIN_SUPPORTED_MODULE_CONTRACT_VERSION = SHUNTER_MODULE_CONTRACT_VERSION_V1;
@@ -4414,6 +4415,8 @@ export type TransactionID = number | bigint | string;
 export interface ReducerCallOptions {
   readonly requestId?: RequestID;
   readonly noSuccessNotify?: boolean;
+  /** Wait for fsync before success. Incompatible with noSuccessNotify. */
+  readonly durable?: boolean;
   readonly signal?: AbortSignal;
 }
 
@@ -4428,7 +4431,8 @@ export interface EncodedReducerCallOptions<Args = unknown>
 
 export type ReducerCallFlags =
   | typeof SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE
-  | typeof SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY;
+  | typeof SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY
+  | typeof SHUNTER_CALL_REDUCER_FLAGS_DURABLE_SUCCESS;
 
 export interface EncodedReducerCallRequest<Name extends string = string> {
   readonly name: Name;
@@ -4454,6 +4458,8 @@ export interface ReducerCallResultOptions<Result = Uint8Array> {
 }
 
 export interface ReducerCallResultRequestOptions<Result = Uint8Array> extends ReducerCallResultOptions<Result> {
+  /** Wait for fsync before committed success. */
+  readonly durable?: boolean;
   readonly signal?: AbortSignal;
 }
 
@@ -4493,6 +4499,7 @@ export function reducerCallOptions<Args>(options: EncodedReducerCallOptions<Args
   return {
     requestId: options.requestId,
     noSuccessNotify: options.noSuccessNotify,
+    durable: options.durable,
     signal: options.signal,
   };
 }
@@ -4502,6 +4509,7 @@ export function reducerCallResultRequestOptions<Args, Result>(
 ): ReducerCallResultRequestOptions<Result> {
   return {
     requestId: options.requestId,
+    durable: options.durable,
     signal: options.signal,
     decodeResult: options.decodeResult,
   };
@@ -4529,6 +4537,7 @@ export async function callReducerWithResult<Name extends string, Result = Uint8A
   try {
     rawResult = await callReducer(name, args, {
       requestId: options.requestId,
+      durable: options.durable,
       signal: options.signal,
     });
   } catch (error) {
@@ -4678,6 +4687,14 @@ export function decodeReducerCallResult<Name extends string, Result = Uint8Array
 }
 
 function reducerCallFlags(options: ReducerCallOptions): ReducerCallFlags {
+  if (options.durable === true) {
+    if (options.noSuccessNotify === true) {
+      throw new ShunterValidationError("Durable success requires a success notification.", {
+        code: "conflicting_reducer_call_options",
+      });
+    }
+    return SHUNTER_CALL_REDUCER_FLAGS_DURABLE_SUCCESS;
+  }
   return options.noSuccessNotify === true
     ? SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY
     : SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE;

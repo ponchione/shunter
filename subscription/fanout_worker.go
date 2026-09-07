@@ -13,7 +13,8 @@ import (
 // Full buffers return ErrSendBufferFull; missing connections return
 // ErrSendConnGone.
 type FanOutSender interface {
-	// SendTransactionUpdateHeavy delivers the caller-bound heavy envelope.
+	// SendTransactionUpdateHeavy delivers the caller-bound heavy envelope,
+	// or disconnects the caller for CallerOutcomeDurabilityUnknown.
 	SendTransactionUpdateHeavy(connID types.ConnectionID, outcome CallerOutcome, callerUpdates []SubscriptionUpdate, memo *EncodingMemo) error
 	// SendTransactionUpdateLight delivers the non-caller delta-only envelope.
 	SendTransactionUpdateLight(connID types.ConnectionID, requestID uint32, updates []SubscriptionUpdate, memo *EncodingMemo) error
@@ -97,7 +98,7 @@ func (w *FanOutWorker) requiresConfirmedRead(connID types.ConnectionID) bool {
 	return !w.fastReads[connID]
 }
 
-func waitForDurable(ctx context.Context, durable <-chan types.TxID, waited *bool, ready *bool) bool {
+func waitForDurable(ctx context.Context, durable <-chan types.TxID, target types.TxID, waited *bool, ready *bool) bool {
 	if *ready || durable == nil {
 		*ready = true
 		return true
@@ -110,7 +111,7 @@ func waitForDurable(ctx context.Context, durable <-chan types.TxID, waited *bool
 	case <-ctx.Done():
 		return false
 	case txID, ok := <-durable:
-		if !ok || txID == 0 {
+		if !ok || txID == 0 || txID < target {
 			return false
 		}
 		*ready = true
@@ -157,6 +158,23 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 
 	var durableWaited bool
 	var durableReady bool
+	if effCallerOutcome != nil && effCallerConnID != nil &&
+		effCallerOutcome.Kind == CallerOutcomeCommitted &&
+		effCallerOutcome.Flags == CallerOutcomeFlagDurableSuccess {
+		// Explicit durable success never accepts a missing waiter or a fast-read
+		// override. Wait here, outside the executor, to preserve commit ordering.
+		if msg.TxID == 0 || msg.TxDurable == nil || !waitForDurable(ctx, msg.TxDurable, msg.TxID, &durableWaited, &durableReady) {
+			err := errors.New("subscription: caller durability acknowledgement unavailable")
+			recordTraceFailure("durability_unavailable", err)
+			w.recordFanoutError("durability_unavailable", *effCallerConnID, err)
+			outcome := *effCallerOutcome
+			outcome.Kind = CallerOutcomeDurabilityUnknown
+			if err := w.sender.SendTransactionUpdateHeavy(*effCallerConnID, outcome, nil, nil); err != nil {
+				w.handleSendError(*effCallerConnID, err)
+			}
+			return
+		}
+	}
 
 	// Fast caller replies share commit ordering, but retain their pre-fsync
 	// acknowledgement semantics even when this commit also has confirmed readers.
@@ -172,7 +190,7 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	// These are post-commit outcomes, so confirmed-read recipients wait
 	// for the same durability signal as normal transaction updates.
 	for connID, errs := range msg.Errors {
-		if w.requiresConfirmedRead(connID) && !waitForDurable(ctx, msg.TxDurable, &durableWaited, &durableReady) {
+		if w.requiresConfirmedRead(connID) && !waitForDurable(ctx, msg.TxDurable, msg.TxID, &durableWaited, &durableReady) {
 			recordTraceFailure("context_canceled", ctx.Err())
 			return
 		}
@@ -202,7 +220,7 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 		if msg.CallerConnID != nil && connID == *msg.CallerConnID {
 			continue
 		}
-		if w.requiresConfirmedRead(connID) && !waitForDurable(ctx, msg.TxDurable, &durableWaited, &durableReady) {
+		if w.requiresConfirmedRead(connID) && !waitForDurable(ctx, msg.TxDurable, msg.TxID, &durableWaited, &durableReady) {
 			recordTraceFailure("context_canceled", ctx.Err())
 			return
 		}
@@ -213,7 +231,7 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 
 	// Deliver the caller's heavy envelope unless NoSuccessNotify suppressed it.
 	if effCallerConnID != nil && effCallerOutcome != nil {
-		if w.requiresConfirmedRead(*effCallerConnID) && !waitForDurable(ctx, msg.TxDurable, &durableWaited, &durableReady) {
+		if w.requiresConfirmedRead(*effCallerConnID) && !waitForDurable(ctx, msg.TxDurable, msg.TxID, &durableWaited, &durableReady) {
 			recordTraceFailure("context_canceled", ctx.Err())
 			return
 		}

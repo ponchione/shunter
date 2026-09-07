@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
 import test from "node:test";
 import {
+  SHUNTER_CALL_REDUCER_FLAGS_DURABLE_SUCCESS,
   SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY,
   SHUNTER_CLIENT_MESSAGE_CALL_REDUCER,
   SHUNTER_CLIENT_MESSAGE_CALL_PROCEDURE,
@@ -791,6 +792,14 @@ assert.deepEqual(
   encodeReducerCallRequest("ping", new Uint8Array(), { requestId: 1 }).frame,
   bytesFromHex("030400000070696e67000000000100000000"),
 );
+assert.deepEqual(
+  encodeReducerCallRequest("ping", new Uint8Array(), { requestId: 1, durable: true }).frame,
+  bytesFromHex("030400000070696e67000000000100000002"),
+);
+assert.throws(
+  () => encodeReducerCallRequest("ping", new Uint8Array(), { durable: true, noSuccessNotify: true }),
+  (error) => error instanceof ShunterValidationError && error.code === "conflicting_reducer_call_options",
+);
 const rawReducerArgs = new Uint8Array([0x01, 0x02]);
 const clonedReducerArgs = encodeReducerArgs(rawReducerArgs);
 rawReducerArgs[0] = 0xff;
@@ -1006,6 +1015,17 @@ const encodedArgsWrappedReducerResult = await callReducerWithEncodedArgsResult(
   },
 );
 assert.equal(encodedArgsWrappedReducerResult.status, "committed");
+for (const invoke of [
+  (call) => callReducerWithEncodedArgs(call, "send", new Uint8Array(), { durable: true }),
+  (call) => callReducerWithResult(call, "send", new Uint8Array(), { durable: true }),
+  (call) => callReducerWithEncodedArgsResult(call, "send", new Uint8Array(), { durable: true }),
+]) {
+  await invoke(async (_name, _args, options) => {
+    assert.equal(options.durable, true);
+    assert.equal(options.noSuccessNotify, undefined);
+    return committedUpdateFrame;
+  });
+}
 assert.throws(
   () => decodeReducerCallResult("other", committedUpdateFrame),
   ShunterProtocolError,
@@ -2050,6 +2070,7 @@ await assert.rejects(
 assert.equal(sockets[0].sent.length, 1);
 sockets[0].message(committedUpdateFrame);
 assert.deepEqual(await reducerResponse, committedUpdateFrame);
+
 
 const autoReducerIdSockets = [];
 const autoReducerIdClient = createShunterClient({
@@ -3131,6 +3152,20 @@ assert.deepEqual(
 await closeDuringRawUnsubscribeClient.close(4000, "caller closed during unsubscribe");
 await assert.rejects(closeDuringRawUnsubscribeResult, ShunterClosedClientError);
 
+let durableSettled = false;
+const durableResponse = client.callReducer("send", new Uint8Array([0xaa]), {
+  requestId: 0x21222324,
+  durable: true,
+}).then((response) => {
+  durableSettled = true;
+  return response;
+});
+assert.equal(sockets[0].sent.at(-1).at(-1), SHUNTER_CALL_REDUCER_FLAGS_DURABLE_SUCCESS);
+await nextTurn();
+assert.equal(durableSettled, false);
+sockets[0].message(committedUpdateFrame);
+assert.deepEqual(await durableResponse, committedUpdateFrame);
+
 await client.close();
 await client.close();
 assert.equal(sockets[0].closeCalls.length, 1);
@@ -3854,6 +3889,7 @@ await lateReducerSubscription;
 const reducerAbort = new AbortController();
 const abortedReducer = abortClient.callReducer("send", new Uint8Array([0xaa]), {
   requestId: 0x21222324,
+  durable: true,
   signal: reducerAbort.signal,
 });
 reducerAbort.abort();
@@ -4502,7 +4538,17 @@ const reconnectHandle = await reconnectHandleSubscription;
 assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["1-2", "3"] });
 const reconnectOldSocketMessageHandler = [...(reconnectSockets[0].listeners.get("message") ?? [])][0];
 assert.equal(typeof reconnectOldSocketMessageHandler, "function");
-reconnectSockets[0].dispatch("close", { code: 1006, reason: "lost", wasClean: false });
+const interruptedDurableCall = reconnectClient.callReducer("send", new Uint8Array(), {
+  requestId: 0x21222324,
+  durable: true,
+});
+reconnectSockets[0].dispatch("close", { code: 1011, reason: "durability acknowledgement unavailable", wasClean: true });
+await assert.rejects(interruptedDurableCall, (error) => {
+  assert(error instanceof ShunterCallInterruptedError);
+  assert.equal(error.operation, "reducer");
+  assert.equal(error.requestId, 0x21222324);
+  return true;
+});
 assert.equal(reconnectClient.state.status, "reconnecting");
 assert.deepEqual(reconnectHandle.state, {
   status: "resynchronizing",
@@ -4535,6 +4581,7 @@ assert.deepEqual(
     queryId: 0x11121314,
   }).frame,
 );
+assert.equal(reconnectSockets[1].sent.length, 1); // Only subscriptions replay; the durable call does not.
 reconnectSockets[1].message(reconnectSubscribeSingleAppliedFrame);
 assert.deepEqual(reconnectHandle.state, { status: "active", rows: ["4-5"] });
 assert.equal(reconnectHandle.epoch, 2);

@@ -156,7 +156,7 @@ func connID(b byte) types.ConnectionID {
 
 func TestFanOutSenderAdapter_SendTransactionUpdateLight(t *testing.T) {
 	mock := &mockClientSender{}
-	adapter := NewFanOutSenderAdapter(mock)
+	adapter := NewFanOutSenderAdapter(mock, nil)
 	err := adapter.SendTransactionUpdateLight(
 		connID(1), 11,
 		[]subscription.SubscriptionUpdate{{
@@ -181,7 +181,7 @@ func TestFanOutSenderAdapter_SendTransactionUpdateLight(t *testing.T) {
 
 func TestFanOutSenderAdapter_BufferFull_MapsError(t *testing.T) {
 	mock := &mockClientSender{sendErr: ErrClientBufferFull}
-	adapter := NewFanOutSenderAdapter(mock)
+	adapter := NewFanOutSenderAdapter(mock, nil)
 	err := adapter.SendTransactionUpdateLight(
 		connID(1), 1,
 		[]subscription.SubscriptionUpdate{{QueryID: 1, TableName: "t"}},
@@ -194,7 +194,7 @@ func TestFanOutSenderAdapter_BufferFull_MapsError(t *testing.T) {
 
 func TestFanOutSenderAdapter_ConnNotFound_MapsError(t *testing.T) {
 	mock := &mockClientSender{sendErr: ErrConnNotFound}
-	adapter := NewFanOutSenderAdapter(mock)
+	adapter := NewFanOutSenderAdapter(mock, nil)
 	err := adapter.SendTransactionUpdateLight(
 		connID(1), 1,
 		[]subscription.SubscriptionUpdate{{QueryID: 1, TableName: "t"}},
@@ -207,7 +207,7 @@ func TestFanOutSenderAdapter_ConnNotFound_MapsError(t *testing.T) {
 
 func TestFanOutSenderAdapter_RowPayloadRoundTrip(t *testing.T) {
 	mock := &mockClientSender{}
-	adapter := NewFanOutSenderAdapter(mock)
+	adapter := NewFanOutSenderAdapter(mock, nil)
 	updates := []subscription.SubscriptionUpdate{{
 		QueryID:   5,
 		TableName: "players",
@@ -254,7 +254,7 @@ func TestFanOutSenderAdapter_RowPayloadRoundTrip(t *testing.T) {
 
 func TestFanOutSenderAdapter_EventTableInsertsEncodeLikeOrdinaryRows(t *testing.T) {
 	mock := &mockClientSender{}
-	adapter := NewFanOutSenderAdapter(mock)
+	adapter := NewFanOutSenderAdapter(mock, nil)
 	row := types.ProductValue{types.NewString("event")}
 	updates := []subscription.SubscriptionUpdate{{
 		QueryID:   9,
@@ -280,7 +280,7 @@ func TestFanOutSenderAdapter_EventTableInsertsEncodeLikeOrdinaryRows(t *testing.
 
 func TestFanOutSenderAdapter_SendTransactionUpdateHeavyCommitted(t *testing.T) {
 	mock := &mockClientSender{}
-	adapter := NewFanOutSenderAdapter(mock)
+	adapter := NewFanOutSenderAdapter(mock, nil)
 	outcome := subscription.CallerOutcome{
 		Kind:      subscription.CallerOutcomeCommitted,
 		RequestID: 9,
@@ -313,7 +313,7 @@ func TestFanOutSenderAdapter_SendTransactionUpdateHeavyCommitted(t *testing.T) {
 
 func TestFanOutSenderAdapter_SendTransactionUpdateHeavyFailed(t *testing.T) {
 	mock := &mockClientSender{}
-	adapter := NewFanOutSenderAdapter(mock)
+	adapter := NewFanOutSenderAdapter(mock, nil)
 	outcome := subscription.CallerOutcome{
 		Kind:      subscription.CallerOutcomeFailed,
 		RequestID: 3,
@@ -338,7 +338,7 @@ func TestFanOutSenderAdapter_SendTransactionUpdateHeavyFailed(t *testing.T) {
 
 func TestFanOutSenderAdapter_CallerEncodingFailureStillReplies(t *testing.T) {
 	mock := &mockClientSender{}
-	adapter := NewFanOutSenderAdapter(mock)
+	adapter := NewFanOutSenderAdapter(mock, nil)
 	err := adapter.SendTransactionUpdateHeavy(connID(1), subscription.CallerOutcome{
 		Kind: subscription.CallerOutcomeCommitted, RequestID: 9,
 	}, []subscription.SubscriptionUpdate{{
@@ -366,7 +366,7 @@ func TestFanOutSenderAdapter_CallerReplyPreservesResponseLimit(t *testing.T) {
 	if err := mgr.Add(conn); err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewFanOutSenderAdapter(NewClientSender(mgr, nil))
+	adapter := NewFanOutSenderAdapter(NewClientSender(mgr, nil), mgr)
 	if err := adapter.SendTransactionUpdateHeavy(id, subscription.CallerOutcome{
 		Kind: subscription.CallerOutcomeCommitted, RequestID: 9,
 	}, []subscription.SubscriptionUpdate{{
@@ -386,11 +386,38 @@ func TestFanOutSenderAdapter_CallerReplyPreservesResponseLimit(t *testing.T) {
 	observer.requireMessage(t, "call_reducer", "response_too_large")
 }
 
+func TestFanOutSenderAdapter_DurabilityUnknownDisconnectsWithoutStatus(t *testing.T) {
+	conn, id := testConn(false)
+	mgr := NewConnManager()
+	if err := mgr.Add(conn); err != nil {
+		t.Fatal(err)
+	}
+	adapter := NewFanOutSenderAdapter(NewClientSender(mgr, nil), mgr)
+	if err := adapter.SendTransactionUpdateHeavy(id, subscription.CallerOutcome{
+		Kind: subscription.CallerOutcomeDurabilityUnknown, RequestID: 9,
+	}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-conn.disconnectRequested:
+		if conn.disconnectRequest.code != CloseInternal {
+			t.Fatalf("close code = %d, want internal error", conn.disconnectRequest.code)
+		}
+	default:
+		t.Fatal("durability failure did not request disconnect")
+	}
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("durability failure sent a status: %x", frame)
+	default:
+	}
+}
+
 // TestFanOutSenderAdapter_SendSubscriptionErrorTransactionOriginClearsIDs
 // pins that eval-origin SubscriptionError diagnostics stay off the wire.
 func TestFanOutSenderAdapter_SendSubscriptionErrorTransactionOriginClearsIDs(t *testing.T) {
 	mock := &mockClientSender{}
-	adapter := NewFanOutSenderAdapter(mock)
+	adapter := NewFanOutSenderAdapter(mock, nil)
 	if err := adapter.SendSubscriptionError(connID(3), subscription.SubscriptionError{RequestID: 55, SubscriptionID: 77, Message: "boom"}); err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +446,7 @@ func TestFanOutSenderAdapter_SendSubscriptionErrorTransactionOriginClearsIDs(t *
 
 func TestFanOutSenderAdapter_SendSubscriptionLimitErrorKeepsDiagnosticsInternal(t *testing.T) {
 	mock := &mockClientSender{}
-	adapter := NewFanOutSenderAdapter(mock)
+	adapter := NewFanOutSenderAdapter(mock, nil)
 	in := subscription.SubscriptionError{
 		RequestID:      55,
 		SubscriptionID: 77,
@@ -452,7 +479,7 @@ func TestFanOutSenderAdapter_SendSubscriptionLimitErrorKeepsDiagnosticsInternal(
 
 func TestFanOutSenderAdapter_MemoizesRowEncodingAcrossLightCalls(t *testing.T) {
 	mock := &mockClientSender{}
-	adapter := NewFanOutSenderAdapter(mock)
+	adapter := NewFanOutSenderAdapter(mock, nil)
 	memo := subscription.NewEncodingMemo()
 
 	sharedRows := []types.ProductValue{{types.NewUint32(42), types.NewString("shared")}}
@@ -479,7 +506,7 @@ func TestFanOutSenderAdapter_MemoizesRowEncodingAcrossLightCalls(t *testing.T) {
 
 func TestFanOutSenderAdapter_MemoizesClonedOuterRowLists(t *testing.T) {
 	mock := &mockClientSender{}
-	adapter := NewFanOutSenderAdapter(mock)
+	adapter := NewFanOutSenderAdapter(mock, nil)
 	memo := subscription.NewEncodingMemo()
 
 	sharedRows := []types.ProductValue{{types.NewUint32(42), types.NewString("shared")}}
@@ -507,7 +534,7 @@ func TestFanOutSenderAdapter_MemoizesClonedOuterRowLists(t *testing.T) {
 
 func TestFanOutSenderAdapter_MemoCacheDoesNotLeakAcrossTransactions(t *testing.T) {
 	mock := &mockClientSender{}
-	adapter := NewFanOutSenderAdapter(mock)
+	adapter := NewFanOutSenderAdapter(mock, nil)
 	sharedRows := []types.ProductValue{{types.NewUint32(7), types.NewString("fresh")}}
 
 	calls := 0

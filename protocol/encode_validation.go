@@ -116,7 +116,7 @@ func requireValidWireString(field string, s string) error {
 
 func validCallReducerFlags(flags byte) bool {
 	switch flags {
-	case CallReducerFlagsFullUpdate, CallReducerFlagsNoSuccessNotify:
+	case CallReducerFlagsFullUpdate, CallReducerFlagsNoSuccessNotify, CallReducerFlagsDurableSuccess:
 		return true
 	default:
 		return false

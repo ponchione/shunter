@@ -137,7 +137,7 @@ func TestShunterSubscriptionErrorWireShapeAllNoneOptions(t *testing.T) {
 // SubscriptionError encoding with request/query/table IDs absent.
 func TestShunterSubscriptionErrorTransactionOriginWire(t *testing.T) {
 	capture := &captureSender{}
-	adapter := NewFanOutSenderAdapter(capture)
+	adapter := NewFanOutSenderAdapter(capture, nil)
 
 	errMsg := "predicate rewrite failed"
 	const measuredDuration uint64 = 4242

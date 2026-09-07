@@ -318,7 +318,7 @@ func (r *Runtime) ensureProtocolGraphLocked() error {
 	conns := protocol.NewConnManager()
 	inbox := executor.NewProtocolInboxAdapter(r.executor)
 	clientSender := protocol.NewClientSender(conns, inbox)
-	fanOutSender := protocol.NewFanOutSenderAdapter(clientSender)
+	fanOutSender := protocol.NewFanOutSenderAdapter(clientSender, conns)
 	if swappable, ok := r.fanOutSender.(*swappableFanOutSender); ok {
 		swappable.SetTarget(fanOutSender)
 	} else {

@@ -15,22 +15,35 @@ import (
 // messages before delivery.
 type FanOutSenderAdapter struct {
 	sender ClientSender
+	conns  *ConnManager
 }
 
-func NewFanOutSenderAdapter(sender ClientSender) *FanOutSenderAdapter {
-	return &FanOutSenderAdapter{sender: sender}
+func NewFanOutSenderAdapter(sender ClientSender, conns *ConnManager) *FanOutSenderAdapter {
+	return &FanOutSenderAdapter{sender: sender, conns: conns}
 }
 
 // SendTransactionUpdateHeavy delivers the caller's heavy
 // `TransactionUpdate`. For `StatusCommitted` outcomes the caller's
 // visible row delta is encoded into `StatusCommitted.Update`. For
 // `StatusFailed` outcomes the update slice is ignored.
+// An unavailable durability acknowledgement disconnects without a wire status.
 func (a *FanOutSenderAdapter) SendTransactionUpdateHeavy(
 	connID types.ConnectionID,
 	outcome subscription.CallerOutcome,
 	callerUpdates []subscription.SubscriptionUpdate,
 	memo *subscription.EncodingMemo,
 ) error {
+	if outcome.Kind == subscription.CallerOutcomeDurabilityUnknown {
+		if a.conns == nil {
+			return subscription.ErrSendConnGone
+		}
+		conn := a.conns.Get(connID)
+		if conn == nil {
+			return subscription.ErrSendConnGone
+		}
+		conn.requestDisconnect(CloseInternal, "durability acknowledgement unavailable")
+		return nil
+	}
 	msg, err := BuildTransactionUpdateHeavy(connID, outcome, callerUpdates, memo)
 	if err != nil {
 		encodeErr := fmt.Errorf("%w: encode caller outcome: %v", subscription.ErrSendEncodeFailed, err)

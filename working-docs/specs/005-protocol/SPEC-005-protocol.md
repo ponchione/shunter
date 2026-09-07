@@ -454,9 +454,9 @@ Invoke a named reducer.
 
 ```
 tag: 3
-request_id:    uint32 LE
 reducer_name:  string           — matches a registered reducer name
 args:          bytes            — BSATN-encoded ProductValue of reducer arguments
+request_id:    uint32 LE
 flags:         uint8            — CallReducerFlags byte (see below)
 ```
 
@@ -470,8 +470,20 @@ The client is responsible for encoding `args` as a `ProductValue` matching the r
 |---|---|---|
 | 0 | `FullUpdate` | Caller always receives the heavy `TransactionUpdate` on success or failure. Default. |
 | 1 | `NoSuccessNotify` | On `StatusCommitted` the caller is not echoed. Failure envelopes (`StatusFailed`) are still delivered so the caller observes non-success outcomes. |
+| 2 | `DurableSuccess` | Send committed success only after the commit is confirmed fsynced. Reducer failures still reply normally. |
 
-Any other value is rejected as `ErrMalformedMessage`.
+These are alternatives, not a bitmask; any other value is rejected as
+`ErrMalformedMessage`. `DurableSuccess` is an additive option accepted on v1 and
+v2. Older servers reject flag 2; clients must not retry with weaker semantics.
+
+For `DurableSuccess`, the ordered fan-out worker consumes the existing durability
+waiter before delivering success, including empty caller deltas. The executor
+does not wait for fsync. A missing/failed waiter or cancellation of delivery
+interrupts the caller connection with close code 1011, without a success or
+rollback status. A lost response or client cancellation leaves the transaction
+outcome unknown even if it committed. Reconnect does not replay reducer calls;
+applications must reconcile state before retrying. The TypeScript option is
+`{ durable: true }`, incompatible with `{ noSuccessNotify: true }`.
 
 ### 7.4 OneOffQuery
 
@@ -1060,7 +1072,12 @@ Delivery contract:
 
 The fan-out worker constructs the heavy `TransactionUpdate` from the caller's `CommitFanout` slice plus the reducer-outcome metadata (`UpdateStatus`, `CallerIdentity`, `CallerConnectionID`, `ReducerCall`, `Timestamp`, `TotalHostExecutionDuration`) returned by the executor on `CallReducerCmd.ResponseCh`. Non-caller entries become `TransactionUpdateLight{RequestID, Update}`.
 
-Protocol v1 exposes no wire-level confirmed-read flag. Non-caller fan-out delivery defaults to confirmed reads: the fan-out worker waits on `TxDurable` before sending `SubscriptionError` or `TransactionUpdateLight` to a connection unless an internal fast-read policy opts that connection out. Protocol-originated caller-heavy `TransactionUpdate` responses are emitted after commit and synchronous subscription evaluation, but before fsync completion; clients that need crash-survivable acknowledgement must treat the commit log durability boundary as a future explicit feature.
+Non-caller fan-out delivery defaults to confirmed reads: the worker waits on
+`TxDurable` before sending `SubscriptionError` or `TransactionUpdateLight` unless
+an internal fast-read policy opts that connection out. Caller-heavy replies
+share the same commit-ordered queue. Default success does not wait for its own
+fsync; `DurableSuccess` (§7.3) always waits, regardless of internal fast-read
+policy. It requires a nonzero transaction and a waiter value at least that TxID.
 
 ```go
 type ClientSender interface {

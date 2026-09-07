@@ -123,6 +123,43 @@ func committedOutcome(requestID uint32) *CallerOutcome {
 	return &CallerOutcome{Kind: CallerOutcomeCommitted, RequestID: requestID}
 }
 
+func TestFanOutWorker_DurableSuccessRejectsUnavailableWaiter(t *testing.T) {
+	for _, failure := range []string{"nil", "closed", "zero", "behind", "canceled", "missing_tx"} {
+		t.Run(failure, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			durable := make(chan types.TxID, 1)
+			txID := types.TxID(5)
+			switch failure {
+			case "nil":
+				durable = nil
+			case "closed":
+				close(durable)
+			case "zero":
+				durable <- 0
+			case "behind":
+				durable <- txID - 1
+			case "canceled":
+				cancel()
+			case "missing_tx":
+				txID = 0
+			}
+			mock := &mockFanOutSender{}
+			w := NewFanOutWorker(nil, mock, nil)
+			caller := cid(1)
+			w.SetConfirmedReads(caller, false)
+			outcome := &CallerOutcome{Kind: CallerOutcomeCommitted, RequestID: 9, Flags: CallerOutcomeFlagDurableSuccess, FastReply: true}
+			w.deliver(ctx, FanOutMessage{TxID: txID, TxDurable: durable, CallerConnID: &caller, CallerOutcome: outcome})
+			if len(mock.heavyCalls) != 1 || mock.heavyCalls[0].Outcome.Kind != CallerOutcomeDurabilityUnknown {
+				t.Fatalf("caller outcomes = %+v, want interruption", mock.heavyCalls)
+			}
+			if outcome.Kind != CallerOutcomeCommitted {
+				t.Fatal("delivery mutated the shared caller outcome")
+			}
+		})
+	}
+}
+
 func droppedClientHandler(dropped chan<- types.ConnectionID) func(types.ConnectionID) {
 	if dropped == nil {
 		return nil

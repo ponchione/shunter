@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Remote reducer calls can request fsync-confirmed success with
+  `CallReducerFlagsDurableSuccess` or TypeScript `{ durable: true }`, including
+  generated helpers. Waiting stays in ordered fan-out delivery. Unavailable
+  durability acknowledgements disconnect with outcome unknown; default fast
+  success and success suppression remain unchanged.
 - Procedure delivery now defers frames in bounded per-connection storage,
   preserving response-before-delta ordering without stalling global reducer
   execution. Deferred and outbound frames share message/byte limits; overflow
@@ -53,7 +58,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
   inert option; runtime observability continues not to emit raw SQL.
 - Reducer acknowledgement documentation now distinguishes ordinary committed
   success from explicit fsync confirmation through `Runtime.WaitUntilDurable`;
-  the WebSocket protocol continues to expose committed, non-durable success.
+  default WebSocket reducer calls expose committed, non-durable success.
 - Commit-log worker startup now re-syncs existing segment directories,
   and runtime bootstrap, snapshot bases, and offline backup/restore durably
   publish every newly created directory component. TypeScript connection setup

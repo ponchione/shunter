@@ -64,13 +64,15 @@ type SubscriptionError struct {
 	TotalHostExecutionDurationMicros uint64
 }
 
-// CallerOutcomeKind is the discriminant for `CallerOutcome`. It maps
-// directly onto the protocol `UpdateStatus` tagged union.
+// CallerOutcomeKind selects a caller response or interruption.
 type CallerOutcomeKind uint8
 
 const (
 	CallerOutcomeCommitted CallerOutcomeKind = iota
 	CallerOutcomeFailed
+	// CallerOutcomeDurabilityUnknown interrupts delivery without claiming rollback.
+	// The protocol sender disconnects the caller instead of sending a status.
+	CallerOutcomeDurabilityUnknown
 )
 
 // CallerOutcome carries reducer outcome metadata for the heavy caller envelope.
@@ -87,10 +89,10 @@ type CallerOutcome struct {
 	TotalHostExecutionDuration int64
 	// Flags mirrors the `CallReducerFlags` byte received on the wire.
 	// The fan-out worker reads this to suppress the caller's successful
-	// heavy echo when `CallerOutcomeFlagNoSuccessNotify` is set.
+	// heavy echo or require a durable-success acknowledgement.
 	Flags byte
-	// FastReply preserves direct protocol success semantics: do not wait for
-	// this commit's durability. Earlier commits still precede this response.
+	// FastReply preserves direct protocol success semantics, subject to an
+	// explicit DurableSuccess flag. Earlier commits still precede this response.
 	FastReply bool
 }
 
@@ -100,4 +102,5 @@ type CallerOutcome struct {
 const (
 	CallerOutcomeFlagFullUpdate      byte = 0
 	CallerOutcomeFlagNoSuccessNotify byte = 1
+	CallerOutcomeFlagDurableSuccess  byte = 2
 )
