@@ -447,21 +447,8 @@ func (a *ProtocolInboxAdapter) deliverReducerResponse(ctx context.Context, req p
 		})))
 		return
 	}
-	if resp.Committed != nil {
-		if resp.Committed.Outcome.Kind == subscription.CallerOutcomeCommitted &&
-			resp.Committed.Outcome.Flags == subscription.CallerOutcomeFlagNoSuccessNotify {
-			close(req.ResponseCh)
-			return
-		}
-		update, err := protocol.BuildTransactionUpdateHeavy(req.ConnID, resp.Committed.Outcome, resp.Committed.Updates, nil)
-		if err != nil {
-			sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(ReducerResponse{
-				Status: StatusFailedInternal,
-				Error:  fmt.Errorf("encode caller outcome: %w", err),
-			})))
-			return
-		}
-		sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, update)
+	if resp.FanoutOwned {
+		close(req.ResponseCh)
 		return
 	}
 	sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(resp.Reducer)))

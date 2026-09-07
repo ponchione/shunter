@@ -4,6 +4,10 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Committed protocol caller replies now share the ordered fan-out path with
+  subscription deltas, preventing a later caller delete from overtaking an
+  earlier insert. Success suppression and pre-fsync acknowledgement semantics
+  remain unchanged.
 - Runtime snapshots now publish outside the executor after a durable, detached
   capture, allowing reducers to commit during serialization and disk I/O.
   Snapshot creation, compaction, and close serialize with each other to bound

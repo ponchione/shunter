@@ -54,18 +54,6 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 	}
 	recordSubscriptionEvalDuration(m.observer, evalResult, time.Since(start))
 	traceSubscriptionEval(m.observer, txID, evalResult, evalErr)
-	if meta.CaptureCallerUpdates != nil {
-		var callerUpdates []SubscriptionUpdate
-		if meta.CallerConnID != nil {
-			callerUpdates = fanout[*meta.CallerConnID]
-		}
-		if len(callerUpdates) > 0 {
-			copied := append([]SubscriptionUpdate(nil), callerUpdates...)
-			meta.CaptureCallerUpdates(copied)
-		} else {
-			meta.CaptureCallerUpdates(nil)
-		}
-	}
 	if m.inbox != nil {
 		m.sendFanOut(meta.FanoutContext, FanOutMessage{
 			TxID:                  txID,

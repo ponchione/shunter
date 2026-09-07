@@ -253,17 +253,6 @@ func (s *connManagerSender) SendTransactionUpdate(connID types.ConnectionID, upd
 	if update == nil {
 		return nil
 	}
-	return enqueueTransactionEnvelope(s, connID, update)
-}
-
-func (s *connManagerSender) SendTransactionUpdateLight(connID types.ConnectionID, update *TransactionUpdateLight) error {
-	if update == nil {
-		return nil
-	}
-	return enqueueTransactionEnvelope(s, connID, update)
-}
-
-func enqueueTransactionEnvelope[T TransactionUpdate | TransactionUpdateLight](s *connManagerSender, connID types.ConnectionID, update *T) error {
 	if s == nil || s.mgr == nil {
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
 	}
@@ -271,7 +260,19 @@ func enqueueTransactionEnvelope[T TransactionUpdate | TransactionUpdateLight](s 
 	if conn == nil {
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
 	}
-	return s.enqueueOnConn(conn, connID, *update)
+	outcome, err := SendDirectResponse(connOnlySender{conn: conn}, conn, *update)
+	recordProtocolMessage(conn.Observer, "call_reducer", outcome.MetricResult())
+	if err != nil {
+		logReducerDeliveryError(conn, update.ReducerCall.RequestID, err)
+	}
+	return err
+}
+
+func (s *connManagerSender) SendTransactionUpdateLight(connID types.ConnectionID, update *TransactionUpdateLight) error {
+	if update == nil {
+		return nil
+	}
+	return s.enqueue(connID, *update)
 }
 
 // enqueue encodes msg, wraps it in the connection's compression

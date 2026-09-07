@@ -941,6 +941,44 @@ func TestFanOutWorker_FastCallerOnly_DoesNotWaitForTxDurable(t *testing.T) {
 	}
 }
 
+func TestFanOutWorker_FastReplyPreservesConfirmedNonCallerDelivery(t *testing.T) {
+	for _, flags := range []byte{CallerOutcomeFlagFullUpdate, CallerOutcomeFlagNoSuccessNotify} {
+		mock := &mockFanOutSender{}
+		inbox := make(chan FanOutMessage, 1)
+		w := NewFanOutWorker(inbox, mock, nil)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan struct{})
+		go func() { w.Run(ctx); close(done) }()
+		caller, other := cid(1), cid(2)
+		durable := make(chan types.TxID, 1)
+		inbox <- FanOutMessage{
+			TxID: 1, TxDurable: durable,
+			CallerConnID:  &caller,
+			CallerOutcome: &CallerOutcome{Kind: CallerOutcomeCommitted, RequestID: 12, Flags: flags, FastReply: true},
+			Fanout: CommitFanout{
+				caller: {{SubscriptionID: 1, TableName: "t1"}},
+				other:  {{SubscriptionID: 2, TableName: "t1"}},
+			},
+		}
+		wantHeavy := 1
+		if flags == CallerOutcomeFlagNoSuccessNotify {
+			wantHeavy = 0
+		}
+		waitForMockCounts(t, mock, "caller before durability", 0, wantHeavy, 0)
+		durable <- 1
+		close(inbox)
+		waitForFanOutWorkerExit(t, done, "confirmed delivery")
+		assertMockCounts(t, mock, "after durability", 1, wantHeavy, 0)
+		if mock.lightCalls[0].ConnID != other {
+			t.Fatal("caller received a duplicate light update")
+		}
+		if wantHeavy != 0 && len(mock.heavyCalls[0].CallerUpdates) != 1 {
+			t.Fatal("caller lost its updates")
+		}
+	}
+}
+
 func TestFanOutWorker_NilTxDurable_Skips(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)

@@ -1163,120 +1163,37 @@ func TestProtocolInboxAdapter_CallReducerWaitsForAcceptedCommandAfterCancellatio
 	}
 }
 
-func TestProtocolInboxAdapter_CallReducer_ForwardsCommittedHeavyEnvelopeWithRealUpdates(t *testing.T) {
-	connID := types.ConnectionID{8}
-	identity := types.Identity{9}
-	respCh := make(chan protocol.TransactionUpdate, 1)
-	adapter := newProtocolInboxAdapter(
-		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
-			call, ok := cmd.(CallReducerCmd)
-			if !ok {
-				t.Fatalf("command type = %T, want CallReducerCmd", cmd)
+func TestProtocolInboxAdapter_CallReducer_FanoutOwnsCommittedReply(t *testing.T) {
+	for _, flags := range []byte{protocol.CallReducerFlagsFullUpdate, protocol.CallReducerFlagsNoSuccessNotify} {
+		respCh := make(chan protocol.TransactionUpdate, 1)
+		adapter := newProtocolInboxAdapter(
+			stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+				call := cmd.(CallReducerCmd)
+				if call.Request.Flags != flags {
+					t.Fatalf("flags = %d, want %d", call.Request.Flags, flags)
+				}
+				call.ProtocolResponseCh <- ProtocolCallReducerResponse{
+					Reducer:     ReducerResponse{Status: StatusCommitted},
+					FanoutOwned: true,
+				}
+				return nil
+			}},
+			stubProtocolSchemaRegistry{},
+		)
+		if err := adapter.CallReducer(context.Background(), protocol.CallReducerRequest{
+			ConnID: types.ConnectionID{8}, Identity: types.Identity{9},
+			RequestID: 55, ReducerName: "DoThing", Flags: flags, ResponseCh: respCh,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case update, ok := <-respCh:
+			if ok {
+				t.Fatalf("duplicate adapter reply: %+v", update)
 			}
-			call.ProtocolResponseCh <- ProtocolCallReducerResponse{
-				Reducer: ReducerResponse{Status: StatusCommitted},
-				Committed: &CommittedCallerPayload{
-					Outcome: subscription.CallerOutcome{
-						Kind:           subscription.CallerOutcomeCommitted,
-						CallerIdentity: identity,
-						ReducerName:    "DoThing",
-						RequestID:      55,
-						Args:           []byte{0xAA},
-					},
-					Updates: []subscription.SubscriptionUpdate{{
-						SubscriptionID: 11,
-						TableName:      "users",
-						Inserts:        []types.ProductValue{{types.NewUint32(42)}},
-					}},
-				},
-			}
-			return nil
-		}},
-		stubProtocolSchemaRegistry{},
-	)
-
-	err := adapter.CallReducer(context.Background(), protocol.CallReducerRequest{
-		ConnID:      connID,
-		Identity:    identity,
-		RequestID:   55,
-		ReducerName: "DoThing",
-		Args:        []byte{0xAA},
-		ResponseCh:  respCh,
-	})
-	if err != nil {
-		t.Fatalf("CallReducer: %v", err)
-	}
-
-	select {
-	case update := <-respCh:
-		committed, ok := update.Status.(protocol.StatusCommitted)
-		if !ok {
-			t.Fatalf("status = %T, want protocol.StatusCommitted", update.Status)
+		default:
+			t.Fatal("adapter did not close its response channel")
 		}
-		if len(committed.Update) != 1 {
-			t.Fatalf("committed.Update len = %d, want 1", len(committed.Update))
-		}
-		if update.CallerConnectionID != connID || update.CallerIdentity != identity {
-			t.Fatalf("update caller metadata = %+v", update)
-		}
-		if update.ReducerCall.RequestID != 55 || update.ReducerCall.ReducerName != "DoThing" {
-			t.Fatalf("update reducer info = %+v", update.ReducerCall)
-		}
-		rows, err := protocol.DecodeRowList(committed.Update[0].Inserts)
-		if err != nil {
-			t.Fatalf("DecodeRowList: %v", err)
-		}
-		if len(rows) != 1 {
-			t.Fatalf("insert row count = %d, want 1", len(rows))
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for TransactionUpdate")
-	}
-}
-
-func TestProtocolInboxAdapter_CallReducer_SuppressesCommittedSuccessForNoSuccessNotify(t *testing.T) {
-	connID := types.ConnectionID{10}
-	identity := types.Identity{11}
-	respCh := make(chan protocol.TransactionUpdate, 1)
-	adapter := newProtocolInboxAdapter(
-		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
-			call := cmd.(CallReducerCmd)
-			call.ProtocolResponseCh <- ProtocolCallReducerResponse{
-				Reducer: ReducerResponse{Status: StatusCommitted},
-				Committed: &CommittedCallerPayload{
-					Outcome: subscription.CallerOutcome{
-						Kind:           subscription.CallerOutcomeCommitted,
-						Flags:          subscription.CallerOutcomeFlagNoSuccessNotify,
-						CallerIdentity: identity,
-						ReducerName:    "QuietThing",
-						RequestID:      77,
-					},
-				},
-			}
-			return nil
-		}},
-		stubProtocolSchemaRegistry{},
-	)
-
-	err := adapter.CallReducer(context.Background(), protocol.CallReducerRequest{
-		ConnID:      connID,
-		Identity:    identity,
-		RequestID:   77,
-		ReducerName: "QuietThing",
-		Flags:       protocol.CallReducerFlagsNoSuccessNotify,
-		ResponseCh:  respCh,
-	})
-	if err != nil {
-		t.Fatalf("CallReducer: %v", err)
-	}
-
-	select {
-	case update, ok := <-respCh:
-		if ok {
-			t.Fatalf("unexpected TransactionUpdate: %+v", update)
-		}
-	case <-time.After(150 * time.Millisecond):
-		t.Fatal("expected ResponseCh to close for NoSuccessNotify committed success")
 	}
 }
 

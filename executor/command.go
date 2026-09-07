@@ -32,21 +32,12 @@ type CallReducerCmd struct {
 
 func (CallReducerCmd) isExecutorCommand() {}
 
-// CommittedCallerPayload carries the adapter-specific committed reducer-call
-// data the protocol edge needs to build an honest heavy TransactionUpdate.
-// Generic executor callers keep using ReducerResponse.
-type CommittedCallerPayload struct {
-	Outcome subscription.CallerOutcome
-	Updates []subscription.SubscriptionUpdate
-}
-
 // ProtocolCallReducerResponse complements ReducerResponse for the protocol
-// adapter path. Committed is populated only for committed external reducer
-// calls after synchronous post-commit evaluation has produced the real
-// caller-visible update slice.
+// adapter path. FanoutOwned means the ordered fan-out path owns the caller
+// response, including success suppression; the adapter must not send a reply.
 type ProtocolCallReducerResponse struct {
-	Reducer   ReducerResponse
-	Committed *CommittedCallerPayload
+	Reducer     ReducerResponse
+	FanoutOwned bool
 }
 
 // RegisterSubscriptionSetCmd atomically registers a subscription set.

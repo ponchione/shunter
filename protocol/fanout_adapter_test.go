@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ponchione/shunter/bsatn"
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
@@ -333,6 +334,56 @@ func TestFanOutSenderAdapter_SendTransactionUpdateHeavyFailed(t *testing.T) {
 	if failed.Error != "panic" {
 		t.Fatalf("StatusFailed.Error = %q, want %q", failed.Error, "panic")
 	}
+}
+
+func TestFanOutSenderAdapter_CallerEncodingFailureStillReplies(t *testing.T) {
+	mock := &mockClientSender{}
+	adapter := NewFanOutSenderAdapter(mock)
+	err := adapter.SendTransactionUpdateHeavy(connID(1), subscription.CallerOutcome{
+		Kind: subscription.CallerOutcomeCommitted, RequestID: 9,
+	}, []subscription.SubscriptionUpdate{{
+		TableName: "players",
+		Columns:   []schema.ColumnSchema{{Index: 0, Type: types.KindUint64}},
+		Inserts:   []types.ProductValue{{types.NewString("wrong kind")}},
+	}}, nil)
+	if !errors.Is(err, subscription.ErrSendEncodeFailed) {
+		t.Fatalf("send error = %v, want encoding failure", err)
+	}
+	if len(mock.heavyCalls) != 1 || mock.heavyCalls[0].ReducerCall.RequestID != 9 {
+		t.Fatalf("caller replies = %+v, want one correlated failure", mock.heavyCalls)
+	}
+	if _, ok := mock.heavyCalls[0].Status.(StatusFailed); !ok {
+		t.Fatalf("status = %T, want StatusFailed", mock.heavyCalls[0].Status)
+	}
+}
+
+func TestFanOutSenderAdapter_CallerReplyPreservesResponseLimit(t *testing.T) {
+	conn, id := testConn(false)
+	conn.opts.MaxOutboundMessageSize = 256
+	observer := &protocolMetricObserver{}
+	conn.Observer = observer
+	mgr := NewConnManager()
+	if err := mgr.Add(conn); err != nil {
+		t.Fatal(err)
+	}
+	adapter := NewFanOutSenderAdapter(NewClientSender(mgr, nil))
+	if err := adapter.SendTransactionUpdateHeavy(id, subscription.CallerOutcome{
+		Kind: subscription.CallerOutcomeCommitted, RequestID: 9,
+	}, []subscription.SubscriptionUpdate{{
+		TableName: "players", Inserts: []types.ProductValue{{types.NewBytes(make([]byte, 1024))}},
+	}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, msg := drainServerMsg(t, conn)
+	heavy, ok := msg.(TransactionUpdate)
+	if !ok || heavy.ReducerCall.RequestID != 9 {
+		t.Fatalf("response = %+v, want correlated reply", msg)
+	}
+	failed, ok := heavy.Status.(StatusFailed)
+	if !ok || failed.Error != directResponseTooLargeText {
+		t.Fatalf("status = %+v, want response-size failure", heavy.Status)
+	}
+	observer.requireMessage(t, "call_reducer", "response_too_large")
 }
 
 // TestFanOutSenderAdapter_SendSubscriptionErrorTransactionOriginClearsIDs

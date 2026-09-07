@@ -281,7 +281,7 @@ func (e *Executor) rejectPendingCommandsOnShutdown() {
 func (e *Executor) rejectCommand(cmd ExecutorCommand, err error) {
 	switch c := cmd.(type) {
 	case CallReducerCmd:
-		e.sendCallReducerResponse(c, ReducerResponse{Status: StatusFailedInternal, Error: err}, nil)
+		e.sendCallReducerResponse(c, ReducerResponse{Status: StatusFailedInternal, Error: err}, false)
 	case RegisterSubscriptionSetCmd:
 		_ = replyRegisterSubscriptionSet(c, subscription.SubscriptionSetRegisterResult{}, err)
 	case UnregisterSubscriptionSetCmd:
@@ -464,7 +464,7 @@ func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) string {
 		e.sendCallReducerResponse(c, ReducerResponse{
 			Status: StatusFailedPanic,
 			Error:  err,
-		}, nil)
+		}, false)
 	case RegisterSubscriptionSetCmd:
 		_ = replyRegisterSubscriptionSet(c, subscription.SubscriptionSetRegisterResult{}, err)
 		e.traceSubscriptionRegister("internal_error", err)
@@ -858,17 +858,17 @@ func sendResponse[T any](ch chan<- T, resp T) bool {
 	}
 }
 
-func sendCallReducerResponse(cmd CallReducerCmd, resp ReducerResponse, committed *CommittedCallerPayload) bool {
+func sendCallReducerResponse(cmd CallReducerCmd, resp ReducerResponse, fanoutOwned bool) bool {
 	responded := sendResponse(cmd.ResponseCh, resp)
 	protocolResponded := sendResponse(cmd.ProtocolResponseCh, ProtocolCallReducerResponse{
-		Reducer:   resp,
-		Committed: committed,
+		Reducer:     resp,
+		FanoutOwned: fanoutOwned,
 	})
 	return responded && protocolResponded
 }
 
-func (e *Executor) sendCallReducerResponse(cmd CallReducerCmd, resp ReducerResponse, committed *CommittedCallerPayload) bool {
-	responded := sendCallReducerResponse(cmd, resp, committed)
+func (e *Executor) sendCallReducerResponse(cmd CallReducerCmd, resp ReducerResponse, fanoutOwned bool) bool {
+	responded := sendCallReducerResponse(cmd, resp, fanoutOwned)
 	e.afterCallReducerResponse(cmd.Request, resp)
 	return responded
 }
@@ -894,7 +894,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 			e.sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedInternal,
 				Error:  err,
-			}, nil)
+			}, false)
 			return "internal_error"
 		}
 	}
@@ -908,7 +908,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedInternal,
 			Error:  err,
-		}, nil)
+		}, false)
 		return "internal_error"
 	}
 	if req.Source == CallSourceExternal {
@@ -919,7 +919,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 			e.sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedPermission,
 				Error:  err,
-			}, nil)
+			}, false)
 			return "permission_denied"
 		}
 	}
@@ -977,7 +977,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedPanic,
 			Error:  panicErr,
-		}, nil)
+		}, false)
 		return "panic"
 	}
 
@@ -988,7 +988,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedUser,
 			Error:  reducerErr,
-		}, nil)
+		}, false)
 		return "user_error"
 	}
 
@@ -1007,7 +1007,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 			e.sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedInternal,
 				Error:  err,
-			}, nil)
+			}, false)
 			return "internal_error"
 		}
 	}
@@ -1020,7 +1020,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedInternal,
 			Error:  err,
-		}, nil)
+		}, false)
 		return "internal_error"
 	}
 	txID, err := e.nextCommitTxID()
@@ -1031,7 +1031,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedInternal,
 			Error:  err,
-		}, nil)
+		}, false)
 		return "internal_error"
 	}
 	tx.Seal()
@@ -1049,7 +1049,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: status,
 			Error:  commitErr,
-		}, nil)
+		}, false)
 		return executorCommandResultFromStatus(status)
 	}
 	e.consumeCommitTxID()
@@ -1102,7 +1102,7 @@ func (e *Executor) postCommit(
 ) (status ReducerStatus) {
 	status = StatusCommitted
 	responded := cmd.ResponseCh == nil && cmd.ProtocolResponseCh == nil
-	var committedPayload *CommittedCallerPayload
+	var fanoutOwned bool
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -1118,7 +1118,7 @@ func (e *Executor) postCommit(
 			Status: StatusFailedInternal,
 			Error:  fmt.Errorf("%w: post-commit panic: %v", ErrExecutorFatal, r),
 			TxID:   txID,
-		}, nil)
+		}, false)
 	}()
 
 	e.durability.EnqueueCommitted(txID, changeset)
@@ -1141,24 +1141,12 @@ func (e *Executor) postCommit(
 				Args:                       opts.args,
 				Timestamp:                  opts.startTime.UnixMicro(),
 				TotalHostExecutionDuration: time.Since(opts.startTime).Microseconds(),
+				FastReply:                  cmd.ProtocolResponseCh != nil,
 			}
-			if cmd.ProtocolResponseCh != nil {
-				// For protocol-originated reducer calls the protocol inbox adapter owns
-				// the caller-visible heavy reply. Keep the caller out of light fan-out,
-				// capture its authoritative update slice from evaluation, but do not
-				// export CallerOutcome into the fan-out worker or it will deliver a
-				// second heavy envelope for the same commit.
-				meta.CallerConnID = &callerConnID
-				committedPayload = &CommittedCallerPayload{Outcome: callerOutcome}
-				meta.CaptureCallerUpdates = func(updates []subscription.SubscriptionUpdate) {
-					committedPayload.Updates = append([]subscription.SubscriptionUpdate(nil), updates...)
-				}
-			} else {
-				// Non-protocol external callers keep the original fan-out-owned caller
-				// heavy delivery path.
-				meta.CallerConnID = &callerConnID
-				meta.CallerOutcome = &callerOutcome
-			}
+			// One fan-out queue orders caller deltas with every earlier commit.
+			meta.CallerConnID = &callerConnID
+			meta.CallerOutcome = &callerOutcome
+			fanoutOwned = true
 		}
 	}
 	needsBroadcast, needsView := e.postCommitNeeds(changeset, meta)
@@ -1175,7 +1163,7 @@ func (e *Executor) postCommit(
 		Status:      StatusCommitted,
 		ReturnBSATN: ret,
 		TxID:        txID,
-	}, committedPayload)
+	}, fanoutOwned)
 
 	// Step 6 (Story 5.2): non-blocking drop-client drain. Runs after
 	// response delivery, before the next command is dequeued. A failing

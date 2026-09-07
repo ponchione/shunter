@@ -33,15 +33,17 @@ func (a *FanOutSenderAdapter) SendTransactionUpdateHeavy(
 ) error {
 	msg, err := BuildTransactionUpdateHeavy(connID, outcome, callerUpdates, memo)
 	if err != nil {
-		return fmt.Errorf("%w: encode caller outcome: %v", subscription.ErrSendEncodeFailed, err)
+		encodeErr := fmt.Errorf("%w: encode caller outcome: %v", subscription.ErrSendEncodeFailed, err)
+		outcome.Kind = subscription.CallerOutcomeFailed
+		outcome.Error = fmt.Sprintf("shunter runtime error: encode caller outcome: %v", err)
+		msg, _ = BuildTransactionUpdateHeavy(connID, outcome, nil, nil)
+		return errors.Join(encodeErr, mapDeliveryError(a.sender.SendTransactionUpdate(connID, &msg)))
 	}
 	return mapDeliveryError(a.sender.SendTransactionUpdate(connID, &msg))
 }
 
 // BuildTransactionUpdateHeavy is the canonical heavy-envelope assembler for
-// committed caller responses. Both the protocol inbox adapter and the fan-out
-// adapter route committed reducer results through this helper so the wire shape
-// is derived from one path.
+// committed caller responses delivered by the ordered fan-out worker.
 func BuildTransactionUpdateHeavy(
 	connID types.ConnectionID,
 	outcome subscription.CallerOutcome,

@@ -35,10 +35,7 @@ type FanOutMessage struct {
 
 	// CallerOutcome carries the caller-visible reducer outcome and the
 	// metadata required to assemble the heavy `TransactionUpdate`
-	// envelope when the fan-out worker owns caller-heavy delivery. Nil is
-	// allowed when some other seam (for example the protocol inbox
-	// adapter) owns the caller's heavy reply and FanOutMessage only needs
-	// CallerConnID to suppress the caller's light echo.
+	// envelope. Nil suppresses the caller's light echo without a heavy reply.
 	CallerOutcome *CallerOutcome
 
 	// DeliveryBarrierConnID and DeliveryReady delay delivery to one connection
@@ -56,16 +53,10 @@ type PostCommitMeta struct {
 	Context context.Context
 	// FanoutContext bounds enqueueing the evaluated fan-out message. Nil means
 	// Background so evaluation cancellation can still deliver eval errors.
-	FanoutContext context.Context
-	TxDurable     <-chan types.TxID
-	CallerConnID  *types.ConnectionID
-	CallerOutcome *CallerOutcome
-	// CaptureCallerUpdates, when non-nil, receives the authoritative
-	// caller-visible update slice extracted from the same per-connection
-	// fanout map entry that would be delivered to the caller connection.
-	// EvalAndBroadcast invokes it synchronously on the executor goroutine
-	// before enqueueing the FanOutMessage.
-	CaptureCallerUpdates  func([]SubscriptionUpdate)
+	FanoutContext         context.Context
+	TxDurable             <-chan types.TxID
+	CallerConnID          *types.ConnectionID
+	CallerOutcome         *CallerOutcome
 	DeliveryBarrierConnID *types.ConnectionID
 	DeliveryReady         <-chan struct{}
 }
@@ -106,6 +97,9 @@ type CallerOutcome struct {
 	// The fan-out worker reads this to suppress the caller's successful
 	// heavy echo when `CallerOutcomeFlagNoSuccessNotify` is set.
 	Flags byte
+	// FastReply preserves direct protocol success semantics: do not wait for
+	// this commit's durability. Earlier commits still precede this response.
+	FastReply bool
 }
 
 // CallerOutcome flag values mirror the wire `CallReducerFlags` byte. Keeping

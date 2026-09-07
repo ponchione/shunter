@@ -158,8 +158,18 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	var durableWaited bool
 	var durableReady bool
 
-	// Deliver subscription errors first (before updates). These are still
-	// post-commit client-visible outcomes, so confirmed-read recipients wait
+	// Fast caller replies share commit ordering, but retain their pre-fsync
+	// acknowledgement semantics even when this commit also has confirmed readers.
+	if effCallerConnID != nil && effCallerOutcome != nil && effCallerOutcome.FastReply {
+		if err := w.sender.SendTransactionUpdateHeavy(*effCallerConnID, *effCallerOutcome, msg.Fanout[*effCallerConnID], memo); err != nil {
+			recordTraceFailure(w.handleSendError(*effCallerConnID, err), err)
+		}
+		effCallerConnID = nil
+		effCallerOutcome = nil
+	}
+
+	// Deliver subscription errors before light and confirmed caller updates.
+	// These are post-commit outcomes, so confirmed-read recipients wait
 	// for the same durability signal as normal transaction updates.
 	for connID, errs := range msg.Errors {
 		if !waitForDeliveryReady(ctx, msg, connID) {

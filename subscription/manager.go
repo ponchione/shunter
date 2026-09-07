@@ -313,7 +313,7 @@ func (m *Manager) needsPostCommitEvaluation(changeset *store.Changeset) bool {
 }
 
 func hasPostCommitCaller(meta PostCommitMeta) bool {
-	return meta.CallerConnID != nil && (meta.CallerOutcome != nil || meta.CaptureCallerUpdates != nil)
+	return meta.CallerConnID != nil && meta.CallerOutcome != nil
 }
 
 // CloseFanOut unblocks post-commit fan-out enqueue attempts during shutdown.

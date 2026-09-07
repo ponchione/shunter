@@ -832,7 +832,7 @@ func TestPostCommitPropagatesCallerFlags(t *testing.T) {
 	}
 }
 
-func TestPostCommit_ProtocolOwnedRepliesDoNotExportCallerHeavyFanoutMetadata(t *testing.T) {
+func TestPostCommit_ProtocolRepliesUseOrderedCallerFanout(t *testing.T) {
 	h := newPipelineHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -851,8 +851,8 @@ func TestPostCommit_ProtocolOwnedRepliesDoNotExportCallerHeavyFanoutMetadata(t *
 		t.Fatal(err)
 	}
 	resp := <-respCh
-	if resp.Committed == nil {
-		t.Fatal("Committed payload = nil")
+	if !resp.FanoutOwned {
+		t.Fatal("protocol reply must be owned by fanout")
 	}
 
 	h.subs.mu.Lock()
@@ -864,11 +864,8 @@ func TestPostCommit_ProtocolOwnedRepliesDoNotExportCallerHeavyFanoutMetadata(t *
 	if meta.CallerConnID == nil {
 		t.Fatal("CallerConnID = nil")
 	}
-	if meta.CallerOutcome != nil {
-		t.Fatalf("CallerOutcome should be nil when protocol adapter owns the reply: %+v", meta.CallerOutcome)
-	}
-	if meta.CaptureCallerUpdates == nil {
-		t.Fatal("CaptureCallerUpdates = nil")
+	if meta.CallerOutcome == nil || meta.CallerOutcome.RequestID != 90 || !meta.CallerOutcome.FastReply {
+		t.Fatalf("CallerOutcome = %+v, want ordered fast reply for request 90", meta.CallerOutcome)
 	}
 }
 

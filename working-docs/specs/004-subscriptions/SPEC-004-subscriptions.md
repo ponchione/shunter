@@ -556,15 +556,14 @@ type FanOutMessage struct {
     Fanout CommitFanout
 
     // Errors contains per-connection subscription-evaluation failures that
-    // must be delivered before normal updates for the same batch.
+    // precede light and confirmed caller updates for the same batch.
     Errors map[ConnectionID][]SubscriptionError
 
     // Optional caller metadata for reducer-originated commits. When present,
     // CallerConnID identifies the caller so the fan-out worker can suppress the
-    // caller's light delivery. CallerOutcome is populated only when the fan-out
-    // worker owns the caller's heavy TransactionUpdate envelope; protocol-originated
-    // reducer replies may carry CallerConnID with nil CallerOutcome because the
-    // protocol inbox adapter owns that direct heavy reply.
+    // caller's light delivery. Committed protocol replies carry CallerOutcome
+    // and share this ordered delivery path with earlier subscription deltas.
+    // CallerOutcome.FastReply preserves the protocol's pre-fsync success policy.
     CallerConnID *ConnectionID
     CallerOutcome *CallerOutcome
 }
@@ -576,14 +575,18 @@ Ownership rule: once `FanOutMessage` is sent to `FanOutWorker.inbox`, ownership 
 
 ```
 For each FanOutMessage received:
-  0. Deliver any queued SubscriptionError entries in msg.Errors before normal updates.
+  0. Deliver a FastReply caller outcome without waiting for this commit's durability,
+     unless NoSuccessNotify suppresses its committed success. Earlier fan-out
+     messages must finish first; the protocol adapter must not send a second reply.
+     Then deliver queued SubscriptionError entries before remaining updates.
   1. Wait for TxDurable before each recipient delivery when that connection requires confirmed reads.
   2. Read the pre-grouped CommitFanout entries keyed by ConnectionID.
      A connection may have multiple subscriptions affected by one transaction.
   3. Deliver TransactionUpdateLight to non-caller connections with row-touches.
      Preserve one update entry per affected subscription; do not merge entries
      across distinct internal SubscriptionIDs/query entries.
-  4. Deliver the heavy TransactionUpdate to the caller when CallerOutcome is present.
+  4. Deliver the heavy TransactionUpdate to the caller when CallerOutcome is present
+     and was not already handled as FastReply.
      For Committed, include the caller's row-update slice; for Failed, send the
      heavy outcome with no row update. If NoSuccessNotify is set on a committed
      caller outcome, suppress the caller's success echo.
@@ -682,10 +685,6 @@ type PostCommitMeta struct {
     TxDurable     <-chan TxID
     CallerConnID  *ConnectionID
     CallerOutcome *CallerOutcome
-    // CaptureCallerUpdates, when non-nil, receives the caller-visible update
-    // slice extracted from the same per-connection fanout map entry that would
-    // otherwise be delivered to the caller connection.
-    CaptureCallerUpdates func([]SubscriptionUpdate)
 }
 
 // TxDurable contract:
@@ -869,7 +868,7 @@ Should delta delivery wait for the transaction to be durable (fsync'd to commit 
 - **Yes (confirmed reads)**: Client only sees data that will survive a crash. Higher latency.
 - **No (fast reads)**: Client sees data immediately after in-memory commit. Lower latency, but client could see data that is lost on crash.
 
-**v1 protocol contract:** the public WebSocket protocol (SPEC-005) does not expose a client-selectable confirmed-read flag. Non-caller fan-out delivery defaults to confirmed reads: the fan-out worker waits on `TxDurable` before sending `SubscriptionError` or `TransactionUpdateLight` unless an internal fast-read policy opts a connection out. Protocol-originated caller-heavy `TransactionUpdate` responses are emitted after commit and synchronous subscription evaluation, but before fsync completion; clients must not treat reducer success as a durable-commit acknowledgement unless a future explicit durability acknowledgement is added.
+**v1 protocol contract:** the public WebSocket protocol (SPEC-005) does not expose a client-selectable confirmed-read flag. Non-caller fan-out delivery defaults to confirmed reads: the fan-out worker waits on `TxDurable` before sending `SubscriptionError` or `TransactionUpdateLight` unless an internal fast-read policy opts a connection out. Protocol-originated caller-heavy `TransactionUpdate` responses share the ordered fan-out path after commit and synchronous subscription evaluation. They wait behind earlier deltas but do not wait for their own commit's fsync; clients must not treat reducer success as a durable-commit acknowledgement unless a future explicit durability acknowledgement is added.
 
 ### 12.4 Reference-Informed Shunter Decisions
 
