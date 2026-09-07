@@ -1,7 +1,6 @@
 # Shunter Tech Debt
 
-Status: future-work tracker; one measurement task, four deferred items, and
-one hardening check that requires gap confirmation.
+Status: future-work tracker; one measurement task and four deferred items.
 
 No real product application is selected. The external `opsboard-canary` is
 available as a sibling checkout and already exercises public Shunter APIs and
@@ -43,23 +42,3 @@ repeated measurements, and observed limits are recorded in
 4. **Development watchers.** Revisit when real app work demonstrates costly
    manual rebuild/restart or TypeScript regeneration. Automate the observed
    bottleneck using existing tooling first.
-
-## Focused Hardening Checks
-
-These are candidate coverage gaps, not confirmed defects. Check existing tests
-before implementation. Close an entry if they already establish its invariant;
-otherwise add the smallest deterministic regression for the missing case.
-
-### Joined Subscription Convergence Across Reconnect
-
-Check a joined subscription when concurrent writers update/delete join rows,
-delivery is paused, and a subscriber disconnects and resubscribes. At a known
-commit boundary, compare the live row multiset with fresh query evaluation for
-the same caller; detect missing or repeated delta application and stale delivery
-from the old connection. Reuse
-[caller delivery ordering tests](../caller_delivery_ordering_test.go) and the
-[join evaluation checks](../subscription/eval_test.go).
-
-**Done when:** Existing coverage is identified or one deterministic hosted
-scenario establishes convergence after reconnect and passes under the race
-detector. Additional join shapes require a specific uncovered case.
