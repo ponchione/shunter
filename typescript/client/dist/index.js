@@ -27,6 +27,7 @@ export const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_MULTI_APPLIED = 10;
 export const SHUNTER_SERVER_MESSAGE_PROCEDURE_RESPONSE = 11;
 export const SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE = 0;
 export const SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY = 1;
+export const SHUNTER_CALL_REDUCER_FLAGS_DURABLE_SUCCESS = 2;
 export const SHUNTER_MODULE_CONTRACT_FORMAT = "shunter.module_contract";
 export const SHUNTER_MODULE_CONTRACT_VERSION_V1 = 1;
 export const SHUNTER_MIN_SUPPORTED_MODULE_CONTRACT_VERSION = SHUNTER_MODULE_CONTRACT_VERSION_V1;
@@ -3387,12 +3388,14 @@ export function reducerCallOptions(options) {
     return {
         requestId: options.requestId,
         noSuccessNotify: options.noSuccessNotify,
+        durable: options.durable,
         signal: options.signal,
     };
 }
 export function reducerCallResultRequestOptions(options) {
     return {
         requestId: options.requestId,
+        durable: options.durable,
         signal: options.signal,
         decodeResult: options.decodeResult,
     };
@@ -3408,6 +3411,7 @@ export async function callReducerWithResult(callReducer, name, args, options = {
     try {
         rawResult = await callReducer(name, args, {
             requestId: options.requestId,
+            durable: options.durable,
             signal: options.signal,
         });
     }
@@ -3520,6 +3524,14 @@ export function decodeReducerCallResult(name, data, options = {}) {
     };
 }
 function reducerCallFlags(options) {
+    if (options.durable === true) {
+        if (options.noSuccessNotify === true) {
+            throw new ShunterValidationError("Durable success requires a success notification.", {
+                code: "conflicting_reducer_call_options",
+            });
+        }
+        return SHUNTER_CALL_REDUCER_FLAGS_DURABLE_SUCCESS;
+    }
     return options.noSuccessNotify === true
         ? SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY
         : SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE;

@@ -27,6 +27,7 @@ export declare const SHUNTER_SERVER_MESSAGE_UNSUBSCRIBE_MULTI_APPLIED: 10;
 export declare const SHUNTER_SERVER_MESSAGE_PROCEDURE_RESPONSE: 11;
 export declare const SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE: 0;
 export declare const SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY: 1;
+export declare const SHUNTER_CALL_REDUCER_FLAGS_DURABLE_SUCCESS: 2;
 export declare const SHUNTER_MODULE_CONTRACT_FORMAT: "shunter.module_contract";
 export declare const SHUNTER_MODULE_CONTRACT_VERSION_V1: 1;
 export declare const SHUNTER_MIN_SUPPORTED_MODULE_CONTRACT_VERSION: 1;
@@ -412,6 +413,8 @@ export type TransactionID = number | bigint | string;
 export interface ReducerCallOptions {
     readonly requestId?: RequestID;
     readonly noSuccessNotify?: boolean;
+    /** Wait for fsync before success. Incompatible with noSuccessNotify. */
+    readonly durable?: boolean;
     readonly signal?: AbortSignal;
 }
 export type ReducerArgEncoder<Args = unknown> = (args: Args) => Uint8Array;
@@ -420,7 +423,7 @@ export interface ReducerArgEncodingOptions<Args = unknown> {
 }
 export interface EncodedReducerCallOptions<Args = unknown> extends ReducerCallOptions, ReducerArgEncodingOptions<Args> {
 }
-export type ReducerCallFlags = typeof SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE | typeof SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY;
+export type ReducerCallFlags = typeof SHUNTER_CALL_REDUCER_FLAGS_FULL_UPDATE | typeof SHUNTER_CALL_REDUCER_FLAGS_NO_SUCCESS_NOTIFY | typeof SHUNTER_CALL_REDUCER_FLAGS_DURABLE_SUCCESS;
 export interface EncodedReducerCallRequest<Name extends string = string> {
     readonly name: Name;
     readonly args: Uint8Array;
@@ -442,6 +445,8 @@ export interface ReducerCallResultOptions<Result = Uint8Array> {
     readonly decodeResult?: (update: TransactionUpdateMessage) => Result;
 }
 export interface ReducerCallResultRequestOptions<Result = Uint8Array> extends ReducerCallResultOptions<Result> {
+    /** Wait for fsync before committed success. */
+    readonly durable?: boolean;
     readonly signal?: AbortSignal;
 }
 export interface EncodedReducerCallResultOptions<Args = unknown, Result = Uint8Array> extends ReducerCallResultRequestOptions<Result>, ReducerArgEncodingOptions<Args> {
