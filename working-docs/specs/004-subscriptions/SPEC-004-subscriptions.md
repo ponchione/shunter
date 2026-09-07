@@ -516,6 +516,11 @@ This avoids redundant work proportional to subscriber count.
 
 The evaluation loop (Section 7) produces a `CommitFanout` synchronously on the executor goroutine. The executor waits only until ownership of those deltas has been handed to the fan-out subsystem via `FanOutMessage`. Actual websocket sends happen on a separate fan-out goroutine so slow clients do not block executor ordering.
 
+Procedure-response ordering is enforced by the protocol connection's bounded
+delivery hold (SPEC-005 §10.1). The fan-out worker MUST NOT wait for a procedure
+to return: that procedure may need the executor to run more reducers. Caller
+replies and subscription deltas still enter the same ordered fan-out path.
+
 ```go
 type FanOutWorker struct {
     // Receives computed deltas from the executor.

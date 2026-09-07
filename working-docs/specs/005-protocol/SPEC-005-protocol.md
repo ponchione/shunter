@@ -925,6 +925,16 @@ procedure-triggered `TransactionUpdateLight` deltas. If either cannot be
 enqueued, the connection follows the same bounded overflow close path; the
 server does not block a procedure handler waiting for outbound capacity.
 
+While procedures are active on a connection, ordinary outbound frames are
+held in a per-connection FIFO. Procedure responses bypass this hold; the FIFO
+is released after all active procedures have queued their responses. This
+also keeps later reducer replies, subscription snapshots, errors, and deltas
+in their existing enqueue order. The combined held and outbound frames share
+both queue ceilings above, including capacity for procedure responses.
+Disconnect discards held frames and releases their byte reservations.
+The fan-out worker never waits for a procedure response. Runtime protocol
+health exposes held client/message counts and the oldest held frame's age.
+
 **Design decision:** Disconnect on buffer overflow rather than drop messages. Dropped deltas would corrupt the client's local cache (it would be missing rows). Disconnection is recoverable: the client reconnects and re-subscribes, rebuilding the cache from a fresh `SubscribeSingleApplied` / `SubscribeMultiApplied`.
 
 ### 10.2 Client → Server

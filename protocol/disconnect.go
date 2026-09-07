@@ -48,9 +48,7 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 			mgr.Remove(c.ID)
 			recordProtocolConnections(c.Observer, mgr.ActiveCount())
 		}
-		c.outboundMu.Lock()
-		c.outboundStopped = true
-		c.outboundMu.Unlock()
+		c.stopOutbound()
 		if c.closed != nil {
 			close(c.closed)
 		}
@@ -90,9 +88,7 @@ func (c *Conn) closeTransport(code websocket.StatusCode, reason string) {
 		return
 	}
 	c.transportCloseOnce.Do(func() {
-		c.outboundMu.Lock()
-		c.outboundStopped = true
-		c.outboundMu.Unlock()
+		c.stopOutbound()
 		if c.ws != nil {
 			go func() {
 				closeWithHandshake(c.ws, code, reason, c.closeHandshakeTimeout())

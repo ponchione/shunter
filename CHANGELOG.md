@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Procedure delivery now defers frames in bounded per-connection storage,
+  preserving response-before-delta ordering without stalling global reducer
+  execution. Deferred and outbound frames share message/byte limits; overflow
+  disconnects the caller. Protocol health reports deferred clients, messages,
+  and the oldest deferred frame's age.
 - Committed protocol caller replies now share the ordered fan-out path with
   subscription deltas, preventing a later caller delete from overtaking an
   earlier insert. Success suppression and pre-fsync acknowledgement semantics

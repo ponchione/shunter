@@ -37,12 +37,6 @@ type FanOutMessage struct {
 	// metadata required to assemble the heavy `TransactionUpdate`
 	// envelope. Nil suppresses the caller's light echo without a heavy reply.
 	CallerOutcome *CallerOutcome
-
-	// DeliveryBarrierConnID and DeliveryReady delay delivery to one connection
-	// until a correlated direct response has been queued. Other recipients are
-	// unaffected.
-	DeliveryBarrierConnID *types.ConnectionID
-	DeliveryReady         <-chan struct{}
 }
 
 // PostCommitMeta carries executor-owned delivery metadata into the
@@ -53,12 +47,10 @@ type PostCommitMeta struct {
 	Context context.Context
 	// FanoutContext bounds enqueueing the evaluated fan-out message. Nil means
 	// Background so evaluation cancellation can still deliver eval errors.
-	FanoutContext         context.Context
-	TxDurable             <-chan types.TxID
-	CallerConnID          *types.ConnectionID
-	CallerOutcome         *CallerOutcome
-	DeliveryBarrierConnID *types.ConnectionID
-	DeliveryReady         <-chan struct{}
+	FanoutContext context.Context
+	TxDurable     <-chan types.TxID
+	CallerConnID  *types.ConnectionID
+	CallerOutcome *CallerOutcome
 }
 
 // SubscriptionError is the evaluation-failure payload queued for clients.

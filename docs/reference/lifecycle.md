@@ -77,6 +77,12 @@ Use `Runtime.Ready()` for a boolean readiness check. Use
 `InspectRuntimeHealth(rt)` when the app needs structured health status and
 reasoning.
 
+`Runtime.Health().Protocol` reports `DeferredDeliveryClients`,
+`DeferredDeliveryMessages`, and `OldestDeferredDeliveryMillis`. A growing age
+identifies delivery held by a long-running procedure even when the fanout inbox
+is empty. These holds are bounded per connection and do not change readiness
+for unrelated clients.
+
 HTTP-style status helpers:
 
 ```go

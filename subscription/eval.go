@@ -56,14 +56,12 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 	traceSubscriptionEval(m.observer, txID, evalResult, evalErr)
 	if m.inbox != nil {
 		m.sendFanOut(meta.FanoutContext, FanOutMessage{
-			TxID:                  txID,
-			TxDurable:             meta.TxDurable,
-			Fanout:                fanout,
-			Errors:                errs,
-			CallerConnID:          meta.CallerConnID,
-			CallerOutcome:         meta.CallerOutcome,
-			DeliveryBarrierConnID: meta.DeliveryBarrierConnID,
-			DeliveryReady:         meta.DeliveryReady,
+			TxID:          txID,
+			TxDurable:     meta.TxDurable,
+			Fanout:        fanout,
+			Errors:        errs,
+			CallerConnID:  meta.CallerConnID,
+			CallerOutcome: meta.CallerOutcome,
 		})
 	}
 }

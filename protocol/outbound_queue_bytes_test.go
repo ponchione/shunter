@@ -15,11 +15,11 @@ func TestOutboundQueueByteLimitPrecedesMessageLimit(t *testing.T) {
 	conn := testConnDirect(&opts)
 
 	for _, frame := range [][]byte{make([]byte, 4), make([]byte, 6)} {
-		if got := conn.trySendOutbound(frame); got != outboundSendSent {
+		if got := conn.trySendOutbound(frame, false); got != outboundSendSent {
 			t.Fatalf("trySendOutbound(%d bytes) = %v, want sent", len(frame), got)
 		}
 	}
-	if got := conn.trySendOutbound([]byte{1}); got != outboundSendBytesFull {
+	if got := conn.trySendOutbound([]byte{1}, false); got != outboundSendBytesFull {
 		t.Fatalf("byte-overflow send = %v, want outboundSendBytesFull", got)
 	}
 	if got := len(conn.OutboundCh); got != 2 {
@@ -36,13 +36,13 @@ func TestOutboundQueueMessageLimitPrecedesByteLimit(t *testing.T) {
 	opts.MaxOutboundQueuedBytes = 100
 	conn := testConnDirect(&opts)
 
-	if got := conn.trySendOutbound([]byte{1}); got != outboundSendSent {
+	if got := conn.trySendOutbound([]byte{1}, false); got != outboundSendSent {
 		t.Fatalf("first send = %v, want sent", got)
 	}
-	if got := conn.trySendOutbound([]byte{2}); got != outboundSendSent {
+	if got := conn.trySendOutbound([]byte{2}, false); got != outboundSendSent {
 		t.Fatalf("second send = %v, want sent", got)
 	}
-	if got := conn.trySendOutbound([]byte{3}); got != outboundSendFull {
+	if got := conn.trySendOutbound([]byte{3}, false); got != outboundSendFull {
 		t.Fatalf("message-overflow send = %v, want outboundSendFull", got)
 	}
 	if got := conn.outboundQueuedByteCount(); got != 2 {
@@ -67,7 +67,7 @@ func TestOutboundQueueConcurrentAccountingReturnsToZero(t *testing.T) {
 			frame := make([]byte, size+1)
 			for range sendsPerProducer {
 				for {
-					switch got := conn.trySendOutbound(frame); got {
+					switch got := conn.trySendOutbound(frame, false); got {
 					case outboundSendSent:
 						goto sent
 					case outboundSendFull:
@@ -121,7 +121,7 @@ func TestOutboundQueueFailuresDoNotReserveBytes(t *testing.T) {
 func TestOutboundQueueAbandonReleasesReservationsOnce(t *testing.T) {
 	conn := testConnDirect(nil)
 	for _, frame := range [][]byte{make([]byte, 3), make([]byte, 5), make([]byte, 7)} {
-		if got := conn.trySendOutbound(frame); got != outboundSendSent {
+		if got := conn.trySendOutbound(frame, false); got != outboundSendSent {
 			t.Fatalf("send = %v, want sent", got)
 		}
 	}
@@ -131,7 +131,7 @@ func TestOutboundQueueAbandonReleasesReservationsOnce(t *testing.T) {
 	if got := conn.outboundQueuedByteCount(); got != 0 {
 		t.Fatalf("queued bytes after writer discard = %d, want 0", got)
 	}
-	if got := conn.trySendOutbound([]byte{1}); got != outboundSendClosed {
+	if got := conn.trySendOutbound([]byte{1}, false); got != outboundSendClosed {
 		t.Fatalf("send after writer exit = %v, want closed", got)
 	}
 	conn.abandonOutboundQueue()
@@ -145,7 +145,7 @@ func TestDisconnectRequestStopsFurtherOutboundEnqueue(t *testing.T) {
 	if !conn.requestDisconnect(CloseProtocol, "fatal") {
 		t.Fatal("first disconnect request was not accepted")
 	}
-	if got := conn.trySendOutbound([]byte{1}); got != outboundSendClosed {
+	if got := conn.trySendOutbound([]byte{1}, false); got != outboundSendClosed {
 		t.Fatalf("send after disconnect request = %v, want closed", got)
 	}
 	if got := conn.outboundQueuedByteCount(); got != 0 {

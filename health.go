@@ -44,12 +44,17 @@ type DurabilityHealth struct {
 
 // ProtocolHealth reports protocol serving graph and connection facts.
 type ProtocolHealth struct {
-	Enabled             bool   `json:"enabled"`
-	Ready               bool   `json:"ready"`
-	ActiveConnections   int    `json:"active_connections"`
-	AcceptedConnections uint64 `json:"accepted_connections"`
-	RejectedConnections uint64 `json:"rejected_connections"`
-	LastError           string `json:"last_error,omitempty"`
+	Enabled                  bool   `json:"enabled"`
+	Ready                    bool   `json:"ready"`
+	ActiveConnections        int    `json:"active_connections"`
+	AcceptedConnections      uint64 `json:"accepted_connections"`
+	RejectedConnections      uint64 `json:"rejected_connections"`
+	LastError                string `json:"last_error,omitempty"`
+	DeferredDeliveryClients  int    `json:"deferred_delivery_clients"`
+	DeferredDeliveryMessages int    `json:"deferred_delivery_messages"`
+	// OldestDeferredDeliveryMillis measures how long a procedure has held the
+	// oldest queued frame. It does not change admission readiness for other clients.
+	OldestDeferredDeliveryMillis int64 `json:"oldest_deferred_delivery_millis"`
 }
 
 // SubscriptionHealth reports subscription manager and fan-out facts.
@@ -226,6 +231,7 @@ func buildRuntimeHealth(snap runtimeHealthSnapshot) RuntimeHealth {
 	if snap.fanOutInbox != nil {
 		fanoutDepth = len(snap.fanOutInbox)
 	}
+	deferredClients, deferredMessages, deferredAge := snap.protocolConns.DeferredDeliveryStats()
 
 	return RuntimeHealth{
 		State:     snap.state,
@@ -248,12 +254,15 @@ func buildRuntimeHealth(snap runtimeHealthSnapshot) RuntimeHealth {
 			FatalError:    redactHealthError(snap.observability, durabilityFatalErr),
 		},
 		Protocol: ProtocolHealth{
-			Enabled:             snap.buildConfig.EnableProtocol,
-			Ready:               snap.buildConfig.EnableProtocol && coreReady && snap.protocolConns != nil && snap.protocolInbox != nil && snap.protocolServer != nil,
-			ActiveConnections:   protocolActive,
-			AcceptedConnections: protocolAccepted,
-			RejectedConnections: protocolRejected,
-			LastError:           redactHealthError(snap.observability, snap.protocolLastErr),
+			Enabled:                      snap.buildConfig.EnableProtocol,
+			Ready:                        snap.buildConfig.EnableProtocol && coreReady && snap.protocolConns != nil && snap.protocolInbox != nil && snap.protocolServer != nil,
+			ActiveConnections:            protocolActive,
+			AcceptedConnections:          protocolAccepted,
+			RejectedConnections:          protocolRejected,
+			LastError:                    redactHealthError(snap.observability, snap.protocolLastErr),
+			DeferredDeliveryClients:      deferredClients,
+			DeferredDeliveryMessages:     deferredMessages,
+			OldestDeferredDeliveryMillis: deferredAge.Milliseconds(),
 		},
 		Subscriptions: SubscriptionHealth{
 			Started:             snap.state == RuntimeStateReady && snap.subscriptions != nil,

@@ -1123,31 +1123,24 @@ func (e *Executor) postCommit(
 
 	e.durability.EnqueueCommitted(txID, changeset)
 	meta := subscription.PostCommitMeta{TxDurable: e.durability.WaitUntilDurable(txID)}
-	if opts.source == CallSourceExternal && opts.callerConnID != nil && !opts.callerConnID.IsZero() {
+	if opts.source == CallSourceExternal && opts.callerConnID != nil && !opts.callerConnID.IsZero() && !cmd.SuppressCallerOutcome {
 		callerConnID := *opts.callerConnID
-		if cmd.SuppressCallerOutcome {
-			if cmd.DeliveryReady != nil {
-				meta.DeliveryBarrierConnID = &callerConnID
-				meta.DeliveryReady = cmd.DeliveryReady
-			}
-		} else {
-			callerOutcome := subscription.CallerOutcome{
-				Kind:                       subscription.CallerOutcomeCommitted,
-				RequestID:                  opts.callerRequestID,
-				Flags:                      opts.callerFlags,
-				CallerIdentity:             opts.callerIdentity,
-				ReducerName:                opts.reducerName,
-				ReducerID:                  opts.reducerID,
-				Args:                       opts.args,
-				Timestamp:                  opts.startTime.UnixMicro(),
-				TotalHostExecutionDuration: time.Since(opts.startTime).Microseconds(),
-				FastReply:                  cmd.ProtocolResponseCh != nil,
-			}
-			// One fan-out queue orders caller deltas with every earlier commit.
-			meta.CallerConnID = &callerConnID
-			meta.CallerOutcome = &callerOutcome
-			fanoutOwned = true
+		callerOutcome := subscription.CallerOutcome{
+			Kind:                       subscription.CallerOutcomeCommitted,
+			RequestID:                  opts.callerRequestID,
+			Flags:                      opts.callerFlags,
+			CallerIdentity:             opts.callerIdentity,
+			ReducerName:                opts.reducerName,
+			ReducerID:                  opts.reducerID,
+			Args:                       opts.args,
+			Timestamp:                  opts.startTime.UnixMicro(),
+			TotalHostExecutionDuration: time.Since(opts.startTime).Microseconds(),
+			FastReply:                  cmd.ProtocolResponseCh != nil,
 		}
+		// One fan-out queue orders caller deltas with every earlier commit.
+		meta.CallerConnID = &callerConnID
+		meta.CallerOutcome = &callerOutcome
+		fanoutOwned = true
 	}
 	needsBroadcast, needsView := e.postCommitNeeds(changeset, meta)
 	if needsBroadcast {

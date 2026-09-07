@@ -3,6 +3,8 @@ package protocol
 import (
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/ponchione/shunter/types"
 )
@@ -157,7 +159,34 @@ const (
 	outboundSendBytesFull
 )
 
-func (c *Conn) trySendOutbound(frame []byte) (result outboundSendResult) {
+// DeferDelivery holds ordinary outbound frames until every active procedure
+// has queued its response and called the returned release function. Procedure
+// responses bypass the hold. Deferred frames share the connection's existing
+// message and byte limits; overflow requests the usual client-local disconnect.
+func (c *Conn) DeferDelivery() func() {
+	c.outboundMu.Lock()
+	c.deliveryDeferrals++
+	c.outboundMu.Unlock()
+	return sync.OnceFunc(c.finishDeferredDelivery)
+}
+
+func (c *Conn) finishDeferredDelivery() {
+	c.outboundMu.Lock()
+	c.deliveryDeferrals--
+	if c.deliveryDeferrals != 0 || c.outboundStopped {
+		c.outboundMu.Unlock()
+		return
+	}
+	// Message slots were reserved on enqueue, so the entire deferred FIFO fits.
+	for _, frame := range c.deferredFrames {
+		c.OutboundCh <- frame
+	}
+	c.deferredFrames = nil
+	c.deferredSince = time.Time{}
+	c.outboundMu.Unlock()
+}
+
+func (c *Conn) trySendOutbound(frame []byte, procedureResponse bool) (result outboundSendResult) {
 	if c == nil {
 		return outboundSendClosed
 	}
@@ -183,6 +212,17 @@ func (c *Conn) trySendOutbound(frame []byte) (result outboundSendResult) {
 	}
 	if frameBytes > maxQueuedBytes-c.outboundQueuedBytes {
 		return outboundSendBytesFull
+	}
+	if len(c.OutboundCh)+len(c.deferredFrames) >= cap(c.OutboundCh) {
+		return outboundSendFull
+	}
+	if c.deliveryDeferrals > 0 && !procedureResponse {
+		if len(c.deferredFrames) == 0 {
+			c.deferredSince = time.Now()
+		}
+		c.deferredFrames = append(c.deferredFrames, frame)
+		c.outboundQueuedBytes += frameBytes
+		return outboundSendSent
 	}
 	select {
 	case <-c.closed:
@@ -230,10 +270,40 @@ func (c *Conn) stopAndAbandonOutboundQueue() {
 	if c == nil {
 		return
 	}
-	c.outboundMu.Lock()
-	c.outboundStopped = true
-	c.outboundMu.Unlock()
+	c.stopOutbound()
 	c.abandonOutboundQueue()
+}
+
+func (c *Conn) stopOutbound() {
+	c.outboundMu.Lock()
+	defer c.outboundMu.Unlock()
+	c.outboundStopped = true
+	for _, frame := range c.deferredFrames {
+		c.outboundQueuedBytes -= int64(len(frame))
+	}
+	c.deferredFrames = nil
+	c.deferredSince = time.Time{}
+}
+
+// DeferredDeliveryStats reports client-local delivery holds and the age of the
+// oldest held frame. A growing age exposes a procedure preventing delivery even
+// when the global fan-out inbox is empty and the runtime can admit other work.
+func (m *ConnManager) DeferredDeliveryStats() (clients, messages int, oldestAge time.Duration) {
+	if m == nil {
+		return
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, conn := range m.conns {
+		conn.outboundMu.Lock()
+		if len(conn.deferredFrames) > 0 {
+			clients++
+			messages += len(conn.deferredFrames)
+			oldestAge = max(oldestAge, time.Since(conn.deferredSince))
+		}
+		conn.outboundMu.Unlock()
+	}
+	return
 }
 
 func (c *Conn) outboundQueuedByteCount() int64 {
@@ -307,7 +377,8 @@ func sendOnConn(conn *Conn, connID types.ConnectionID, msg any) error {
 
 	wrapped := EncodeFrame(frame[0], frame[1:], conn.Compression, outboundCompressionMode(conn))
 
-	switch conn.trySendOutbound(wrapped) {
+	_, procedureResponse := msg.(ProcedureResponse)
+	switch conn.trySendOutbound(wrapped, procedureResponse) {
 	case outboundSendSent:
 		return nil
 	case outboundSendClosed:

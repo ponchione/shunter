@@ -105,6 +105,8 @@ slow reader from blocking unrelated outbound delivery indefinitely.
 `OutgoingBufferMessages` defaults to 1,024 and `MaxOutboundQueuedBytes`
 defaults to 65 MiB. Exceeding either queue ceiling disconnects the slow client
 before another encoded application frame is retained.
+These ceilings include frames held while a procedure is running. Procedure
+responses precede held frames; overflow disconnects only that connection.
 `MaxOutboundMessageSize` defaults to 64 MiB and caps the uncompressed encoded
 server message before final-frame allocation or optional compression. Direct
 query, procedure, and reducer replies account for their complete response

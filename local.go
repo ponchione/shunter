@@ -189,17 +189,7 @@ func (r *Runtime) CallReducer(ctx context.Context, reducerName string, args []by
 	if !callOpts.permissionsSet && !callOpts.allowAllSet && r != nil && r.buildConfig.AuthMode == AuthModeDev {
 		callOpts.caller.AllowAllPermissions = true
 	}
-	return r.callReducerWithCallerAndRequest(ctx, reducerName, args, callOpts.caller, callOpts.requestID, false, nil)
-}
-
-func (r *Runtime) callReducerFromProcedure(
-	ctx context.Context,
-	reducerName string,
-	args []byte,
-	caller types.CallerContext,
-	deliveryReady <-chan struct{},
-) (ReducerResult, error) {
-	return r.callReducerWithCallerAndRequest(ctx, reducerName, args, caller, 0, true, deliveryReady)
+	return r.callReducerWithCallerAndRequest(ctx, reducerName, args, callOpts.caller, callOpts.requestID, false)
 }
 
 func (r *Runtime) callReducerWithCallerAndRequest(
@@ -209,7 +199,6 @@ func (r *Runtime) callReducerWithCallerAndRequest(
 	caller types.CallerContext,
 	requestID uint32,
 	suppressCallerOutcome bool,
-	deliveryReady <-chan struct{},
 ) (ReducerResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -232,7 +221,6 @@ func (r *Runtime) callReducerWithCallerAndRequest(
 		},
 		ResponseCh:            responseCh,
 		SuppressCallerOutcome: suppressCallerOutcome,
-		DeliveryReady:         deliveryReady,
 	}
 	if err := exec.SubmitWithContext(ctx, cmd); err != nil {
 		return ReducerResult{}, err

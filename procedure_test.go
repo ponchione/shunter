@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -403,6 +404,10 @@ func TestProcedureReturnWaitsForRacingCallReducer(t *testing.T) {
 
 func TestProtocolProcedureReducerProducesOneResponseThenCallerLightDelta(t *testing.T) {
 	const messagesTableID schema.TableID = 0
+	const inserts = 4 // Exceed the fanout inbox while caller delivery is deferred.
+	release := make(chan struct{})
+	finish := sync.OnceFunc(func() { close(release) })
+	defer finish()
 	var nextID uint64
 	insert := func(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {
 		nextID++
@@ -415,15 +420,22 @@ func TestProtocolProcedureReducerProducesOneResponseThenCallerLightDelta(t *test
 	rt, err := Build(validChatModule().
 		Reducer("insert_message", insert).
 		Procedure("insert_from_procedure", func(ctx *ProcedureContext, _ []byte) ([]byte, error) {
-			result, err := ctx.CallReducer("insert_message", nil)
-			if err != nil {
-				return nil, err
+			for range inserts {
+				result, err := ctx.CallReducer("insert_message", nil)
+				if err != nil {
+					return nil, err
+				}
+				if result.Error != nil {
+					return nil, result.Error
+				}
 			}
-			if result.Error != nil {
-				return nil, result.Error
+			select {
+			case <-release:
+			case <-ctx.Context.Done():
+				return nil, ctx.Context.Err()
 			}
 			return []byte("inserted"), nil
-		}), Config{DataDir: t.TempDir(), EnableProtocol: true})
+		}), Config{DataDir: t.TempDir(), EnableProtocol: true, ExecutorQueueCapacity: 1})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -458,28 +470,61 @@ func TestProtocolProcedureReducerProducesOneResponseThenCallerLightDelta(t *test
 		t.Fatalf("subscription response = tag %d %T, want SubscribeSingleApplied", tag, msg)
 	}
 
-	response, err := client.CallProcedure(ctx, "insert_from_procedure", nil)
+	if err := client.Send(ctx, protocol.CallProcedureMsg{Name: "insert_from_procedure", MessageID: []byte("insert")}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() bool {
+		health := rt.Health()
+		return health.Protocol.DeferredDeliveryMessages == inserts && health.Protocol.OldestDeferredDeliveryMillis > 0
+	})
+	other, _, err := protocolclient.Dial(ctx, protocolclient.Options{
+		URL: "ws" + strings.TrimPrefix(server.URL, "http") + "/subscribe", AllowAnonymous: true,
+	})
 	if err != nil {
-		t.Fatalf("CallProcedure: %v", err)
+		t.Fatal(err)
 	}
-	if string(response.Result) != "inserted" {
-		t.Fatalf("procedure result = %q, want inserted", response.Result)
+	defer other.Close(ctx)
+	if _, err := other.CallReducer(ctx, "insert_message", nil); err != nil {
+		t.Fatalf("unrelated reducer while procedure delivery is deferred: %v", err)
 	}
-
+	eventually(t, func() bool { return rt.Health().Protocol.DeferredDeliveryMessages == inserts+1 })
+	health := rt.Health()
+	if !health.Ready || health.Protocol.DeferredDeliveryClients != 1 {
+		t.Fatalf("health while caller delivery is held: %+v", health)
+	}
+	finish()
 	tag, msg, err := client.Read(ctx)
 	if err != nil {
-		t.Fatalf("read procedure subscription delta: %v", err)
+		t.Fatalf("procedure response: %v; health: %+v", err, rt.Health())
 	}
-	light, ok := msg.(protocol.TransactionUpdateLight)
-	if tag != protocol.TagTransactionUpdateLight || !ok {
-		t.Fatalf("procedure delta = tag %d %T, want TransactionUpdateLight", tag, msg)
+	response, ok := msg.(protocol.ProcedureResponse)
+	if tag != protocol.TagProcedureResponse || !ok || response.Error != nil || string(response.Result) != "inserted" || string(response.MessageID) != "insert" {
+		t.Fatalf("first response = tag %d %+v, want correlated procedure success before deltas", tag, msg)
 	}
-	if light.RequestID != 0 || len(light.Update) != 1 || light.Update[0].QueryID != 72 {
-		t.Fatalf("procedure light delta = %+v, want request 0 query 72", light)
-	}
-	rows, err := protocol.DecodeRowList(light.Update[0].Inserts)
-	if err != nil || len(rows) != 1 {
-		t.Fatalf("procedure light inserts = %d rows, error %v; want one row", len(rows), err)
+
+	for i := range inserts + 1 {
+		tag, msg, err := client.Read(ctx)
+		if err != nil {
+			t.Fatalf("read procedure subscription delta: %v", err)
+		}
+		light, ok := msg.(protocol.TransactionUpdateLight)
+		if tag != protocol.TagTransactionUpdateLight || !ok {
+			t.Fatalf("procedure delta = tag %d %T, want TransactionUpdateLight", tag, msg)
+		}
+		wantRequestID := uint32(0)
+		if i == inserts {
+			wantRequestID = 1 // The other client's direct reducer request.
+		}
+		if light.RequestID != wantRequestID || len(light.Update) != 1 || light.Update[0].QueryID != 72 {
+			t.Fatalf("procedure light delta = %+v, want request %d query 72", light, wantRequestID)
+		}
+		rows, err := protocol.DecodeRowList(light.Update[0].Inserts)
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("procedure light inserts = %d rows, error %v; want one row", len(rows), err)
+		}
+		if want, _ := protocol.EncodeProductRows([]types.ProductValue{{types.NewUint64(uint64(i + 1)), types.NewString("from reducer")}}); !bytes.Equal(light.Update[0].Inserts, want) {
+			t.Fatalf("delta %d out of commit order", i)
+		}
 	}
 
 	direct, err := client.CallReducer(ctx, "insert_message", nil)
@@ -489,6 +534,134 @@ func TestProtocolProcedureReducerProducesOneResponseThenCallerLightDelta(t *test
 	committed, ok := direct.Status.(protocol.StatusCommitted)
 	if !ok || len(committed.Update) != 1 || committed.Update[0].QueryID != 72 {
 		t.Fatalf("direct reducer update = %#v, want one heavy caller delta for query 72", direct.Status)
+	}
+}
+
+func TestProtocolProcedureDeferredDeliveryLifecycle(t *testing.T) {
+	for _, action := range []string{"error", "cancel", "disconnect", "shutdown", "overflow"} {
+		t.Run(action, func(t *testing.T) {
+			release := make(chan struct{})
+			finish := sync.OnceFunc(func() { close(release) })
+			defer finish()
+			handlerDone := make(chan struct{})
+			var nextID uint64
+			bufferMessages := 8
+			if action == "overflow" {
+				bufferMessages = 2
+			}
+			rt, err := Build(validChatModule().
+				Reducer("insert", func(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {
+					nextID++
+					_, err := ctx.DB.Insert(0, types.ProductValue{types.NewUint64(nextID), types.NewString("held")})
+					return nil, err
+				}).Procedure("hold", func(ctx *ProcedureContext, _ []byte) ([]byte, error) {
+				defer close(handlerDone)
+				res, err := ctx.CallReducer("insert", nil)
+				if err != nil {
+					return nil, err
+				}
+				if res.Error != nil {
+					return nil, res.Error
+				}
+				select {
+				case <-release:
+					return nil, errors.New("procedure failed after commit")
+				case <-ctx.Context.Done():
+					return nil, ctx.Context.Err()
+				}
+			}), Config{
+				DataDir: t.TempDir(), EnableProtocol: true, ExecutorQueueCapacity: 1,
+				Protocol: ProtocolConfig{OutgoingBufferMessages: bufferMessages},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rt.Start(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			defer rt.Close()
+			server := httptest.NewServer(rt.HTTPHandler())
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			dialOpts := protocolclient.Options{URL: "ws" + strings.TrimPrefix(server.URL, "http") + "/subscribe", AllowAnonymous: true}
+			client, token, err := protocolclient.Dial(ctx, dialOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close(ctx)
+			if err := client.Send(ctx, protocol.SubscribeSingleMsg{QueryID: 1, QueryString: "SELECT * FROM messages"}); err != nil {
+				t.Fatal(err)
+			}
+			if tag, _, err := client.Read(ctx); err != nil || tag != protocol.TagSubscribeSingleApplied {
+				t.Fatalf("subscribe = %d, %v", tag, err)
+			}
+			callCtx, cancelCall := context.WithCancel(ctx)
+			defer cancelCall()
+			request := protocol.CallProcedureMsg{Name: "hold", MessageID: []byte(action)}
+			if action == "cancel" {
+				// The wire has no cancel request; exercise handler-context cancellation
+				// on the live connection so its error response and delta are observable.
+				conn := rt.protocolConns.Get(token.ConnectionID)
+				go rt.HandleCallProcedure(callCtx, conn, &request)
+			} else if err := client.Send(ctx, request); err != nil {
+				t.Fatal(err)
+			}
+			eventually(t, func() bool { return rt.Health().Protocol.DeferredDeliveryMessages == 1 })
+			other, _, err := protocolclient.Dial(ctx, dialOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer other.Close(ctx)
+			if _, err := other.CallReducer(ctx, "insert", nil); err != nil {
+				t.Fatalf("unrelated reducer while delivery deferred: %v", err)
+			}
+			eventually(t, func() bool { return rt.Health().Protocol.DeferredDeliveryMessages == 2 })
+			switch action {
+			case "error":
+				finish()
+			case "cancel":
+				cancelCall()
+			case "disconnect":
+				if err := client.Close(ctx); err != nil {
+					t.Fatal(err)
+				}
+			case "shutdown":
+				if err := rt.Close(); err != nil {
+					t.Fatal(err)
+				}
+			case "overflow":
+				if _, err := other.CallReducer(ctx, "insert", nil); err != nil {
+					t.Fatalf("unrelated reducer at caller overflow: %v", err)
+				}
+				if _, _, err := client.Read(ctx); err == nil || !strings.Contains(err.Error(), "send buffer full") {
+					t.Fatalf("caller overflow = %v, want buffer-full disconnect", err)
+				}
+			}
+			select {
+			case <-handlerDone:
+			case <-ctx.Done():
+				t.Fatalf("procedure handler stalled on %s", action)
+			}
+			if action == "error" || action == "cancel" {
+				tag, msg, err := client.Read(ctx)
+				response, ok := msg.(protocol.ProcedureResponse)
+				if err != nil || tag != protocol.TagProcedureResponse || !ok || response.Error == nil || string(response.MessageID) != action {
+					t.Fatalf("first frame = %d %+v, %v; want correlated procedure error", tag, msg, err)
+				}
+				for range 2 {
+					if tag, _, err := client.Read(ctx); err != nil || tag != protocol.TagTransactionUpdateLight {
+						t.Fatalf("post-error committed delta = %d, %v", tag, err)
+					}
+				}
+			}
+			eventually(t, func() bool { return rt.Health().Protocol.DeferredDeliveryMessages == 0 })
+			if action != "shutdown" {
+				if _, err := other.CallReducer(ctx, "insert", nil); err != nil {
+					t.Fatalf("unrelated reducer after %s: %v", action, err)
+				}
+			}
+		})
 	}
 }
 

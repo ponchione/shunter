@@ -35,7 +35,6 @@ type ProcedureContext struct {
 	runtime       *Runtime
 	mu            sync.RWMutex
 	active        bool
-	deliveryReady <-chan struct{}
 }
 
 // CallReducer invokes a reducer as the same caller. The reducer runs on the
@@ -53,7 +52,7 @@ func (c *ProcedureContext) CallReducer(name string, args []byte) (ReducerResult,
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return c.runtime.callReducerFromProcedure(ctx, name, args, c.Caller, c.deliveryReady)
+	return c.runtime.callReducerWithCallerAndRequest(ctx, name, args, c.Caller, 0, true)
 }
 
 func (c *ProcedureContext) invalidate() {
@@ -123,16 +122,6 @@ func (r *Runtime) CallProcedure(ctx context.Context, name string, args []byte, o
 }
 
 func (r *Runtime) callProcedureWithCaller(ctx context.Context, name string, args []byte, caller types.CallerContext) ([]byte, error) {
-	return r.callProcedureWithCallerAndDelivery(ctx, name, args, caller, nil)
-}
-
-func (r *Runtime) callProcedureWithCallerAndDelivery(
-	ctx context.Context,
-	name string,
-	args []byte,
-	caller types.CallerContext,
-	deliveryReady <-chan struct{},
-) ([]byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -163,7 +152,6 @@ func (r *Runtime) callProcedureWithCallerAndDelivery(
 		Caller:        caller,
 		runtime:       r,
 		active:        true,
-		deliveryReady: deliveryReady,
 	}
 	var ret []byte
 	var err error
@@ -207,9 +195,8 @@ func (r *Runtime) HandleCallProcedure(ctx context.Context, conn *protocol.Conn, 
 		Permissions:         append([]string(nil), conn.Permissions...),
 		AllowAllPermissions: conn.AllowAllPermissions,
 	}
-	deliveryReady := make(chan struct{})
-	defer close(deliveryReady)
-	result, err := r.callProcedureWithCallerAndDelivery(ctx, msg.Name, msg.Args, caller, deliveryReady)
+	defer conn.DeferDelivery()()
+	result, err := r.callProcedureWithCaller(ctx, msg.Name, msg.Args, caller)
 	response := protocol.ProcedureResponse{
 		MessageID:                  append([]byte(nil), msg.MessageID...),
 		Result:                     result,

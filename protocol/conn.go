@@ -34,6 +34,9 @@ type Conn struct {
 	outboundMu          sync.Mutex
 	outboundQueuedBytes int64
 	outboundStopped     bool
+	deliveryDeferrals   int
+	deferredFrames      [][]byte
+	deferredSince       time.Time
 
 	// inflightSem limits concurrent in-flight inbound messages.
 	// Capacity is IncomingQueueMessages. The dispatch loop acquires
@@ -119,9 +122,7 @@ func (c *Conn) requestDisconnect(code websocket.StatusCode, reason string) bool 
 	requested := false
 	c.disconnectRequestOnce.Do(func() {
 		c.stopInbound()
-		c.outboundMu.Lock()
-		c.outboundStopped = true
-		c.outboundMu.Unlock()
+		c.stopOutbound()
 		if c.disconnectRequested == nil {
 			c.disconnectRequested = make(chan struct{})
 		}
