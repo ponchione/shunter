@@ -5,6 +5,204 @@ exists. The rows are advisory unless a release process defines hard thresholds
 for a specific workload. The snapshot below uses the preferred repo toolchain
 from `go.mod`.
 
+## 2026-09-07 External Canary Capacity
+
+This bounded study uses the existing external `opsboard-canary` application,
+with its ticket reducers, permissions, visibility filters, declared detail
+read, and project-board subscriptions. Results are advisory for this workload
+on this host. They do not establish production capacity or a performance gate.
+
+### Reproduction and host
+
+- Shunter: `d24a46d02531de1b0d5bba9528d392f04a73ff58` (measurement harness;
+  runtime code is unchanged from `fb119c1345526d6d70daa05f1b8e32c9eff90c64`).
+- Canary: `fedcbb6de9eabb539e561e814e9687f27ddb4fe6`.
+- Linux `7.0.0-31-generic`, linux/amd64, Go `1.27.1`, `GOAMD64=v1`,
+  24 Go scheduler processors; AMD Ryzen 9 9900X, 12 cores / 24 threads,
+  125 GiB reported RAM, Samsung SSD 990 PRO 2TB, local ext4.
+- Both processes run on the same host over loopback. CPU boost, normal GC,
+  filesystem caches, the `powersave` CPU governor, and the runtime's default
+  queue, message, work, and durability settings remain enabled. The host is shared, without CPU pinning
+  or cache dropping. The larger fixture fits easily in available memory.
+- Input seed: `20260907`; PCG stream 0 generates ticket titles and stream
+  `client index + 1` selects each client's read/write sequence.
+
+```bash
+rtk proxy scripts/measure-canary-capacity /tmp/shunter-canary-capacity-20260907-final
+```
+
+The [runner](../scripts/measure-canary-capacity) archives the committed canary,
+adds the [measurement test](../testdata/canary_capacity_test.go), updates only
+that copy's Go module to Go 1.27.1 with a local Shunter replacement, and changes
+the canary's old test key to `opsboard-canary-capacity-signing-key` to meet the
+current HS256 minimum. The original canary's existing `go.mod`/`go.sum` edits
+are not inputs and are preserved. Exact staged inputs, host details, seed
+output, and all repeated samples are retained in
+[the raw measurement record](canary-capacity-20260907.txt).
+
+Analysis also ran:
+
+```bash
+rtk proxy go run golang.org/x/perf/cmd/benchstat@v0.0.0-20260709024250-82a0b07e230d /tmp/shunter-canary-capacity-20260907-final/raw.txt
+```
+
+The runner follows the [benchmark workflow](benchmarks.md#external-canary-capacity-study):
+`-benchtime=1x -count=10`, with one sustained ten-second workload per operation.
+Each sample restores the same seed directory and starts a fresh server
+process. Setup, authentication, initial subscription snapshots, and shutdown
+are outside the timer. Eight workload rows produce 80 samples; the two
+backup/restore rows add 20 samples. Tables show the median across ten samples;
+latency columns are medians of each sample's nearest-rank p50/p95, rather than
+percentiles pooled across different runs. Ranges show the observed minimum
+and maximum, not confidence intervals or regression thresholds. Rows run in
+the fixed order shown in the raw record; host drift is not randomized away.
+
+### Fixture and workload
+
+Seed setup calls the existing `bootstrap_demo`, `create_project`, and
+`create_ticket` reducers, then snapshots and closes the runtime. Each added
+ticket has a deterministic 1,024-byte lowercase title, public visibility,
+Alice as reporter, and no assignee. Tickets are distributed evenly across
+four projects. Creation also adds a real audit row containing the title.
+The offline fixture retains the seed commit log and one snapshot; it is not
+a padding-file approximation.
+
+| Added tickets | Total tickets | Initial audit rows | Total application rows | Offline bytes | MiB |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,024 | 1,026 | 1,031 | 2,076 | 5,131,956 | 4.894 |
+| 8,192 | 8,194 | 8,199 | 16,412 | 39,129,780 | 37.317 |
+
+The larger fixture is 6.2 times the previously published 6.001 MiB
+backup/restore fixture. The fixed matrix combines:
+
+| Shape | Subscription clients by project, 8 clients | Subscription clients by project, 32 clients | Write probability |
+| --- | --- | --- | ---: |
+| Balanced | 2 / 2 / 2 / 2 | 8 / 8 / 8 / 8 | 50% |
+| Hot | 6 / 1 / 1 / 0 | 24 / 3 / 3 / 2 | 80% |
+
+Each strict-auth client keeps one WebSocket, one project-board subscription,
+and at most one typed request outstanding. It alternates `close_ticket` and
+`reopen_ticket` on its own seeded ticket when a write is selected; otherwise
+it calls `ticket_100_detail` and verifies ticket 100. Workers issue their next
+request after the previous response, without an imposed arrival rate.
+Subscriptions use `SELECT * FROM tickets WHERE project_id = N`, the existing
+alpha-board shape extended to the four seeded projects. All callers are
+Alice, so this is connection concurrency with one permission/visibility
+principal, not a study of distinct-user authorization distributions.
+
+Ticket count stays fixed; each successful write appends one audit row, with
+no notification growth for these reporter-owned, unassigned tickets. Thus
+this is an application workload with growing audit history, not a stationary
+reducer microbenchmark. The hot shape also changes the read/write mix, so
+its comparison with balanced does not isolate fanout cost alone.
+
+Reducer latency covers the typed call through its decoded committed reply;
+the default reply does not promise fsync completion. Read latency includes
+response decoding and the result check. Delta latency runs from the write's
+client timestamp through receipt and row decoding, including the caller's
+full update and other subscribers' light updates. Wall-clock timestamps share
+one host. Every sample validates initial row counts, successful replies, and
+the complete expected fanout count before finishing; errors fail the sample.
+
+Two explicit snapshots start near one-third and two-thirds of the workload
+while requests continue. Snapshot duration includes control HTTP round trip,
+executor/durability wait, capture, serialization, fsync, and publication.
+Server RSS (`/proc/self/statm`) and Go `HeapAlloc` are sampled every 10 ms, with
+additional samples at memory reset and snapshot boundaries. Start is after
+subscription setup; peaks cover the workload and final drain. Snapshot peaks
+are the subset sampled while a snapshot request is active. They include the
+whole server process, exclude the client/benchmark process, and may miss
+shorter peaks. No forced GC occurs during measurement. Raw `B/op` and
+`allocs/op` belong to the client process and are not server allocation metrics.
+
+### Hosted latency and throughput
+
+| Added tickets | Clients | Shape | Reducer p50 / p95, ms | Read p50 / p95, ms | Delta p50 / p95, ms |
+| ---: | ---: | --- | ---: | ---: | ---: |
+| 1,024 | 8 | Balanced | 20.0 / 22.1 | 0.130 / 0.345 | 20.1 / 22.7 |
+| 1,024 | 8 | Hot | 20.1 / 24.7 | 0.176 / 0.407 | 20.2 / 30.1 |
+| 1,024 | 32 | Balanced | 60.5 / 94.1 | 0.161 / 0.535 | 60.8 / 100.5 |
+| 1,024 | 32 | Hot | 60.7 / 95.1 | 0.220 / 0.742 | 61.0 / 101.4 |
+| 8,192 | 8 | Balanced | 70.1 / 94.8 | 0.156 / 0.337 | 72.5 / 102.1 |
+| 8,192 | 8 | Hot | 68.5 / 99.8 | 0.201 / 0.406 | 77.5 / 110.2 |
+| 8,192 | 32 | Balanced | 276.3 / 316.4 | 0.187 / 0.443 | 285.8 / 328.9 |
+| 8,192 | 32 | Hot | 281.7 / 337.9 | 0.234 / 0.655 | 288.9 / 350.5 |
+
+| Added tickets | Clients | Shape | Reducers/s, median (range) | Reads/s | Deltas/s | Writes per sample, range |
+| ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| 1,024 | 8 | Balanced | 428.3 (372.6–430.7) | 425.5 | 856.7 | 3,732–4,314 |
+| 1,024 | 8 | Hot | 434.9 (422.2–441.3) | 109.3 | 2,045.5 | 4,230–4,422 |
+| 1,024 | 32 | Balanced | 524.7 (519.3–527.3) | 526.3 | 4,198.0 | 5,242–5,326 |
+| 1,024 | 32 | Hot | 519.9 (403.0–523.7) | 131.7 | 9,690.5 | 4,105–5,286 |
+| 8,192 | 8 | Balanced | 112.7 (54.3–119.7) | 107.6 | 225.4 | 549–1,204 |
+| 8,192 | 8 | Hot | 112.8 (108.7–117.4) | 29.1 | 536.8 | 1,096–1,182 |
+| 8,192 | 32 | Balanced | 113.8 (101.4–115.3) | 108.2 | 909.9 | 1,041–1,185 |
+| 8,192 | 32 | Hot | 111.4 (97.9–115.6) | 29.3 | 2,083.0 | 1,006–1,189 |
+
+### Server memory and snapshots
+
+| Added tickets | Clients | Shape | RSS start / peak, MiB | Heap start / peak, MiB | Snapshot RSS / heap peak, MiB | Slower snapshot, ms (range) |
+| ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| 1,024 | 8 | Balanced | 38.1 / 71.1 | 13.2 / 42.3 | 70.6 / 41.1 | 61.9 (52.7–77.2) |
+| 1,024 | 8 | Hot | 37.8 / 71.7 | 14.8 / 46.1 | 71.6 / 42.6 | 66.2 (57.2–82.9) |
+| 1,024 | 32 | Balanced | 39.9 / 87.3 | 15.2 / 56.8 | 87.2 / 56.8 | 125.8 (119.9–137.2) |
+| 1,024 | 32 | Hot | 40.5 / 85.3 | 12.4 / 53.7 | 85.2 / 53.7 | 135.2 (123.1–242.0) |
+| 8,192 | 8 | Balanced | 161.6 / 226.2 | 93.5 / 183.3 | 226.1 / 182.2 | 205.8 (166.3–274.2) |
+| 8,192 | 8 | Hot | 162.6 / 231.7 | 105.3 / 186.2 | 230.9 / 184.7 | 240.0 (211.6–596.2) |
+| 8,192 | 32 | Balanced | 165.4 / 233.5 | 73.3 / 186.2 | 231.4 / 185.4 | 419.8 (389.9–714.1) |
+| 8,192 | 32 | Hot | 166.8 / 233.1 | 75.0 / 187.9 | 232.1 / 187.9 | 437.5 (404.2–545.9) |
+
+### Offline backup and restore
+
+Offline backup and restore use the stopped seed fixtures at both sizes. Each
+sample copies to new directories using `BackupDataDir` and `RestoreDataDir`,
+then checks byte totals and opens the restored runtime to verify ticket and
+audit counts. Timings include the helpers' transactional copy and fsync work;
+validation/recovery are outside those timings. These are warm local-filesystem
+measurements, without compression, remote storage, cold caches, or media
+failure simulation.
+
+| Added tickets | Backup ms, median (range) | Restore ms, median (range) |
+| ---: | ---: | ---: |
+| 1,024 | 71.4 (69.8–80.3) | 69.6 (68.2–78.8) |
+| 8,192 | 100.7 (99.7–107.0) | 98.3 (95.8–109.6) |
+
+### Limits and interpretation
+
+- All 80 workload samples completed without reducer/read errors or missing
+  expected deliveries: 233,903 writes, 145,680 reads, and 2,033,480 delta
+  deliveries in total. All 160 explicit snapshots and all 20 offline
+  backup/restore samples passed. Every workload sample collected at least
+  1,008 memory samples, including at least 13 during snapshot requests.
+- At 1,024 added tickets, increasing balanced concurrency from 8 to 32 clients
+  raised median reducer throughput from 428.3 to 524.7/s, while median p95
+  latency rose from 22.1 to 94.1 ms. At 8,192 added tickets, throughput stayed
+  near 113/s while p95 rose from 94.8 to 316.4 ms. More concurrent callers
+  mostly increased waiting at this larger fixture size.
+- The canary's `findTicket` scans tickets and `nextPrimaryID` scans audit rows
+  on every close/reopen. Audit rows increase by the measured write count in
+  each sample. Those application costs are included; these data do not
+  isolate a Shunter engine bottleneck or justify a runtime optimization.
+- Median sampled peak RSS ranged from 71.1–87.3 MiB for the smaller fixture
+  and 226.2–233.5 MiB for the larger one. The maximum observed server peaks
+  were 245.6 MiB RSS and 196.6 MiB Go heap, potentially in different samples.
+  The slowest snapshot took 714.1 ms. Snapshot-window peaks often approached
+  whole-run peaks; the study does not isolate capture memory from other
+  server allocations or estimate retained memory after GC.
+- Variation is material: the larger balanced eight-client row ranged from
+  54.3 to 119.7 reducer calls/s. Across all runs, the highest per-run reducer
+  p95 was 533.0 ms and the highest delta p95 was 551.8 ms. These outliers
+  remain in the raw record and the ranges; no samples were discarded.
+
+No production application, acceptable latency budget, maximum client count,
+maximum dataset, overload arrival rate, long-duration memory equilibrium,
+WAN/TLS/browser behavior, slow-reader distribution, or hard gate is inferred.
+Ten-second samples do not cover periodic work with longer intervals.
+The study measures one detail-read shape and one ticket/audit write cycle;
+notification, comment, scheduler, join, and full-board read costs remain
+outside it. Future capacity work should follow a selected application's
+workload and budgets.
+
 ## 2026-09-07 Snapshot Capture And Publication
 
 Runtime snapshot publication now runs outside the executor. Only waiting for
@@ -2193,18 +2391,21 @@ These remain outside the current benchmark envelope:
 
 - WebSocket network-level subscription workloads beyond the current
   single-connection subscribe, 16/64/128-client light-update fanout, and
-  slow-reader backpressure fixtures, including application-scale fanout;
+  slow-reader backpressure fixtures and the bounded 8/32-client external
+  canary study, including larger application fanout distributions;
   deterministic sender-level full-buffer rejection is covered separately
 - workload-derived application fanout distributions beyond the focused RC
   taskboard open-tasks live-view create/complete deltas, the bounded
   two-subscriber RC protocol correctness gate, the bounded two-subscriber
-  hosted chat insert/delete timing row, and the deterministic in-process
+  hosted chat insert/delete timing row, the external canary's balanced and
+  skewed four-project ticket boards, and the deterministic in-process
   same-query, varied single-table, skewed hot-key, and varied two-table
   predicate fixtures; RC taskboard hosted timing remains blocked by the lack of
   a real bounded taskboard reducer cycle that removes or reopens tasks
 - application workload timing beyond the bounded hosted chat insert/delete
-  subscription cycle with one and two subscribers, including production-scale
-  backup/restore timing
+  subscription cycle and external canary ticket close/reopen/detail reads,
+  including backup/restore beyond the canary's 37.317 MiB local fixture and
+  product-specific latency or recovery budgets
 - multi-way join evidence beyond the focused Stage B, Stage D, and Stage F
   through Stage Z snapshots, including larger Cartesian fixtures beyond the
   bounded 88-row cross shape, larger skew/fanout distributions beyond the
@@ -2215,7 +2416,8 @@ These remain outside the current benchmark envelope:
 - memory profiles outside the current subscription, single-WebSocket,
   16/64/128-client WebSocket fanout, sender-level backpressure, executor
   reducer commit, and small/larger local backup/restore fixtures, including
-  application-scale fanout, slow-reader network paths, and production-sized
+  allocation attribution beyond the external canary's sampled server RSS/heap,
+  larger application fanout, slow-reader network paths, and production-sized
   backup/restore workloads
 
 Current campaign cap:

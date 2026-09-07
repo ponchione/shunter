@@ -4,6 +4,9 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Added a reproducible external canary capacity study covering hosted latency,
+  fanout, server memory during writes and snapshots, and offline backup/restore
+  up to a 37.317 MiB fixture. Recorded measurements remain advisory.
 - Remote reducer calls can request fsync-confirmed success with
   `CallReducerFlagsDurableSuccess` or TypeScript `{ durable: true }`, including
   generated helpers. Waiting stays in ordered fan-out delivery. Unavailable
