@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Advisory Linux measurement; outputs are ordinary benchmark data, not qualification.
+set -euo pipefail
+[[ -r /proc/self/statm ]] || { printf 'Linux /proc is required.\n' >&2; exit 1; }
+
+shunter=$(cd "$(dirname "$0")/.." && pwd)
+canary=${CANARY_CHECKOUT:-"$shunter/../opsboard-canary"}
+output=${1:?usage: measure-canary-capacity NEW_OUTPUT_DIRECTORY}
+mkdir "$output"
+output=$(cd "$output" && pwd)
+mkdir "$output/canary"
+rtk git -C "$canary" archive HEAD | rtk proxy tar -x -C "$output/canary"
+cp "$shunter/testdata/canary_capacity_test.go" "$output/canary/internal/workflows/"
+export GOTOOLCHAIN=${GOTOOLCHAIN:-go1.27.1}
+export CANARY_CAPACITY_FIXTURES="$output/fixtures"
+mkdir "$CANARY_CAPACITY_FIXTURES"
+cd "$output/canary"
+# The older canary key predates Shunter's 32-byte HS256 minimum. Keep this
+# fixture-only adjustment in the staged copy; its token helper uses this constant.
+rtk proxy sed -i 's/opsboard-canary-dev-signing-key/opsboard-canary-capacity-signing-key/' internal/app/config.go
+rtk go mod edit -go=1.27.1 -replace="github.com/ponchione/shunter=$shunter"
+rtk go mod tidy
+{
+  printf 'Samples=%s duration=%s seed=20260907\n' "${CANARY_CAPACITY_COUNT:-10}" "${CANARY_CAPACITY_DURATION:-10s}"
+  rtk git -C "$shunter" rev-parse HEAD
+  rtk git -C "$shunter" status --short
+  printf '\nCanary revision:\n'
+  rtk git -C "$canary" rev-parse HEAD
+  rtk go version
+  rtk go env GOOS GOARCH GOAMD64 GOMAXPROCS
+  rtk proxy uname -a
+  rtk proxy lscpu
+  rtk proxy free -h
+  rtk proxy df -T "$output"
+  rtk proxy lsblk -d -o NAME,MODEL,SIZE,ROTA
+  rtk proxy sha256sum "$shunter/testdata/canary_capacity_test.go" internal/app/config.go go.mod go.sum
+} > "$output/host.txt"
+rtk proxy go test ./internal/workflows -run '^TestCanaryCapacitySeed$' -count=1 -timeout=30m -v > "$output/seed.txt" 2>&1
+# Raw go benchmark output is the RTK.md exception; preserve custom metrics.
+go test ./internal/workflows -run '^$' -bench '^BenchmarkCanaryCapacity' \
+  -benchtime=1x -count="${CANARY_CAPACITY_COUNT:-10}" -timeout=45m -benchmem > "$output/raw.txt" 2>&1
+printf 'Capacity samples: %s/raw.txt\n' "$output"
