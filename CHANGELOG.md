@@ -7,7 +7,12 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Store memory gauges now sample outside reducer and migration commits, waiting
   30 seconds after each sample, instead of scanning all rows and
   indexes after every commit. Runtime close drains any in-flight sample.
-- The module now requires Go 1.27.0.
+- The module now requires Go 1.27.1. Staticcheck and the CI vulnerability scanner
+  now support the Go 1.27 toolchain, and JWKS ECDSA keys use the supported
+  standard-library point parsing and encoding APIs.
+- Updated compression and Go module tooling dependencies to address
+  GO-2026-5841, GO-2026-6179, and GO-2026-6180. Hosted frontend and package-smoke
+  TypeScript compilers now use the client's pinned version.
 - Hosted one-off queries and all subscription plans now share finite work
   accounting across scans, joins, and aggregate input. Live deltas enforce
   row/byte materialization bounds before append, and ordered subscriptions

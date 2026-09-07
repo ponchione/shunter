@@ -3,7 +3,6 @@ package auth
 import (
 	"bytes"
 	"context"
-	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
@@ -497,16 +496,15 @@ func ecdsaPublicKeyFromJWK(raw jwkDocumentKey) (*ecdsa.PublicKey, error) {
 	if len(xBytes) > 32 || len(yBytes) > 32 {
 		return nil, fmt.Errorf("invalid ECDSA jwk coordinate length")
 	}
-	x := new(big.Int).SetBytes(xBytes)
-	y := new(big.Int).SetBytes(yBytes)
 	point := make([]byte, 1+32+32)
 	point[0] = 4
 	copy(point[1+32-len(xBytes):33], xBytes)
 	copy(point[33+32-len(yBytes):], yBytes)
-	if _, err := ecdh.P256().NewPublicKey(point); err != nil {
+	key, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), point)
+	if err != nil {
 		return nil, fmt.Errorf("invalid ECDSA jwk point")
 	}
-	return &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, nil
+	return key, nil
 }
 
 func cloneResolvedJWTVerificationKeys(in []resolvedJWTVerificationKey) []resolvedJWTVerificationKey {

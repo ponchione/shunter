@@ -1,6 +1,6 @@
 # Dependency Considerations
 
-Last reviewed: 2026-05-28
+Last reviewed: 2026-09-07
 
 This note captures adopted dependencies, dependency suggestions, and explicit
 rejections from the dependency scan of the current Shunter codebase. Candidate
@@ -10,16 +10,18 @@ themselves.
 Current repo context:
 
 - Shunter is intentionally dependency-light today.
-- Direct runtime dependencies are currently limited to `github.com/ponchione/websocket`,
+- Direct runtime dependencies are currently limited to `golang.org/x/sys`,
+  `github.com/ponchione/websocket`,
   `github.com/golang-jwt/jwt/v5`, `github.com/prometheus/client_golang`,
   and `lukechampine.com/blake3`.
 - Direct test and benchmark dependencies now include
   `github.com/andybalholm/brotli v1.2.1`,
-  `github.com/google/go-cmp v0.6.0`,
+  `github.com/google/go-cmp v0.7.0`,
   `github.com/prometheus/client_model v0.6.2`, `go.uber.org/goleak v1.3.0`,
   and `pgregory.net/rapid v1.2.0`.
 - Pinned Go tool dependencies now include
-  `honnef.co/go/tools/cmd/staticcheck v0.7.0`.
+  `honnef.co/go/tools/cmd/staticcheck v0.8.1`. CI installs
+  `golang.org/x/vuln/cmd/govulncheck v1.7.0` separately.
 - `github.com/ponchione/websocket v1.8.15-shunter.1` is Shunter's
   direct WebSocket dependency. It is published under the fork's module path so
   downstream Shunter consumers do not need a `replace` directive.
@@ -181,7 +183,7 @@ Docs: https://pkg.go.dev/github.com/andybalholm/brotli
 
 ### `honnef.co/go/tools/cmd/staticcheck`
 
-Pinned as a Go tool dependency at `v0.7.0`.
+Pinned as a Go tool dependency at `v0.8.1`, with Go 1.27 support.
 
 Run it with:
 

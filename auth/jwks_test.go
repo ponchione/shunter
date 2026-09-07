@@ -457,6 +457,28 @@ func TestValidateJWTJWKSES256Accepted(t *testing.T) {
 	}
 }
 
+func TestResolveJWKRejectsInvalidECPoints(t *testing.T) {
+	_, valid := generateES256JWK(t, "ec-1")
+	oversized := base64.RawURLEncoding.EncodeToString(make([]byte, 33))
+	for _, tc := range []struct{ name, curve, x, y string }{
+		{"wrong curve", "P-384", valid.X, valid.Y},
+		{"invalid x encoding", "P-256", "!", valid.Y},
+		{"invalid y encoding", "P-256", valid.X, "!"},
+		{"oversized x", "P-256", oversized, valid.Y},
+		{"oversized y", "P-256", valid.X, oversized},
+		{"off curve", "P-256", "AA", "AA"},
+		{"empty coordinates", "P-256", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key := valid
+			key.Crv, key.X, key.Y = tc.curve, tc.x, tc.y
+			if _, err := resolveJWK(key); err == nil {
+				t.Fatal("resolveJWK accepted an invalid EC point")
+			}
+		})
+	}
+}
+
 func TestFetchJWKSRejectsOversizedResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -815,22 +837,19 @@ func generateES256JWK(t *testing.T, keyID string) (*ecdsa.PrivateKey, jwkDocumen
 	if err != nil {
 		t.Fatal(err)
 	}
+	point, err := privateKey.PublicKey.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return privateKey, jwkDocumentKey{
 		KeyType:   "EC",
 		KeyID:     keyID,
 		Algorithm: "ES256",
 		Use:       "sig",
 		Crv:       "P-256",
-		X:         base64.RawURLEncoding.EncodeToString(padP256Coordinate(privateKey.PublicKey.X)),
-		Y:         base64.RawURLEncoding.EncodeToString(padP256Coordinate(privateKey.PublicKey.Y)),
+		X:         base64.RawURLEncoding.EncodeToString(point[1:33]),
+		Y:         base64.RawURLEncoding.EncodeToString(point[33:]),
 	}
-}
-
-func padP256Coordinate(v *big.Int) []byte {
-	out := make([]byte, 32)
-	b := v.Bytes()
-	copy(out[len(out)-len(b):], b)
-	return out
 }
 
 func writeJWKS(t *testing.T, w http.ResponseWriter, keys ...jwkDocumentKey) {

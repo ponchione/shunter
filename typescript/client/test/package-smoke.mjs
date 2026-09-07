@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repoRoot = dirname(dirname(packageRoot));
 const smokeRoot = join(packageRoot, ".tmp_package_smoke");
+const typescriptVersion = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).devDependencies.typescript;
 
 const run = (command, args, cwd) => {
   execFileSync(command, args, { cwd, stdio: "inherit" });
@@ -60,7 +61,7 @@ const writeFixtureApp = (
           [runtimePackageName]: dependency,
         },
         devDependencies: {
-          typescript: "^5.9.0",
+          typescript: typescriptVersion,
         },
       },
       null,
@@ -211,7 +212,7 @@ writeFileSync(
       private: true,
       workspaces: ["client", "app"],
       devDependencies: {
-        typescript: "^5.9.0",
+        typescript: typescriptVersion,
       },
     },
     null,

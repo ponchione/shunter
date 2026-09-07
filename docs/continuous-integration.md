@@ -13,7 +13,7 @@ tags or releases, or deploy artifacts.
 | Go tests | all Go tests without cached results and uncached race runs over concurrency-heavy packages plus selected store/commit-log invariants | `rtk go test -count=1 ./...`; `rtk go test -race -count=1 . ./auth ./executor ./protocol ./protocolclient ./subscription`; then the focused store and commit-log commands below |
 | TypeScript client | locked install, typecheck/runtime tests, build, checked-in `dist`, package dry-run/smoke, high-or-critical npm audit | `rtk npm --prefix typescript/client ci`; then `run test`, `run build`, `run pack:dry-run`, `run smoke:package`, and `audit --audit-level=high` with the same prefix |
 | Browser integration | locked client/browser installs, pinned Chromium, strict-auth and successful reconnect-lifecycle browser tests, high-or-critical npm audit | `rtk npm --prefix typescript/browser-integration ci`, `rtk npm --prefix typescript/browser-integration run install:browsers`, `rtk npm --prefix typescript/browser-integration test`, and the prefixed audit command |
-| Vulnerability checks | pinned `govulncheck` against all packages | `rtk govulncheck ./...` using govulncheck v1.1.4 |
+| Vulnerability checks | pinned `govulncheck` against all packages | `rtk go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...` |
 | Hosted/static | static hosted-binary gauntlet, hosted-chat gate, generated contract/client sync, hosted frontend audit | `rtk bash scripts/static-hosted-binary-gate.sh`, followed by `rtk git diff` on the generated files and the prefixed frontend audit |
 
 The workflow uses SHA-pinned official checkout/setup actions, the Go toolchain
