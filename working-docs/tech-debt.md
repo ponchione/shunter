@@ -1,74 +1,79 @@
 # Shunter Tech Debt
 
-Status: future-work tracker
-Scope: known non-blocking follow-up moved out of the retired v1 roadmap.
+Status: future-work tracker; one measurement task, four deferred items, and
+two hardening checks that require gap confirmation.
 
-This file tracks work that should remain visible without making old release
-roadmaps look active. Keep entries concise and implementation-facing. Prefer
-live code, tests, focused docs, and Go doc when they disagree with this file.
+No real product application is selected. The external `opsboard-canary` is
+available as a sibling checkout and already exercises public Shunter APIs and
+package-shaped client installs. Reuse its natural workflows; product-specific
+validation waits for a selected app. A duplicate reference app is unnecessary.
 
-## Performance Gaps
+## Canary Capacity Measurement
 
-`docs/performance-envelopes.md` owns the current benchmark snapshot. The
-remaining measurement gaps are:
+**Status:** Ready to scope. Combines fanout, application timing, and memory
+measurement into one bounded study using the existing canary.
 
-- product-app and external-canary-scale fanout, including workload-derived
-  fanout distributions
-- product-app and external-canary workload timing, including canary-scale
-  backup/restore
-- production-sized memory profiles beyond the current local fixtures
-- enough historical runs to decide whether any row should become a hard
-  release gate instead of advisory data
+Choose a small, fixed matrix of dataset sizes, concurrent clients, read/write
+mixes, and uneven subscription distributions on one documented host. Measure
+reducer/read/delta latency and throughput, process RSS and Go heap during
+sustained writes and snapshots, and offline backup/restore duration at the same
+dataset sizes. Include datasets larger than the published backup/restore
+fixtures; identify the workload and limits rather than calling it production
+capacity without a real application.
 
-Keep measured snapshots in `docs/performance-envelopes.md`; keep this section
-limited to the missing evidence.
+**Done when:** Reproducible commands, seeds, revisions, hardware, fixture sizes,
+repeated measurements, and observed limits are recorded in
+[performance envelopes](../docs/performance-envelopes.md), using the existing
+[benchmark workflow](../docs/benchmarks.md). Results remain advisory.
 
-## Product And External Canary Maintenance
+## Deferred
 
-No real product application is currently selected. When the owner selects one,
-use its natural workload to validate API ergonomics, generated TypeScript
-shape, auth, procedures/service adapters, persistence, deployment,
-backup/restore, and operational workflows.
+1. **Hard performance gates.** Revisit after a representative workload, stable
+   measurement environment, and acceptable performance budgets are agreed.
+   Then use repeated baseline comparisons and observed variance to set useful
+   thresholds; collecting more history alone is not a task.
+2. **Public npm publishing.** Revisit when an external consumer needs registry
+   distribution. Private/local packaging already works. Resolve public package
+   ownership, release authority, access/2FA, publish policy, metadata/licensing,
+   provenance, and public artifact policy using the
+   [client promotion checklist](../typescript/client/README.md).
+3. **App scaffolding tooling.** Revisit when repeated app creation exposes
+   concrete friction that the maintained hosted-chat template and
+   [hosting guide](../docs/how-to/host-shunter-backend.md) do not address.
+4. **Development watchers.** Revisit when real app work demonstrates costly
+   manual rebuild/restart or TypeScript regeneration. Automate the observed
+   bottleneck using existing tooling first.
 
-Do not add artificial product features only to improve Shunter coverage. If a
-Shunter edge case is not natural product behavior, cover it in package tests,
-hosted-chat, or a synthetic/external canary.
+## Focused Hardening Checks
 
-When the external `opsboard-canary` repository is available, keep it on public
-Shunter APIs and package-shaped `@shunter/client` installs. It should continue
-covering broad regression surfaces that product apps may not naturally touch:
-strict auth, permissions, visibility, reducers, declared reads, raw SQL escape
-hatches, subscriptions, restart/rollback, contract export, generated
-TypeScript, offline backup/restore, and one app-owned migration path.
+These are candidate coverage gaps, not confirmed defects. Check existing tests
+before implementation. Close an entry if they already establish its invariant;
+otherwise add the smallest deterministic regression for the missing case.
 
-Do not add a duplicate in-repo reference app unless the product direction
-changes.
+### Abrupt Exit During Snapshot Publication
 
-## Hosted App Productization
+Check process exit after snapshot capture, while publication is incomplete and
+later reducers have committed durably. Verify restart recovers all acknowledged
+state through a valid snapshot plus log, or log fallback, without selecting a
+partial snapshot. Start with
+[snapshot publication tests](../storage_test.go),
+[recovery fault tests](../commitlog/recovery_fault_test.go), and the
+[crash subprocess harness](../internal/gauntlettests/runtime_crash_gauntlet_test.go).
 
-Keep hosted-app productization work here until it becomes a concrete release
-slice:
+**Done when:** An existing test is identified or a controlled subprocess exit
+test pins this recovery invariant and passes. Other storage boundaries need a
+separately demonstrated gap before expanding this task.
 
-- public `@shunter/client` npm promotion, including package ownership, public
-  install docs, release authority, npm access and 2FA policy, publish command
-  policy, package metadata including licensing, version synchronization,
-  provenance decisions, and the final `dist/` artifact policy
-- scaffolded static hosted-app template tooling if real app work proves docs
-  and the hosted-chat template shape are not enough
-- dev workflow automation, such as rebuild/restart and TypeScript regeneration
-  watchers, if real app work proves the manual flow too expensive
+### Joined Subscription Convergence Across Reconnect
 
-## Hardening Follow-Up
+Check a joined subscription when concurrent writers update/delete join rows,
+delivery is paused, and a subscriber disconnects and resubscribes. At a known
+commit boundary, compare the live row multiset with fresh query evaluation for
+the same caller; detect missing or repeated delta application and stale delivery
+from the old connection. Reuse
+[caller delivery ordering tests](../caller_delivery_ordering_test.go) and the
+[join evaluation checks](../subscription/eval_test.go).
 
-Keep hardening work tied to reproducible failures and focused regression
-coverage:
-
-- add corpus entries, seeds, traces, commands, or fixtures when new failures
-  are found
-- extend crash/fault coverage across snapshot, compaction, migration, recovery,
-  and shutdown boundaries
-- expand subscription correctness scenarios for joins, deletes, updates, and
-  concurrent writes
-- keep race-enabled package guidance current as ownership changes
-- keep soak/load tests outside the short local loop, with commands that make
-  failures attributable
+**Done when:** Existing coverage is identified or one deterministic hosted
+scenario establishes convergence after reconnect and passes under the race
+detector. Additional join shapes require a specific uncovered case.
