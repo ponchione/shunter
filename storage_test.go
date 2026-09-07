@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ponchione/shunter/commitlog"
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
@@ -418,6 +420,139 @@ func TestRuntimeSnapshotPublicationAllowsCommitsAndDrainsOnClose(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+type snapshotPublicationBarrierRegistry struct {
+	schema.SchemaRegistry
+	onVersion func()
+}
+
+func (r *snapshotPublicationBarrierRegistry) Version() uint32 {
+	if r.onVersion != nil {
+		r.onVersion()
+	}
+	return r.SchemaRegistry.Version()
+}
+
+func TestRuntimeSnapshotPublicationAbruptExitRecoversDurableTail(t *testing.T) {
+	const childDirEnv = "SHUNTER_SNAPSHOT_CRASH_CHILD_DIR"
+	const baseSnapshotEnv = "SHUNTER_SNAPSHOT_CRASH_BASE"
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if dir := os.Getenv(childDirEnv); dir != "" {
+		rt, err := Build(dataDirBackupTestModule(), Config{DataDir: dir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.Start(ctx); err != nil {
+			t.Fatal(err)
+		}
+		// Omit the automatic empty bootstrap snapshot so the no-base case
+		// must recover from the log alone.
+		if err := os.RemoveAll(filepath.Join(dir, "0")); err != nil {
+			t.Fatal(err)
+		}
+		insert := func(body string, wantTxID types.TxID) {
+			t.Helper()
+			result, err := rt.CallReducer(ctx, "insert_message", []byte(body))
+			if err != nil || result.Status != StatusCommitted || result.TxID != wantTxID {
+				t.Fatalf("insert %q = %+v, %v; want committed tx %d", body, result, err, wantTxID)
+			}
+		}
+		insert("base", 1)
+		if os.Getenv(baseSnapshotEnv) == "true" {
+			if txID, err := rt.CreateSnapshot(); err != nil || txID != 1 {
+				t.Fatalf("base snapshot = %d, %v; want tx 1", txID, err)
+			}
+		}
+		insert("captured", 2)
+
+		entered := make(chan struct{})
+		captureRuntimeSnapshot = func(_ *commitlog.FileSnapshotWriter, state *store.CommittedState, txID types.TxID) (func() error, error) {
+			reg := &snapshotPublicationBarrierRegistry{SchemaRegistry: rt.registry}
+			writer := commitlog.NewFileSnapshotWriterWithObserver(dir, reg, rt.observability)
+			publish, err := writer.CaptureSnapshot(state, txID)
+			// Arm only after capture. The real writer then pauses partway through
+			// its temporary file header, with the publication lock still present.
+			reg.onVersion = func() {
+				close(entered)
+				<-ctx.Done()
+			}
+			return publish, err
+		}
+		done := make(chan error, 1)
+		go func() { _, err := rt.CreateSnapshot(); done <- err }()
+		select {
+		case <-entered:
+		case err := <-done:
+			t.Fatalf("snapshot returned before paused publication: %v", err)
+		case <-ctx.Done():
+			t.Fatal("snapshot did not reach publication")
+		}
+		insert("tail-one", 3)
+		insert("tail-two", 4)
+		if err := rt.WaitUntilDurable(ctx, 4); err != nil {
+			t.Fatalf("durability barrier during publication: %v", err)
+		}
+		os.Exit(42) // Skip snapshot cleanup and runtime/durability shutdown.
+	}
+
+	for _, withBase := range []bool{false, true} {
+		t.Run("base-snapshot="+strconv.FormatBool(withBase), func(t *testing.T) {
+			dir := t.TempDir()
+			child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRuntimeSnapshotPublicationAbruptExitRecoversDurableTail$")
+			child.Env = append(os.Environ(), childDirEnv+"="+dir, baseSnapshotEnv+"="+strconv.FormatBool(withBase))
+			output, err := child.CombinedOutput()
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 42 {
+				t.Fatalf("child did not reach abrupt exit: %v\n%s", err, output)
+			}
+			partialDir := filepath.Join(dir, "2")
+			if !commitlog.HasLockFile(partialDir) || !commitlog.HasSnapshotTempFile(partialDir) {
+				t.Fatal("crash did not leave an incomplete snapshot with lock and temporary file")
+			}
+			partial, err := os.ReadFile(filepath.Join(partialDir, "snapshot.tmp"))
+			if err != nil || len(partial) == 0 || len(partial) >= commitlog.SnapshotHeaderSize {
+				t.Fatalf("partial snapshot = %d bytes, %v; want an incomplete header", len(partial), err)
+			}
+			runtimeAssertFileMissing(t, filepath.Join(partialDir, "snapshot"))
+			snapshots, err := commitlog.ListSnapshots(dir)
+			var wantSnapshots []types.TxID
+			if withBase {
+				wantSnapshots = []types.TxID{1}
+			}
+			if err != nil || !slices.Equal(snapshots, wantSnapshots) {
+				t.Fatalf("selectable snapshots = %v, %v; want %v", snapshots, err, wantSnapshots)
+			}
+
+			rt, err := Build(dataDirBackupTestModule(), Config{DataDir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rt.Close()
+			report := rt.recovery.report
+			firstReplay := types.TxID(1)
+			if withBase {
+				firstReplay = 2
+			}
+			if report.HasSelectedSnapshot != withBase || (withBase && report.SelectedSnapshotTxID != 1) {
+				t.Fatalf("recovery selected the wrong snapshot: %+v", report)
+			}
+			if report.DurableLogHorizon != 4 || report.ReplayedTxRange != (commitlog.RecoveryTxIDRange{Start: firstReplay, End: 4}) {
+				t.Fatalf("recovery did not replay through the acknowledged durable tail: %+v", report)
+			}
+			want := []string{"base", "captured", "tail-one", "tail-two"}
+			assertDataDirRuntimeStateMessageBodies(t, rt, want)
+			if err := rt.Start(ctx); err != nil {
+				t.Fatal(err)
+			}
+			result, err := rt.CallReducer(ctx, "insert_message", []byte("after-restart"))
+			if err != nil || result.Status != StatusCommitted || result.TxID != 5 {
+				t.Fatalf("reducer after restart = %+v, %v; want committed tx 5", result, err)
+			}
+			assertDataDirRestoredMessageBodies(t, rt, append(want, "after-restart"))
+		})
 	}
 }
 

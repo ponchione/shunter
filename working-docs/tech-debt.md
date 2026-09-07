@@ -1,7 +1,7 @@
 # Shunter Tech Debt
 
 Status: future-work tracker; one measurement task, four deferred items, and
-two hardening checks that require gap confirmation.
+one hardening check that requires gap confirmation.
 
 No real product application is selected. The external `opsboard-canary` is
 available as a sibling checkout and already exercises public Shunter APIs and
@@ -49,20 +49,6 @@ repeated measurements, and observed limits are recorded in
 These are candidate coverage gaps, not confirmed defects. Check existing tests
 before implementation. Close an entry if they already establish its invariant;
 otherwise add the smallest deterministic regression for the missing case.
-
-### Abrupt Exit During Snapshot Publication
-
-Check process exit after snapshot capture, while publication is incomplete and
-later reducers have committed durably. Verify restart recovers all acknowledged
-state through a valid snapshot plus log, or log fallback, without selecting a
-partial snapshot. Start with
-[snapshot publication tests](../storage_test.go),
-[recovery fault tests](../commitlog/recovery_fault_test.go), and the
-[crash subprocess harness](../internal/gauntlettests/runtime_crash_gauntlet_test.go).
-
-**Done when:** An existing test is identified or a controlled subprocess exit
-test pins this recovery invariant and passes. Other storage boundaries need a
-separately demonstrated gap before expanding this task.
 
 ### Joined Subscription Convergence Across Reconnect
 
