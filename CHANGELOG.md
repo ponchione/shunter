@@ -4,6 +4,11 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 ## Unreleased
 
+- Canary capacity reporting now offers an explicit scheduled-arrival mode with
+  offered/achieved rates, scheduling backlog, deadline outcomes, and separate
+  response, row-decoding and validation timings. The runner includes current
+  Canary working-tree inputs; historical closed-loop metric names stay intact.
+
 - Added a reproducible external canary capacity study covering hosted latency,
   fanout, server memory during writes and snapshots, and offline backup/restore
   up to a 37.317 MiB fixture. Recorded measurements remain advisory.

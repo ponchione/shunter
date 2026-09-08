@@ -9,11 +9,38 @@ output=${1:?usage: measure-canary-capacity NEW_OUTPUT_DIRECTORY}
 mkdir "$output"
 output=$(cd "$output" && pwd)
 mkdir "$output/canary"
-rtk git -C "$canary" archive HEAD | rtk proxy tar -x -C "$output/canary"
-cp "$shunter/testdata/canary_capacity_test.go" "$output/canary/internal/workflows/"
+# Copy actual nonignored working-tree source, including relevant untracked files.
+rtk proxy python3 - "$canary" "$output" <<'PYTHON'
+import hashlib, json, pathlib, shutil, subprocess, sys
+src, out = map(pathlib.Path, sys.argv[1:])
+names = subprocess.check_output(['rtk','proxy','git','ls-files','--cached','--others','--exclude-standard','-z'], cwd=src).decode().split('\0')
+manifest = {}
+for name in sorted(set(names)-{''}):
+    p = src/name
+    if name.startswith(('working-docs/','reference/')) or not p.is_file(): continue
+    target = out/'canary'/name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(p,target)
+    manifest[name] = hashlib.sha256(p.read_bytes()).hexdigest()
+(out/'canary-source-sha256.json').write_text(json.dumps(manifest,indent=2)+'\n')
+PYTHON
+cp "$shunter"/testdata/canary_*test.go "$output/canary/internal/workflows/"
 export GOTOOLCHAIN=${GOTOOLCHAIN:-go1.27.1}
-export CANARY_CAPACITY_FIXTURES="$output/fixtures"
-mkdir "$CANARY_CAPACITY_FIXTURES"
+export CANARY_CAPACITY_MODE=${CANARY_CAPACITY_MODE:-closed-loop}
+export CANARY_CAPACITY_SHAPE=${CANARY_CAPACITY_SHAPE:-even}
+case "$CANARY_CAPACITY_MODE" in
+  closed-loop) benchmark='^BenchmarkCanaryCapacity';;
+  scheduled-arrival) benchmark='^BenchmarkCanaryScheduledArrival$';;
+  *) printf 'mode must be closed-loop or scheduled-arrival\n' >&2; exit 1;;
+esac
+seed=true
+if [[ -n "${CANARY_CAPACITY_FIXTURES:-}" ]]; then
+  export CANARY_CAPACITY_FIXTURES=$(cd "$CANARY_CAPACITY_FIXTURES" && pwd)
+  seed=false
+else
+  export CANARY_CAPACITY_FIXTURES="$output/fixtures"
+  mkdir "$CANARY_CAPACITY_FIXTURES"
+fi
 cd "$output/canary"
 # The older canary key predates Shunter's 32-byte HS256 minimum. Keep this
 # fixture-only adjustment in the staged copy; its token helper uses this constant.
@@ -22,6 +49,7 @@ rtk go mod edit -go=1.27.1 -replace="github.com/ponchione/shunter=$shunter"
 rtk go mod tidy
 {
   printf 'Samples=%s duration=%s seed=20260907\n' "${CANARY_CAPACITY_COUNT:-10}" "${CANARY_CAPACITY_DURATION:-10s}"
+  printf 'Mode=%s shape=%s rate=%s per-client=%s\n' "$CANARY_CAPACITY_MODE" "$CANARY_CAPACITY_SHAPE" "${CANARY_CAPACITY_RATE:-1000}" "${CANARY_CAPACITY_PER_CLIENT:-100}"
   rtk git -C "$shunter" rev-parse HEAD
   rtk git -C "$shunter" status --short
   printf '\nCanary revision:\n'
@@ -35,8 +63,28 @@ rtk go mod tidy
   rtk proxy lsblk -d -o NAME,MODEL,SIZE,ROTA
   rtk proxy sha256sum "$shunter/testdata/canary_capacity_test.go" internal/app/config.go go.mod go.sum
 } > "$output/host.txt"
-rtk proxy go test ./internal/workflows -run '^TestCanaryCapacitySeed$' -count=1 -timeout=30m -v > "$output/seed.txt" 2>&1
-# Raw go benchmark output is the RTK.md exception; preserve custom metrics.
-go test ./internal/workflows -run '^$' -bench '^BenchmarkCanaryCapacity' \
-  -benchtime=1x -count="${CANARY_CAPACITY_COUNT:-10}" -timeout=45m -benchmem > "$output/raw.txt" 2>&1
+if "$seed"; then
+  rtk proxy go test ./internal/workflows -run '^TestCanaryCapacitySeed$' -count=1 -timeout=30m -v > "$output/seed.txt" 2>&1
+fi
+rtk proxy python3 - "$CANARY_CAPACITY_FIXTURES" "$output" <<'PYTHON'
+import hashlib,json,pathlib,sys
+src,out=map(pathlib.Path,sys.argv[1:])
+(out/'fixture-sha256.json').write_text(json.dumps({str(p.relative_to(src)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(src.rglob('*')) if p.is_file()},indent=2)+'\n')
+PYTHON
+if [[ "$CANARY_CAPACITY_MODE" == closed-loop ]]; then
+  # Preserve the historical per-benchmark repetition order and metric names.
+  rtk proxy timeout --kill-after=5s 46m go test ./internal/workflows -run '^$' -bench "$benchmark" \
+    -benchtime=1x -count="${CANARY_CAPACITY_COUNT:-10}" -timeout=45m -benchmem > "$output/raw.txt" 2>&1
+else
+  # Each scheduled invocation retains its own complete operations and deliveries.
+  for ((sample=1; sample<=${CANARY_CAPACITY_COUNT:-10}; sample++)); do
+    export CANARY_CAPACITY_RESULT_DIR="$output/sample-$sample"
+    mkdir "$CANARY_CAPACITY_RESULT_DIR"
+    # Raw benchmark lines are the RTK.md exception. The outer limit bounds
+    # startup/shutdown; the scheduled phase has its own 90s completion/drain cap.
+    rtk proxy timeout --kill-after=5s 180s go test ./internal/workflows -run '^$' -bench "$benchmark" \
+      -benchtime=1x -count=1 -timeout=170s -benchmem > "$CANARY_CAPACITY_RESULT_DIR/raw.txt" 2>&1
+    cat "$CANARY_CAPACITY_RESULT_DIR/raw.txt" >> "$output/raw.txt"
+  done
+fi
 printf 'Capacity samples: %s/raw.txt\n' "$output"

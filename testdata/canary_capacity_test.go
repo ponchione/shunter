@@ -94,6 +94,8 @@ func TestCanaryCapacitySeed(t *testing.T) {
 type capacityMemory struct {
 	RSS, Heap, SnapshotRSS, SnapshotHeap uint64
 	Samples, SnapshotSamples             int
+	TotalAlloc                           uint64
+	ResourceStop                         bool
 }
 
 // A separate test process owns the server so client allocations never enter
@@ -127,6 +129,8 @@ func TestCanaryCapacityServer(t *testing.T) {
 		memory.RSS = max(memory.RSS, rss)
 		memory.Heap = max(memory.Heap, mem.HeapAlloc)
 		memory.Samples++
+		memory.TotalAlloc = mem.TotalAlloc
+		memory.ResourceStop = memory.ResourceStop || rss > 1<<30
 		if snapshot.Load() {
 			memory.SnapshotRSS = max(memory.SnapshotRSS, rss)
 			memory.SnapshotHeap = max(memory.SnapshotHeap, mem.HeapAlloc)
@@ -169,6 +173,12 @@ func TestCanaryCapacityServer(t *testing.T) {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
+	})
+	mux.HandleFunc("/capacity/retained", func(w http.ResponseWriter, r *http.Request) {
+		runtime.GC() // outside timing; the sampler retains counters only
+		var mem runtime.MemStats
+		runtime.ReadMemStats(&mem)
+		_ = json.NewEncoder(w).Encode(mem.HeapAlloc)
 	})
 	mux.Handle("/", rt.HTTPHandler())
 	srv := httptest.NewServer(mux)
@@ -269,6 +279,7 @@ func capacityPercentile(values []float64, p float64) float64 {
 	return values[int(math.Ceil(p*float64(len(values))))-1]
 }
 
+// BenchmarkCanaryCapacity is the historical closed-loop throughput workload.
 func BenchmarkCanaryCapacity(b *testing.B) {
 	if os.Getenv("CANARY_CAPACITY_FIXTURES") == "" {
 		b.Skip("run with scripts/measure-canary-capacity")
