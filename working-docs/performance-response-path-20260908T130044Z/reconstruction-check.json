@@ -1,0 +1,14 @@
+{
+  "checked_files": {
+    "shunter": 694,
+    "canary": 80,
+    "diagnostic/shunter": 696,
+    "diagnostic/canary": 80,
+    "fixtures": 12
+  },
+  "relocations": [
+    "canary/go.mod",
+    "diagnostic/canary/go.mod"
+  ],
+  "workloads_run": 0
+}

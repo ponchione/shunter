@@ -1,0 +1,108 @@
+Samples=1 duration=10s seed=20260907
+Mode=scheduled-arrival shape=even rate=1000 per-client=10
+47452940236b11402d047ca50d1592afcfcb4b1a
+ M CHANGELOG.md
+ M TECH_DEBT.md
+ M commitlog/durability.go
+ M commitlog/snapshot_io.go
+ M docs/how-to/persistence-and-shutdown.md
+ M docs/how-to/reducer-patterns.md
+ M docs/performance-envelopes.md
+ M executor/executor.go
+ M executor/reducer_db_policy_test.go
+ M scripts/measure-canary-capacity
+ M testdata/canary_capacity_test.go
+ M types/reducer.go
+?? commitlog/sidecar_test.go
+?? commitlog/snapshot_buffer_test.go
+?? executor/reducer_db_lookup_test.go
+?? testdata/canary_arrival_report_test.go
+?? testdata/canary_arrival_test.go
+?? testdata/canary_capacity_check_test.go
+Canary revision:
+fedcbb6de9eabb539e561e814e9687f27ddb4fe6
+go version go1.27.1 linux/amd64
+linux
+amd64
+v1
+
+Linux gernsback 7.0.0-31-generic #31~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Mon Aug 10 09:38:02 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
+Architecture:                            x86_64
+CPU op-mode(s):                          32-bit, 64-bit
+Address sizes:                           48 bits physical, 48 bits virtual
+Byte Order:                              Little Endian
+CPU(s):                                  24
+On-line CPU(s) list:                     0-23
+Vendor ID:                               AuthenticAMD
+Model name:                              AMD Ryzen 9 9900X 12-Core Processor
+CPU family:                              26
+Model:                                   68
+Thread(s) per core:                      2
+Core(s) per socket:                      12
+Socket(s):                               1
+Stepping:                                0
+Frequency boost:                         enabled
+CPU(s) scaling MHz:                      79%
+CPU max MHz:                             5662.0161
+CPU min MHz:                             613.9540
+BogoMIPS:                                8799.98
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good amd_lbr_v2 nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpuid_fault cpb cat_l3 cdp_l3 hw_pstate ssbd mba perfmon_v2 ibrs ibpb stibp ibrs_enhanced vmmcall fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk avx_vnni avx512_bf16 clzero irperf xsaveerptr rdpru wbnoinvd cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif x2avic v_spec_ctrl vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid bus_lock_detect movdiri movdir64b overflow_recov succor smca fsrm avx512_vp2intersect flush_l1d amd_lbr_pmc_freeze
+Virtualization:                          AMD-V
+L1d cache:                               576 KiB (12 instances)
+L1i cache:                               384 KiB (12 instances)
+L2 cache:                                12 MiB (12 instances)
+L3 cache:                                64 MiB (2 instances)
+NUMA node(s):                            1
+NUMA node0 CPU(s):                       0-23
+Vulnerability Gather data sampling:      Not affected
+Vulnerability Ghostwrite:                Not affected
+Vulnerability Indirect target selection: Not affected
+Vulnerability Itlb multihit:             Not affected
+Vulnerability L1tf:                      Not affected
+Vulnerability Mds:                       Not affected
+Vulnerability Meltdown:                  Not affected
+Vulnerability Mmio stale data:           Not affected
+Vulnerability Old microcode:             Not affected
+Vulnerability Reg file data sampling:    Not affected
+Vulnerability Retbleed:                  Not affected
+Vulnerability Spec rstack overflow:      Mitigation; IBPB on VMEXIT only
+Vulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl
+Vulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization
+Vulnerability Spectre v2:                Mitigation; Enhanced / Automatic IBRS; IBPB conditional; STIBP always-on; PBRSB-eIBRS Not affected; BHI Not affected
+Vulnerability Srbds:                     Not affected
+Vulnerability Tsa:                       Not affected
+Vulnerability Tsx async abort:           Not affected
+Vulnerability Vmscape:                   Mitigation; IBPB on VMEXIT
+               total        used        free      shared  buff/cache   available
+Mem:           125Gi        27Gi        70Gi       659Mi        28Gi        97Gi
+Swap:          8.0Gi          0B       8.0Gi
+Filesystem     Type  1K-blocks      Used  Available Use% Mounted on
+/dev/nvme1n1p2 ext4 1920641288 320424772 1502579552  18% /
+NAME    MODEL                     SIZE ROTA
+loop0                               4K    0
+loop1                           214.5M    0
+loop2                              74M    0
+loop3                            66.8M    0
+loop4                           265.4M    0
+loop5                             8.9M    0
+loop6                           531.5M    0
+loop7                           257.7M    0
+loop8                             402M    0
+loop9                            91.7M    0
+loop10                           16.5M    0
+loop11                          614.5M    0
+loop12                          110.6M    0
+loop13                           11.8M    0
+loop14                           50.3M    0
+loop15                            828K    0
+loop16                          107.5M    0
+loop17                          178.9M    0
+loop18                          143.8M    0
+loop19                          406.7M    0
+nvme0n1 Samsung SSD 990 PRO 2TB   1.8T    0
+nvme2n1 Samsung SSD 990 PRO 2TB   1.8T    0
+nvme1n1 Samsung SSD 990 PRO 2TB   1.8T    0
+e4c692b5a66fe6ebff1dd1fabb3e1ada6bdc281bceb5410f55c322b9a9cab5e0  /tmp/shunter-response-path-20260908T130044Z/shunter/testdata/canary_capacity_test.go
+257d42775376946e6fb41c217aab651ad173d4b175d7a897e9968e1342a94a34  internal/app/config.go
+f5db525f39e4114ce8cf3efefd998ffb530e19f356dc9c44f7f1059b4ce0fdbc  go.mod
+5d00cb921cb094671b28b67bfbeaf5caa596cb03922bfb544e76dd076d363907  go.sum

@@ -1,0 +1,1 @@
+{"cwd": "/tmp/shunter-response-path-20260908T130044Z/diagnostic/canary", "command": ["rtk", "proxy", "/home/gernsback/.cache/go-build/d6/d6c443a26327a93ab4fbb451a6f76942d994abca36beff2fa8481eeeee91c2c7-d/staticcheck", "./..."]}

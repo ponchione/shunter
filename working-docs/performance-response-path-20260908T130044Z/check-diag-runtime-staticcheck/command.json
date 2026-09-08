@@ -1,0 +1,11 @@
+{
+  "cwd": "/tmp/shunter-response-path-20260908T130044Z/diagnostic/shunter",
+  "command": [
+    "rtk",
+    "go",
+    "tool",
+    "staticcheck",
+    "./..."
+  ],
+  "started": 1788873206.4582732
+}

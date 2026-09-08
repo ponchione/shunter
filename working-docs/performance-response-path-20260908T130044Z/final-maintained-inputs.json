@@ -1,0 +1,30 @@
+{
+  "scripts/measure-canary-capacity": {
+    "sha256": "2893f09cbaafabda013be92919c7f4100443ce49ec923d7394bec4727ea191e0",
+    "bytes": 4651
+  },
+  "testdata/canary_capacity_test.go": {
+    "sha256": "442dfe9422630709be480e24e6ce03fc86832828c9dfb6a22e9fdaf62e2afaae",
+    "bytes": 18202
+  },
+  "testdata/canary_arrival_test.go": {
+    "sha256": "245a750a6bbbfd5477266e0e490fc89120f1c09b8fbc667230bed632130baea4",
+    "bytes": 18300
+  },
+  "testdata/canary_arrival_report_test.go": {
+    "sha256": "d1c8b74ab37f1b73dae6c5dcfd061442b8f792e9f18aba813de0ece1221649f6",
+    "bytes": 6908
+  },
+  "testdata/canary_capacity_check_test.go": {
+    "sha256": "3c7914b521b59b42dc8beb188e32c8a4a3ec8ab0f1ec5aa5532405729a648dce",
+    "bytes": 5323
+  },
+  "docs/benchmarks.md": {
+    "sha256": "31bd7a9818011a07d8fe7b9670738905855c8453c4d2ccbdc8d88a7978282d81",
+    "bytes": 8467
+  },
+  "CHANGELOG.md": {
+    "sha256": "d01fcefcfd5ab3730b97ac2fbfbda50d8d32d7aba6652b1b276dd556f48ba69a",
+    "bytes": 64026
+  }
+}

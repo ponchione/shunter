@@ -1,0 +1,6 @@
+Go test: 2 passed, 1 failed in 1 packages
+
+workflows (2 passed, 1 failed)
+  [FAIL] TestFinalReporterReplaysMeasured
+     canary_final_report_replay_test.go:8: report differs: /home/gernsback/source/shunter/working-docs...
+[full output: ~/.local/share/rtk/tee/1788874524_go_test.log]

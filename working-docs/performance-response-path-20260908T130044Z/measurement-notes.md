@@ -1,0 +1,14 @@
+# Setup and boundary notes
+
+- Initial shell discovery used unsupported `rtk find` compound predicates and `rtk exec`; corrected to `rtk proxy`. No mutation occurred in those attempts.
+- First arrival-harness compilation used `.Hex()` on the identity frame's `[16]byte` connection ID; corrected to hexadecimal formatting. First successful targeted run: two schedule/accounting tests passed. No workload has run yet.
+- Diagnosis skill phases that require a fixed latency pass/fail budget, repeated minimization, bisection or optimization are superseded by the user's fixed matrix and diagnostic-only attribution task. No product latency budget is supplied.
+- Original source manifest includes 3,117 pre-existing nonignored files. Fixtures: all 12 archived files verified against the prior frozen manifest. No original evidence was changed.
+
+- Smoke 1 ran the supported script with mode=scheduled-arrival, rate=1000, shape=even, 10 operations/client, count=1. All 320 operations and final/drain checks passed. Smoke 2 invoked the diagnostic benchmark without its enabling environment and skipped; raw output is retained. No diagnostic workload ran, and no further excluded smoke invocation will be added. Diagnostic compilation passed; bounded correlation tests precede the frozen measurements.
+
+- After measurements, final review restored the runner's historical closed-loop per-benchmark repetition order (one Go invocation with `-count=N`) and corrected the event tie-order comment. The scheduled benchmark implementation and all measured source copies remain unchanged. `final-review-vs-measured.patch` records the two review changes; `measured-harness.patch` and frozen source hashes retain exactly what ran, while `maintained-harness.patch` and `final-maintained-inputs.json` describe the delivered surface.
+- All ordinary and diagnostic validation checks passed, including a separate 320-operation arrival workload under the race detector. Analysis timestamp-closure assertions initially assumed too little wall/monotonic pairing uncertainty; both failures and the observed skew are retained in `analysis-initial-error.txt`. No measured sample was retried or omitted.
+
+- Final reporter replay initially compared backing-array capacities after JSON unmarshaling with capacities of the original live recorder; JSON allocates different capacities, so that check was invalid. The failed invocation and initial test are retained as `setup-replay-capacity-error` and `final_report_replay_test.go.initial.txt`. Corrected replay compares all semantic measurements, excluding the two explicitly physical backing-capacity gauges.
+- Final review also guarded missing server memory capture against unsigned TotalAlloc subtraction wraparound, and kept resource cancellation before the phase deadline out of timeout counts. These failure-only changes do not affect successful measured runs; the final reporter replays their semantic measurements unchanged.

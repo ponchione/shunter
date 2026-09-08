@@ -1,0 +1,74 @@
+{
+  "1000-even-ordinary-a": {
+    "client_B_per_invocation": 282412920.0,
+    "client_allocs_per_invocation": 1728835.0,
+    "client_ns_per_invocation": 3207829429.0,
+    "read_max_ms": 4.820390999999972
+  },
+  "1000-even-diagnostic": {
+    "client_B_per_invocation": 281263544.0,
+    "client_allocs_per_invocation": 1726609.0,
+    "client_ns_per_invocation": 3217065673.0,
+    "read_max_ms": 1.820019000000002
+  },
+  "1000-even-ordinary-b": {
+    "client_B_per_invocation": 282485368.0,
+    "client_allocs_per_invocation": 1728710.0,
+    "client_ns_per_invocation": 3206996382.0,
+    "read_max_ms": 3.6176889999999844
+  },
+  "4000-burst-ordinary-a": {
+    "client_B_per_invocation": 282099120.0,
+    "client_allocs_per_invocation": 1725894.0,
+    "client_ns_per_invocation": 840752927.0,
+    "read_max_ms": 5.03121299999998
+  },
+  "4000-burst-diagnostic": {
+    "client_B_per_invocation": 281379456.0,
+    "client_allocs_per_invocation": 1725666.0,
+    "client_ns_per_invocation": 836111348.0,
+    "read_max_ms": 9.26983899999999
+  },
+  "4000-burst-ordinary-b": {
+    "client_B_per_invocation": 281940328.0,
+    "client_allocs_per_invocation": 1725150.0,
+    "client_ns_per_invocation": 839926478.0,
+    "read_max_ms": 8.253237000000013
+  },
+  "4000-even-ordinary-a": {
+    "client_B_per_invocation": 282109624.0,
+    "client_allocs_per_invocation": 1725988.0,
+    "client_ns_per_invocation": 872290340.0,
+    "read_max_ms": 10.000975999999994
+  },
+  "4000-even-diagnostic": {
+    "client_B_per_invocation": 281408472.0,
+    "client_allocs_per_invocation": 1725817.0,
+    "client_ns_per_invocation": 853857674.0,
+    "read_max_ms": 2.7879290000000765
+  },
+  "4000-even-ordinary-b": {
+    "client_B_per_invocation": 281893320.0,
+    "client_allocs_per_invocation": 1725397.0,
+    "client_ns_per_invocation": 851095974.0,
+    "read_max_ms": 6.842651999999987
+  },
+  "1000-burst-ordinary-a": {
+    "client_B_per_invocation": 282092528.0,
+    "client_allocs_per_invocation": 1727096.0,
+    "client_ns_per_invocation": 3186928334.0,
+    "read_max_ms": 2.659157999999934
+  },
+  "1000-burst-diagnostic": {
+    "client_B_per_invocation": 281571640.0,
+    "client_allocs_per_invocation": 1726456.0,
+    "client_ns_per_invocation": 3183518425.0,
+    "read_max_ms": 3.629697999999962
+  },
+  "1000-burst-ordinary-b": {
+    "client_B_per_invocation": 282028536.0,
+    "client_allocs_per_invocation": 1726874.0,
+    "client_ns_per_invocation": 3183435530.0,
+    "read_max_ms": 1.9557910000000902
+  }
+}

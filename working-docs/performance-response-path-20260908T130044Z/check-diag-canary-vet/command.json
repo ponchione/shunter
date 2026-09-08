@@ -1,0 +1,10 @@
+{
+  "cwd": "/tmp/shunter-response-path-20260908T130044Z/diagnostic/canary",
+  "command": [
+    "rtk",
+    "go",
+    "vet",
+    "./internal/workflows"
+  ],
+  "started": 1788873202.3386312
+}

@@ -1,0 +1,16 @@
+ M README.md
+ M contracts/shunter.contract.json
+ M generated/typescript/index.ts
+ M go.mod
+ M go.sum
+ M internal/app/config.go
+ M internal/app/migrations.go
+ M internal/app/module.go
+ M internal/app/reducers.go
+ M internal/app/schema.go
+ M internal/workflows/operations_test.go
+ M tests/typescript/sdk-smoke.ts
+?? internal/app/audit_allocator.go
+?? internal/app/audit_allocator_test.go
+?? internal/app/reducers_test.go
+?? internal/workflows/ordered_delivery_test.go

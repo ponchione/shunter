@@ -1,0 +1,1 @@
+{"cwd": "/tmp/shunter-response-reconstruct-20260908T130044Z/canary", "command": ["rtk", "go", "test", "./internal/workflows", "-run", "TestCanaryArrival|TestFinalReporterReplaysMeasured", "-count=1"], "environment": {"FINAL_REPORT_RESULTS": "/home/gernsback/source/shunter/working-docs/performance-response-path-20260908T130044Z"}}

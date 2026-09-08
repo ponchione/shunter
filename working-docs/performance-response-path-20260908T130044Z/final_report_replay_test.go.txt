@@ -1,0 +1,13 @@
+package workflows
+import("encoding/json";"os";"path/filepath";"reflect";"testing")
+func TestFinalReporterReplaysMeasured(t *testing.T){
+ root:=os.Getenv("FINAL_REPORT_RESULTS");if root==""{t.Skip("archived observations required")}
+ paths,err:=filepath.Glob(filepath.Join(root,"*-diagnostic","result.json"));capacityOK(t,err)
+ ordinary,err:=filepath.Glob(filepath.Join(root,"*-ordinary-*","result.json"));capacityOK(t,err);paths=append(paths,ordinary...)
+ if len(paths)!=12 {t.Fatalf("results %d",len(paths))}
+ for _,p:=range paths {b,err:=os.ReadFile(p);capacityOK(t,err);var r arrivalResult;capacityOK(t,json.Unmarshal(b,&r));got:=arrivalReport(r)
+ // JSON decoding allocates different slice capacities from the original live
+ // recorder. Replay only semantic measurements, not live backing-array storage.
+ for _,k:=range []string{"client-operation-buffer-B","client-delivery-buffer-B"}{delete(got,k);delete(r.Report,k)}
+ if !reflect.DeepEqual(got,r.Report){t.Fatalf("report differs: %s",p)}}
+}

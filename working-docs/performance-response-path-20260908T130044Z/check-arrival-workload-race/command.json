@@ -1,0 +1,27 @@
+{
+  "cwd": "/tmp/shunter-response-path-20260908T130044Z/canary",
+  "command": [
+    "go",
+    "test",
+    "-race",
+    "./internal/workflows",
+    "-run",
+    "^$",
+    "-bench",
+    "^BenchmarkCanaryScheduledArrival$",
+    "-benchtime=1x",
+    "-count=1",
+    "-timeout=170s",
+    "-benchmem"
+  ],
+  "environment": {
+    "GOTOOLCHAIN": "go1.27.1",
+    "CANARY_CAPACITY_MODE": "scheduled-arrival",
+    "CANARY_CAPACITY_RATE": "4000",
+    "CANARY_CAPACITY_SHAPE": "burst",
+    "CANARY_CAPACITY_PER_CLIENT": "10",
+    "CANARY_CAPACITY_FIXTURES": "/tmp/shunter-response-path-20260908T130044Z/fixtures",
+    "CANARY_CAPACITY_RESULT_DIR": "/home/gernsback/source/shunter/working-docs/performance-response-path-20260908T130044Z/check-arrival-workload-race"
+  },
+  "category": "validation/race, excluded from measured matrix"
+}

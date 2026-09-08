@@ -1,0 +1,13 @@
+{
+  "cwd": "/tmp/shunter-response-path-20260908T130044Z/diagnostic/shunter",
+  "command": [
+    "rtk",
+    "go",
+    "test",
+    ".",
+    "-run",
+    "TestProtocolDeclaredQuery|TestProtocolDeclaredReadsApplyVisibility",
+    "-count=1"
+  ],
+  "started": 1788873200.454091
+}

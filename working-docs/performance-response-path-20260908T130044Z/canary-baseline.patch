@@ -1,0 +1,524 @@
+diff --git a/README.md b/README.md
+index dda46ac..9918625 100644
+--- a/README.md
++++ b/README.md
+@@ -29,6 +29,49 @@ workflows. It covers:
+ - public `@shunter/client` TypeScript SDK smoke coverage against a strict-auth
+   served canary runtime
+ 
++Ticket reducers resolve the primary key through the shared indexed `findTicket`
++helper, including transaction-local inserts, updates, deletes and missing IDs.
++
++## Audit allocator migration
++
++Schema version 2 (`0.1.0-audit-allocator-dev`) adds private
++`audit_allocator(id, last_id)`. Startup's existing atomic migration initializes
++the singleton keyed by `1` once from the maximum surviving audit ID. Retries
++leave an existing counter unchanged. Original tables, physical row IDs, complete
++values and pending schedules survive. The audit ID column's autoincrement flag
++remains false; changing that flag on old snapshots is unsupported.
++
++Allocator access uses `ReducerDB.TableID` and the recovered registry, never
++registration order: its fresh table ID is 8, but legacy data retains system
++tables 8/9 and assigns the allocator 10. This app requires a Shunter version
++providing that API. The contract and generated TypeScript describe fresh schema
++registration; runtime table IDs must be resolved in the current invocation.
++
++All application audit writers use the counter: reducers, explicit bootstrap
++seeds, rollback probes and offline migration markers. Automatic IDs start at 1;
++successful higher explicit IDs advance the high-water mark. Committed deletion
++never lowers it, and failed inserts or rolled-back transactions never advance
++it. `MaxUint64` can be allocated once, after which automatic allocation fails
++without wrapping. Future audit imports must use the same counter path.
++
++This changes the old scan's reuse of the highest deleted ID. Initialization
++cannot recover identifiers deleted before migration, and explicit imports may
++still select unused lower IDs. The counter is not a permanent history of every
++identifier ever used.
++
++Before migration, stop the runtime and take a complete pre-migration DataDir
++backup with its matching contract and binary. Run the existing offline migration
++command below, or start the new app, then verify application reads and schedules.
++For rollback, stop the new runtime, restore that backup into a fresh DataDir and
++run the matching old binary. Post-backup writes require a separate app-owned
++reconciliation plan. An old binary is not promised to consume later allocator
++snapshots or log records.
++
++The [Shunter performance guidance](../shunter/docs/performance-envelopes.md)
++records the combined app/runtime evidence. Faster unpaced writes can worsen read
++p95/p99 and retain more audit history; compare matched offered load and record
++absolute milliseconds. A product latency acceptance budget remains unspecified.
++
+ `cmd/workflow` is a lightweight executable protocol smoke. It works in-process
+ or against an already running local server, but the full canary coverage remains
+ in `go test ./internal/workflows`.
+diff --git a/contracts/shunter.contract.json b/contracts/shunter.contract.json
+index 0188a13..13d53e3 100644
+--- a/contracts/shunter.contract.json
++++ b/contracts/shunter.contract.json
+@@ -2,11 +2,11 @@
+   "contract_version": 1,
+   "module": {
+     "name": "opsboard-canary",
+-    "version": "0.1.0-milestone1",
++    "version": "0.1.0-audit-allocator-dev",
+     "metadata": {}
+   },
+   "schema": {
+-    "version": 1,
++    "version": 2,
+     "tables": [
+       {
+         "id": 0,
+@@ -748,6 +748,45 @@
+       },
+       {
+         "id": 8,
++        "name": "audit_allocator",
++        "columns": [
++          {
++            "index": 0,
++            "name": "id",
++            "type": "uint64",
++            "auto_increment": false
++          },
++          {
++            "index": 1,
++            "name": "last_id",
++            "type": "uint64",
++            "auto_increment": false
++          }
++        ],
++        "indexes": [
++          {
++            "id": 0,
++            "name": "pk",
++            "columns": [
++              "id"
++            ],
++            "column_ordinals": [
++              0
++            ],
++            "unique": true,
++            "primary": true
++          }
++        ],
++        "read_policy": {
++          "access": "private",
++          "permissions": []
++        },
++        "sdk": {
++          "visibility": "public"
++        }
++      },
++      {
++        "id": 9,
+         "name": "sys_clients",
+         "columns": [
+           {
+@@ -792,7 +831,7 @@
+         }
+       },
+       {
+-        "id": 9,
++        "id": 10,
+         "name": "sys_scheduled",
+         "columns": [
+           {
+@@ -1458,15 +1497,15 @@
+   },
+   "migrations": {
+     "module": {
+-      "module_version": "0.1.0-milestone1",
+-      "schema_version": 1,
++      "module_version": "0.1.0-audit-allocator-dev",
++      "schema_version": 2,
+       "contract_version": 1,
+-      "previous_version": "0.0.0-milestone0",
+-      "compatibility": "breaking",
++      "previous_version": "0.1.0-milestone1",
++      "compatibility": "compatible",
+       "classifications": [
+         "additive"
+       ],
+-      "notes": "Milestone 1 replaces the placeholder schema with the OpsBoard tables, reducers, reads, and visibility filters."
++      "notes": "Additive audit allocator: automatic IDs advance above the committed high-water mark, including after deletion. Existing audit IDs and autoincrement flags are preserved."
+     },
+     "declarations": []
+   },
+diff --git a/generated/typescript/index.ts b/generated/typescript/index.ts
+index fa114b4..df04310 100644
+--- a/generated/typescript/index.ts
++++ b/generated/typescript/index.ts
+@@ -1,6 +1,6 @@
+ // Code generated by github.com/ponchione/shunter/codegen. DO NOT EDIT.
+ // Source contract: shunter.module_contract v1
+-// Module: opsboard-canary 0.1.0-milestone1
++// Module: opsboard-canary 0.1.0-audit-allocator-dev
+ 
+ import type {
+   BsatnColumn as ShunterBsatnColumn,
+@@ -51,7 +51,7 @@ export const shunterContract = {
+   contractFormat: "shunter.module_contract",
+   contractVersion: 1,
+   moduleName: "opsboard-canary",
+-  moduleVersion: "0.1.0-milestone1",
++  moduleVersion: "0.1.0-audit-allocator-dev",
+   generationProfile: "internal",
+   runtimeImport: "@shunter/client",
+   protocol: shunterProtocol,
+@@ -167,6 +167,11 @@ export interface TicketRemindersRow {
+   fired: boolean;
+ }
+ 
++export interface AuditAllocatorRow {
++  id: bigint;
++  lastId: bigint;
++}
++
+ export interface SysClientsRow {
+   connectionId: Uint8Array;
+   identity: Uint8Array;
+@@ -190,6 +195,7 @@ export const tables = {
+   notifications: "notifications",
+   auditLog: "audit_log",
+   ticketReminders: "ticket_reminders",
++  auditAllocator: "audit_allocator",
+   sysClients: "sys_clients",
+   sysScheduled: "sys_scheduled",
+ } as const;
+@@ -205,6 +211,7 @@ export type TableRows = {
+   "notifications": NotificationsRow;
+   "audit_log": AuditLogRow;
+   "ticket_reminders": TicketRemindersRow;
++  "audit_allocator": AuditAllocatorRow;
+   "sys_clients": SysClientsRow;
+   "sys_scheduled": SysScheduledRow;
+ };
+@@ -381,6 +388,18 @@ export function decodeTicketRemindersRow(row: Uint8Array): TicketRemindersRow {
+   }));
+ }
+ 
++const auditAllocatorColumns = [
++  { name: "id", kind: "uint64" },
++  { name: "last_id", kind: "uint64" },
++] as const satisfies readonly ShunterBsatnColumn[];
++
++export function decodeAuditAllocatorRow(row: Uint8Array): AuditAllocatorRow {
++  return shunterDecodeBsatnProduct(row, auditAllocatorColumns, (values) => ({
++    id: values[0] as bigint,
++    lastId: values[1] as bigint,
++  }));
++}
++
+ const sysClientsColumns = [
+   { name: "connection_id", kind: "bytes" },
+   { name: "identity", kind: "bytes" },
+@@ -422,6 +441,7 @@ export const tableRowDecoders = {
+   "notifications": decodeNotificationsRow,
+   "audit_log": decodeAuditLogRow,
+   "ticket_reminders": decodeTicketRemindersRow,
++  "audit_allocator": decodeAuditAllocatorRow,
+   "sys_clients": decodeSysClientsRow,
+   "sys_scheduled": decodeSysScheduledRow,
+ } as const satisfies TableRowDecoders;
+@@ -435,6 +455,7 @@ export const tableReadPolicies = {
+   notifications: { access: "private", permissions: [] },
+   auditLog: { access: "permissioned", permissions: ["audit:read"] },
+   ticketReminders: { access: "private", permissions: [] },
++  auditAllocator: { access: "private", permissions: [] },
+   sysClients: { access: "private", permissions: [] },
+   sysScheduled: { access: "private", permissions: [] },
+ } as const;
+@@ -448,6 +469,7 @@ export const tableKinds = {
+   notifications: "persistent",
+   auditLog: "persistent",
+   ticketReminders: "persistent",
++  auditAllocator: "persistent",
+   sysClients: "persistent",
+   sysScheduled: "persistent",
+ } as const;
+@@ -501,6 +523,11 @@ export function subscribeTicketReminders(subscribeTable: TableSubscribeCaller<Ti
+   return subscribeTable("ticket_reminders", onRows, subscribeOptions);
+ }
+ 
++export function subscribeAuditAllocator(subscribeTable: TableSubscribeCaller<AuditAllocatorRow>, onRows?: (rows: AuditAllocatorRow[]) => void, options: TableSubscribeOptions<AuditAllocatorRow> = {}): Promise<SubscriptionUnsubscribe> {
++  const subscribeOptions: TableSubscribeOptions<AuditAllocatorRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["audit_allocator"] } : { ...options };
++  return subscribeTable("audit_allocator", onRows, subscribeOptions);
++}
++
+ export function subscribeSysClients(subscribeTable: TableSubscribeCaller<SysClientsRow>, onRows?: (rows: SysClientsRow[]) => void, options: TableSubscribeOptions<SysClientsRow> = {}): Promise<SubscriptionUnsubscribe> {
+   const subscribeOptions: TableSubscribeOptions<SysClientsRow> = options.decodeRow === undefined ? { ...options, decodeRow: tableRowDecoders["sys_clients"] } : { ...options };
+   return subscribeTable("sys_clients", onRows, subscribeOptions);
+@@ -1308,6 +1335,9 @@ export function createModuleClient(bindings: ModuleClientBindings) {
+       ticketReminders: {
+         subscribe: (onRows?: (rows: TicketRemindersRow[]) => void, options: TableSubscribeOptions<TicketRemindersRow> = {}) => subscribeTicketReminders(bindings.subscribeTable, onRows, options),
+       },
++      auditAllocator: {
++        subscribe: (onRows?: (rows: AuditAllocatorRow[]) => void, options: TableSubscribeOptions<AuditAllocatorRow> = {}) => subscribeAuditAllocator(bindings.subscribeTable, onRows, options),
++      },
+       sysClients: {
+         subscribe: (onRows?: (rows: SysClientsRow[]) => void, options: TableSubscribeOptions<SysClientsRow> = {}) => subscribeSysClients(bindings.subscribeTable, onRows, options),
+       },
+diff --git a/go.mod b/go.mod
+index bb6f63a..8c641c6 100644
+--- a/go.mod
++++ b/go.mod
+@@ -1,6 +1,6 @@
+ module github.com/ponchione/opsboard-canary
+ 
+-go 1.26.2
++go 1.27.1
+ 
+ replace github.com/ponchione/shunter => ../shunter
+ 
+@@ -13,6 +13,7 @@ require (
+ require (
+ 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
+ 	github.com/ponchione/websocket v1.8.15-shunter.1 // indirect
++	golang.org/x/sys v0.47.0 // indirect
+ 	lukechampine.com/blake3 v1.4.1 // indirect
+ )
+ 
+diff --git a/go.sum b/go.sum
+index ff5b4dd..2e7e4dc 100644
+--- a/go.sum
++++ b/go.sum
+@@ -1,7 +1,9 @@
++github.com/andybalholm/brotli v1.2.1 h1:R+f5xP285VArJDRgowrfb9DqL18yVK0gKAW/F+eTWro=
++github.com/andybalholm/brotli v1.2.1/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
+ github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=
+ github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
+-github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
+-github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
++github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
++github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
+ github.com/klauspost/cpuid/v2 v2.0.9 h1:lgaqFMSdTdQYdZ04uHyN2d/eKdOMyi2YLSvlQIBFYa4=
+ github.com/klauspost/cpuid/v2 v2.0.9/go.mod h1:FInQzS24/EEf25PyTYn52gqo7WaD8xa0213Md/qVLRg=
+ github.com/ponchione/websocket v1.8.14-shunter.1 h1:8tGfkWACqm+OUsoohgX8JrUpOJNzfQqkN/IileFmVWM=
+@@ -10,6 +12,8 @@ github.com/ponchione/websocket v1.8.15-shunter.1 h1:tOaj/AKBTiiQwtkJ1f7W+p5u8Rss
+ github.com/ponchione/websocket v1.8.15-shunter.1/go.mod h1:+g9NnjSE0yU095pdiwWnx2IpLbS586LpsArs9oCBQ94=
+ go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
+ go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
++golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
++golang.org/x/sys v0.47.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+ lukechampine.com/blake3 v1.4.1 h1:I3Smz7gso8w4/TunLKec6K2fn+kyKtDxr/xcQEN84Wg=
+ lukechampine.com/blake3 v1.4.1/go.mod h1:QFosUxmjB8mnrWFSNwKmvxHpfY72bmD2tQ0kBMM3kwo=
+ pgregory.net/rapid v1.2.0 h1:keKAYRcjm+e1F0oAuU5F5+YPAWcyxNNRK2wud503Gnk=
+diff --git a/internal/app/config.go b/internal/app/config.go
+index 4bccf7c..9ba98cb 100644
+--- a/internal/app/config.go
++++ b/internal/app/config.go
+@@ -5,7 +5,7 @@ import "github.com/ponchione/shunter"
+ const (
+ 	StrictAuthIssuer     = "opsboard-canary"
+ 	StrictAuthAudience   = "opsboard"
+-	StrictAuthSigningKey = "opsboard-canary-dev-signing-key"
++	StrictAuthSigningKey = "opsboard-canary-dev-signing-key-32"
+ )
+ 
+ // StrictAuthConfig returns the strict-auth runtime configuration used by the
+diff --git a/internal/app/migrations.go b/internal/app/migrations.go
+index 2dea39f..c6d37d4 100644
+--- a/internal/app/migrations.go
++++ b/internal/app/migrations.go
+@@ -3,8 +3,10 @@ package app
+ import (
+ 	"context"
+ 	"fmt"
++	"math"
+ 
+ 	"github.com/ponchione/shunter"
++	"github.com/ponchione/shunter/types"
+ )
+ 
+ const (
+@@ -34,12 +36,23 @@ func OperationalProofMigration(ctx context.Context, mc *shunter.MigrationContext
+ 		}
+ 	}
+ 
+-	id := uint64(1)
+-	for _, row := range tx.ScanTable(TableAuditLog) {
+-		if rowID := row[0].AsUint64(); rowID >= id {
+-			id = rowID + 1
+-		}
++	table, _, ok := mc.Schema().TableByName(auditAllocatorTable)
++	if !ok {
++		return fmt.Errorf("missing audit allocator table")
++	}
++	var counterID types.RowID
++	var counter types.ProductValue
++	for id, row := range tx.SeekIndex(table, 0, types.NewUint64(1)) {
++		counterID, counter = id, row
++		break
++	}
++	if counter == nil {
++		return fmt.Errorf("audit allocator not initialized")
++	}
++	if counter[1].AsUint64() == math.MaxUint64 {
++		return fmt.Errorf("audit IDs exhausted")
+ 	}
++	id := counter[1].AsUint64() + 1
+ 	body := fmt.Sprintf("%s for %s %s", MigrationOperationalProofBody, mc.ModuleName(), mc.ModuleVersion())
+ 	_, err := tx.Insert(TableAuditLog, auditLogRow(seedAuditLog{
+ 		id:            id,
+@@ -53,5 +66,7 @@ func OperationalProofMigration(ctx context.Context, mc *shunter.MigrationContext
+ 	if err != nil {
+ 		return fmt.Errorf("insert migration audit marker: %w", err)
+ 	}
+-	return nil
++	counter[1] = types.NewUint64(id)
++	_, err = tx.Update(table, counterID, counter)
++	return err
+ }
+diff --git a/internal/app/module.go b/internal/app/module.go
+index 5ce699b..ac559f3 100644
+--- a/internal/app/module.go
++++ b/internal/app/module.go
+@@ -4,8 +4,8 @@ import "github.com/ponchione/shunter"
+ 
+ const (
+ 	ModuleName    = "opsboard-canary"
+-	ModuleVersion = "0.1.0-milestone1"
+-	SchemaVersion = 1
++	ModuleVersion = "0.1.0-audit-allocator-dev"
++	SchemaVersion = 2
+ )
+ 
+ // NewModule returns the OpsBoard Canary Shunter module definition.
+@@ -17,13 +17,14 @@ func NewModule() *shunter.Module {
+ 			ModuleVersion:   ModuleVersion,
+ 			SchemaVersion:   SchemaVersion,
+ 			ContractVersion: shunter.ModuleContractVersion,
+-			PreviousVersion: "0.0.0-milestone0",
+-			Compatibility:   shunter.MigrationCompatibilityBreaking,
++			PreviousVersion: "0.1.0-milestone1",
++			Compatibility:   shunter.MigrationCompatibilityCompatible,
+ 			Classifications: []shunter.MigrationClassification{
+ 				shunter.MigrationClassificationAdditive,
+ 			},
+-			Notes: "Milestone 1 replaces the placeholder schema with the OpsBoard tables, reducers, reads, and visibility filters.",
++			Notes: "Additive audit allocator: automatic IDs advance above the committed high-water mark, including after deletion. Existing audit IDs and autoincrement flags are preserved.",
+ 		})
++	m.MigrationHook(initializeAuditAllocator)
+ 
+ 	registerTables(m)
+ 	registerReducers(m)
+diff --git a/internal/app/reducers.go b/internal/app/reducers.go
+index 5101320..193da10 100644
+--- a/internal/app/reducers.go
++++ b/internal/app/reducers.go
+@@ -424,7 +424,7 @@ func failAfterAuditProbeReducer(ctx *schema.ReducerContext, args []byte) ([]byte
+ 	if err := decodeOptionalNoArgs(ReducerFailAfterAuditProbe, args); err != nil {
+ 		return nil, err
+ 	}
+-	if err := insertAudit(ctx, ctx.Caller.Identity.Hex(), ReducerFailAfterAuditProbe, "audit_log", nextPrimaryID(ctx, TableAuditLog), "rollback probe audit row", 0); err != nil {
++	if err := insertAudit(ctx, ctx.Caller.Identity.Hex(), ReducerFailAfterAuditProbe, "audit_log", 0, "rollback probe audit row", 0); err != nil {
+ 		return nil, err
+ 	}
+ 	return nil, fmt.Errorf("%s forced rollback after audit insert", ReducerFailAfterAuditProbe)
+@@ -573,7 +573,7 @@ func insertBootstrapDemoRows(ctx *schema.ReducerContext, nowNS int64) error {
+ 		{id: 903, actorIdentity: identities["admin"], action: "bootstrap_demo", targetTable: "comments", targetID: 500, body: "seeded comments", createdAtNS: nowNS},
+ 	}
+ 	for _, row := range audits {
+-		if _, err := ctx.DB.Insert(uint32(TableAuditLog), auditLogRow(row)); err != nil {
++		if err := insertAuditRow(ctx, row, false); err != nil {
+ 			return fmt.Errorf("insert seed audit %d: %w", row.id, err)
+ 		}
+ 	}
+@@ -599,11 +599,9 @@ func findProject(ctx *schema.ReducerContext, id uint64) (types.RowID, seedProjec
+ }
+ 
+ func findTicket(ctx *schema.ReducerContext, id uint64) (types.RowID, seedTicket, bool) {
+-	for rowID, row := range ctx.DB.ScanTable(uint32(TableTickets)) {
+-		ticket := ticketFromProduct(row)
+-		if ticket.id == id {
+-			return rowID, ticket, true
+-		}
++	// The schema builder assigns index 0 to this table's primary key.
++	for rowID, row := range ctx.DB.SeekIndex(uint32(TableTickets), 0, types.NewUint64(id)) {
++		return rowID, ticketFromProduct(row), true
+ 	}
+ 	return 0, seedTicket{}, false
+ }
+@@ -675,19 +673,10 @@ func insertNotification(ctx *schema.ReducerContext, recipientIdentity string, ti
+ }
+ 
+ func insertAudit(ctx *schema.ReducerContext, actor, action, targetTable string, targetID uint64, body string, nowNS int64) error {
+-	id := nextPrimaryID(ctx, TableAuditLog)
+-	if _, err := ctx.DB.Insert(uint32(TableAuditLog), auditLogRow(seedAuditLog{
+-		id:            id,
+-		actorIdentity: actor,
+-		action:        action,
+-		targetTable:   targetTable,
+-		targetID:      targetID,
+-		body:          body,
+-		createdAtNS:   nowNS,
+-	})); err != nil {
+-		return fmt.Errorf("insert audit %d: %w", id, err)
+-	}
+-	return nil
++	return insertAuditRow(ctx, seedAuditLog{
++		actorIdentity: actor, action: action, targetTable: targetTable,
++		targetID: targetID, body: body, createdAtNS: nowNS,
++	}, true)
+ }
+ 
+ func nextPrimaryID(ctx *schema.ReducerContext, tableID schema.TableID) uint64 {
+diff --git a/internal/app/schema.go b/internal/app/schema.go
+index e285aeb..cb0f6af 100644
+--- a/internal/app/schema.go
++++ b/internal/app/schema.go
+@@ -24,7 +24,14 @@ func registerTables(m *shunter.Module) {
+ 		TableDef(commentsTable(), schema.WithPublicRead()).
+ 		TableDef(notificationsTable()).
+ 		TableDef(auditLogTable(), schema.WithReadPermissions(PermAuditRead)).
+-		TableDef(ticketRemindersTable())
++		TableDef(ticketRemindersTable()).
++		TableDef(schema.TableDefinition{
++			Name: auditAllocatorTable,
++			Columns: []schema.ColumnDefinition{
++				{Name: "id", Type: schema.KindUint64, PrimaryKey: true},
++				{Name: "last_id", Type: schema.KindUint64},
++			},
++		})
+ }
+ 
+ func usersTable() schema.TableDefinition {
+diff --git a/internal/workflows/operations_test.go b/internal/workflows/operations_test.go
+index d0250b5..c68755d 100644
+--- a/internal/workflows/operations_test.go
++++ b/internal/workflows/operations_test.go
+@@ -70,15 +70,15 @@ func TestBackupRestoreAndMigrationWorkflow(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatalf("RunModuleDataDirMigrations returned error: %v", err)
+ 	}
+-	if len(result.Hooks) != 1 || !result.Hooks[0].Changed {
+-		t.Fatalf("migration result hooks = %#v, want one changed hook", result.Hooks)
++	if len(result.Hooks) != 2 || result.Hooks[0].Changed || !result.Hooks[1].Changed {
++		t.Fatalf("migration result hooks = %#v, want unchanged allocator initialization and changed proof hook", result.Hooks)
+ 	}
+ 	secondResult, err := shunter.RunModuleDataDirMigrations(context.Background(), migratingModule, shunter.Config{DataDir: restoreDir})
+ 	if err != nil {
+ 		t.Fatalf("second RunModuleDataDirMigrations returned error: %v", err)
+ 	}
+-	if len(secondResult.Hooks) != 1 || secondResult.Hooks[0].Changed {
+-		t.Fatalf("second migration result hooks = %#v, want one unchanged idempotent hook", secondResult.Hooks)
++	if len(secondResult.Hooks) != 2 || secondResult.Hooks[0].Changed || secondResult.Hooks[1].Changed {
++		t.Fatalf("second migration result hooks = %#v, want two unchanged idempotent hooks", secondResult.Hooks)
+ 	}
+ 
+ 	restored := newWorkflowHarnessWithBootstrap(t, restoreDir, false)
+diff --git a/tests/typescript/sdk-smoke.ts b/tests/typescript/sdk-smoke.ts
+index 35dec18..8a06e93 100644
+--- a/tests/typescript/sdk-smoke.ts
++++ b/tests/typescript/sdk-smoke.ts
+@@ -30,7 +30,7 @@ import {
+ 
+ const strictAuthIssuer = "opsboard-canary";
+ const strictAuthAudience = "opsboard";
+-const strictAuthSigningKey = "opsboard-canary-dev-signing-key";
++const strictAuthSigningKey = "opsboard-canary-dev-signing-key-32";
+ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+ 
+ async function main(): Promise<void> {

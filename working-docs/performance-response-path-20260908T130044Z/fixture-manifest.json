@@ -1,0 +1,54 @@
+{
+  "archive": "working-docs/performance-next-limits-20260908T115634Z/fixtures.tar.gz",
+  "archive_sha256": "84f6afece32f7d6cef973efa1a65751c7773a03ab052739b2b21922fecbc2e83",
+  "files": {
+    "1024/0/snapshot": {
+      "bytes": 2590,
+      "sha256": "710b45b277b5e3d869bb263d4b52e0ceb6763b5cc5b55328277618e13a6eff8c"
+    },
+    "1024/00000000000000000001.idx": {
+      "bytes": 262144,
+      "sha256": "ad8c099170612357efebf7c4c0d93af8a42745ae73f30f27cfb48847806c4c90"
+    },
+    "1024/00000000000000000001.log": {
+      "bytes": 2514150,
+      "sha256": "6d4e50ac24d490414758505bce70ab27549f17ef8d3b3022798049f0157406a7"
+    },
+    "1024/1029/snapshot": {
+      "bytes": 2410717,
+      "sha256": "3152651ba298deeb0254757f12d10782c7198210cd245491407d63fd5f9dc355"
+    },
+    "1024/shunter.datadir.json": {
+      "bytes": 217,
+      "sha256": "db388b0b9a08fdd8a0714fa29dc3a302d771216cb5ba08ad176701e545db12f9"
+    },
+    "1024.shunter-lock": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "8192/0/snapshot": {
+      "bytes": 2590,
+      "sha256": "710b45b277b5e3d869bb263d4b52e0ceb6763b5cc5b55328277618e13a6eff8c"
+    },
+    "8192/00000000000000000001.idx": {
+      "bytes": 262144,
+      "sha256": "478698372b4bbc67b10796be66f9730587c0f9934f5577320ff237e70021748e"
+    },
+    "8192/00000000000000000001.log": {
+      "bytes": 20082918,
+      "sha256": "1040f240eabdfc9d7d98a65f980db86f01a5b5d760ea688ab4d0d05b6bb9aeb5"
+    },
+    "8192/8197/snapshot": {
+      "bytes": 19241181,
+      "sha256": "c807d519191b738f559506dac53decb30a940b193db8802fb03e16ff3267c9af"
+    },
+    "8192/shunter.datadir.json": {
+      "bytes": 217,
+      "sha256": "db388b0b9a08fdd8a0714fa29dc3a302d771216cb5ba08ad176701e545db12f9"
+    },
+    "8192.shunter-lock": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

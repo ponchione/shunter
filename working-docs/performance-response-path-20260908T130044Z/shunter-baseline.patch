@@ -1,0 +1,903 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index be9b8b8..60b8aa0 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -4,6 +4,15 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
+ 
+ ## Unreleased
+ 
++- Added `ReducerDB.TableID(name string) (uint32, bool)` to resolve recovered
++  table IDs during a reducer invocation; unknown names and expired handles
++  return false. Custom implementations and test doubles must add the method.
++- Durable batches preserve sparse offset-index byte cadence while continuing
++  to sync the backing index after the log. Rotation and close retain the final
++  candidate; durability and delivery guarantees are unchanged. Sparse hints can
++  increase recovery scanning, and inherited full indexes are not resampled.
++- Buffered snapshot file writes independently of hashing. Flush failures stop
++  before hash-header patching, syncing or atomic publication.
+ - Added a reproducible external canary capacity study covering hosted latency,
+   fanout, server memory during writes and snapshots, and offline backup/restore
+   up to a 37.317 MiB fixture. Recorded measurements remain advisory.
+diff --git a/TECH_DEBT.md b/TECH_DEBT.md
+index 4ea5041..1fc8763 100644
+--- a/TECH_DEBT.md
++++ b/TECH_DEBT.md
+@@ -1,33 +1,55 @@
+ # Technical debt
+ 
+-No open findings remain from the 2026-09-07 architecture/runtime audit.
+-Original code references were checked at commit
+-`f893c6379aea7ec6d9dced8abe67b4c749e3e81e`; historical evidence is retained below.
+-Broader future work remains in [working-docs/tech-debt.md](working-docs/tech-debt.md).
++Open findings only, updated 2026-09-08. Completed implementations and validation
++remain in the [adoption record](working-docs/performance-implementation-data/README.md)
++and [completed checklist](working-docs/performance-implementation-progress.md).
++Broader deferred work lives in [working-docs/tech-debt.md](working-docs/tech-debt.md).
++The [implementation plan](working-docs/performance-implementation-plan.md#work-to-defer-or-reject)
++retains all deferred and rejected decisions.
+ 
+-The audit concerns Shunter's own guarantees. Static Go applications, narrow
+-SQL, the native protocol, and the absence of reference-runtime compatibility,
+-managed hosting, billing, distribution, or multilingual modules are not debt.
++These findings concern Shunter's own guarantees. They are development
++opportunities, not release blockers or production capacity claims.
+ 
+-## Audit evidence and limits
++## PERF-03 — Reducer scans materialize rows more than once
+ 
+-The assessment ran `rtk go test` across the root runtime, store, commitlog,
+-executor, subscription, protocol, auth, schema, query/sql, codegen, and
+-protocolclient packages: 5,302 cases passed. Selected executor/subscription race
+-checks passed 68 cases. TypeScript typechecking and two reconnect/interruption
+-test groups passed. Those historical passes did not cover every cross-package
+-ordering or progress failure found by the audit.
++- **Status:** Open; optimization deferred until a necessary scan is a measured
++  bottleneck.
++- **Location:** `store/table.go` (`Scan`), `store/state_view.go` (`ScanTable`),
++  `executor/executor.go` (`snapshotReducerRows`).
++- **Evidence:** full-row copies occur before application iteration, so early
++  return cannot avoid them. Adapter slice growth contributed about 8% of the
++  original canary's allocation, alongside larger product-row copies. After
++  removing unnecessary ticket and audit scans, adapter slice growth is a small
++  cost in that workload. See the
++  [investigation](working-docs/performance-investigation.md).
++- **Next:** measure a required scan in a representative application path before
++  changing iteration. Any optimization must preserve row isolation,
++  transaction-local insert/update/delete visibility, mutation during iteration,
++  and invocation lifetime. A broad iterator rewrite has no established benefit
++  for the adopted canary workload.
+ 
+-The original audit probes used anonymous in-memory Go overlays and real hosted
+-runtime connections. Permanent regression tests for resolved findings live
+-alongside the affected packages. Historical passing tests and previous audit
+-records establish only the coverage exercised. No sustained-load, physical power-loss,
+-penetration, reference-runtime execution, or release-qualification result is
+-implied.
++## PERF-07 — Opening for append rescans the entire active segment
+ 
+-Reference code was inspected only for independent functionality comparison:
+-ordered [commit/subscription delivery](reference/SpacetimeDB/crates/core/src/subscription/module_subscription_actor.rs#L1738),
+-optional [durable client delivery](reference/SpacetimeDB/crates/core/src/client/client_connection.rs#L219),
+-and [snapshot fsync after capture](reference/SpacetimeDB/crates/engine/src/snapshot.rs#L237).
+-These ignored local paths may be absent in another checkout. They are research
+-references, not implementation dependencies or permission to copy source.
++- **Status:** Open; further optimization deferred pending an actual startup
++  requirement.
++- **Location:** `commitlog/segment.go` (`OpenSegmentForAppend`),
++  `commitlog/durability.go` (`NewDurabilityWorkerWithResumePlan`),
++  `lifecycle.go` (durability construction during `Runtime.Start`).
++- **Evidence:** opening a 64-MiB active segment validates all 402,048 records
++  after snapshot recovery. Historical baseline/candidate reopen medians were
++  363.521/372.155 ms, allocating about 173.3 MiB; their timing difference was
++  inconclusive. This is existing behavior, not a sidecar-cadence regression.
++  See the [larger-history study](working-docs/performance-investigation-data/recovery-history-20260907/README.md).
++- **Existing mitigations and limits:** smaller segments and compaction reduce
++  some storage-phase costs, but complete hosted startup gains are mixed.
++  Direct 16-to-4-MiB HTTP readiness was 2.52% slower before compaction and 4.88%
++  faster afterward. Cleanup cost about 77 ms; its overall startup savings were
++  inconclusive. Neither changed defaults nor automatic compaction is justified.
++  See the [hosted-startup study](working-docs/performance-investigation-data/hosted-start-20260907/README.md).
++- **Next:** establish the required complete startup time and representative
++  history before another bounded experiment. The scan validates continuity,
++  integrity and append position; the resume plan contains no validated byte
++  position. Advisory offsets or file size cannot replace that validation.
++  Preserve atomic recovery publication, retention, safe append and integrity.
++  Recovery API timing excludes this later startup phase; allocation volume is
++  distinct from retained memory.
+diff --git a/commitlog/durability.go b/commitlog/durability.go
+index 45a84ee..0d50064 100644
+--- a/commitlog/durability.go
++++ b/commitlog/durability.go
+@@ -610,6 +610,8 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
+ 			return err
+ 		}
+ 		if dw.idx != nil {
++			// The segment is durable; retain the last sparse lookup before close.
++			_ = dw.idx.Sync()
+ 			_ = dw.idx.Close()
+ 			dw.idx = nil
+ 		}
+@@ -633,7 +635,9 @@ func (dw *DurabilityWorker) syncBatchTail(lastDurable uint64) error {
+ 		return err
+ 	}
+ 	if dw.idx != nil {
+-		if err := dw.idx.Sync(); err != nil {
++		// Keep the pending candidate on the byte cadence. Sync only entries
++		// already appended; rotation and close flush the final candidate.
++		if err := dw.idx.head.Sync(); err != nil {
+ 			_ = dw.idx.Close()
+ 			dw.idx = nil
+ 		}
+diff --git a/commitlog/snapshot_io.go b/commitlog/snapshot_io.go
+index 7988465..e5c2f98 100644
+--- a/commitlog/snapshot_io.go
++++ b/commitlog/snapshot_io.go
+@@ -1,6 +1,7 @@
+ package commitlog
+ 
+ import (
++	"bufio"
+ 	"bytes"
+ 	"cmp"
+ 	"encoding/binary"
+@@ -692,10 +693,14 @@ func (w *FileSnapshotWriter) writeSnapshotFile(f snapshotTempFile, txID types.Tx
+ 	}
+ 
+ 	hasher := blake3.New(32, nil)
+-	bodyWriter := io.MultiWriter(f, hasher)
++	fileBuffer := bufio.NewWriter(f)
++	bodyWriter := io.MultiWriter(fileBuffer, hasher)
+ 	if err := writeSnapshotBodyCapture(bodyWriter, w.reg, txID, body); err != nil {
+ 		return err
+ 	}
++	if err := fileBuffer.Flush(); err != nil {
++		return err
++	}
+ 	var hash [32]byte
+ 	copy(hash[:], hasher.Sum(nil))
+ 	if err := writeAtFull(f, hash[:], 20); err != nil {
+diff --git a/docs/how-to/persistence-and-shutdown.md b/docs/how-to/persistence-and-shutdown.md
+index addaf5c..b7ce998 100644
+--- a/docs/how-to/persistence-and-shutdown.md
++++ b/docs/how-to/persistence-and-shutdown.md
+@@ -93,6 +93,26 @@ durability wait and detached state capture, then proceed during serialization
+ and disk I/O. Concurrent snapshot requests and compaction serialize; `Close`
+ waits for active storage maintenance before releasing the DataDir lease.
+ 
++Snapshot serialization buffers file writes while feeding the hash with the
++original write sizes. A failed buffer flush stops before hash-header patching,
++fsync, or publication, preserving cleanup and atomic publication. The measured
++benefit is limited to snapshot publication; it does not establish lower process
++memory or a general hosted throughput gain. See [performance evidence](../performance-envelopes.md).
++
++Commit-log offset indexes are advisory sparse recovery hints. Durable batches
++fsync the segment, then the backing index, before publishing the durable horizon.
++Batch tails retain the pending hint and byte cadence; rotation and graceful
++close flush the final hint. Public `OffsetIndexWriter.Sync` still flushes its
++pending hint and syncs the index. Index errors retain log-based recovery fallback.
++There is still an index sync per batch.
++
++Sparser hints can increase recovery scanning. Historical larger native-index
++recovery rose from 3.267 to 3.645 ms and 0.860 to 1.015 MiB allocated. Existing
++full indexes are not resampled; exhausted capacity removes the normal sparse
++hint scan bound. Reopening the active segment still scans it to validate append
++position. These are storage-phase costs, not complete HTTP readiness. Segment
++defaults and app-owned compaction scheduling remain unchanged.
++
+ `CompactCommitLog` only deletes sealed commit log segments fully covered by the
+ completed snapshot TX ID.
+ 
+diff --git a/docs/how-to/reducer-patterns.md b/docs/how-to/reducer-patterns.md
+index 816afcd..ae2cf4c 100644
+--- a/docs/how-to/reducer-patterns.md
++++ b/docs/how-to/reducer-patterns.md
+@@ -73,6 +73,22 @@ for rowID, row := range ctx.DB.SeekIndex(
+ 
+ Use indexes for reducer lookups that are expected to stay hot as data grows.
+ 
++Resolve tables by name when IDs can differ after an additive migration:
++
++```go
++tableID, ok := ctx.DB.TableID("messages")
++if !ok {
++	return nil, fmt.Errorf("messages table unavailable")
++}
++```
++
++`TableID(name string) (uint32, bool)` uses this runtime's recovered registry;
++registration order is not a stable ID mapping across schema additions. Unknown
++names and expired invocation handles return `false`. The database remains valid
++only during synchronous reducer execution. Resolving a system table does not
++permit its mutation. Custom `ReducerDB` implementations and test doubles must
++implement this added interface method, including lifetime behavior.
++
+ ## Update And Delete
+ 
+ ```go
+diff --git a/docs/performance-envelopes.md b/docs/performance-envelopes.md
+index 06eac89..46d590d 100644
+--- a/docs/performance-envelopes.md
++++ b/docs/performance-envelopes.md
+@@ -2,8 +2,58 @@
+ 
+ This page records measured behavior for the benchmark coverage that already
+ exists. The rows are advisory unless a release process defines hard thresholds
+-for a specific workload. The snapshot below uses the preferred repo toolchain
+-from `go.mod`.
++for a specific workload. Each historical section retains its measured revision, toolchain and configuration;
++those measurements do not describe later defaults automatically.
++
++## 2026-09-08 Performance adoption
++
++The external canary now uses its ticket primary index and a transactional audit
++high-water counter. Shunter supplies invocation-scoped recovered table lookup,
++preserves sparse sidecar cadence across durable batches, and buffers snapshot
++file writes independently of hashing. The [implementation checklist](../working-docs/performance-implementation-progress.md)
++tracks maintained tests and the bounded adoption comparison.
++
++The [adoption comparison](../working-docs/performance-implementation-data/README.md)
++retained 16 workload samples: median writes/s 100.9 → 760.2 at eight clients and
++87.56 → 2,510 at 32. Matched completion was 13.533 → 0.491 s; shared-host control
++variation limits the speedup estimate. Fixed 32-client read p95/p99 rose
++0.4978/2.069 → 1.129/2.935 ms; matched tails rose 0.9290/2.830 →
++1.744/3.593 ms. At 100 operations/s they fell 0.8717/2.638 → 0.6067/1.560 ms.
++Ten separate large snapshot samples gave 74.82 → 65.93 ms median with 4,176 bytes
++extra allocation; one buffered sample was slower (85.68 ms). All exact-state,
++delivery and publication checks passed. These results add development evidence
++without establishing product latency acceptance.
++
++The [September 7 final validation](../working-docs/performance-investigation-data/final-validation-20260907/README.md)
++measured the original **canary plus runtime** against the four-patch candidate,
++without snapshot buffering: eight-client writes/s 117.45 → 785.30; 32-client
++writes/s 116.35 → 2,644.50. A matched 1,024-write job including two snapshots and
++confirmed delivery drain took 8.783 → 0.464 seconds and allocated 27.536 GiB →
++178.841 MiB on the server. These are historical workload results, not runtime-only
++attribution or acceptance thresholds; do not multiply isolated gains into them.
++
++Unpaced 32-client read p95 worsened from 0.358 to 0.852 ms, and from 0.367 to
++1.397 ms with matched history. At the same offered 100 operations/s it improved
++from 0.3375 to 0.2939 ms. Paced equal-content sampled RSS fell 230.8 → 179.2 MiB,
++while retained heap changed only 62.02 → 61.89 MiB. Faster fixed-duration runs
++retained more audits and used more memory. Medians of per-run percentiles are
++not pooled tails; sampled peaks can miss brief peaks. FullUpdate reply latency
++is not DurableSuccess latency. Product read-latency acceptance remains
++unspecified: choose a budget in milliseconds for the intended load.
++
++Sparse sidecars still sync once per durable batch. Fewer dirty writes improve
++throughput, but the larger native-index recovery study measured 3.267 → 3.645 ms
++and 0.860 → 1.015 MiB allocated. Existing full indexes are not resampled, and
++capacity exhaustion removes the normal sparse hint scan bound. Recovery timing
++excludes later full active-segment validation for append and complete hosted
++readiness. Segment defaults and compaction policy remain unchanged.
++
++File-only buffering is a separate, limited publication improvement. The
++[interleaved snapshot study](../working-docs/performance-investigation-data/continuation-20260907/README.md)
++measured large idle snapshots at 92.09 → 82.35 ms with about 4.8 KiB additional
++allocation. Small-snapshot and general hosted gains were inconclusive; no process
++memory improvement was established. Buffering the combined file/hash stream
++remains rejected because of its allocation regression.
+ 
+ ## 2026-09-07 External Canary Capacity
+ 
+@@ -179,8 +229,8 @@ failure simulation.
+   latency rose from 22.1 to 94.1 ms. At 8,192 added tickets, throughput stayed
+   near 113/s while p95 rose from 94.8 to 316.4 ms. More concurrent callers
+   mostly increased waiting at this larger fixture size.
+-- The canary's `findTicket` scans tickets and `nextPrimaryID` scans audit rows
+-  on every close/reopen. Audit rows increase by the measured write count in
++- This historical canary's `findTicket` scanned tickets and `nextPrimaryID`
++  scanned audit rows on every close/reopen. Audit rows increase by the measured write count in
+   each sample. Those application costs are included; these data do not
+   isolate a Shunter engine bottleneck or justify a runtime optimization.
+ - Median sampled peak RSS ranged from 71.1–87.3 MiB for the smaller fixture
+@@ -420,7 +470,7 @@ Best benchmark-local brotli wire result compared with production gzip:
+ | mixed rows | `brotli_q4` | 24.2% | 23.1% | 4.5% smaller | 353.00us +/- 14% | 81.13us +/- 7% | advisory |
+ | random bytes rows | `brotli_q1` | 91.2% | 90.3% | 0.9% smaller | 177.88us +/- 4% | 100.30us +/- 3% | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - Production gzip remains the right supported compression mode for the current
+   corpus.
+@@ -591,7 +641,7 @@ Representative standings:
+ | Multi-way aggregate shape | `MultiWayLiveJoinAggregateRelationShapes/cross3_rows_24/count-24` | `COUNT(*)` over 3-relation Cartesian multi-join, 24 rows per relation, one endpoint insert | 309.5us +/- 1% | 9.964Ki +/- 0% | 73 | advisory |
+ | Multi-way Stage B geomean | all focused Stage B multi-way live join benchmarks | 13 sub-benchmark geomean | 817.6us | 41.61Ki | 81.58 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded 3-relation Cartesian fixture is intentionally much smaller than
+   the 128-row chain fixtures. Its delta row emits a 24x24 Cartesian fragment;
+@@ -642,13 +692,14 @@ Representative standings:
+ | Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain3/sum-24` | `SUM(r.id)` over 3-relation chain, 128 rows per relation, one endpoint insert | 2.365ms +/- 1% | 37.78Ki +/- 0% | 75 | advisory |
+ | Multi-way Stage D aggregate geomean | all focused Stage D aggregate-function benchmarks | 4 sub-benchmark geomean | 2.377ms | 50.12Ki | 108.5 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - `COUNT(column)` and `SUM(column)` track the existing `COUNT(*)` chain3
+   latency envelope in this bounded fixture.
+ - `COUNT(DISTINCT column)` increases allocation and allocation count, but does
+   not create a new latency standout in the bounded 128-row `chain3` sample.
+-- This evidence supports keeping default multi-way join guardrails unlimited.
++- At measurement time this evidence supported the then-unlimited multi-way
++  join defaults. Current finite limits are described below.
+   The bounded rows remain advisory, the worst local rows are not enough to
+   select safe defaults, and apps can still opt into guardrails through config.
+ 
+@@ -693,7 +744,7 @@ Representative standings:
+ | Multi-way aggregate relation count | `MultiWayLiveJoinAggregateRelationShapes/chain5_rows_128/count-24` | `COUNT(*)` over 5-relation chain, 128 rows per relation, one endpoint insert | 7.591ms +/- 0% | 62.55Ki +/- 0% | 110 | advisory |
+ | Multi-way Stage F geomean | all focused Stage F multi-way live join benchmarks | 25 sub-benchmark geomean | 1.114ms | 44.16Ki | 84.28 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded 5-relation chain stays local-review-sized at 128 rows per
+   relation while extending relation-count evidence beyond the prior `chain4`
+@@ -705,7 +756,8 @@ Current read:
+   rows beyond the bounded `chain3` fixture, and app-derived workload
+   distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage G Skew/Fanout
+ 
+@@ -745,7 +797,7 @@ Representative standings:
+ | Multi-way selectivity | `MultiWayLiveJoinSelectivity/rows_128/hot_key_16x16-24` | 128 rows per relation, one changed hot-key row matching 16 left rows by 16 middle rows | 388.3us +/- 1% | 74.63Ki +/- 0% | 83 | advisory |
+ | Multi-way Stage G geomean | all focused Stage G multi-way live join benchmarks | 16 sub-benchmark geomean | 948.9us | 45.41Ki | 84.53 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `hot_key_16x16` row remains local-review-sized under `-count=10`
+   and extends skew/fanout coverage without turning the benchmark into a load
+@@ -756,7 +808,8 @@ Current read:
+   skew rows, relation counts beyond the bounded 5-relation chain, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage H Cartesian
+ 
+@@ -798,7 +851,7 @@ Representative standings:
+ | Multi-way aggregate Cartesian shape | `MultiWayLiveJoinAggregateRelationShapes/cross3_rows_32/count-24` | `COUNT(*)` over 3-relation Cartesian multi-join, 32 rows per relation, one endpoint insert | 707.3us +/- 1% | 12.63Ki +/- 0% | 73 | advisory |
+ | Multi-way Stage H geomean | all focused Stage H multi-way live join benchmarks | 12 sub-benchmark geomean | 1.116ms | 42.66Ki | 82.69 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `cross3_rows_32` rows remain local-review-sized under
+   `-count=10` and extend Cartesian evidence without turning the benchmark into
+@@ -811,7 +864,8 @@ Current read:
+   chain, broader aggregate-function shapes, and app-derived workload
+   distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage I Aggregate Function Shape
+ 
+@@ -856,7 +910,7 @@ Representative standings:
+ | Multi-way aggregate function | `MultiWayLiveJoinAggregateFunctions/chain4/sum-24` | `SUM(t3.id)` over 4-relation chain, 128 rows per relation, one endpoint insert | 4.699ms +/- 1% | 50.78Ki +/- 0% | 95 | advisory |
+ | Multi-way Stage I aggregate geomean | all focused Stage I aggregate relation/function benchmarks | 14 sub-benchmark geomean | 3.406ms | 42.55Ki | 101.8 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `chain4` aggregate-function rows remain local-review-sized under
+   `-count=10` while extending function-shape evidence beyond `chain3`.
+@@ -871,7 +925,8 @@ Current read:
+   `cross3_rows_32`, aggregate-function skew/self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage J Aggregate Cartesian Function Shape
+ 
+@@ -914,7 +969,7 @@ Representative standings:
+ | Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_32/sum-24` | `SUM(t3.id)` over 3-relation Cartesian multi-join, 32 rows per relation, one endpoint insert | 2.254ms +/- 0% | 12.77Ki +/- 0% | 75 | advisory |
+ | Multi-way Stage J aggregate geomean | all focused Stage J aggregate relation/function benchmarks | 18 sub-benchmark geomean | 2.947ms | 34.19Ki | 98.44 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `cross3_rows_32` aggregate-function rows remain local-review-sized
+   under `-count=10` and close one Cartesian aggregate-function evidence gap.
+@@ -929,7 +984,8 @@ Current read:
+   chain, aggregate-function skew/self-alias distributions, and app-derived
+   workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage K Aggregate Skew/Fanout Function Shape
+ 
+@@ -972,7 +1028,7 @@ Representative standings:
+ | Multi-way aggregate skew function | `MultiWayLiveJoinAggregateFunctions/hot_key_16x16/sum-24` | `SUM(t3.id)` over 3-relation chain, 128 rows per relation, one changed hot-key endpoint row matching a 16x16 fragment | 5.256ms +/- 0% | 37.82Ki +/- 0% | 75 | advisory |
+ | Multi-way Stage K aggregate geomean | all focused Stage K aggregate/selectivity benchmarks | 19 sub-benchmark geomean | 2.269ms | 39.35Ki | 95.70 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `hot_key_16x16` aggregate-function rows remain
+   local-review-sized under `-count=10` and close one aggregate skew/fanout
+@@ -988,7 +1044,8 @@ Current read:
+   5-relation chain, aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage L Aggregate Self-Alias Function Shape
+ 
+@@ -1031,7 +1088,7 @@ Representative standings:
+ | Multi-way aggregate self-alias function | `MultiWayLiveJoinAggregateFunctions/self_alias3/sum-24` | `SUM(t2.id)` over table 2 alias 2 in the 3-alias repeated-table fixture | 101.8ms +/- 0% | 39.58Ki +/- 0% | 79.00 +/- 0% | advisory |
+ | Multi-way Stage L aggregate geomean | all focused Stage L aggregate relation/function benchmarks | 26 sub-benchmark geomean | 5.542ms | 37.21Ki | 97.29 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `self_alias3` aggregate-function rows are local-review-sized, but
+   they dominate the focused command wall time: the `-count=10` run took
+@@ -1045,7 +1102,8 @@ Current read:
+   relation counts beyond the bounded 5-relation chain, and app-derived
+   workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage M Larger Cartesian Function Shape
+ 
+@@ -1094,7 +1152,7 @@ Representative standings:
+ | Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_40/sum-24` | `SUM(t3.id)` over 3-relation Cartesian multi-join, 40 rows per relation, one endpoint insert | 4.408ms +/- 0% | 14.28Ki +/- 0% | 75 | advisory |
+ | Multi-way Stage M Cartesian geomean | all focused Stage M Cartesian benchmarks | 12 sub-benchmark geomean | 1.249ms | 24.45Ki | 85.91 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `cross3_rows_40` rows remain local-review-sized under
+   `-count=10` while extending Cartesian size evidence beyond the 32-row shape.
+@@ -1111,7 +1169,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage N Larger Skew/Fanout Function Shape
+ 
+@@ -1165,7 +1224,7 @@ Representative standings:
+ | Multi-way Stage N selectivity geomean | focused Stage N selectivity hot-key benchmarks | 2 sub-benchmark geomean | 407.3us | 92.42Ki | 83.99 | advisory |
+ | Multi-way Stage N aggregate geomean | focused Stage N aggregate hot-key benchmarks | 8 sub-benchmark geomean | 5.399ms | 39.05Ki | 80.09 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `hot_key_24x24` rows remain local-review-sized under
+   `-count=10` while extending skew/fanout evidence beyond the 16x16 shape.
+@@ -1182,7 +1241,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage O Larger Cartesian Function Shape
+ 
+@@ -1231,7 +1291,7 @@ Representative standings:
+ | Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_48/sum-24` | `SUM(t3.id)` over 3-relation Cartesian multi-join, 48 rows per relation, one endpoint insert | 7.567ms +/- 0% | 16.90Ki +/- 0% | 75 | advisory |
+ | Multi-way Stage O Cartesian geomean | all focused Stage O Cartesian benchmarks | 12 sub-benchmark geomean | 2.199ms | 29.63Ki | 87.73 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `cross3_rows_48` rows remain local-review-sized under
+   `-count=10` while extending Cartesian size evidence beyond the 40-row shape.
+@@ -1248,7 +1308,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage P Larger Skew/Fanout Function Shape
+ 
+@@ -1302,7 +1363,7 @@ Representative standings:
+ | Multi-way Stage P selectivity geomean | focused Stage P selectivity hot-key benchmarks | 2 sub-benchmark geomean | 480.2us | 144.0Ki | 86.49 | advisory |
+ | Multi-way Stage P aggregate geomean | focused Stage P aggregate hot-key benchmarks | 8 sub-benchmark geomean | 8.952ms | 39.61Ki | 81.78 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `hot_key_32x32` rows remain local-review-sized under
+   `-count=10` while extending skew/fanout evidence beyond the 24x24 shape.
+@@ -1319,7 +1380,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage Q Larger Cartesian Function Shape
+ 
+@@ -1368,7 +1430,7 @@ Representative standings:
+ | Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_56/sum-24` | `SUM(t3.id)` over 3-relation Cartesian multi-join, 56 rows per relation, one endpoint insert | 11.94ms +/- 1% | 18.44Ki +/- 0% | 75 | advisory |
+ | Multi-way Stage Q Cartesian geomean | all focused Stage Q Cartesian benchmarks | 12 sub-benchmark geomean | 3.569ms | 35.26Ki | 89.53 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `cross3_rows_56` rows remain local-review-sized under
+   `-count=10` while extending Cartesian size evidence beyond the 48-row shape.
+@@ -1384,7 +1446,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage R Larger Skew/Fanout Function Shape
+ 
+@@ -1438,7 +1501,7 @@ Representative standings:
+ | Multi-way Stage R selectivity geomean | focused Stage R selectivity hot-key benchmarks | 2 sub-benchmark geomean | 523.5us | 223.2Ki | 89.49 | advisory |
+ | Multi-way Stage R aggregate geomean | focused Stage R aggregate hot-key benchmarks | 8 sub-benchmark geomean | 13.52ms | 40.20Ki | 83.38 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `hot_key_40x40` rows remain local-review-sized under
+   `-count=10` while extending skew/fanout evidence beyond the 32x32 shape.
+@@ -1454,7 +1517,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage S Larger Cartesian Function Shape
+ 
+@@ -1503,7 +1567,7 @@ Representative standings:
+ | Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_64/sum-24` | `SUM(t3.id)` over 3-relation Cartesian multi-join, 64 rows per relation, one endpoint insert | 17.70ms +/- 0% | 22.30Ki +/- 0% | 75 | advisory |
+ | Multi-way Stage S Cartesian geomean | all focused Stage S Cartesian benchmarks | 12 sub-benchmark geomean | 5.362ms | 42.59Ki | 91.46 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `cross3_rows_64` rows remain local-review-sized under
+   `-count=10` while extending Cartesian size evidence beyond the 56-row shape.
+@@ -1519,7 +1583,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage T Larger Skew/Fanout Function Shape
+ 
+@@ -1573,7 +1638,7 @@ Representative standings:
+ | Multi-way Stage T selectivity geomean | focused Stage T selectivity hot-key benchmarks | 2 sub-benchmark geomean | 611.9us | 333.5Ki | 91.99 | advisory |
+ | Multi-way Stage T aggregate geomean | focused Stage T aggregate hot-key benchmarks | 8 sub-benchmark geomean | 19.34ms | 40.51Ki | 84.73 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `hot_key_48x48` rows remain local-review-sized under
+   `-count=10` while extending skew/fanout evidence beyond the 40x40 shape.
+@@ -1589,7 +1654,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage U Larger Cartesian Function Shape
+ 
+@@ -1638,7 +1704,7 @@ Representative standings:
+ | Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_72/sum-24` | `SUM(t3.id)` over 3-relation Cartesian multi-join, 72 rows per relation, one endpoint insert | 25.24ms +/- 1% | 22.75Ki +/- 0% | 75 | advisory |
+ | Multi-way Stage U Cartesian geomean | all focused Stage U Cartesian benchmarks | 12 sub-benchmark geomean | 7.594ms | 49.89Ki | 93.46 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `cross3_rows_72` rows remain local-review-sized under
+   `-count=10` while extending Cartesian size evidence beyond the 64-row shape.
+@@ -1654,7 +1720,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage V Larger Skew/Fanout Function Shape
+ 
+@@ -1708,7 +1775,7 @@ Representative standings:
+ | Multi-way Stage V selectivity geomean | focused Stage V selectivity hot-key benchmarks | 2 sub-benchmark geomean | 717.0us | 488.0Ki | 94.49 | advisory |
+ | Multi-way Stage V aggregate geomean | focused Stage V aggregate hot-key benchmarks | 8 sub-benchmark geomean | 26.22ms | 40.78Ki | 86.01 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `hot_key_56x56` rows remain local-review-sized under
+   `-count=10` while extending skew/fanout evidence beyond the 48x48 shape.
+@@ -1724,7 +1791,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage W Larger Cartesian Function Shape
+ 
+@@ -1774,7 +1842,7 @@ Representative standings:
+ | Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_80/sum-24` | `SUM(t3.id)` over 3-relation Cartesian multi-join, 80 rows per relation, one endpoint insert | 34.64ms +/- 1% | 25.47Ki +/- 0% | 75 | advisory |
+ | Multi-way Stage W Cartesian geomean | all focused Stage W Cartesian benchmarks | 12 sub-benchmark geomean | 10.33ms | 54.31Ki | 94.93 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `cross3_rows_80` rows remain local-review-sized under
+   `-count=10` while extending Cartesian size evidence beyond the 72-row shape.
+@@ -1791,7 +1859,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage X Larger Skew/Fanout Function Shape
+ 
+@@ -1845,7 +1914,7 @@ Representative standings:
+ | Multi-way Stage X selectivity geomean | focused Stage X selectivity hot-key benchmarks | 2 sub-benchmark geomean | 855.0us | 701.1Ki | 98.47 | advisory |
+ | Multi-way Stage X aggregate geomean | focused Stage X aggregate hot-key benchmarks | 8 sub-benchmark geomean | 34.71ms | 41.56Ki | 87.39 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `hot_key_64x64` rows remain local-review-sized under
+   `-count=10` while extending skew/fanout evidence beyond the 56x56 shape.
+@@ -1861,7 +1930,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage Y Larger Cartesian Function Shape
+ 
+@@ -1917,7 +1987,7 @@ Representative standings:
+ | Multi-way aggregate Cartesian function | `MultiWayLiveJoinAggregateFunctions/cross3_rows_88/sum-24` | `SUM(t3.id)` over 3-relation Cartesian multi-join, 88 rows per relation, one endpoint insert | 46.66ms +/- 0% | 28.19Ki +/- 0% | 75.00 +/- 0% | advisory |
+ | Multi-way Stage Y Cartesian geomean | all focused Stage Y Cartesian benchmarks | 12 sub-benchmark geomean | 13.92ms | 60.75Ki | 96.49 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `cross3_rows_88` rows remain local-review-sized under
+   `-count=10` while extending Cartesian size evidence beyond the 80-row shape.
+@@ -1934,7 +2004,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Multi-Way Live Join Stage Z Larger Skew/Fanout Function Shape
+ 
+@@ -1990,7 +2061,7 @@ Representative standings:
+ | Multi-way Stage Z selectivity geomean | focused Stage Z selectivity hot-key benchmarks | 2 sub-benchmark geomean | 982.9us | 989.5Ki | 103.5 | advisory |
+ | Multi-way Stage Z aggregate geomean | focused Stage Z aggregate hot-key benchmarks | 8 sub-benchmark geomean | 43.79ms | 42.36Ki | 88.71 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The bounded `hot_key_72x72` rows remain local-review-sized under
+   `-count=10` while extending skew/fanout evidence beyond the 64x64 shape.
+@@ -2006,7 +2077,8 @@ Current read:
+   5-relation chain, larger aggregate-function self-alias distributions, and
+   app-derived workload distributions remain outside the current envelope.
+ - This evidence keeps the default multi-way join guardrails unchanged:
+-  unlimited by default, with app-owned opt-in limits available through config.
++  unlimited in these historical runs, with app-owned opt-in limits available
++  then. Current finite limits are described below.
+ 
+ ## Focused Ordered Subscription Window Baseline
+ 
+@@ -2053,68 +2125,28 @@ Representative standings:
+ 
+ ## Current Read
+ 
+-- Existing equality subscription evaluation and candidate collection remain the
+-  healthiest hot paths.
+-- Large bag diffing, large snapshot-plus-tail recovery, segmented log replay,
+-  and multi-way joins at 512 rows per table are the clearest allocation and
+-  latency targets in the current coverage.
+-- Subscription fanout coverage now includes same-query, varied single-table,
+-  skewed hot-key, and varied two-table fixtures. Workload-derived application
+-  distributions remain outside the local benchmark envelope.
+-- Ordered subscription window coverage now has a focused `-count=10` baseline
+-  across bounded initial rows, full ordering, initial row collection,
+-  registration, comparator shape, and live ordered/limited delta fixtures.
+-- Compression corpus coverage now has a focused `-count=10` baseline across
+-  production gzip and benchmark-local brotli candidates. The current evidence
+-  keeps brotli as benchmark-only tooling rather than runtime support.
+-- Executor reducer commit coverage now includes one-at-a-time round trips and
+-  a queued 64-command burst fixture. These are internal executor fixtures, not
+-  end-to-end application throughput measurements.
+-- Declared read coverage now includes local declared-query execution and local
+-  declared live-view initial rows for projection/order/limit and count shapes.
+-- Live multi-way joins now have opt-in production guardrails through
+-  `Config.SubscriptionMaxMultiJoinRelations` and
+-  `Config.SubscriptionMaxMultiJoinRowsPerRelation`. The focused Stage A
+-  snapshot above refreshes the relation-size fixtures and publishes the
+-  existing chain3, self_alias3, and chain4 relation-shape fixtures. The focused
+-  Stage B snapshot adds bounded cross-shape, selectivity/skew,
+-  changed-row-count, and `COUNT(*)` aggregate relation-shape rows. The focused
+-  Stage F snapshot extends relation-count evidence to a bounded 5-relation
+-  chain for table-shaped projection and `COUNT(*)`, Stage G extends bounded
+-  skew/fanout evidence to `hot_key_16x16`, and Stage H extends bounded
+-  Cartesian evidence to `cross3_rows_32` for table-shaped projection and
+-  `COUNT(*)`. Stage I extends aggregate-function evidence from `chain3` to
+-  bounded `chain4` rows for `COUNT(*)`, `COUNT(column)`,
+-  `COUNT(DISTINCT column)`, and `SUM(column)`. Stage J extends those
+-  aggregate-function rows to bounded `cross3_rows_32` Cartesian rows. Stage K
+-  extends them to the bounded `hot_key_16x16` skew/fanout fixture. Stage L
+-  extends them to the bounded `self_alias3` repeated-table fixture. Stage M
+-  extends Cartesian evidence to `cross3_rows_40` for table-shaped projection,
+-  `COUNT(*)`, and the current aggregate-function rows. Stage N extends
+-  skew/fanout evidence to `hot_key_24x24` for table-shaped projection and the
+-  current aggregate-function rows. Stage O extends larger bounded Cartesian
+-  evidence to `cross3_rows_48` for table-shaped projection, `COUNT(*)`, and
+-  the current aggregate-function rows. Stage P extends skew/fanout evidence to
+-  `hot_key_32x32`, Stage Q extends Cartesian evidence to `cross3_rows_56`,
+-  Stage R extends skew/fanout evidence to `hot_key_40x40`, Stage S extends
+-  Cartesian evidence to `cross3_rows_64`, Stage T extends skew/fanout evidence
+-  to `hot_key_48x48`, and Stage U extends Cartesian evidence to
+-  `cross3_rows_72`. Stage V extends skew/fanout evidence to
+-  `hot_key_56x56`, Stage W extends Cartesian evidence to `cross3_rows_80`,
+-  Stage X extends skew/fanout evidence to `hot_key_64x64`, and Stage Y
+-  extends Cartesian evidence to `cross3_rows_88`. Stage Z extends
+-  skew/fanout evidence to `hot_key_72x72`. This evidence does not justify
+-  changing the unlimited defaults.
+-- Offline backup/restore is covered for small and larger complete local
+-  DataDir fixtures and is expected to be I/O dominated; these rows do not
+-  replace production-scale backup/restore timing.
+-- WebSocket coverage now includes a single SubscribeSingle round trip and
+-  16-, 64-, and 128-client light-update fanout fixtures. Slow-reader
+-  backpressure now has a network-level advisory row for unrelated healthy
+-  client delivery while a second client is held in a blocked unread write.
+-  Deterministic sender-level full-buffer rejection is covered separately.
+-- The current rows are not release-blocking thresholds. Treat regressions here
+-  as investigation triggers until the release process defines hard limits.
++- Recovery no longer clones the whole table per replay record; the July 12
++  optimization above removed that cost. Historical profiles do not prioritize
++  another recovery rewrite. The active segment still receives a full integrity
++  scan when reopened for append (PERF-07).
++- Current hosted multi-way limits are 8 relations, 100,000 input rows per
++  relation, and 1,000,000 work units per evaluation. The compatibility-named
++  `SubscriptionMaxMultiJoinWork` budget now covers candidate rows, index probes
++  and join pairs across all subscription plans, including aggregate input.
++  Hosted one-off reads also default to 1,000,000 work units. See the
++  [configuration reference](reference/config.md) for row, byte and window caps.
++  Earlier unlimited benchmark configurations remain historical evidence.
++- The September adoption removes the canary's unnecessary ticket and audit
++  scans. Remaining general reducer row materialization (PERF-03) should change
++  only for a demonstrated necessary scan; invocation lifetime and transaction
++  isolation remain required.
++- Large bag diffing, joins, ordered windows, fanout and snapshot publication
++  have bounded fixtures above. Choose any next experiment from an application's
++  actual workload and latency requirement. Neither these measurements nor the
++  adoption comparison establish production capacity or a latency budget.
++- Segment defaults, automatic compaction, allocator flag conversion, combined
++  file/hash buffering and weaker durability remain deferred or rejected as
++  recorded in the [implementation plan](../working-docs/performance-implementation-plan.md).
+ 
+ ## Focused Workload-Derived Subscription Evidence
+ 
+@@ -2155,7 +2187,7 @@ Representative rows:
+ | Workload-derived live view | `RCAppOpenTasksLiveViewDelta/create_task_insert_open-24` | RC taskboard `create_task` inserts one open task into `open_tasks_live` with one existing open peer and one completed task | 960.7ns +/- 1% | 750 B +/- 0% | 9 | advisory |
+ | Workload-derived live view | `RCAppOpenTasksLiveViewDelta/complete_task_delete_open-24` | RC taskboard `complete_task` changes one open task to done, producing one live-view delete with one open peer | 1.135us +/- 1% | 774 B +/- 0% | 10 | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - The first concrete app-shaped subscription delta fixture is now covered by a
+   deterministic local package benchmark.
+@@ -2228,7 +2260,7 @@ Representative rows:
+ | Workload-derived hosted live view | `DeclaredReadHostedSubscriptionReducerDelta-24` | strict-auth local WebSocket protocol over the existing chat declared-read workload; one subscriber receives insert and delete deltas for a real insert/delete reducer pair | 20.67ms +/- 10% | 29.63KiB +/- 1% | 408.0 +/- 0% | advisory |
+ | Workload-derived hosted live view | `DeclaredReadHostedSubscriptionReducerFanout2-24` | strict-auth local WebSocket protocol over the existing chat declared-read workload; two subscribers receive insert and delete deltas for the same real insert/delete reducer pair | 20.82ms +/- 5% | 34.83KiB +/- 1% | 496.0 +/- 0% | advisory |
+ 
+-Current read:
++Interpretation at measurement time:
+ 
+ - Bounded workload-derived hosted subscription timing is now covered for the
+   existing chat insert/delete reducer cycle with one subscriber and two
+diff --git a/executor/executor.go b/executor/executor.go
+index 3d770b3..46763bb 100644
+--- a/executor/executor.go
++++ b/executor/executor.go
+@@ -699,6 +699,7 @@ func (e *Executor) handleDisconnectClientSubscriptions(cmd DisconnectClientSubsc
+ }
+ 
+ type reducerDBAdapter struct {
++	registry            schema.SchemaRegistry
+ 	mu                  sync.Mutex
+ 	closed              bool
+ 	tx                  *store.Transaction
+@@ -713,6 +714,7 @@ func (e *Executor) newReducerDBAdapter(tx *store.Transaction) *reducerDBAdapter
+ 		panic("executor: sys_clients is not registered")
+ 	}
+ 	return &reducerDBAdapter{
++		registry:            e.schemaReg,
+ 		tx:                  tx,
+ 		protectSystemTables: true,
+ 		sysClientsTableID:   sysClientsTableID,
+@@ -720,6 +722,19 @@ func (e *Executor) newReducerDBAdapter(tx *store.Transaction) *reducerDBAdapter
+ 	}
+ }
+ 
++func (d *reducerDBAdapter) TableID(name string) (uint32, bool) {
++	d.mu.Lock()
++	defer d.mu.Unlock()
++	if d.checkOpenLocked() != nil || d.registry == nil {
++		return 0, false
++	}
++	id, _, ok := d.registry.TableByName(name)
++	if !ok {
++		return 0, false
++	}
++	return uint32(id), true
++}
++
+ func (d *reducerDBAdapter) close() {
+ 	d.mu.Lock()
+ 	d.closed = true
+diff --git a/executor/reducer_db_policy_test.go b/executor/reducer_db_policy_test.go
+index 6df2802..57cf728 100644
+--- a/executor/reducer_db_policy_test.go
++++ b/executor/reducer_db_policy_test.go
+@@ -76,6 +76,9 @@ func TestReducerDBRejectsSystemTableMutationsAndAllowsReads(t *testing.T) {
+ 		{name: SysScheduledTableName, tableID: scheduled.ID, rowID: scheduleRowID, row: scheduleRow},
+ 	} {
+ 		t.Run(tc.name, func(t *testing.T) {
++			if id, ok := db.TableID(tc.name); !ok || id != uint32(tc.tableID) {
++				t.Fatalf("TableID(%q) = (%d, %t), want %d", tc.name, id, ok, tc.tableID)
++			}
+ 			if _, err := db.Insert(uint32(tc.tableID), tc.row); !errors.Is(err, ErrReducerSystemTableMutation) || !strings.Contains(err.Error(), tc.name) {
+ 				t.Fatalf("Insert error = %v, want system-table mutation error naming %s", err, tc.name)
+ 			}
+diff --git a/types/reducer.go b/types/reducer.go
+index 55e390f..ca62944 100644
+--- a/types/reducer.go
++++ b/types/reducer.go
+@@ -13,6 +13,9 @@ type ScheduleID uint64
+ // execution without leaking the concrete store implementation through
+ // `ReducerContext`.
+ type ReducerDB interface {
++	// TableID resolves a name in this runtime's recovered schema. It returns
++	// false for unknown names and after the reducer invocation has ended.
++	TableID(name string) (uint32, bool)
+ 	Insert(tableID uint32, row ProductValue) (RowID, error)
+ 	Delete(tableID uint32, rowID RowID) error
+ 	Update(tableID uint32, rowID RowID, newRow ProductValue) (RowID, error)

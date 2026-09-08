@@ -1,0 +1,345 @@
+--- a/declared_read.go
++++ b/declared_read.go
+@@ -4,6 +4,7 @@
+ 	"context"
+ 	"errors"
+ 	"fmt"
++	"github.com/ponchione/shunter/responseprobe"
+ 	"sync"
+ 	"time"
+ 
+@@ -656,17 +657,21 @@
+ 
+ func (r *Runtime) handleProtocolDeclaredQuery(ctx context.Context, conn *protocol.Conn, messageID []byte, name string, parameters *types.ProductValue) {
+ 	receipt := time.Now()
++	probeID := responseprobe.ID(messageID)
++	responseprobe.Mark(conn.ID, probeID, "handler-entry", receipt)
+ 	opts := append(protocolDeclaredReadOptions(conn, nil), withDeclaredQueryResponseLimit(conn, messageID))
+ 	if parameters != nil {
+ 		opts = append(opts, WithDeclaredReadParameters(*parameters))
+ 	}
+ 	result, err := r.CallQuery(ctx, name, opts...)
++	responseprobe.Mark(conn.ID, probeID, "query-ready", time.Now())
+ 	if err != nil {
+ 		r.sendProtocolDeclaredQueryError(conn, messageID, err.Error(), receipt)
+ 		r.observability.RecordProtocolMessage("declared_query", protocolDeclaredReadMetricResult(err))
+ 		return
+ 	}
+ 	rows, err := encodeDeclaredReadRows(result.Rows, result.Columns)
++	responseprobe.Mark(conn.ID, probeID, "rows-encoded", time.Now())
+ 	if err != nil {
+ 		r.sendProtocolDeclaredQueryError(conn, messageID, "encode error: "+err.Error(), receipt)
+ 		r.observability.RecordProtocolMessage("declared_query", "internal_error")
+--- a/protocol/outbound.go
++++ b/protocol/outbound.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"context"
++	"github.com/ponchione/shunter/responseprobe"
+ 	"time"
+ 
+ 	"github.com/ponchione/websocket"
+@@ -25,6 +26,7 @@
+ 			if !ok {
+ 				return
+ 			}
++			responseprobe.Mark(c.ID, responseprobe.FrameID(frame), "dequeue", time.Now())
+ 			c.releaseOutboundBytes(len(frame))
+ 			if err := c.writeBinary(ctx, frame); err != nil {
+ 				logProtocolError(c.Observer, "unknown", "send_failed", err)
+@@ -37,6 +39,7 @@
+ 					if !ok {
+ 						return
+ 					}
++					responseprobe.Mark(c.ID, responseprobe.FrameID(frame), "dequeue", time.Now())
+ 					c.releaseOutboundBytes(len(frame))
+ 					if err := c.writeBinary(ctx, frame); err != nil {
+ 						logProtocolError(c.Observer, "unknown", "send_failed", err)
+@@ -53,7 +56,11 @@
+ func (c *Conn) writeBinary(ctx context.Context, frame []byte) error {
+ 	writeCtx, cancel := c.outboundWriteContext(ctx)
+ 	defer cancel()
+-	return c.ws.Write(writeCtx, websocket.MessageBinary, frame)
++	id := responseprobe.FrameID(frame)
++	responseprobe.Mark(c.ID, id, "socket-write-start", time.Now())
++	err := c.ws.Write(writeCtx, websocket.MessageBinary, frame)
++	responseprobe.Mark(c.ID, id, "socket-write-done", time.Now())
++	return err
+ }
+ 
+ func (c *Conn) outboundWriteContext(ctx context.Context) (context.Context, context.CancelFunc) {
+--- a/protocol/sender.go
++++ b/protocol/sender.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"errors"
+ 	"fmt"
++	"github.com/ponchione/shunter/responseprobe"
+ 	"sync"
+ 	"time"
+ 
+@@ -224,6 +225,7 @@
+ 		c.outboundQueuedBytes += frameBytes
+ 		return outboundSendSent
+ 	}
++	responseprobe.Mark(c.ID, responseprobe.FrameID(frame), "enqueue", time.Now())
+ 	select {
+ 	case <-c.closed:
+ 		return outboundSendClosed
+@@ -370,6 +372,11 @@
+ 	if conn.opts != nil {
+ 		maxBytes = conn.opts.MaxOutboundMessageSize
+ 	}
++	probeID := uint32(0)
++	if m, ok := msg.(OneOffQueryResponse); ok {
++		probeID = responseprobe.ID(m.MessageID)
++	}
++	responseprobe.Mark(connID, probeID, "envelope-start", time.Now())
+ 	frame, err := EncodeServerMessageWithLimit(msg, maxBytes)
+ 	if err != nil {
+ 		return fmt.Errorf("encode server message: %w", err)
+@@ -377,6 +384,7 @@
+ 
+ 	wrapped := EncodeFrame(frame[0], frame[1:], conn.Compression, outboundCompressionMode(conn))
+ 
++	responseprobe.Mark(connID, probeID, "envelope-ready", time.Now())
+ 	_, procedureResponse := msg.(ProcedureResponse)
+ 	switch conn.trySendOutbound(wrapped, procedureResponse) {
+ 	case outboundSendSent:
+--- a/protocolclient/client.go
++++ b/protocolclient/client.go
+@@ -4,10 +4,12 @@
+ 	"context"
+ 	"errors"
+ 	"fmt"
++	"github.com/ponchione/shunter/responseprobe"
+ 	"net/http"
+ 	"strings"
+ 	"sync"
+ 	"sync/atomic"
++	"time"
+ 
+ 	"github.com/ponchione/websocket"
+ 
+@@ -209,7 +211,14 @@
+ 	}
+ 	c.writeMu.Lock()
+ 	defer c.writeMu.Unlock()
+-	if err := c.conn.Write(ctx, websocket.MessageBinary, frame); err != nil {
++	probeID := uint32(0)
++	if m, ok := msg.(protocol.DeclaredQueryMsg); ok {
++		probeID = responseprobe.ID(m.MessageID)
++	}
++	responseprobe.Mark(c.identity.ConnectionID, probeID, "request-write-start", time.Now())
++	writeErr := c.conn.Write(ctx, websocket.MessageBinary, frame)
++	responseprobe.Mark(c.identity.ConnectionID, probeID, "request-write-done", time.Now())
++	if err := writeErr; err != nil {
+ 		return classifyContextError(ctx, err)
+ 	}
+ 	return nil
+@@ -225,6 +234,9 @@
+ 		c.pendingMu.Lock()
+ 		if len(c.pending) > 0 {
+ 			next := c.popPendingLocked()
++			if m, ok := next.msg.(protocol.OneOffQueryResponse); ok {
++				responseprobe.Mark(c.identity.ConnectionID, responseprobe.ID(m.MessageID), "pending-dequeue", time.Now())
++			}
+ 			c.pendingMu.Unlock()
+ 			return next.tag, next.msg, nil
+ 		}
+@@ -253,6 +265,9 @@
+ 	}
+ 	ctx = contextOrBackground(ctx)
+ 	typ, frame, err := c.conn.Read(ctx)
++	received := time.Now()
++	probeID := responseprobe.FrameID(frame)
++	responseprobe.Mark(c.identity.ConnectionID, probeID, "frame-received", received)
+ 	if err != nil {
+ 		return 0, nil, 0, classifyContextError(ctx, err)
+ 	}
+@@ -260,6 +275,7 @@
+ 		return 0, nil, int64(len(frame)), fmt.Errorf("%w: message type %d", ErrNonBinaryMessage, typ)
+ 	}
+ 	tag, msg, err := protocol.DecodeServerMessage(frame)
++	responseprobe.Mark(c.identity.ConnectionID, probeID, "outer-decoded", time.Now())
+ 	if err != nil {
+ 		return 0, nil, int64(len(frame)), fmt.Errorf("%w: %w", ErrUnexpectedMessage, err)
+ 	}
+@@ -281,6 +297,11 @@
+ }
+ 
+ func (c *Client) routeServerMessage(next queuedServerMessage) bool {
++	probeID := uint32(0)
++	if m, ok := next.msg.(protocol.OneOffQueryResponse); ok {
++		probeID = responseprobe.ID(m.MessageID)
++	}
++	responseprobe.Mark(c.identity.ConnectionID, probeID, "route-entry", time.Now())
+ 	c.pendingMu.Lock()
+ 	defer c.pendingMu.Unlock()
+ 
+@@ -307,6 +328,7 @@
+ 		c.failReaderLocked(err, true)
+ 		return false
+ 	}
++	responseprobe.Mark(c.identity.ConnectionID, probeID, "pending-enqueue", time.Now())
+ 	c.pending = append(c.pending, next)
+ 	c.pendingBytes += next.size
+ 	c.signalPendingLocked()
+--- a/responseprobe/probe.go
++++ b/responseprobe/probe.go
+@@ -0,0 +1,98 @@
++// Package responseprobe is bounded, diagnostic-only instrumentation.
++package responseprobe
++
++import (
++	"encoding/binary"
++	"encoding/json"
++	"os"
++	"path/filepath"
++	"sync/atomic"
++	"time"
++	"unsafe"
++)
++
++const Limit = 65536
++
++var origin = time.Now()
++
++type Event struct {
++	Connection     [16]byte
++	Request        uint32
++	Stage          string
++	UnixNS, MonoNS int64
++}
++type slot struct {
++	event Event
++	ready atomic.Bool
++}
++
++var events [Limit]slot
++var count, failures atomic.Uint64
++
++func ID(b []byte) uint32 {
++	if len(b) == 0 || len(b) > 9 {
++		failures.Add(1)
++		return 0
++	}
++	var n uint32
++	for _, v := range b {
++		if v < '0' || v > '9' {
++			failures.Add(1)
++			return 0
++		}
++		n = n*10 + uint32(v-'0')
++	}
++	return n
++}
++
++// FrameID examines only the uncompressed response tag and request identity.
++// This experiment negotiates no compression. It never decodes application rows.
++func FrameID(frame []byte) uint32 {
++	if len(frame) == 0 || frame[0] != 6 {
++		return 0
++	}
++	if len(frame) < 5 {
++		failures.Add(1)
++		return 0
++	}
++	n := int(binary.LittleEndian.Uint32(frame[1:5]))
++	if n > len(frame)-5 {
++		failures.Add(1)
++		return 0
++	}
++	return ID(frame[5 : 5+n])
++}
++func Mark(conn [16]byte, id uint32, stage string, t time.Time) {
++	if id == 0 {
++		return
++	}
++	i := count.Add(1) - 1
++	if i >= Limit {
++		return
++	}
++	events[i].event = Event{conn, id, stage, t.UnixNano(), t.Sub(origin).Nanoseconds()}
++	events[i].ready.Store(true)
++}
++func Clock() [2]int64 { t := time.Now(); return [2]int64{t.UnixNano(), t.Sub(origin).Nanoseconds()} }
++func Dump(role string) error {
++	var out []Event
++	n := count.Load()
++	for i := uint64(0); i < min(n, Limit); i++ {
++		if events[i].ready.Load() {
++			out = append(out, events[i].event)
++		}
++	}
++	v := struct {
++		Role                         string
++		OriginUnixNS                 int64
++		Clock                        [2]int64
++		Events                       []Event
++		Dropped, CorrelationFailures uint64
++		BufferBytes                  uintptr
++	}{role, origin.UnixNano(), Clock(), out, n - min(n, Limit), failures.Load(), unsafe.Sizeof(events)}
++	data, err := json.Marshal(v)
++	if err != nil {
++		return err
++	}
++	return os.WriteFile(filepath.Join(os.Getenv("CANARY_CAPACITY_RESULT_DIR"), "probe-"+role+".json"), append(data, '\n'), 0600)
++}
+--- a/responseprobe/probe_test.go
++++ b/responseprobe/probe_test.go
+@@ -0,0 +1,53 @@
++package responseprobe
++
++import (
++	"encoding/json"
++	"os"
++	"path/filepath"
++	"sync"
++	"testing"
++	"time"
++)
++
++func TestBoundedCorrelation(t *testing.T) {
++	frame := []byte{6, 3, 0, 0, 0, '1', '9', '9'}
++	if FrameID(frame) != 199 {
++		t.Fatal("wire identity")
++	}
++	if FrameID([]byte{6, 255, 255, 255, 255}) != 0 {
++		t.Fatal("unbounded identity")
++	}
++	var wg sync.WaitGroup
++	for range 8 {
++		wg.Go(func() {
++			for range Limit/8 + 1 {
++				Mark([16]byte{1}, 199, "check", time.Now())
++			}
++		})
++	}
++	wg.Wait()
++	dir := t.TempDir()
++	t.Setenv("CANARY_CAPACITY_RESULT_DIR", dir)
++	if err := Dump("test"); err != nil {
++		t.Fatal(err)
++	}
++	data, err := os.ReadFile(filepath.Join(dir, "probe-test.json"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	var out struct {
++		Events                       []Event
++		Dropped, CorrelationFailures uint64
++	}
++	if err := json.Unmarshal(data, &out); err != nil {
++		t.Fatal(err)
++	}
++	if len(out.Events) != Limit || out.Dropped != 8 || out.CorrelationFailures != 1 {
++		t.Fatal("bounded accounting", len(out.Events), out.Dropped, out.CorrelationFailures)
++	}
++	for _, e := range out.Events {
++		if e.Request != 199 || e.Connection[0] != 1 || e.MonoNS <= 0 {
++			t.Fatal("correlation")
++		}
++	}
++}

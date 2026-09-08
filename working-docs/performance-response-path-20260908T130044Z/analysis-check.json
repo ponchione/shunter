@@ -1,0 +1,98 @@
+{
+  "1000-even-ordinary-a": {
+    "operations": 3200,
+    "reads": 1563,
+    "accepted_writes": 1637,
+    "ordered_deliveries": 13096,
+    "choices": "3eb217a582e5d1572d4b6f2079e513ab25f4bcdd639dcb55a5748e53e65a8cd8",
+    "exact_recovery_check": true
+  },
+  "1000-even-diagnostic": {
+    "operations": 3200,
+    "reads": 1563,
+    "accepted_writes": 1637,
+    "ordered_deliveries": 13096,
+    "choices": "3eb217a582e5d1572d4b6f2079e513ab25f4bcdd639dcb55a5748e53e65a8cd8",
+    "exact_recovery_check": true
+  },
+  "1000-even-ordinary-b": {
+    "operations": 3200,
+    "reads": 1563,
+    "accepted_writes": 1637,
+    "ordered_deliveries": 13096,
+    "choices": "3eb217a582e5d1572d4b6f2079e513ab25f4bcdd639dcb55a5748e53e65a8cd8",
+    "exact_recovery_check": true
+  },
+  "4000-burst-ordinary-a": {
+    "operations": 3200,
+    "reads": 1563,
+    "accepted_writes": 1637,
+    "ordered_deliveries": 13096,
+    "choices": "3eb217a582e5d1572d4b6f2079e513ab25f4bcdd639dcb55a5748e53e65a8cd8",
+    "exact_recovery_check": true
+  },
+  "4000-burst-diagnostic": {
+    "operations": 3200,
+    "reads": 1563,
+    "accepted_writes": 1637,
+    "ordered_deliveries": 13096,
+    "choices": "3eb217a582e5d1572d4b6f2079e513ab25f4bcdd639dcb55a5748e53e65a8cd8",
+    "exact_recovery_check": true
+  },
+  "4000-burst-ordinary-b": {
+    "operations": 3200,
+    "reads": 1563,
+    "accepted_writes": 1637,
+    "ordered_deliveries": 13096,
+    "choices": "3eb217a582e5d1572d4b6f2079e513ab25f4bcdd639dcb55a5748e53e65a8cd8",
+    "exact_recovery_check": true
+  },
+  "4000-even-ordinary-a": {
+    "operations": 3200,
+    "reads": 1563,
+    "accepted_writes": 1637,
+    "ordered_deliveries": 13096,
+    "choices": "3eb217a582e5d1572d4b6f2079e513ab25f4bcdd639dcb55a5748e53e65a8cd8",
+    "exact_recovery_check": true
+  },
+  "4000-even-diagnostic": {
+    "operations": 3200,
+    "reads": 1563,
+    "accepted_writes": 1637,
+    "ordered_deliveries": 13096,
+    "choices": "3eb217a582e5d1572d4b6f2079e513ab25f4bcdd639dcb55a5748e53e65a8cd8",
+    "exact_recovery_check": true
+  },
+  "4000-even-ordinary-b": {
+    "operations": 3200,
+    "reads": 1563,
+    "accepted_writes": 1637,
+    "ordered_deliveries": 13096,
+    "choices": "3eb217a582e5d1572d4b6f2079e513ab25f4bcdd639dcb55a5748e53e65a8cd8",
+    "exact_recovery_check": true
+  },
+  "1000-burst-ordinary-a": {
+    "operations": 3200,
+    "reads": 1563,
+    "accepted_writes": 1637,
+    "ordered_deliveries": 13096,
+    "choices": "3eb217a582e5d1572d4b6f2079e513ab25f4bcdd639dcb55a5748e53e65a8cd8",
+    "exact_recovery_check": true
+  },
+  "1000-burst-diagnostic": {
+    "operations": 3200,
+    "reads": 1563,
+    "accepted_writes": 1637,
+    "ordered_deliveries": 13096,
+    "choices": "3eb217a582e5d1572d4b6f2079e513ab25f4bcdd639dcb55a5748e53e65a8cd8",
+    "exact_recovery_check": true
+  },
+  "1000-burst-ordinary-b": {
+    "operations": 3200,
+    "reads": 1563,
+    "accepted_writes": 1637,
+    "ordered_deliveries": 13096,
+    "choices": "3eb217a582e5d1572d4b6f2079e513ab25f4bcdd639dcb55a5748e53e65a8cd8",
+    "exact_recovery_check": true
+  }
+}

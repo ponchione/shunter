@@ -1,0 +1,406 @@
+{
+  "1000-even": {
+    "read-dispatch-p95-ms": {
+      "ordinary": [
+        0.3650039999997716,
+        0.3558639999996558
+      ],
+      "diagnostic": 0.23254300000007788,
+      "vs_ordinary_percent": [
+        -36.2902872296678,
+        -34.653968931866444
+      ]
+    },
+    "read-dispatch-p99-ms": {
+      "ordinary": [
+        0.740827999999965,
+        0.7153379999999743
+      ],
+      "diagnostic": 0.45437500000025466,
+      "vs_ordinary_percent": [
+        -38.66660007447395,
+        -36.48107607868294
+      ]
+    },
+    "read-scheduled-p95-ms": {
+      "ordinary": [
+        1.1099209999999857,
+        1.1115449999999996
+      ],
+      "diagnostic": 1.11859800000002,
+      "vs_ordinary_percent": [
+        0.7817673510127632,
+        0.6345222190752953
+      ]
+    },
+    "read-scheduled-p99-ms": {
+      "ordinary": [
+        1.5656269999999495,
+        1.3017220000000407
+      ],
+      "diagnostic": 1.2503160000001117,
+      "vs_ordinary_percent": [
+        -20.139599023257006,
+        -3.949076684570696
+      ]
+    },
+    "completion-ops/s": {
+      "ordinary": [
+        997.8918017022454,
+        997.8205537981966
+      ],
+      "diagnostic": 997.4997802048199,
+      "vs_ordinary_percent": [
+        -0.039284970249953144,
+        -0.032147422916439794
+      ]
+    },
+    "peak-outstanding": {
+      "ordinary": [
+        21,
+        33
+      ],
+      "diagnostic": 29,
+      "vs_ordinary_percent": [
+        38.095238095238095,
+        -12.121212121212121
+      ]
+    },
+    "server-TotalAlloc-B": {
+      "ordinary": [
+        268461648,
+        268360376
+      ],
+      "diagnostic": 268379064,
+      "vs_ordinary_percent": [
+        -0.030761935872491986,
+        0.00696377024005379
+      ]
+    },
+    "server-retained-heap-B": {
+      "ordinary": [
+        64937288,
+        64939648
+      ],
+      "diagnostic": 64928112,
+      "vs_ordinary_percent": [
+        -0.014130556237579306,
+        -0.017764186217950062
+      ]
+    },
+    "server-sampled-rss-peak-B": {
+      "ordinary": [
+        199766016,
+        184889344
+      ],
+      "diagnostic": 214315008,
+      "vs_ordinary_percent": [
+        7.283016546718346,
+        15.915283900839627
+      ]
+    }
+  },
+  "4000-burst": {
+    "read-dispatch-p95-ms": {
+      "ordinary": [
+        1.1338619999999082,
+        0.8244389999999839
+      ],
+      "diagnostic": 0.5363550000000146,
+      "vs_ordinary_percent": [
+        -52.69662445693939,
+        -34.94303399038316
+      ]
+    },
+    "read-dispatch-p99-ms": {
+      "ordinary": [
+        2.108881999999994,
+        1.702038000000016
+      ],
+      "diagnostic": 1.2509039999999914,
+      "vs_ordinary_percent": [
+        -40.68402120175549,
+        -26.50551867819757
+      ]
+    },
+    "read-scheduled-p95-ms": {
+      "ordinary": [
+        45.32316900000001,
+        47.680859000000055
+      ],
+      "diagnostic": 41.97724800000003,
+      "vs_ordinary_percent": [
+        -7.382363311797491,
+        -11.962055884941202
+      ]
+    },
+    "read-scheduled-p99-ms": {
+      "ordinary": [
+        68.34171400000002,
+        68.69491
+      ],
+      "diagnostic": 53.25877700000001,
+      "vs_ordinary_percent": [
+        -22.06988399500781,
+        -22.47056295728459
+      ]
+    },
+    "completion-ops/s": {
+      "ordinary": [
+        3835.2309562718488,
+        3839.106547767777
+      ],
+      "diagnostic": 3856.358266075804,
+      "vs_ordinary_percent": [
+        0.5508745117267289,
+        0.44936805200308516
+      ]
+    },
+    "peak-outstanding": {
+      "ordinary": [
+        155,
+        162
+      ],
+      "diagnostic": 177,
+      "vs_ordinary_percent": [
+        14.193548387096765,
+        9.259259259259256
+      ]
+    },
+    "server-TotalAlloc-B": {
+      "ordinary": [
+        267575576,
+        267583608
+      ],
+      "diagnostic": 267552456,
+      "vs_ordinary_percent": [
+        -0.008640549464800085,
+        -0.011641968741227249
+      ]
+    },
+    "server-retained-heap-B": {
+      "ordinary": [
+        65024136,
+        65073656
+      ],
+      "diagnostic": 65049912,
+      "vs_ordinary_percent": [
+        0.03964066512163189,
+        -0.03648788382198953
+      ]
+    },
+    "server-sampled-rss-peak-B": {
+      "ordinary": [
+        192012288,
+        205189120
+      ],
+      "diagnostic": 214884352,
+      "vs_ordinary_percent": [
+        11.91177097999061,
+        4.725022457331063
+      ]
+    }
+  },
+  "4000-even": {
+    "read-dispatch-p95-ms": {
+      "ordinary": [
+        0.8522390000000541,
+        0.7926690000000463
+      ],
+      "diagnostic": 0.45913500000006024,
+      "vs_ordinary_percent": [
+        -46.12602802734549,
+        -42.07733618950237
+      ]
+    },
+    "read-dispatch-p99-ms": {
+      "ordinary": [
+        1.8843100000000277,
+        2.872950000000003
+      ],
+      "diagnostic": 1.1745620000000372,
+      "vs_ordinary_percent": [
+        -37.66620142120883,
+        -59.116517864911124
+      ]
+    },
+    "read-scheduled-p95-ms": {
+      "ordinary": [
+        50.012039999999956,
+        74.48283500000002
+      ],
+      "diagnostic": 44.18053600000002,
+      "vs_ordinary_percent": [
+        -11.660200223786,
+        -40.68360045640045
+      ]
+    },
+    "read-scheduled-p99-ms": {
+      "ordinary": [
+        71.63410699999997,
+        101.2464
+      ],
+      "diagnostic": 62.003398999999945,
+      "vs_ordinary_percent": [
+        -13.44430523856468,
+        -38.759897635866615
+      ]
+    },
+    "completion-ops/s": {
+      "ordinary": [
+        3695.575055395919,
+        3788.415184059927
+      ],
+      "diagnostic": 3775.5579998046105,
+      "vs_ordinary_percent": [
+        2.1642895411340124,
+        -0.33938160498918624
+      ]
+    },
+    "peak-outstanding": {
+      "ordinary": [
+        157,
+        205
+      ],
+      "diagnostic": 149,
+      "vs_ordinary_percent": [
+        -5.095541401273884,
+        -27.31707317073171
+      ]
+    },
+    "server-TotalAlloc-B": {
+      "ordinary": [
+        267452464,
+        267442536
+      ],
+      "diagnostic": 267433784,
+      "vs_ordinary_percent": [
+        -0.006984418733935183,
+        -0.003272478690530267
+      ]
+    },
+    "server-retained-heap-B": {
+      "ordinary": [
+        65027392,
+        65026392
+      ],
+      "diagnostic": 64951480,
+      "vs_ordinary_percent": [
+        -0.11673849690911897,
+        -0.11520245502779636
+      ]
+    },
+    "server-sampled-rss-peak-B": {
+      "ordinary": [
+        209805312,
+        202399744
+      ],
+      "diagnostic": 208109568,
+      "vs_ordinary_percent": [
+        -0.8082464566006808,
+        2.8210628566802898
+      ]
+    }
+  },
+  "1000-burst": {
+    "read-dispatch-p95-ms": {
+      "ordinary": [
+        0.6639270000000579,
+        0.8102979999998752
+      ],
+      "diagnostic": 0.5712159999998221,
+      "vs_ordinary_percent": [
+        -13.964035202699653,
+        -29.50544120806048
+      ]
+    },
+    "read-dispatch-p99-ms": {
+      "ordinary": [
+        0.9731500000000324,
+        1.021080999999981
+      ],
+      "diagnostic": 1.542077000000063,
+      "vs_ordinary_percent": [
+        58.46241586600336,
+        51.02396381874617
+      ]
+    },
+    "read-scheduled-p95-ms": {
+      "ordinary": [
+        1.5195709999999991,
+        1.6816890000000058
+      ],
+      "diagnostic": 1.430866000000151,
+      "vs_ordinary_percent": [
+        -5.837502821510032,
+        -14.914945629058284
+      ]
+    },
+    "read-scheduled-p99-ms": {
+      "ordinary": [
+        2.903846000000158,
+        1.9553260000000137
+      ],
+      "diagnostic": 4.024352000000022,
+      "vs_ordinary_percent": [
+        38.586963633739636,
+        105.81488713390983
+      ]
+    },
+    "completion-ops/s": {
+      "ordinary": [
+        1000,
+        1000
+      ],
+      "diagnostic": 1000,
+      "vs_ordinary_percent": [
+        0.0,
+        0.0
+      ]
+    },
+    "peak-outstanding": {
+      "ordinary": [
+        32,
+        32
+      ],
+      "diagnostic": 32,
+      "vs_ordinary_percent": [
+        0.0,
+        0.0
+      ]
+    },
+    "server-TotalAlloc-B": {
+      "ordinary": [
+        268394288,
+        268408584
+      ],
+      "diagnostic": 268356816,
+      "vs_ordinary_percent": [
+        -0.01396154898796187,
+        -0.01928701356287421
+      ]
+    },
+    "server-retained-heap-B": {
+      "ordinary": [
+        65115312,
+        65111776
+      ],
+      "diagnostic": 65160624,
+      "vs_ordinary_percent": [
+        0.06958731918538241,
+        0.07502175950475642
+      ]
+    },
+    "server-sampled-rss-peak-B": {
+      "ordinary": [
+        196792320,
+        180748288
+      ],
+      "diagnostic": 198905856,
+      "vs_ordinary_percent": [
+        1.073993131439277,
+        10.045775924583022
+      ]
+    }
+  }
+}

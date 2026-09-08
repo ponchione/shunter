@@ -1,0 +1,2 @@
+internal/workflows/canary_arrival_test.go
+internal/workflows/canary_capacity_test.go

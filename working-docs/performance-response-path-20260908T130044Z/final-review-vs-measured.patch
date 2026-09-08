@@ -1,0 +1,103 @@
+--- a/scripts/measure-canary-capacity
++++ b/scripts/measure-canary-capacity
+@@ -71,16 +71,20 @@
+ src,out=map(pathlib.Path,sys.argv[1:])
+ (out/'fixture-sha256.json').write_text(json.dumps({str(p.relative_to(src)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(src.rglob('*')) if p.is_file()},indent=2)+'\n')
+ PYTHON
+-# Each invocation gets its own raw operations; repetitions cannot overwrite them.
+-for ((sample=1; sample<=${CANARY_CAPACITY_COUNT:-10}; sample++)); do
+-  export CANARY_CAPACITY_RESULT_DIR="$output/sample-$sample"
+-  mkdir "$CANARY_CAPACITY_RESULT_DIR"
+-  # Raw benchmark lines are the RTK.md exception. The outer limit bounds startup
+-  # and shutdown too; the scheduled phase has its own 90s completion/drain cap.
+-  outer=180s; inner=170s
+-  if [[ "$CANARY_CAPACITY_MODE" == closed-loop ]]; then outer=45m; inner=44m; fi
+-  rtk proxy timeout --kill-after=5s "$outer" go test ./internal/workflows -run '^$' -bench "$benchmark" \
+-    -benchtime=1x -count=1 -timeout="$inner" -benchmem > "$CANARY_CAPACITY_RESULT_DIR/raw.txt" 2>&1
+-  cat "$CANARY_CAPACITY_RESULT_DIR/raw.txt" >> "$output/raw.txt"
+-done
++if [[ "$CANARY_CAPACITY_MODE" == closed-loop ]]; then
++  # Preserve the historical per-benchmark repetition order and metric names.
++  rtk proxy timeout --kill-after=5s 46m go test ./internal/workflows -run '^$' -bench "$benchmark" \
++    -benchtime=1x -count="${CANARY_CAPACITY_COUNT:-10}" -timeout=45m -benchmem > "$output/raw.txt" 2>&1
++else
++  # Each scheduled invocation retains its own complete operations and deliveries.
++  for ((sample=1; sample<=${CANARY_CAPACITY_COUNT:-10}; sample++)); do
++    export CANARY_CAPACITY_RESULT_DIR="$output/sample-$sample"
++    mkdir "$CANARY_CAPACITY_RESULT_DIR"
++    # Raw benchmark lines are the RTK.md exception. The outer limit bounds
++    # startup/shutdown; the scheduled phase has its own 90s completion/drain cap.
++    rtk proxy timeout --kill-after=5s 180s go test ./internal/workflows -run '^$' -bench "$benchmark" \
++      -benchtime=1x -count=1 -timeout=170s -benchmem > "$CANARY_CAPACITY_RESULT_DIR/raw.txt" 2>&1
++    cat "$CANARY_CAPACITY_RESULT_DIR/raw.txt" >> "$output/raw.txt"
++  done
++fi
+ printf 'Capacity samples: %s/raw.txt\n' "$output"
+--- a/testdata/canary_arrival_test.go
++++ b/testdata/canary_arrival_test.go
+@@ -416,7 +416,7 @@
+ 				}
+ 				op.DoneMS = float64(time.Since(start)) / 1e6
+ 				op.Finished = true
+-				op.Timeout = errors.Is(err, context.DeadlineExceeded) || errors.Is(err, protocolclient.ErrTimeout) || (ctx.Err() != nil && !op.Responded)
++				op.Timeout = errors.Is(err, context.DeadlineExceeded) || errors.Is(err, protocolclient.ErrTimeout) || (ctx.Err() != nil && !op.Responded && op.DoneMS >= result.DeadlineMS)
+ 				reqcancel()
+ 				if err != nil {
+ 					op.Error = err.Error()
+--- a/testdata/canary_arrival_report_test.go
++++ b/testdata/canary_arrival_report_test.go
+@@ -88,7 +88,7 @@
+ 			}
+ 		}
+ 	}
+-	// Equal-time arrivals precede dispatch, then terminal attempts, so a burst's
++	// Equal-time arrivals precede terminal waits, then dispatch, so a burst's
+ 	// full intended cohort is visible. Counts at a cutoff use inclusive timestamps.
+ 	slices.SortStableFunc(events, func(a, b event) int {
+ 		if a.ms < b.ms {
+@@ -125,7 +125,11 @@
+ 			m[name] = 0
+ 		}
+ 	}
+-	m["server-TotalAlloc-B"] = float64(r.Memory.TotalAlloc - r.Before.TotalAlloc)
++	// A failed memory capture must not wrap an unsigned allocation delta.
++	m["server-TotalAlloc-B"] = -1
++	if r.Memory.TotalAlloc >= r.Before.TotalAlloc {
++		m["server-TotalAlloc-B"] = float64(r.Memory.TotalAlloc - r.Before.TotalAlloc)
++	}
+ 	m["server-retained-heap-B"] = float64(r.Retained)
+ 	m["server-sampled-rss-peak-B"] = float64(r.Memory.RSS)
+ 	m["server-sampled-heap-peak-B"] = float64(r.Memory.Heap)
+@@ -153,6 +157,10 @@
+ 			t.Errorf("%s=%g want %g", k, m[k], want)
+ 		}
+ 	}
++	r.Before.TotalAlloc = 100
++	if arrivalReport(r)["server-TotalAlloc-B"] != -1 {
++		t.Fatal("missing memory capture wrapped allocation delta")
++	}
+ 	// Frozen offsets survive an arbitrarily late preceding completion.
+ 	if arrivalDue(2, 0, 1000, false) != 64*time.Millisecond {
+ 		t.Fatal("schedule drift")
+--- a/docs/benchmarks.md
++++ b/docs/benchmarks.md
+@@ -141,7 +141,8 @@
+ explicit. A completion includes row decoding and validation, including a failed
+ response. A timeout terminates the client wait but is not a response completion.
+ Backlog is reconstructed from every intended arrival, dispatch and terminal wait:
+-awaiting dispatch plus in-flight waits equals outstanding work. Unknown writes
++awaiting dispatch plus in-flight waits equals outstanding work. Resource cancellation before the phase deadline counts as an error, not a timeout.
++Unknown writes
+ are counted separately after a timeout; failed jobs preserve recovered data and
+ reconcile attempted writes against audit rows. No timeout implies rejection.
+ 
+@@ -154,7 +155,8 @@
+ wire durations are microseconds, converted to milliseconds by dividing by 1000.
+ 
+ Client `B/op` is allocation per entire benchmark invocation. Server `TotalAlloc`
+-is a separate process delta from setup completion through drain; retained heap is
++is a separate process delta from setup completion through drain (-1 if the final
++capture is unavailable); retained heap is
+ after untimed GC. RSS/heap peaks are 10ms samples, not exact maxima. The server
+ sampler retains counters only. Client operation/delivery buffer metrics report
+ backing-array bytes (excluding strings/maps); those buffers grow with operation

@@ -1,0 +1,81 @@
+--- a/internal/workflows/canary_arrival_test.go
++++ b/internal/workflows/canary_arrival_test.go
+@@ -6,6 +6,7 @@
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
++	"github.com/ponchione/shunter/responseprobe"
+ 	"math/rand/v2"
+ 	"net/http"
+ 	"os"
+@@ -176,6 +177,7 @@
+ 		b.Fatal("-benchtime=1x")
+ 	}
+ 	b.StopTimer()
++	defer func() { capacityOK(b, responseprobe.Dump("client")) }()
+ 	shape := os.Getenv("CANARY_CAPACITY_SHAPE")
+ 	rate := arrivalInt("CANARY_CAPACITY_RATE", 1000)
+ 	if shape != "even" && shape != "burst" {
+@@ -282,11 +284,13 @@
+ 			}
+ 		})
+ 	}
++	arrivalClock(b, url, "before")
+ 	capacityOK(b, capacityControl(url, http.MethodPost, "memory", &result.Before))
+ 	b.ResetTimer()
+ 	b.StartTimer()
+ 	start := time.Now()
+ 	result.OriginUnixNS = start.UnixNano()
++	responseprobe.Mark([16]byte{}, 1, "phase-origin", start)
+ 	result.DeadlineMS = 90000
+ 	deadlineTimer := time.AfterFunc(90*time.Second, cancel)
+ 	defer deadlineTimer.Stop()
+@@ -458,6 +462,7 @@
+ 	if result.Memory.ResourceStop {
+ 		result.Errors = append(result.Errors, "resource stop: server RSS >1GiB")
+ 	}
++	arrivalClock(b, url, "after")
+ 	capacityOK(b, capacityControl(url, http.MethodGet, "retained", &result.Retained))
+ 	for i := range cs {
+ 		if len(result.Operations[i]) != n {
+@@ -555,3 +560,14 @@
+ 		b.ReportMetric(value, name)
+ 	}
+ }
++
++func arrivalClock(tb testing.TB, url, phase string) {
++	var samples [][3][2]int64
++	for range 20 {
++		a := responseprobe.Clock()
++		var remote [2]int64
++		capacityOK(tb, capacityControl(url, http.MethodGet, "clock", &remote))
++		samples = append(samples, [3][2]int64{a, remote, responseprobe.Clock()})
++	}
++	arrivalSave(tb, "clock-"+phase, samples)
++}
+--- a/internal/workflows/canary_capacity_test.go
++++ b/internal/workflows/canary_capacity_test.go
+@@ -7,6 +7,7 @@
+ 	"context"
+ 	"encoding/json"
+ 	"fmt"
++	"github.com/ponchione/shunter/responseprobe"
+ 	"io"
+ 	"math"
+ 	"math/rand/v2"
+@@ -105,6 +106,7 @@
+ 	if dir == "" {
+ 		t.Skip("measurement subprocess only")
+ 	}
++	defer func() { capacityOK(t, responseprobe.Dump("server")) }()
+ 	rt, err := shunter.Build(app.NewModule(), app.StrictAuthConfig(dir, ""))
+ 	capacityOK(t, err)
+ 	capacityOK(t, rt.Start(context.Background()))
+@@ -153,6 +155,7 @@
+ 	})
+ 	defer func() { cancel(); sampler.Wait() }()
+ 	mux := http.NewServeMux()
++	mux.HandleFunc("/capacity/clock", func(w http.ResponseWriter, r *http.Request) { _ = json.NewEncoder(w).Encode(responseprobe.Clock()) })
+ 	mux.HandleFunc("/capacity/memory", func(w http.ResponseWriter, r *http.Request) {
+ 		mu.Lock()
+ 		if r.Method == http.MethodPost {

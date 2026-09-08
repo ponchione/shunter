@@ -1,0 +1,1 @@
+{"cwd": "/tmp/shunter-response-reconstruct-20260908T130044Z/canary", "command": ["rtk", "go", "test", "./internal/workflows", "-run", "TestCanaryArrival", "-count=1"]}
